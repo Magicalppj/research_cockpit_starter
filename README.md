@@ -89,6 +89,15 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\suggest_next_actions.py --json 
 
 Suggestions are generated from current focus actions, blockers, planned experiments, completed experiments without findings, proposed decisions, and missing local resources. They are read-only and do not update YAML.
 
+Queue a suggestion into an action list:
+
+```powershell
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\apply_suggestion.py --id next_action_001
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\apply_suggestion.py --id next_action_001 --target node
+```
+
+`apply_suggestion.py` only appends the suggestion text to `current_state.next_actions` or the source node's `next_actions`. It does not run experiments, update statuses, record findings, or create decisions.
+
 Create a linked Markdown note:
 
 ```powershell
@@ -155,6 +164,7 @@ scripts/
   promote_decision.py
   create_note.py
   suggest_next_actions.py
+  apply_suggestion.py
 ui/
   app.py
 ```

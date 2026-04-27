@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from cockpit.model import load_nodes, load_yaml, save_yaml
 from scripts.add_node import add_node
+from scripts.apply_suggestion import apply_suggestion
 from scripts.build_dashboard import build_dashboard
 from scripts.create_note import create_note
 from scripts.promote_decision import promote_decision
@@ -319,6 +320,57 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertEqual(failed.returncode, 1)
         self.assertIn("invalid status", failed.stdout)
+
+    def test_apply_suggestion_adds_current_action_without_duplicates(self) -> None:
+        result = apply_suggestion(self.root, suggestion_id="next_action_001", target="current", rebuild_dashboard=False)
+        first = load_yaml(self.root / "current_state.yaml")
+        result_again = apply_suggestion(self.root, suggestion_id="next_action_001", target="current", rebuild_dashboard=False)
+        second = load_yaml(self.root / "current_state.yaml")
+
+        self.assertEqual(result["target"], "current")
+        self.assertTrue(result["changed"])
+        self.assertFalse(result_again["changed"])
+        self.assertEqual(first["next_actions"], second["next_actions"])
+        self.assertEqual(first["next_actions"].count(result["suggestion"]["action"]), 1)
+
+    def test_apply_suggestion_adds_source_node_action_and_rebuilds_dashboard(self) -> None:
+        result = apply_suggestion(self.root, suggestion_id="next_action_001", target="node")
+        source_id = result["suggestion"]["source_node_id"]
+        source = load_yaml(self.root / "graph" / "nodes" / f"{source_id}.yaml")
+
+        self.assertEqual(result["target"], "node")
+        self.assertIn(result["suggestion"]["action"], source["next_actions"])
+        self.assertTrue((self.root / "dashboards" / "next_action_suggestions.json").exists())
+
+    def test_apply_suggestion_rejects_unknown_id_and_invalid_target(self) -> None:
+        with self.assertRaises(ValueError) as missing:
+            apply_suggestion(self.root, suggestion_id="missing_suggestion", target="current", rebuild_dashboard=False)
+        self.assertIn("missing_suggestion", str(missing.exception))
+
+        with self.assertRaises(ValueError) as bad_target:
+            apply_suggestion(self.root, suggestion_id="next_action_001", target="invalid", rebuild_dashboard=False)
+        self.assertIn("target", str(bad_target.exception))
+
+    def test_apply_suggestion_cli_reports_errors(self) -> None:
+        script = ROOT_DIR / "scripts" / "apply_suggestion.py"
+
+        ok = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--id", "next_action_001", "--no-build"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(ok.returncode, 0)
+        self.assertIn("Queued", ok.stdout)
+
+        failed = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--id", "missing_suggestion", "--no-build"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("missing_suggestion", failed.stdout)
 
     def test_record_finding_appends_finding_and_rebuilds_dashboard(self) -> None:
         write_node(

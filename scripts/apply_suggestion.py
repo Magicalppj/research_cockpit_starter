@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+import argparse
+from datetime import date
+from pathlib import Path
+import sys
+from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1] / "research_cockpit"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from cockpit.model import (
+    ResearchNode,
+    ValidationError,
+    build_action_suggestions,
+    build_link_rows,
+    load_explicit_edges,
+    load_nodes,
+    load_yaml,
+    save_yaml,
+    validate_cockpit,
+)
+from scripts.build_dashboard import build_dashboard
+from scripts.record_finding import find_node_file
+
+
+VALID_TARGETS = {"current", "node"}
+
+
+def _find_suggestion(suggestions: list[dict[str, Any]], suggestion_id: str) -> dict[str, Any]:
+    for suggestion in suggestions:
+        if suggestion.get("id") == suggestion_id:
+            return suggestion
+    raise ValueError(f"Suggestion does not exist: {suggestion_id}")
+
+
+def _append_action(data: dict[str, Any], action: str, owner: str) -> bool:
+    actions = data.get("next_actions", []) or []
+    if not isinstance(actions, list):
+        raise ValueError(f"{owner}: next_actions must be a list")
+    if action in actions:
+        data["next_actions"] = actions
+        return False
+    actions.append(action)
+    data["next_actions"] = actions
+    data["updated_at"] = str(date.today())
+    return True
+
+
+def apply_suggestion(
+    root: Path,
+    *,
+    suggestion_id: str,
+    target: str = "current",
+    rebuild_dashboard: bool = True,
+) -> dict[str, Any]:
+    if target not in VALID_TARGETS:
+        allowed = ", ".join(sorted(VALID_TARGETS))
+        raise ValueError(f"Invalid target {target!r}; allowed: {allowed}")
+
+    nodes = load_nodes(root)
+    current = load_yaml(root / "current_state.yaml")
+    explicit_edges = load_explicit_edges(root)
+    validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
+    suggestions = build_action_suggestions(root, nodes, current, build_link_rows(root, nodes))
+    suggestion = _find_suggestion(suggestions, suggestion_id)
+    action = str(suggestion.get("action") or "")
+
+    if target == "current":
+        changed = _append_action(current, action, "current_state")
+        validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
+        save_yaml(root / "current_state.yaml", current)
+    else:
+        node_id = str(suggestion.get("source_node_id"))
+        node_path = find_node_file(root, node_id)
+        node_data = load_yaml(node_path)
+        changed = _append_action(node_data, action, node_id)
+        candidate = dict(nodes)
+        candidate[node_id] = ResearchNode.from_dict(node_data)
+        validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
+        save_yaml(node_path, node_data)
+
+    if rebuild_dashboard:
+        build_dashboard(root)
+    return {
+        "suggestion": suggestion,
+        "target": target,
+        "changed": changed,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--id", required=True, dest="suggestion_id")
+    parser.add_argument("--target", choices=sorted(VALID_TARGETS), default="current")
+    parser.add_argument("--no-build", action="store_true")
+    args = parser.parse_args()
+
+    try:
+        result = apply_suggestion(
+            args.root,
+            suggestion_id=args.suggestion_id,
+            target=args.target,
+            rebuild_dashboard=not args.no_build,
+        )
+    except (ValidationError, ValueError) as exc:
+        print(str(exc))
+        raise SystemExit(1) from exc
+
+    action = result["suggestion"]["action"]
+    if result["changed"]:
+        print(f"Queued suggestion {args.suggestion_id} to {args.target}: {action}")
+    else:
+        print(f"Suggestion {args.suggestion_id} is already queued in {args.target}: {action}")
+    if not args.no_build:
+        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
+
+
+if __name__ == "__main__":
+    main()

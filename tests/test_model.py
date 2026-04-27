@@ -425,6 +425,25 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(run_suggestions[0]["source_node_id"], "exp_t5")
         self.assertEqual(len(focus_actions), 1)
 
+    def test_action_suggestions_mark_current_and_node_queue_state(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["next_actions"] = ["Node queued action"]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "problem_text"
+        current["next_actions"] = ["Current queued action"]
+        save_yaml(self.root / "current_state.yaml", current)
+        nodes = load_nodes(self.root)
+
+        suggestions = build_action_suggestions(self.root, nodes, current)
+        by_action = {suggestion["action"]: suggestion for suggestion in suggestions}
+
+        self.assertTrue(by_action["Current queued action"]["queued_in_current"])
+        self.assertFalse(by_action["Current queued action"]["queued_in_node"])
+        self.assertFalse(by_action["Node queued action"]["queued_in_current"])
+        self.assertTrue(by_action["Node queued action"]["queued_in_node"])
+        self.assertEqual([item["id"] for item in suggestions], [f"next_action_{index:03d}" for index in range(1, len(suggestions) + 1)])
+
     def test_experiment_findings_enter_context_and_matrix(self) -> None:
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
         experiment["findings"] = [

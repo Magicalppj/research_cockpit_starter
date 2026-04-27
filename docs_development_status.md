@@ -1,5 +1,23 @@
 # Research Cockpit 开发状态
 
+## Action Execution v1 更新（2026-04-27）
+
+本批在 Action Guidance v1 的只读建议基础上，补齐“建议入队”闭环。写回范围刻意保持最小：只把建议文本追加到 `current_state.next_actions` 或来源节点 `next_actions`，不直接执行实验、不自动改状态、不自动生成 decision。
+
+已完成：
+
+- 新增 `scripts/apply_suggestion.py`，支持 `--id <suggestion_id>`、`--target current|node` 和 `--no-build`。
+- `build_action_suggestions(...)` 增加 `queued_in_current` 和 `queued_in_node`，用于标记建议是否已经进入行动队列。
+- Action Guidance UI 增加写入当前行动队列、写入来源节点行动队列两个本地写回入口。
+- 写回逻辑会去重；已存在的 action 不重复追加。
+- 写回后更新 `updated_at`、运行统一校验，并默认重建 dashboard/context。
+
+下一批候选：
+
+- 增强 `promote_decision.py`，从 findings 自动汇总 supporting evidence。
+- 增加 suggestion dismiss / completed 状态，避免已处理建议反复出现。
+- 增加 notes / Markdown 全文搜索或轻量索引。
+
 ## Action Guidance v1 更新（2026-04-27）
 
 本批新增只读行动建议和决策证据阅读能力，目标是让人和 agent 更快判断“下一步应该推进什么”，但不自动写回 `current_state.yaml` 或节点 YAML。
@@ -65,7 +83,7 @@
 
 ## 当前阶段
 
-当前项目处于 **Action Guidance v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要。
+当前项目处于 **Action Execution v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
@@ -96,6 +114,7 @@
 - `scripts/record_finding.py`：向 experiment 节点追加结构化 finding，并可同步更新 `result_summary`。
 - `scripts/promote_decision.py`：从 option 和 supporting experiments 生成 decision；accepted decision 会同步更新 option/problem 状态。
 - `scripts/suggest_next_actions.py`：只读生成下一步行动建议，支持 JSON、kind 过滤、limit 和 focus-only。
+- `scripts/apply_suggestion.py`：将建议写入 `current_state.next_actions` 或来源节点 `next_actions`，不直接执行建议命令。
 - `scripts/build_dashboard.py`：生成前先校验，再输出 dashboard 和 agent context 文件。
 
 ### Dashboard 输出
@@ -145,7 +164,7 @@ Streamlit 页面现在包含：
 - 方案比较页按当前 problem 汇总候选 option 的状态、证据强度、实验数量、最新结果、优缺点和拒绝原因。
 - 决策追踪页展示 Decision -> Option -> Problem -> Stage 链路、支持实验、备选方案和 consequences。
 - 决策追踪页展示 evidence summary，包括实验数量、findings 数量、结果分布和最新 finding。
-- 行动建议页展示只读建议，可按 kind、priority 和当前 focus 相关性过滤，并展示可复制命令。
+- 行动建议页展示建议，可按 kind、priority 和当前 focus 相关性过滤；支持把建议写入当前行动队列或来源节点行动队列。
 - 资源页汇总 notes、config、artifact path、run id 和 linked artifacts，并支持存在状态过滤。
 
 ### 测试
@@ -312,7 +331,13 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 3. Agent/focus context 中的 `suggested_next_actions`。
 4. Action Guidance / 行动建议页和 Decision Trace evidence summary。
 
-下一批建议进入“建议写回与证据自动注入”层：选中建议写回、`promote_decision.py` 自动汇总 supporting evidence、notes/全文搜索。
+第八批已完成：
+
+1. `apply_suggestion.py` 建议入队命令。
+2. `queued_in_current` / `queued_in_node` 建议状态。
+3. Action Guidance UI 中的写入当前行动队列和来源节点行动队列入口。
+
+下一批建议进入“证据自动注入与建议生命周期”层：`promote_decision.py` 自动汇总 supporting evidence、suggestion dismiss/completed、notes/全文搜索。
 
 ## 后续可优化
 
@@ -325,7 +350,7 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 ### 第二优先级：研究工作流
 
 - 增强 `promote_decision.py`，支持从已有 findings 自动汇总 supporting evidence。
-- 支持将用户选中的行动建议写回 `current_state.yaml` 或节点 `next_actions`。
+- 增加 suggestion dismiss / completed 状态，减少已处理建议重复出现。
 - 为 notes 增加推荐写作模板和命名约定，但仍不反向解析 Markdown 正文。
 
 ### 第三优先级：UI 交互

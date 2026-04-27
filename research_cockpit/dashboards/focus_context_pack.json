@@ -422,7 +422,9 @@
       ],
       "suggested_command": "",
       "is_focus_related": true,
-      "id": "next_action_001"
+      "id": "next_action_001",
+      "queued_in_current": true,
+      "queued_in_node": false
     },
     {
       "kind": "focus_next_action",
@@ -437,7 +439,9 @@
       ],
       "suggested_command": "",
       "is_focus_related": true,
-      "id": "next_action_002"
+      "id": "next_action_002",
+      "queued_in_current": true,
+      "queued_in_node": false
     },
     {
       "kind": "focus_next_action",
@@ -452,7 +456,9 @@
       ],
       "suggested_command": "",
       "is_focus_related": true,
-      "id": "next_action_003"
+      "id": "next_action_003",
+      "queued_in_current": false,
+      "queued_in_node": true
     },
     {
       "kind": "focus_next_action",
@@ -467,7 +473,9 @@
       ],
       "suggested_command": "",
       "is_focus_related": true,
-      "id": "next_action_004"
+      "id": "next_action_004",
+      "queued_in_current": true,
+      "queued_in_node": false
     },
     {
       "kind": "focus_next_action",
@@ -482,7 +490,9 @@
       ],
       "suggested_command": "",
       "is_focus_related": true,
-      "id": "next_action_005"
+      "id": "next_action_005",
+      "queued_in_current": false,
+      "queued_in_node": true
     },
     {
       "kind": "focus_next_action",
@@ -497,7 +507,9 @@
       ],
       "suggested_command": "",
       "is_focus_related": true,
-      "id": "next_action_006"
+      "id": "next_action_006",
+      "queued_in_current": true,
+      "queued_in_node": false
     },
     {
       "kind": "resolve_blocker",
@@ -511,7 +523,9 @@
       ],
       "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id problem_event_text_weak --status blocked",
       "is_focus_related": true,
-      "id": "next_action_007"
+      "id": "next_action_007",
+      "queued_in_current": false,
+      "queued_in_node": false
     },
     {
       "kind": "resolve_blocker",
@@ -525,7 +539,9 @@
       ],
       "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id problem_event_text_weak --status blocked",
       "is_focus_related": true,
-      "id": "next_action_008"
+      "id": "next_action_008",
+      "queued_in_current": false,
+      "queued_in_node": false
     },
     {
       "kind": "run_experiment",
@@ -539,7 +555,9 @@
       ],
       "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id exp_041_flan_t5_only --status running",
       "is_focus_related": true,
-      "id": "next_action_009"
+      "id": "next_action_009",
+      "queued_in_current": false,
+      "queued_in_node": false
     },
     {
       "kind": "run_experiment",
@@ -553,7 +571,9 @@
       ],
       "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id exp_042_flan_t5_clap --status running",
       "is_focus_related": true,
-      "id": "next_action_010"
+      "id": "next_action_010",
+      "queued_in_current": false,
+      "queued_in_node": false
     },
     {
       "kind": "review_decision",
@@ -567,7 +587,9 @@
       ],
       "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\promote_decision.py --id decision_flan_t5_clap --option option_flan_t5_clap",
       "is_focus_related": true,
-      "id": "next_action_011"
+      "id": "next_action_011",
+      "queued_in_current": false,
+      "queued_in_node": false
     },
     {
       "kind": "record_finding",
@@ -581,7 +603,9 @@
       ],
       "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\record_finding.py --experiment exp_001_demo200_gemma --statement \"Describe the finding\" --confidence medium",
       "is_focus_related": true,
-      "id": "next_action_012"
+      "id": "next_action_012",
+      "queued_in_current": false,
+      "queued_in_node": false
     }
   ]
 }

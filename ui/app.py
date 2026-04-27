@@ -29,6 +29,7 @@ from cockpit.model import (
     validate_cockpit,
 )
 from scripts.set_focus import set_focus as save_current_focus
+from scripts.apply_suggestion import apply_suggestion as queue_suggestion
 
 
 st.set_page_config(page_title="Audio Edit Research Cockpit", layout="wide")
@@ -86,6 +87,13 @@ UI_TEXT = {
         "focus_related": "当前焦点相关",
         "top_suggestions": "优先行动建议",
         "no_action_suggestions": "暂无行动建议。",
+        "queue_suggestion": "选择建议",
+        "queue_current": "写入当前行动队列",
+        "queue_node": "写入来源节点行动队列",
+        "queued_current": "已在当前行动队列中。",
+        "queued_node": "已在来源节点行动队列中。",
+        "queue_updated": "行动队列已更新。",
+        "queue_failed": "写入行动队列失败。",
         "blockers": "阻塞项",
         "raw_yaml": "原始 YAML 字段",
         "view_mode": "视图范围",
@@ -201,6 +209,13 @@ UI_TEXT = {
         "focus_related": "Focus Related",
         "top_suggestions": "Top Action Suggestions",
         "no_action_suggestions": "No action suggestions.",
+        "queue_suggestion": "Select suggestion",
+        "queue_current": "Queue in current actions",
+        "queue_node": "Queue in source node actions",
+        "queued_current": "Already queued in current actions.",
+        "queued_node": "Already queued in source node actions.",
+        "queue_updated": "Action queue updated.",
+        "queue_failed": "Failed to update action queue.",
         "blockers": "Blockers",
         "raw_yaml": "Raw YAML fields",
         "view_mode": "View Mode",
@@ -356,6 +371,14 @@ def build_create_note_command(node_id: str) -> str:
     )
 
 
+def build_apply_suggestion_command(suggestion_id: str, target: str = "current") -> str:
+    return (
+        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\apply_suggestion.py"
+        f" --id {suggestion_id}"
+        f" --target {target}"
+    )
+
+
 def edge_style_for_type(edge_type: str | None) -> dict[str, object]:
     styles: dict[str, dict[str, object]] = {
         "supports": {"color": "#16A34A", "dashes": False},
@@ -410,6 +433,8 @@ def format_action_suggestion_rows(suggestions: list[dict]) -> list[dict]:
         if isinstance(related, list):
             row["related_node_ids"] = "; ".join(str(item) for item in related)
         row["is_focus_related"] = "yes" if row.get("is_focus_related") else ""
+        row["queued_in_current"] = "yes" if row.get("queued_in_current") else ""
+        row["queued_in_node"] = "yes" if row.get("queued_in_node") else ""
         formatted.append(row)
     return formatted
 
@@ -941,6 +966,43 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
             format_func=lambda item: f"{item.get('kind')} | {item.get('source_node_id')}",
         )
         st.code(selected["suggested_command"], language="powershell")
+
+    selected_suggestion = st.selectbox(
+        text["queue_suggestion"],
+        filtered,
+        format_func=lambda item: f"{item.get('id')} | {item.get('kind')} | {item.get('source_node_id')}",
+    )
+    current_col, node_col = st.columns(2)
+    with current_col:
+        st.code(build_apply_suggestion_command(selected_suggestion["id"], "current"), language="powershell")
+        if selected_suggestion.get("queued_in_current"):
+            st.caption(text["queued_current"])
+        if st.button(
+            text["queue_current"],
+            key=f"queue_current_{selected_suggestion['id']}",
+            disabled=bool(selected_suggestion.get("queued_in_current")),
+        ):
+            try:
+                queue_suggestion(RESEARCH_ROOT, suggestion_id=selected_suggestion["id"], target="current")
+                st.success(text["queue_updated"])
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{text['queue_failed']} {exc}")
+    with node_col:
+        st.code(build_apply_suggestion_command(selected_suggestion["id"], "node"), language="powershell")
+        if selected_suggestion.get("queued_in_node"):
+            st.caption(text["queued_node"])
+        if st.button(
+            text["queue_node"],
+            key=f"queue_node_{selected_suggestion['id']}",
+            disabled=bool(selected_suggestion.get("queued_in_node")),
+        ):
+            try:
+                queue_suggestion(RESEARCH_ROOT, suggestion_id=selected_suggestion["id"], target="node")
+                st.success(text["queue_updated"])
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{text['queue_failed']} {exc}")
 
 
 def render_resources(link_rows: list[dict], text: dict[str, str]) -> None:

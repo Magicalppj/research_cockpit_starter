@@ -835,6 +835,23 @@ def _finalize_suggestions(suggestions: list[dict[str, Any]]) -> list[dict[str, A
     return deduped
 
 
+def _mark_queued_suggestions(
+    suggestions: list[dict[str, Any]],
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any],
+) -> list[dict[str, Any]]:
+    current_actions = {str(action) for action in current.get("next_actions", []) or []}
+    for suggestion in suggestions:
+        action = str(suggestion.get("action") or "")
+        source = nodes.get(str(suggestion.get("source_node_id")))
+        node_actions = set()
+        if source:
+            node_actions = {str(item) for item in source.raw.get("next_actions", []) or []}
+        suggestion["queued_in_current"] = action in current_actions
+        suggestion["queued_in_node"] = action in node_actions
+    return suggestions
+
+
 def build_action_suggestions(
     root: Path,
     nodes: dict[str, ResearchNode],
@@ -939,7 +956,7 @@ def build_action_suggestions(
             focus_ids=focus_ids,
         ))
 
-    return _finalize_suggestions(suggestions)
+    return _mark_queued_suggestions(_finalize_suggestions(suggestions), nodes, current)
 
 
 def node_context(node: ResearchNode) -> dict[str, Any]:

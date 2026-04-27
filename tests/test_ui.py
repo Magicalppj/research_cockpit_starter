@@ -9,6 +9,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 from ui.app import (
+    build_apply_suggestion_command,
     build_create_note_command,
     build_promote_decision_command,
     build_pyvis_html,
@@ -291,6 +292,8 @@ class UiRenderingTests(unittest.TestCase):
                 "related_node_ids": ["option_t5"],
                 "suggested_command": "scripts\\update_status.py --id exp_t5 --status running",
                 "is_focus_related": True,
+                "queued_in_current": True,
+                "queued_in_node": False,
             },
             {
                 "id": "s2",
@@ -303,15 +306,24 @@ class UiRenderingTests(unittest.TestCase):
                 "related_node_ids": [],
                 "suggested_command": "",
                 "is_focus_related": False,
+                "queued_in_current": False,
+                "queued_in_node": True,
             },
         ]
 
         rows = format_action_suggestion_rows(suggestions)
         filtered = filter_action_suggestions(suggestions, {"run_experiment"}, {"high"}, True)
+        current_command = build_apply_suggestion_command("s1", "current")
+        node_command = build_apply_suggestion_command("s1", "node")
 
         self.assertEqual(rows[0]["related_node_ids"], "option_t5")
         self.assertEqual(rows[0]["is_focus_related"], "yes")
+        self.assertEqual(rows[0]["queued_in_current"], "yes")
+        self.assertEqual(rows[1]["queued_in_node"], "yes")
         self.assertEqual([item["id"] for item in filtered], ["s1"])
+        self.assertIn("scripts\\apply_suggestion.py", current_command)
+        self.assertIn("--id s1", current_command)
+        self.assertIn("--target node", node_command)
 
     def test_format_evidence_summary_degrades_without_findings(self) -> None:
         summary = format_evidence_summary({
