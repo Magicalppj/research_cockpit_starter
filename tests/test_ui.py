@@ -20,6 +20,9 @@ from ui.app import (
     format_comparison_rows,
     format_finding_rows,
     format_resource_rows,
+    format_action_suggestion_rows,
+    filter_action_suggestions,
+    format_evidence_summary,
     filter_graph_for_view,
     filter_node_ids,
     format_node_option,
@@ -174,6 +177,7 @@ class UiRenderingTests(unittest.TestCase):
             "dashboard": "总览",
             "branch_comparison": "方案比较",
             "decision_trace": "决策追踪",
+            "action_guidance": "行动建议",
             "resources": "资源",
             "experiment_matrix": "实验矩阵",
             "decisions": "决策",
@@ -186,6 +190,7 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(labels[0], "研究图谱")
         self.assertIn("方案比较", labels)
         self.assertIn("决策追踪", labels)
+        self.assertIn("行动建议", labels)
         self.assertIn("资源", labels)
 
     def test_format_comparison_rows_keeps_tables_readable(self) -> None:
@@ -272,6 +277,53 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(rows[0]["exists"], "yes")
         self.assertEqual(rows[1]["exists"], "unknown")
         self.assertEqual(rows[2]["exists"], "missing")
+
+    def test_action_suggestion_helpers_format_and_filter_rows(self) -> None:
+        suggestions = [
+            {
+                "id": "s1",
+                "kind": "run_experiment",
+                "priority": "high",
+                "action": "Run T5 ablation.",
+                "reason": "Planned experiment.",
+                "source_node_id": "exp_t5",
+                "source_node_type": "experiment",
+                "related_node_ids": ["option_t5"],
+                "suggested_command": "scripts\\update_status.py --id exp_t5 --status running",
+                "is_focus_related": True,
+            },
+            {
+                "id": "s2",
+                "kind": "fix_resource",
+                "priority": "low",
+                "action": "Create missing resource.",
+                "reason": "Missing local file.",
+                "source_node_id": "artifact_fig",
+                "source_node_type": "artifact",
+                "related_node_ids": [],
+                "suggested_command": "",
+                "is_focus_related": False,
+            },
+        ]
+
+        rows = format_action_suggestion_rows(suggestions)
+        filtered = filter_action_suggestions(suggestions, {"run_experiment"}, {"high"}, True)
+
+        self.assertEqual(rows[0]["related_node_ids"], "option_t5")
+        self.assertEqual(rows[0]["is_focus_related"], "yes")
+        self.assertEqual([item["id"] for item in filtered], ["s1"])
+
+    def test_format_evidence_summary_degrades_without_findings(self) -> None:
+        summary = format_evidence_summary({
+            "experiment_count": 1,
+            "findings_count": 0,
+            "outcome_counts": {},
+            "latest_finding": None,
+        })
+
+        self.assertEqual(summary["experiment_count"], 1)
+        self.assertEqual(summary["findings_count"], 0)
+        self.assertEqual(summary["latest_finding"], "")
 
 
 if __name__ == "__main__":

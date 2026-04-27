@@ -11,8 +11,10 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from cockpit.model import (
     ValidationError,
+    build_action_suggestions,
     build_agent_context,
     build_branch_comparison,
+    build_decision_evidence_summary,
     build_decision_trace,
     build_focus_context,
     build_experiment_matrix,
@@ -375,6 +377,54 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(rows[0]["id"], "exp_t5")
         self.assertEqual(rows[0]["parent"], "option_t5")
 
+    def test_action_suggestions_cover_focus_blockers_experiments_decisions_and_missing_resources(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["blockers"] = ["Need cache parity"]
+        problem["next_actions"] = ["Run ablation"]
+        problem["links"] = {
+            "notes": "notes/problems/problem_text.md",
+            "external": "https://example.com/problem",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+        link_rows = build_link_rows(self.root, nodes)
+
+        suggestions = build_action_suggestions(self.root, nodes, current, link_rows)
+        by_kind = {suggestion["kind"]: suggestion for suggestion in suggestions}
+
+        self.assertEqual(suggestions[0]["kind"], "focus_next_action")
+        self.assertIn("resolve_blocker", by_kind)
+        self.assertIn("record_finding", by_kind)
+        self.assertIn("review_decision", by_kind)
+        self.assertIn("fix_resource", by_kind)
+        self.assertEqual(by_kind["record_finding"]["source_node_id"], "exp_t5")
+        self.assertIn("scripts\\record_finding.py", by_kind["record_finding"]["suggested_command"])
+        self.assertEqual(by_kind["fix_resource"]["source_node_id"], "problem_text")
+        self.assertNotIn("https://example.com/problem", by_kind["fix_resource"]["action"])
+
+    def test_action_suggestions_include_run_experiment_and_dedupe_actions(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["next_actions"] = ["Run ablation", "Run ablation"]
+        save_yaml(self.root / "current_state.yaml", current)
+        nodes = load_nodes(self.root)
+
+        suggestions = build_action_suggestions(self.root, nodes, current)
+        run_suggestions = [item for item in suggestions if item["kind"] == "run_experiment"]
+        focus_actions = [
+            item for item in suggestions
+            if item["kind"] == "focus_next_action" and item["action"] == "Run ablation"
+        ]
+
+        self.assertEqual(len(run_suggestions), 1)
+        self.assertEqual(run_suggestions[0]["source_node_id"], "exp_t5")
+        self.assertEqual(len(focus_actions), 1)
+
     def test_experiment_findings_enter_context_and_matrix(self) -> None:
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
         experiment["findings"] = [
@@ -471,6 +521,28 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(trace["supporting_experiments"][0]["id"], "exp_t5")
         self.assertEqual(trace["alternatives_considered"][0]["id"], "option_alt")
         self.assertEqual(trace["consequences"], ["Prioritize T5 branch"])
+
+    def test_decision_evidence_summary_counts_experiments_findings_and_outcomes(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["outcome"] = "positive"
+        experiment["findings"] = [
+            {
+                "id": "exp_t5_finding_001",
+                "statement": "T5 improves replace following.",
+                "confidence": "medium",
+                "outcome": "positive",
+            }
+        ]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+
+        summary = build_decision_evidence_summary(nodes, "decision_t5")
+
+        self.assertEqual(summary["experiment_count"], 1)
+        self.assertEqual(summary["findings_count"], 1)
+        self.assertEqual(summary["outcome_counts"]["positive"], 1)
+        self.assertEqual(summary["latest_finding"], "T5 improves replace following.")
 
     def test_v2_statuses_and_current_focus_node_pass_validation(self) -> None:
         write_node(

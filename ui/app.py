@@ -14,9 +14,11 @@ RESEARCH_ROOT = ROOT_DIR / "research_cockpit"
 sys.path.insert(0, str(ROOT_DIR))
 
 from cockpit.model import (
+    build_action_suggestions,
     build_agent_context,
     build_branch_comparison,
     build_decision_rows,
+    build_decision_evidence_summary,
     build_decision_trace,
     build_experiment_matrix,
     build_link_rows,
@@ -44,6 +46,7 @@ UI_TEXT = {
         "focus_node": "焦点节点",
         "data_health": "数据健康",
         "resources": "资源",
+        "action_guidance": "行动建议",
         "valid": "有效",
         "issues": "个问题",
         "dashboard": "总览",
@@ -78,6 +81,11 @@ UI_TEXT = {
         "resource_type": "资源类型",
         "resource_exists": "存在状态",
         "no_resources": "未找到关联资源。",
+        "suggestion_kind": "建议类型",
+        "suggestion_priority": "建议优先级",
+        "focus_related": "当前焦点相关",
+        "top_suggestions": "优先行动建议",
+        "no_action_suggestions": "暂无行动建议。",
         "blockers": "阻塞项",
         "raw_yaml": "原始 YAML 字段",
         "view_mode": "视图范围",
@@ -129,6 +137,9 @@ UI_TEXT = {
         "rejection_reason": "拒绝原因",
         "trace_chain": "决策链路",
         "supporting_evidence": "支持证据",
+        "evidence_summary": "证据摘要",
+        "findings_count": "观察数量",
+        "outcome_counts": "结果分布",
         "alternatives_considered": "备选方案",
         "consequences": "后续影响",
         "agent_context_pack": "Agent 上下文包",
@@ -150,6 +161,7 @@ UI_TEXT = {
         "focus_node": "Focus Node",
         "data_health": "Data Health",
         "resources": "Resources",
+        "action_guidance": "Action Guidance",
         "valid": "Valid",
         "issues": "issue(s)",
         "dashboard": "Dashboard",
@@ -184,6 +196,11 @@ UI_TEXT = {
         "resource_type": "Resource Type",
         "resource_exists": "Exists",
         "no_resources": "No linked resources found.",
+        "suggestion_kind": "Suggestion Type",
+        "suggestion_priority": "Suggestion Priority",
+        "focus_related": "Focus Related",
+        "top_suggestions": "Top Action Suggestions",
+        "no_action_suggestions": "No action suggestions.",
         "blockers": "Blockers",
         "raw_yaml": "Raw YAML fields",
         "view_mode": "View Mode",
@@ -235,6 +252,9 @@ UI_TEXT = {
         "rejection_reason": "Rejection Reason",
         "trace_chain": "Decision Chain",
         "supporting_evidence": "Supporting Evidence",
+        "evidence_summary": "Evidence Summary",
+        "findings_count": "Findings Count",
+        "outcome_counts": "Outcome Counts",
         "alternatives_considered": "Alternatives Considered",
         "consequences": "Consequences",
         "agent_context_pack": "Agent Context Pack",
@@ -260,7 +280,8 @@ def load_graph_data():
     graph = graph_to_json(nodes, current.get("current_focus_path", []), current, explicit_edges)
     context = build_agent_context(RESEARCH_ROOT, nodes)
     link_rows = build_link_rows(RESEARCH_ROOT, nodes)
-    return nodes, current, graph, context, validation_errors, link_rows
+    action_suggestions = build_action_suggestions(RESEARCH_ROOT, nodes, current, link_rows)
+    return nodes, current, graph, context, validation_errors, link_rows, action_suggestions
 
 
 def ordered_tab_labels(text: dict[str, str]) -> list[str]:
@@ -269,6 +290,7 @@ def ordered_tab_labels(text: dict[str, str]) -> list[str]:
         "dashboard",
         "branch_comparison",
         "decision_trace",
+        "action_guidance",
         "resources",
         "experiment_matrix",
         "decisions",
@@ -378,6 +400,43 @@ def format_resource_rows(rows: list[dict]) -> list[dict]:
         next_row["exists"] = labels.get(next_row.get("exists"), "unknown")
         formatted.append(next_row)
     return formatted
+
+
+def format_action_suggestion_rows(suggestions: list[dict]) -> list[dict]:
+    formatted = []
+    for suggestion in suggestions:
+        row = dict(suggestion)
+        related = row.get("related_node_ids")
+        if isinstance(related, list):
+            row["related_node_ids"] = "; ".join(str(item) for item in related)
+        row["is_focus_related"] = "yes" if row.get("is_focus_related") else ""
+        formatted.append(row)
+    return formatted
+
+
+def filter_action_suggestions(
+    suggestions: list[dict],
+    selected_kinds: set[str],
+    selected_priorities: set[str],
+    focus_only: bool,
+) -> list[dict]:
+    return [
+        suggestion
+        for suggestion in suggestions
+        if suggestion.get("kind") in selected_kinds
+        and suggestion.get("priority") in selected_priorities
+        and (not focus_only or suggestion.get("is_focus_related"))
+    ]
+
+
+def format_evidence_summary(summary: dict) -> dict:
+    outcome_counts = summary.get("outcome_counts") or {}
+    return {
+        "experiment_count": summary.get("experiment_count", 0),
+        "findings_count": summary.get("findings_count", 0),
+        "outcome_counts": "; ".join(f"{key}: {value}" for key, value in sorted(outcome_counts.items())),
+        "latest_finding": summary.get("latest_finding") or "",
+    }
 
 
 def filter_node_ids(nodes: dict, query: str) -> list[str]:
@@ -661,7 +720,12 @@ def render_node_detail(
         st.json(node.raw)
 
 
-def render_dashboard(context: dict, validation_errors: list[str], text: dict[str, str]) -> None:
+def render_dashboard(
+    context: dict,
+    validation_errors: list[str],
+    text: dict[str, str],
+    action_suggestions: list[dict],
+) -> None:
     c1, c2, c3 = st.columns(3)
     c1.metric(text["active_problems"], len(context.get("active_problems", [])))
     c2.metric(text["active_options"], len(context.get("active_options", [])))
@@ -696,6 +760,17 @@ def render_dashboard(context: dict, validation_errors: list[str], text: dict[str
                 st.checkbox(action, value=False)
         else:
             st.caption(text["no_next_actions"])
+
+    st.subheader(text["top_suggestions"])
+    top_suggestions = action_suggestions[:3]
+    if top_suggestions:
+        st.dataframe(
+            pd.DataFrame(format_action_suggestion_rows(top_suggestions)),
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.caption(text["no_action_suggestions"])
 
     if validation_errors:
         st.error(text["data_health_warning"].format(count=len(validation_errors)))
@@ -828,6 +903,45 @@ def render_decision_trace(nodes: dict, text: dict[str, str]) -> None:
         for item in consequences:
             st.write(f"- {item}")
 
+    st.subheader(text["evidence_summary"])
+    st.dataframe(
+        pd.DataFrame([format_evidence_summary(trace.get("evidence_summary") or build_decision_evidence_summary(nodes, decision_id))]),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
+def render_action_guidance(action_suggestions: list[dict], text: dict[str, str]) -> None:
+    if not action_suggestions:
+        st.info(text["no_action_suggestions"])
+        return
+
+    kinds = sorted({suggestion.get("kind", "") for suggestion in action_suggestions if suggestion.get("kind")})
+    priorities = sorted({suggestion.get("priority", "") for suggestion in action_suggestions if suggestion.get("priority")})
+    kind_filter, priority_filter, focus_filter = st.columns(3)
+    selected_kinds = set(kind_filter.multiselect(text["suggestion_kind"], kinds, default=kinds))
+    selected_priorities = set(priority_filter.multiselect(text["suggestion_priority"], priorities, default=priorities))
+    focus_only = focus_filter.checkbox(text["focus_related"], value=False)
+
+    filtered = filter_action_suggestions(action_suggestions, selected_kinds, selected_priorities, focus_only)
+    if not filtered:
+        st.info(text["no_action_suggestions"])
+        return
+    st.dataframe(
+        pd.DataFrame(format_action_suggestion_rows(filtered)),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    commands = [item for item in filtered if item.get("suggested_command")]
+    if commands:
+        selected = st.selectbox(
+            text["set_focus_command"],
+            commands,
+            format_func=lambda item: f"{item.get('kind')} | {item.get('source_node_id')}",
+        )
+        st.code(selected["suggested_command"], language="powershell")
+
 
 def render_resources(link_rows: list[dict], text: dict[str, str]) -> None:
     if not link_rows:
@@ -895,6 +1009,7 @@ def render_data_health(
     validation_errors: list[str],
     text: dict[str, str],
     link_rows: list[dict],
+    action_suggestions: list[dict],
 ) -> None:
     if validation_errors:
         st.error(text["validation_failed"])
@@ -923,17 +1038,19 @@ def render_data_health(
     st.subheader(text["resources"])
     missing_rows = [row for row in link_rows if row.get("exists") is False]
     unknown_rows = [row for row in link_rows if row.get("exists") is None]
-    r1, r2, r3 = st.columns(3)
+    fix_resource_count = len([item for item in action_suggestions if item.get("kind") == "fix_resource"])
+    r1, r2, r3, r4 = st.columns(4)
     r1.metric(text["resources"], len(link_rows))
     r2.metric("Missing", len(missing_rows))
     r3.metric("Unknown", len(unknown_rows))
+    r4.metric(text["action_guidance"], fix_resource_count)
     if missing_rows:
         st.warning(f"{len(missing_rows)} linked resource(s) are missing.")
         st.dataframe(pd.DataFrame(format_resource_rows(missing_rows)), use_container_width=True, hide_index=True)
 
 
 def main() -> None:
-    nodes, current, graph, context, validation_errors, link_rows = load_graph_data()
+    nodes, current, graph, context, validation_errors, link_rows, action_suggestions = load_graph_data()
 
     with st.sidebar:
         language = st.selectbox("界面语言 / Language", ["中文", "English"], index=0)
@@ -963,11 +1080,13 @@ def main() -> None:
             if label == text["research_graph"]:
                 render_graph_tab(nodes, graph, current, text, link_rows)
             elif label == text["dashboard"]:
-                render_dashboard(context, validation_errors, text)
+                render_dashboard(context, validation_errors, text, action_suggestions)
             elif label == text["branch_comparison"]:
                 render_branch_comparison(nodes, current, text)
             elif label == text["decision_trace"]:
                 render_decision_trace(nodes, text)
+            elif label == text["action_guidance"]:
+                render_action_guidance(action_suggestions, text)
             elif label == text["resources"]:
                 render_resources(link_rows, text)
             elif label == text["experiment_matrix"]:
@@ -977,7 +1096,7 @@ def main() -> None:
             elif label == text["agent_context"]:
                 render_agent_context(context, text)
             elif label == text["data_health"]:
-                render_data_health(nodes, graph, validation_errors, text, link_rows)
+                render_data_health(nodes, graph, validation_errors, text, link_rows, action_suggestions)
 
 
 if __name__ == "__main__":

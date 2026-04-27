@@ -18,7 +18,7 @@ streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501
 
 Then open the forwarded port in your browser.
 The UI opens on the Research Graph in Focus Mode by default.
-The graph detail panel can set any visible node as the current focus. The UI also includes Branch Comparison, Decision Trace, Resources, and node search views for read-only research review.
+The graph detail panel can set any visible node as the current focus. The UI also includes Branch Comparison, Decision Trace, Action Guidance, Resources, and node search views for read-only research review.
 
 On the current Windows workstation, the verified interpreter is:
 
@@ -80,6 +80,15 @@ Promote an option into a decision:
 D:\Tools\miniconda3\envs\aigc\python.exe scripts\promote_decision.py --id decision_flan_t5_clap_v2 --option option_flan_t5_clap --title "Adopt FLAN-T5 + CLAP" --summary "Use FLAN-T5 event tokens with CLAP anchor." --status proposed --supporting-experiment exp_042_flan_t5_clap --evidence-strength medium
 ```
 
+Review read-only action suggestions:
+
+```powershell
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\suggest_next_actions.py
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\suggest_next_actions.py --json --focus-only
+```
+
+Suggestions are generated from current focus actions, blockers, planned experiments, completed experiments without findings, proposed decisions, and missing local resources. They are read-only and do not update YAML.
+
 Create a linked Markdown note:
 
 ```powershell
@@ -118,6 +127,7 @@ Save this as `research_cockpit/graph/edges.yaml` when you need semantic edges be
 - The Research Graph detail selector has a search box over node id, title, summary, tags, status, and type.
 
 Agents should read `agent_context_pack.json` first, then `focus_context_pack.json`. The focus context now includes a `knowledge_index` with nearby linked note/config/file paths so agents can decide which long-form notes or artifacts to open next.
+Both context packs also include `suggested_next_actions` for read-only planning.
 
 ## Directory Layout
 
@@ -144,6 +154,7 @@ scripts/
   record_finding.py
   promote_decision.py
   create_note.py
+  suggest_next_actions.py
 ui/
   app.py
 ```

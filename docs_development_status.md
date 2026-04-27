@@ -1,5 +1,36 @@
 # Research Cockpit 开发状态
 
+## Action Guidance v1 更新（2026-04-27）
+
+本批新增只读行动建议和决策证据阅读能力，目标是让人和 agent 更快判断“下一步应该推进什么”，但不自动写回 `current_state.yaml` 或节点 YAML。
+
+已完成：
+
+- 新增 `build_action_suggestions(root, nodes, current, link_rows=None)`，从当前 focus、阻塞项、planned/done experiment、proposed decision 和缺失本地资源生成候选行动。
+- 新增 `scripts/suggest_next_actions.py`，支持默认人类可读输出、`--json`、`--limit`、`--kind` 和 `--focus-only`。
+- `scripts/build_dashboard.py` 新增输出 `research_cockpit/dashboards/next_action_suggestions.json`。
+- `agent_context_pack.json` 和 `focus_context_pack.json` 增加 `suggested_next_actions`，保持只读。
+- UI 新增“行动建议 / Action Guidance”页签，支持按建议类型、优先级和当前 focus 相关性过滤。
+- Dashboard 首页展示 Top 3 建议；Data Health 展示缺失资源建议数量。
+- Decision Trace 增加 evidence summary，汇总支持实验数量、findings 数量、结果分布和最新 finding。
+
+当前 dashboard 输出文件为：
+
+- `graph_view.json`
+- `agent_context_pack.json`
+- `focus_context_pack.json`
+- `current_state.md`
+- `current_state.json`
+- `experiment_matrix.json`
+- `linked_resources.json`
+- `next_action_suggestions.json`
+
+下一批候选：
+
+- 允许用户从建议中选择一项写回 `current_state.yaml` 或对应节点。
+- 增强 `promote_decision.py`，自动从 findings 汇总 supporting evidence。
+- 增加全文搜索或 notes 内容索引。
+
 ## Notes/Search v1 更新（2026-04-27）
 
 本批已把结构化 YAML 状态进一步连接到长篇研究记录和产物路径，重点是“可创建 note、可看资源、可搜节点”，仍然保持 YAML 为真相源，Markdown notes 只作为辅助长文本记录。
@@ -34,7 +65,7 @@
 
 ## 当前阶段
 
-当前项目处于 **Notes/Search v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索。
+当前项目处于 **Action Guidance v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
@@ -64,6 +95,7 @@
 - `scripts/validate_cockpit.py`：独立运行数据健康检查，支持人类可读输出和 `--json` 输出。
 - `scripts/record_finding.py`：向 experiment 节点追加结构化 finding，并可同步更新 `result_summary`。
 - `scripts/promote_decision.py`：从 option 和 supporting experiments 生成 decision；accepted decision 会同步更新 option/problem 状态。
+- `scripts/suggest_next_actions.py`：只读生成下一步行动建议，支持 JSON、kind 过滤、limit 和 focus-only。
 - `scripts/build_dashboard.py`：生成前先校验，再输出 dashboard 和 agent context 文件。
 
 ### Dashboard 输出
@@ -76,6 +108,8 @@
 - `current_state.md`
 - `current_state.json`
 - `experiment_matrix.json`
+- `linked_resources.json`
+- `next_action_suggestions.json`
 
 这些文件是可再生成产物，但当前 MVP 建议保留在仓库中，方便人和 agent 快速读取上下文。
 
@@ -87,6 +121,7 @@ Streamlit 页面现在包含：
 - 研究图谱
 - 方案比较
 - 决策追踪
+- 行动建议
 - 资源
 - 实验矩阵
 - 决策
@@ -109,6 +144,8 @@ Streamlit 页面现在包含：
 - 图谱详情选择器上方支持按 `id/title/summary/tags/status/type` 搜索节点。
 - 方案比较页按当前 problem 汇总候选 option 的状态、证据强度、实验数量、最新结果、优缺点和拒绝原因。
 - 决策追踪页展示 Decision -> Option -> Problem -> Stage 链路、支持实验、备选方案和 consequences。
+- 决策追踪页展示 evidence summary，包括实验数量、findings 数量、结果分布和最新 finding。
+- 行动建议页展示只读建议，可按 kind、priority 和当前 focus 相关性过滤，并展示可复制命令。
 - 资源页汇总 notes、config、artifact path、run id 和 linked artifacts，并支持存在状态过滤。
 
 ### 测试
@@ -130,6 +167,7 @@ Streamlit 页面现在包含：
 - `promote_decision.py` 创建 proposed decision；accepted decision 同步更新 option/problem。
 - Dashboard 生成文件。
 - 中文节点图谱 HTML 生成。
+- 行动建议生成、CLI 过滤、dashboard 输出和 UI helper。
 
 当前验证命令：
 
@@ -267,7 +305,14 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 3. Resources / 资源页、节点搜索和节点详情资源表。
 4. `focus_context_pack.json` 的 `knowledge_index` 纳入当前 focus 附近的 note/config/file 路径。
 
-下一批建议进入“行动建议与证据汇总”层：`suggest_next_actions.py`、决策证据自动汇总、focus path 下一步推进提示。
+第七批已完成：
+
+1. `suggest_next_actions.py` 只读行动建议命令。
+2. `next_action_suggestions.json` dashboard 输出。
+3. Agent/focus context 中的 `suggested_next_actions`。
+4. Action Guidance / 行动建议页和 Decision Trace evidence summary。
+
+下一批建议进入“建议写回与证据自动注入”层：选中建议写回、`promote_decision.py` 自动汇总 supporting evidence、notes/全文搜索。
 
 ## 后续可优化
 
@@ -279,8 +324,8 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 
 ### 第二优先级：研究工作流
 
-- 增加 `suggest_next_actions.py`，基于 active problem、blocked node 和缺失 evidence 生成候选下一步。
 - 增强 `promote_decision.py`，支持从已有 findings 自动汇总 supporting evidence。
+- 支持将用户选中的行动建议写回 `current_state.yaml` 或节点 `next_actions`。
 - 为 notes 增加推荐写作模板和命名约定，但仍不反向解析 Markdown 正文。
 
 ### 第三优先级：UI 交互

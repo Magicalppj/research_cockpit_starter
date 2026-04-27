@@ -407,5 +407,181 @@
         }
       ]
     }
+  ],
+  "suggested_next_actions": [
+    {
+      "kind": "focus_next_action",
+      "priority": "critical",
+      "action": "Add CLAP anchor projection to EventStateInitializer.",
+      "reason": "Current focus or current_state lists this as a next action.",
+      "source_node_id": "problem_event_text_weak",
+      "source_node_type": "problem",
+      "related_node_ids": [
+        "stage_text_encoder",
+        "problem_event_text_weak"
+      ],
+      "suggested_command": "",
+      "is_focus_related": true,
+      "id": "next_action_001"
+    },
+    {
+      "kind": "focus_next_action",
+      "priority": "critical",
+      "action": "Regenerate timeline feature cache with FLAN-T5-XL token features.",
+      "reason": "Current focus or current_state lists this as a next action.",
+      "source_node_id": "problem_event_text_weak",
+      "source_node_type": "problem",
+      "related_node_ids": [
+        "stage_text_encoder",
+        "problem_event_text_weak"
+      ],
+      "suggested_command": "",
+      "is_focus_related": true,
+      "id": "next_action_002"
+    },
+    {
+      "kind": "focus_next_action",
+      "priority": "critical",
+      "action": "Run FLAN-T5 + CLAP ablation",
+      "reason": "Current focus or current_state lists this as a next action.",
+      "source_node_id": "problem_event_text_weak",
+      "source_node_type": "problem",
+      "related_node_ids": [
+        "stage_text_encoder",
+        "problem_event_text_weak"
+      ],
+      "suggested_command": "",
+      "is_focus_related": true,
+      "id": "next_action_003"
+    },
+    {
+      "kind": "focus_next_action",
+      "priority": "critical",
+      "action": "Run FLAN-T5 + CLAP ablation and compare local edit following.",
+      "reason": "Current focus or current_state lists this as a next action.",
+      "source_node_id": "problem_event_text_weak",
+      "source_node_type": "problem",
+      "related_node_ids": [
+        "stage_text_encoder",
+        "problem_event_text_weak"
+      ],
+      "suggested_command": "",
+      "is_focus_related": true,
+      "id": "next_action_004"
+    },
+    {
+      "kind": "focus_next_action",
+      "priority": "critical",
+      "action": "Run FLAN-T5-only ablation",
+      "reason": "Current focus or current_state lists this as a next action.",
+      "source_node_id": "problem_event_text_weak",
+      "source_node_type": "problem",
+      "related_node_ids": [
+        "stage_text_encoder",
+        "problem_event_text_weak"
+      ],
+      "suggested_command": "",
+      "is_focus_related": true,
+      "id": "next_action_005"
+    },
+    {
+      "kind": "focus_next_action",
+      "priority": "critical",
+      "action": "Run FLAN-T5-only ablation on Audio Edit Dataset v2_150.",
+      "reason": "Current focus or current_state lists this as a next action.",
+      "source_node_id": "problem_event_text_weak",
+      "source_node_type": "problem",
+      "related_node_ids": [
+        "stage_text_encoder",
+        "problem_event_text_weak"
+      ],
+      "suggested_command": "",
+      "is_focus_related": true,
+      "id": "next_action_006"
+    },
+    {
+      "kind": "resolve_blocker",
+      "priority": "critical",
+      "action": "Resolve blocker: Need ablation runs",
+      "reason": "problem_event_text_weak is active and has an explicit blocker.",
+      "source_node_id": "problem_event_text_weak",
+      "source_node_type": "problem",
+      "related_node_ids": [
+        "stage_text_encoder"
+      ],
+      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id problem_event_text_weak --status blocked",
+      "is_focus_related": true,
+      "id": "next_action_007"
+    },
+    {
+      "kind": "resolve_blocker",
+      "priority": "critical",
+      "action": "Resolve blocker: Need new feature cache",
+      "reason": "problem_event_text_weak is active and has an explicit blocker.",
+      "source_node_id": "problem_event_text_weak",
+      "source_node_type": "problem",
+      "related_node_ids": [
+        "stage_text_encoder"
+      ],
+      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id problem_event_text_weak --status blocked",
+      "is_focus_related": true,
+      "id": "next_action_008"
+    },
+    {
+      "kind": "run_experiment",
+      "priority": "high",
+      "action": "Run planned experiment: FLAN-T5-XL event branch only",
+      "reason": "exp_041_flan_t5_only is still planned.",
+      "source_node_id": "exp_041_flan_t5_only",
+      "source_node_type": "experiment",
+      "related_node_ids": [
+        "option_flan_t5_clap"
+      ],
+      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id exp_041_flan_t5_only --status running",
+      "is_focus_related": true,
+      "id": "next_action_009"
+    },
+    {
+      "kind": "run_experiment",
+      "priority": "high",
+      "action": "Run planned experiment: FLAN-T5-XL + CLAP anchor",
+      "reason": "exp_042_flan_t5_clap is still planned.",
+      "source_node_id": "exp_042_flan_t5_clap",
+      "source_node_type": "experiment",
+      "related_node_ids": [
+        "option_flan_t5_clap"
+      ],
+      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id exp_042_flan_t5_clap --status running",
+      "is_focus_related": true,
+      "id": "next_action_010"
+    },
+    {
+      "kind": "review_decision",
+      "priority": "high",
+      "action": "Review proposed decision: Adopt FLAN-T5-XL + CLAP for event branch",
+      "reason": "decision_flan_t5_clap is proposed and needs acceptance or rejection.",
+      "source_node_id": "decision_flan_t5_clap",
+      "source_node_type": "decision",
+      "related_node_ids": [
+        "option_flan_t5_clap"
+      ],
+      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\promote_decision.py --id decision_flan_t5_clap --option option_flan_t5_clap",
+      "is_focus_related": true,
+      "id": "next_action_011"
+    },
+    {
+      "kind": "record_finding",
+      "priority": "low",
+      "action": "Record findings for completed experiment: Demo-200 Gemma baseline",
+      "reason": "exp_001_demo200_gemma is done but has no structured findings.",
+      "source_node_id": "exp_001_demo200_gemma",
+      "source_node_type": "experiment",
+      "related_node_ids": [
+        "option_gemma_baseline"
+      ],
+      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\record_finding.py --experiment exp_001_demo200_gemma --statement \"Describe the finding\" --confidence medium",
+      "is_focus_related": true,
+      "id": "next_action_012"
+    }
   ]
 }

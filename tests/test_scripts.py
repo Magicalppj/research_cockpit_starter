@@ -18,6 +18,7 @@ from scripts.create_note import create_note
 from scripts.promote_decision import promote_decision
 from scripts.record_finding import record_finding
 from scripts.set_focus import set_focus
+from scripts.suggest_next_actions import select_suggestions
 from scripts.update_status import update_status
 
 
@@ -195,6 +196,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "current_state.json",
             "experiment_matrix.json",
             "linked_resources.json",
+            "next_action_suggestions.json",
         }
 
         self.assertEqual({path.name for path in paths}, expected)
@@ -202,12 +204,16 @@ class ScriptBehaviorTests(unittest.TestCase):
         focus_context = json.loads((self.root / "dashboards" / "focus_context_pack.json").read_text(encoding="utf-8"))
         matrix = json.loads((self.root / "dashboards" / "experiment_matrix.json").read_text(encoding="utf-8"))
         links = json.loads((self.root / "dashboards" / "linked_resources.json").read_text(encoding="utf-8"))
+        suggestions = json.loads((self.root / "dashboards" / "next_action_suggestions.json").read_text(encoding="utf-8"))
         nodes = load_nodes(self.root)
 
         self.assertEqual(context["linked_nodes"][0]["id"], "stage_text")
+        self.assertIn("suggested_next_actions", context)
+        self.assertIn("suggested_next_actions", focus_context)
         self.assertEqual(focus_context["focus_node"]["id"], "problem_text")
         self.assertEqual(matrix[0]["id"], "exp_t5")
         self.assertIsInstance(links, list)
+        self.assertIsInstance(suggestions, list)
         self.assertIn("stage_text", nodes)
 
     def test_create_note_generates_note_links_node_and_rebuilds_dashboard(self) -> None:
@@ -260,6 +266,57 @@ class ScriptBehaviorTests(unittest.TestCase):
             text=True,
             check=False,
         )
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("invalid status", failed.stdout)
+
+    def test_suggest_next_actions_cli_outputs_text_json_and_filters(self) -> None:
+        script = ROOT_DIR / "scripts" / "suggest_next_actions.py"
+
+        text = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--limit", "2"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(text.returncode, 0)
+        self.assertIn("run_experiment", text.stdout)
+
+        json_out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--json",
+                "--kind",
+                "run_experiment",
+                "--focus-only",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(json_out.returncode, 0)
+        suggestions = json.loads(json_out.stdout)
+        self.assertEqual({item["kind"] for item in suggestions}, {"run_experiment"})
+        self.assertTrue(all(item["is_focus_related"] for item in suggestions))
+
+        selected = select_suggestions(suggestions, kinds=["run_experiment"], limit=1, focus_only=True)
+        self.assertEqual(len(selected), 1)
+
+    def test_suggest_next_actions_cli_fails_on_invalid_cockpit(self) -> None:
+        script = ROOT_DIR / "scripts" / "suggest_next_actions.py"
+        bad = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        bad["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", bad)
+
+        failed = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
         self.assertEqual(failed.returncode, 1)
         self.assertIn("invalid status", failed.stdout)
 

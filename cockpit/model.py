@@ -737,6 +737,211 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
     return rows
 
 
+def _workflow_command(script_name: str, *parts: str) -> str:
+    command = [r"D:\Tools\miniconda3\envs\aigc\python.exe", fr"scripts\{script_name}"]
+    command.extend(parts)
+    return " ".join(str(part) for part in command if part not in ("", None))
+
+
+def _priority_rank(priority: str | None) -> int:
+    return {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(str(priority or "").lower(), 2)
+
+
+def _suggestion_priority(node: ResearchNode | None, default: str = "medium") -> str:
+    if node and str(node.priority or "").lower() in {"critical", "high", "medium", "low"}:
+        return str(node.priority).lower()
+    return default
+
+
+def _focus_related_ids(nodes: dict[str, ResearchNode], current: dict[str, Any]) -> set[str]:
+    related = {
+        str(node_id)
+        for node_id in current.get("current_focus_path", []) or []
+        if str(node_id) in nodes
+    }
+    for key in ("current_stage", "current_problem", "current_option", "current_focus_node"):
+        node_id = current.get(key)
+        if node_id in nodes:
+            related.add(str(node_id))
+    for node_id in list(related):
+        node = nodes.get(node_id)
+        if not node:
+            continue
+        if node.parent in nodes:
+            related.add(str(node.parent))
+        related.update(child_id for child_id in _child_ids(nodes, node) if child_id in nodes)
+    return related
+
+
+def _make_suggestion(
+    *,
+    kind: str,
+    priority: str,
+    action: str,
+    reason: str,
+    source: ResearchNode,
+    related_node_ids: list[str] | None = None,
+    suggested_command: str = "",
+    focus_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    related_node_ids = related_node_ids or []
+    focus_ids = focus_ids or set()
+    return {
+        "kind": kind,
+        "priority": priority,
+        "action": action,
+        "reason": reason,
+        "source_node_id": source.id,
+        "source_node_type": source.type,
+        "related_node_ids": _unique_strings(related_node_ids),
+        "suggested_command": suggested_command,
+        "is_focus_related": source.id in focus_ids or any(node_id in focus_ids for node_id in related_node_ids),
+    }
+
+
+def _finalize_suggestions(suggestions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, str]] = set()
+    deduped: list[dict[str, Any]] = []
+    for suggestion in suggestions:
+        key = (
+            str(suggestion.get("kind")),
+            str(suggestion.get("source_node_id")),
+            str(suggestion.get("action")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(suggestion)
+
+    kind_rank = {
+        "focus_next_action": 0,
+        "resolve_blocker": 1,
+        "run_experiment": 2,
+        "record_finding": 3,
+        "review_decision": 4,
+        "fix_resource": 5,
+    }
+    deduped.sort(
+        key=lambda item: (
+            0 if item.get("is_focus_related") else 1,
+            _priority_rank(item.get("priority")),
+            kind_rank.get(str(item.get("kind")), 99),
+            str(item.get("source_node_id")),
+            str(item.get("action")),
+        )
+    )
+    for index, suggestion in enumerate(deduped, start=1):
+        suggestion["id"] = f"next_action_{index:03d}"
+    return deduped
+
+
+def build_action_suggestions(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any],
+    link_rows: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    focus_ids = _focus_related_ids(nodes, current)
+    suggestions: list[dict[str, Any]] = []
+    focus_node_id = focus_node_id_from_current(current, nodes)
+    focus_node = nodes.get(focus_node_id) if focus_node_id else None
+
+    action_source = focus_node or nodes.get(str(current.get("current_problem"))) or nodes.get(str(current.get("current_stage")))
+    if action_source:
+        for action in (current.get("next_actions", []) or []) + (action_source.raw.get("next_actions", []) or []):
+            if not action:
+                continue
+            suggestions.append(_make_suggestion(
+                kind="focus_next_action",
+                priority=_suggestion_priority(action_source, "high"),
+                action=str(action),
+                reason="Current focus or current_state lists this as a next action.",
+                source=action_source,
+                related_node_ids=[node_id for node_id in current.get("current_focus_path", []) or [] if node_id in nodes],
+                focus_ids=focus_ids,
+            ))
+
+    active_statuses = {"active", "open", "blocked"}
+    for node in sorted(nodes.values(), key=lambda item: item.id):
+        blockers = node.raw.get("blockers", []) or []
+        if node.type == "problem" and node.status in active_statuses and blockers:
+            for blocker in blockers:
+                suggestions.append(_make_suggestion(
+                    kind="resolve_blocker",
+                    priority=_suggestion_priority(node, "high"),
+                    action=f"Resolve blocker: {blocker}",
+                    reason=f"{node.id} is active and has an explicit blocker.",
+                    source=node,
+                    related_node_ids=[node.parent] if node.parent else [],
+                    suggested_command=_workflow_command("update_status.py", "--id", node.id, "--status", "blocked"),
+                    focus_ids=focus_ids,
+                ))
+
+        if node.type == "experiment" and node.status == "planned":
+            suggestions.append(_make_suggestion(
+                kind="run_experiment",
+                priority=_suggestion_priority(nodes.get(str(node.parent)), "medium"),
+                action=f"Run planned experiment: {node.title}",
+                reason=f"{node.id} is still planned.",
+                source=node,
+                related_node_ids=[node.parent] if node.parent else [],
+                suggested_command=_workflow_command("update_status.py", "--id", node.id, "--status", "running"),
+                focus_ids=focus_ids,
+            ))
+
+        if node.type == "experiment" and node.status == "done" and not (node.raw.get("findings") or []):
+            suggestions.append(_make_suggestion(
+                kind="record_finding",
+                priority=_suggestion_priority(nodes.get(str(node.parent)), "medium"),
+                action=f"Record findings for completed experiment: {node.title}",
+                reason=f"{node.id} is done but has no structured findings.",
+                source=node,
+                related_node_ids=[node.parent] if node.parent else [],
+                suggested_command=_workflow_command(
+                    "record_finding.py",
+                    "--experiment",
+                    node.id,
+                    '--statement "Describe the finding"',
+                    "--confidence",
+                    "medium",
+                ),
+                focus_ids=focus_ids,
+            ))
+
+        if node.type == "decision" and node.status == "proposed":
+            suggestions.append(_make_suggestion(
+                kind="review_decision",
+                priority=_suggestion_priority(nodes.get(str(node.parent)), "medium"),
+                action=f"Review proposed decision: {node.title}",
+                reason=f"{node.id} is proposed and needs acceptance or rejection.",
+                source=node,
+                related_node_ids=[node.parent] if node.parent else [],
+                suggested_command=_workflow_command("promote_decision.py", "--id", node.id, "--option", str(node.parent or "")),
+                focus_ids=focus_ids,
+            ))
+
+    for row in (link_rows if link_rows is not None else build_link_rows(root, nodes)):
+        if row.get("exists") is not False:
+            continue
+        node_id = str(row.get("node_id"))
+        source = nodes.get(node_id)
+        if not source:
+            continue
+        target = str(row.get("target") or "")
+        suggestions.append(_make_suggestion(
+            kind="fix_resource",
+            priority="low",
+            action=f"Restore or update missing resource path: {target}",
+            reason=f"{node_id} links to a local resource that does not exist.",
+            source=source,
+            related_node_ids=[],
+            suggested_command="",
+            focus_ids=focus_ids,
+        ))
+
+    return _finalize_suggestions(suggestions)
+
+
 def node_context(node: ResearchNode) -> dict[str, Any]:
     return {
         "id": node.id,
@@ -844,6 +1049,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
             }
             for n in sorted(recent_decisions, key=lambda item: item.id)
         ],
+        "suggested_next_actions": build_action_suggestions(root, nodes, current),
     }
 
 
@@ -983,6 +1189,12 @@ def build_focus_context(
     )
     knowledge_node_ids = [focus_node_id or ""] + path_ids + parent_ids + child_ids + experiment_ids + decision_ids + artifact_ids
 
+    suggested_next_actions = [
+        suggestion
+        for suggestion in build_action_suggestions(root, nodes, current)
+        if suggestion.get("is_focus_related")
+    ]
+
     return {
         "focus_node": node_context(focus_node) if focus_node else None,
         "focus_path": _ordered_node_contexts(nodes, path_ids),
@@ -1014,6 +1226,7 @@ def build_focus_context(
         "blockers": blockers,
         "next_actions": next_actions,
         "knowledge_index": _knowledge_index(nodes, knowledge_node_ids),
+        "suggested_next_actions": suggested_next_actions,
     }
 
 
@@ -1062,6 +1275,54 @@ def _latest_experiment_result(nodes: dict[str, ResearchNode], experiment_ids: li
         experiment = nodes[experiment_id]
         latest = experiment.raw.get("result_summary") or experiment.raw.get("outcome") or experiment.summary or latest
     return latest
+
+
+def _evidence_experiment_ids(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
+    if node_id not in nodes:
+        return []
+    node = nodes[node_id]
+    if node.type == "experiment":
+        return [node.id]
+    if node.type == "option":
+        return _experiment_ids_for_option(nodes, node.id)
+    if node.type != "decision":
+        return []
+
+    experiment_ids = _unique_strings(node.raw.get("supporting_experiments", []) or [])
+    option_id = node.parent if node.parent in nodes and nodes[node.parent].type == "option" else None
+    if option_id:
+        experiment_ids = _unique_strings(experiment_ids + _experiment_ids_for_option(nodes, str(option_id)))
+    return [experiment_id for experiment_id in experiment_ids if experiment_id in nodes and nodes[experiment_id].type == "experiment"]
+
+
+def build_decision_evidence_summary(nodes: dict[str, ResearchNode], node_id: str) -> dict[str, Any]:
+    experiment_ids = _evidence_experiment_ids(nodes, node_id)
+    findings_count = 0
+    latest_finding: str | None = None
+    outcome_counts: dict[str, int] = {}
+    for experiment_id in experiment_ids:
+        experiment = nodes[experiment_id]
+        findings = experiment.raw.get("findings", []) or []
+        counted_finding_outcome = False
+        if isinstance(findings, list):
+            findings_count += len(findings)
+            for finding in findings:
+                if isinstance(finding, dict) and finding.get("outcome"):
+                    finding_outcome = str(finding["outcome"])
+                    outcome_counts[finding_outcome] = outcome_counts.get(finding_outcome, 0) + 1
+                    counted_finding_outcome = True
+                if isinstance(finding, dict) and finding.get("statement"):
+                    latest_finding = str(finding["statement"])
+        outcome = experiment.raw.get("outcome")
+        if outcome and not counted_finding_outcome:
+            outcome_counts[str(outcome)] = outcome_counts.get(str(outcome), 0) + 1
+    return {
+        "experiment_count": len(experiment_ids),
+        "experiment_ids": experiment_ids,
+        "findings_count": findings_count,
+        "outcome_counts": outcome_counts,
+        "latest_finding": latest_finding,
+    }
 
 
 def build_branch_comparison(
@@ -1129,6 +1390,7 @@ def build_decision_trace(nodes: dict[str, ResearchNode], decision_id: str) -> di
         "supporting_experiments": _ordered_node_contexts(nodes, supporting_experiment_ids),
         "alternatives_considered": _ordered_node_contexts(nodes, alternative_ids),
         "consequences": decision.raw.get("consequences", []) or [],
+        "evidence_summary": build_decision_evidence_summary(nodes, decision_id),
     }
 
 
