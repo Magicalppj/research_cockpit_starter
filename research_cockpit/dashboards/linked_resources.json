@@ -1,0 +1,11 @@
+[
+  {
+    "node_id": "dataset_v2_150",
+    "node_title": "Audio Edit Dataset v2_150",
+    "node_type": "artifact",
+    "kind": "link",
+    "label": "figure",
+    "target": "figures/dataset_pipeline_v2_150.png",
+    "exists": false
+  }
+]

@@ -1,0 +1,411 @@
+{
+  "focus_node": {
+    "id": "problem_event_text_weak",
+    "type": "problem",
+    "title": "Event-level text control is weak",
+    "status": "active",
+    "priority": "critical",
+    "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
+    "question": "How can the model respond more strongly to fine-grained old/new event text edits?",
+    "hypothesis": null,
+    "evidence_strength": null,
+    "evidence_summary": null,
+    "current_best_option": "option_flan_t5_clap",
+    "decision_state": null,
+    "outcome": null,
+    "result_summary": null,
+    "supporting_experiments": [],
+    "contradicting_experiments": [],
+    "supporting_decisions": [],
+    "linked_artifacts": [],
+    "links": [],
+    "findings": [],
+    "implementation_steps": [],
+    "success_criteria": [],
+    "agent_context": null,
+    "next_actions": [
+      "Run FLAN-T5-only ablation",
+      "Run FLAN-T5 + CLAP ablation"
+    ],
+    "blockers": [
+      "Need new feature cache",
+      "Need ablation runs"
+    ]
+  },
+  "focus_path": [
+    {
+      "id": "stage_text_encoder",
+      "type": "stage",
+      "title": "Text Encoder Redesign",
+      "status": "active",
+      "priority": "high",
+      "summary": "Improve event-level old/new text understanding for local audio editing.",
+      "question": null,
+      "hypothesis": null,
+      "evidence_strength": null,
+      "evidence_summary": null,
+      "current_best_option": null,
+      "decision_state": null,
+      "outcome": null,
+      "result_summary": null,
+      "supporting_experiments": [],
+      "contradicting_experiments": [],
+      "supporting_decisions": [],
+      "linked_artifacts": [],
+      "links": [],
+      "findings": [],
+      "implementation_steps": [],
+      "success_criteria": [],
+      "agent_context": null,
+      "next_actions": [
+        "Implement FLAN-T5 timeline features",
+        "Add CLAP semantic anchor"
+      ],
+      "blockers": []
+    },
+    {
+      "id": "problem_event_text_weak",
+      "type": "problem",
+      "title": "Event-level text control is weak",
+      "status": "active",
+      "priority": "critical",
+      "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
+      "question": "How can the model respond more strongly to fine-grained old/new event text edits?",
+      "hypothesis": null,
+      "evidence_strength": null,
+      "evidence_summary": null,
+      "current_best_option": "option_flan_t5_clap",
+      "decision_state": null,
+      "outcome": null,
+      "result_summary": null,
+      "supporting_experiments": [],
+      "contradicting_experiments": [],
+      "supporting_decisions": [],
+      "linked_artifacts": [],
+      "links": [],
+      "findings": [],
+      "implementation_steps": [],
+      "success_criteria": [],
+      "agent_context": null,
+      "next_actions": [
+        "Run FLAN-T5-only ablation",
+        "Run FLAN-T5 + CLAP ablation"
+      ],
+      "blockers": [
+        "Need new feature cache",
+        "Need ablation runs"
+      ]
+    }
+  ],
+  "focus_path_ids": [
+    "stage_text_encoder",
+    "problem_event_text_weak"
+  ],
+  "overview": {
+    "project_name": "Audio Edit Research Cockpit",
+    "current_stage": "stage_text_encoder",
+    "current_stage_title": "Text Encoder Redesign",
+    "current_problem": "problem_event_text_weak",
+    "current_problem_title": "Event-level text control is weak",
+    "current_option": "option_flan_t5_clap",
+    "current_option_title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+    "current_focus_node": "problem_event_text_weak",
+    "current_focus_node_title": "Event-level text control is weak",
+    "current_hypothesis": "Event-level old/new text control can be improved by using FLAN-T5-XL token features plus CLAP audio-semantic anchors in the Semantic Ribbon branch.\n",
+    "open_risks": [
+      "Need train/inference parity for FLAN-T5 + CLAP timeline features.",
+      "Need to verify whether CLAP anchor improves remove/replace under overlap.",
+      "Need to avoid mixing legacy timeline inference with edit-program inference."
+    ],
+    "focus_mode": {
+      "default_depth": 2,
+      "hide_statuses": [
+        "rejected",
+        "parked",
+        "archived"
+      ],
+      "show_resolved": false,
+      "show_rejected": false,
+      "show_parked": false
+    }
+  },
+  "local_neighbors": {
+    "parents": [
+      {
+        "id": "stage_text_encoder",
+        "type": "stage",
+        "title": "Text Encoder Redesign",
+        "status": "active",
+        "priority": "high",
+        "summary": "Improve event-level old/new text understanding for local audio editing.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_context": null,
+        "next_actions": [
+          "Implement FLAN-T5 timeline features",
+          "Add CLAP semantic anchor"
+        ],
+        "blockers": []
+      }
+    ],
+    "children": [
+      {
+        "id": "option_gemma_baseline",
+        "type": "option",
+        "title": "Keep Gemma-only event features",
+        "status": "rejected",
+        "priority": "low",
+        "summary": "Current baseline; useful for comparison but weak for event-level edit control.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": "rejected",
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_context": null,
+        "next_actions": [],
+        "blockers": []
+      },
+      {
+        "id": "option_flan_t5_clap",
+        "type": "option",
+        "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+        "status": "active",
+        "priority": "high",
+        "summary": "Main candidate for event/edit branch text encoding.",
+        "question": null,
+        "hypothesis": "FLAN-T5 improves token-level event understanding, while CLAP improves audio-semantic alignment.",
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": "promising",
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_context": null,
+        "next_actions": [],
+        "blockers": []
+      },
+      {
+        "id": "option_umt5_clap",
+        "type": "option",
+        "title": "UMT5 + CLAP multilingual branch",
+        "status": "parked",
+        "priority": "medium",
+        "summary": "Potential multilingual alternative if Chinese or mixed-language event text becomes central.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": "open",
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_context": null,
+        "next_actions": [],
+        "blockers": []
+      }
+    ],
+    "siblings": [],
+    "experiments": [
+      {
+        "id": "exp_041_flan_t5_only",
+        "type": "experiment",
+        "title": "FLAN-T5-XL event branch only",
+        "status": "planned",
+        "priority": null,
+        "summary": "Ablation to test whether FLAN-T5 improves event-level token understanding.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_context": null,
+        "next_actions": [],
+        "blockers": []
+      },
+      {
+        "id": "exp_042_flan_t5_clap",
+        "type": "experiment",
+        "title": "FLAN-T5-XL + CLAP anchor",
+        "status": "planned",
+        "priority": null,
+        "summary": "Ablation to test whether CLAP anchor improves old/new edit direction and audio-semantic grounding.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_context": null,
+        "next_actions": [],
+        "blockers": []
+      }
+    ],
+    "decisions": [
+      {
+        "id": "decision_flan_t5_clap",
+        "type": "decision",
+        "title": "Adopt FLAN-T5-XL + CLAP for event branch",
+        "status": "proposed",
+        "priority": null,
+        "summary": "Keep LTX/Gemma global prompt path, use FLAN-T5-XL for event tokens and CLAP as event semantic anchor.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [
+          "exp_041_flan_t5_only",
+          "exp_042_flan_t5_clap"
+        ],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_context": null,
+        "next_actions": [],
+        "blockers": []
+      }
+    ],
+    "artifacts": [
+      {
+        "id": "dataset_v2_150",
+        "type": "artifact",
+        "title": "Audio Edit Dataset v2_150",
+        "status": "active",
+        "priority": null,
+        "summary": "150 editable classes, 7.2k event atoms, 20k+ edit pairs, 10s scenes.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [
+          {
+            "kind": "link",
+            "label": "figure",
+            "target": "figures/dataset_pipeline_v2_150.png"
+          }
+        ],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_context": null,
+        "next_actions": [
+          "Run quality filter audit",
+          "Export FLAN-T5 + CLAP feature cache"
+        ],
+        "blockers": []
+      }
+    ],
+    "blockers": [
+      "Need new feature cache",
+      "Need ablation runs"
+    ]
+  },
+  "current_best_option": "option_flan_t5_clap",
+  "blockers": [
+    "Need new feature cache",
+    "Need ablation runs"
+  ],
+  "next_actions": [
+    "Regenerate timeline feature cache with FLAN-T5-XL token features.",
+    "Add CLAP anchor projection to EventStateInitializer.",
+    "Run FLAN-T5-only ablation on Audio Edit Dataset v2_150.",
+    "Run FLAN-T5 + CLAP ablation and compare local edit following.",
+    "Run FLAN-T5-only ablation",
+    "Run FLAN-T5 + CLAP ablation"
+  ],
+  "knowledge_index": [
+    {
+      "node_id": "dataset_v2_150",
+      "node_title": "Audio Edit Dataset v2_150",
+      "node_type": "artifact",
+      "role": null,
+      "key_files": [],
+      "key_questions": [],
+      "next_action_hint": null,
+      "linked_resources": [
+        {
+          "kind": "link",
+          "label": "figure",
+          "target": "figures/dataset_pipeline_v2_150.png"
+        }
+      ]
+    }
+  ]
+}

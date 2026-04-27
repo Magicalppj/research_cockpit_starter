@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import argparse
+from datetime import date
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1] / "research_cockpit"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from cockpit.model import ResearchNode, load_nodes, load_yaml, save_yaml, validate_cockpit
+from scripts.build_dashboard import build_dashboard
+from scripts.record_finding import find_node_file
+
+
+VALID_DECISION_STATUSES = {"proposed", "accepted"}
+VALID_EVIDENCE_STRENGTHS = {"none", "weak", "medium", "strong"}
+
+
+def _validate_refs(
+    nodes: dict[str, ResearchNode],
+    refs: list[str],
+    expected_type: str,
+    field_name: str,
+) -> None:
+    for ref_id in refs:
+        if ref_id not in nodes:
+            raise ValueError(f"{field_name} references missing node {ref_id}")
+        if nodes[ref_id].type != expected_type:
+            raise ValueError(f"{field_name} reference {ref_id} must be {expected_type}, got {nodes[ref_id].type}")
+
+
+def promote_decision(
+    root: Path,
+    *,
+    decision_id: str,
+    option_id: str,
+    title: str,
+    summary: str,
+    status: str = "proposed",
+    supporting_experiments: list[str] | None = None,
+    alternatives: list[str] | None = None,
+    consequences: list[str] | None = None,
+    next_required_actions: list[str] | None = None,
+    evidence_strength: str = "none",
+    rebuild_dashboard: bool = True,
+) -> Path:
+    nodes = load_nodes(root)
+    if decision_id in nodes:
+        raise FileExistsError(root / "graph" / "nodes" / f"{decision_id}.yaml")
+    if option_id not in nodes:
+        raise ValueError(f"Option node does not exist: {option_id}")
+    option = nodes[option_id]
+    if option.type != "option":
+        raise ValueError(f"Node {option_id} must be option, got {option.type}")
+    if status not in VALID_DECISION_STATUSES:
+        allowed = ", ".join(sorted(VALID_DECISION_STATUSES))
+        raise ValueError(f"Invalid decision status {status!r}; allowed: {allowed}")
+    if evidence_strength not in VALID_EVIDENCE_STRENGTHS:
+        allowed = ", ".join(sorted(VALID_EVIDENCE_STRENGTHS))
+        raise ValueError(f"Invalid evidence strength {evidence_strength!r}; allowed: {allowed}")
+
+    supporting_experiments = supporting_experiments or []
+    alternatives = alternatives or []
+    consequences = consequences or []
+    next_required_actions = next_required_actions or []
+    _validate_refs(nodes, supporting_experiments, "experiment", "supporting_experiments")
+    _validate_refs(nodes, alternatives, "option", "alternatives")
+
+    today = str(date.today())
+    decision_data = {
+        "id": decision_id,
+        "type": "decision",
+        "title": title,
+        "status": status,
+        "priority": option.priority,
+        "parent": option_id,
+        "summary": summary,
+        "decision_status": status,
+        "derived_from": [option_id],
+        "supporting_experiments": supporting_experiments,
+        "alternatives_considered": alternatives,
+        "consequences": consequences,
+        "next_required_actions": next_required_actions,
+        "evidence_strength": evidence_strength,
+        "created_at": today,
+        "updated_at": today,
+    }
+
+    candidate = dict(nodes)
+    candidate[decision_id] = ResearchNode.from_dict(decision_data)
+    option_data = None
+    problem_data = None
+    problem_id = option.parent
+    if status == "accepted":
+        option_path = find_node_file(root, option_id)
+        option_data = load_yaml(option_path)
+        option_data["status"] = "accepted"
+        option_data["decision_state"] = "accepted"
+        option_data["updated_at"] = today
+        candidate[option_id] = ResearchNode.from_dict(option_data)
+
+        if problem_id and problem_id in nodes and nodes[problem_id].type == "problem":
+            problem_path = find_node_file(root, str(problem_id))
+            problem_data = load_yaml(problem_path)
+            problem_data["status"] = "resolved"
+            problem_data["resolved_by"] = decision_id
+            problem_data["current_best_option"] = option_id
+            problem_data["updated_at"] = today
+            candidate[str(problem_id)] = ResearchNode.from_dict(problem_data)
+
+    validate_cockpit(root, candidate, load_yaml(root / "current_state.yaml"), raise_on_error=True)
+
+    out = root / "graph" / "nodes" / f"{decision_id}.yaml"
+    save_yaml(out, decision_data)
+    if option_data is not None:
+        save_yaml(find_node_file(root, option_id), option_data)
+    if problem_data is not None and problem_id:
+        save_yaml(find_node_file(root, str(problem_id)), problem_data)
+    if rebuild_dashboard:
+        build_dashboard(root)
+    return out
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--id", required=True, dest="decision_id")
+    parser.add_argument("--option", required=True, dest="option_id")
+    parser.add_argument("--title", required=True)
+    parser.add_argument("--summary", required=True)
+    parser.add_argument("--status", default="proposed", choices=sorted(VALID_DECISION_STATUSES))
+    parser.add_argument("--supporting-experiment", action="append", dest="supporting_experiments")
+    parser.add_argument("--alternative", action="append", dest="alternatives")
+    parser.add_argument("--consequence", action="append", dest="consequences")
+    parser.add_argument("--next-required-action", action="append", dest="next_required_actions")
+    parser.add_argument("--evidence-strength", default="none", choices=sorted(VALID_EVIDENCE_STRENGTHS))
+    parser.add_argument("--no-build", action="store_true")
+    args = parser.parse_args()
+
+    out = promote_decision(
+        args.root,
+        decision_id=args.decision_id,
+        option_id=args.option_id,
+        title=args.title,
+        summary=args.summary,
+        status=args.status,
+        supporting_experiments=args.supporting_experiments,
+        alternatives=args.alternatives,
+        consequences=args.consequences,
+        next_required_actions=args.next_required_actions,
+        evidence_strength=args.evidence_strength,
+        rebuild_dashboard=not args.no_build,
+    )
+    print(f"Created {out}")
+    if not args.no_build:
+        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
+
+
+if __name__ == "__main__":
+    main()

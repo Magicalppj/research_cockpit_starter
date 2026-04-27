@@ -1,0 +1,21 @@
+edges:
+  - from: stage_text_encoder
+    to: problem_event_text_weak
+    type: contains
+    label: contains
+  - from: problem_event_text_weak
+    to: option_flan_t5_clap
+    type: candidate_for
+    label: candidate
+  - from: option_flan_t5_clap
+    to: exp_042_flan_t5_clap
+    type: validates
+    label: ablation
+  - from: exp_042_flan_t5_clap
+    to: decision_flan_t5_clap
+    type: supports
+    label: supports
+  - from: decision_flan_t5_clap
+    to: problem_event_text_weak
+    type: resolves
+    label: resolves

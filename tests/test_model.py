@@ -1,0 +1,584 @@
+from __future__ import annotations
+
+import shutil
+import unittest
+import uuid
+from pathlib import Path
+import sys
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
+
+from cockpit.model import (
+    ValidationError,
+    build_agent_context,
+    build_branch_comparison,
+    build_decision_trace,
+    build_focus_context,
+    build_experiment_matrix,
+    build_link_rows,
+    derive_focus_path,
+    graph_to_json,
+    load_explicit_edges,
+    load_yaml,
+    load_nodes,
+    node_context,
+    save_yaml,
+    validate_cockpit,
+)
+
+
+def write_node(root: Path, data: dict) -> None:
+    save_yaml(root / "graph" / "nodes" / f"{data['id']}.yaml", data)
+
+
+class ModelValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        temp_parent = ROOT_DIR / ".test_tmp"
+        temp_parent.mkdir(exist_ok=True)
+        self.root = temp_parent / f"model_{uuid.uuid4().hex}"
+        self.root.mkdir(parents=True)
+        write_node(
+            self.root,
+            {
+                "id": "stage_text",
+                "type": "stage",
+                "title": "Text",
+                "status": "active",
+                "children": ["problem_text"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "problem_text",
+                "type": "problem",
+                "title": "Weak text",
+                "status": "active",
+                "parent": "stage_text",
+                "children": ["option_t5"],
+                "priority": "high",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_t5",
+                "type": "option",
+                "title": "T5",
+                "status": "active",
+                "parent": "problem_text",
+                "children": ["exp_t5", "decision_t5"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_t5",
+                "type": "experiment",
+                "title": "T5 ablation",
+                "status": "planned",
+                "parent": "option_t5",
+                "dataset": "dataset_v1",
+                "backbone": "ltx",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+            },
+        )
+        save_yaml(
+            self.root / "current_state.yaml",
+            {
+                "current_stage": "stage_text",
+                "current_problem": "problem_text",
+                "current_option": "option_t5",
+                "current_focus_path": ["stage_text", "problem_text", "option_t5"],
+                "current_hypothesis": "T5 helps.",
+                "open_risks": ["Need cache parity"],
+                "next_actions": ["Run ablation"],
+            },
+        )
+
+    def tearDown(self) -> None:
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_valid_sample_cockpit_passes_validation(self) -> None:
+        nodes = load_nodes(self.root)
+
+        errors = validate_cockpit(self.root, nodes)
+
+        self.assertEqual(errors, [])
+
+    def test_invalid_status_reports_node_id(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "bad_problem",
+                "type": "problem",
+                "title": "Bad",
+                "status": "done",
+            },
+        )
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        self.assertIn("bad_problem", str(ctx.exception))
+        self.assertIn("invalid status", str(ctx.exception))
+
+    def test_unknown_parent_reports_reference(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "orphan_option",
+                "type": "option",
+                "title": "Orphan",
+                "status": "open",
+                "parent": "missing_problem",
+            },
+        )
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        self.assertIn("orphan_option", str(ctx.exception))
+        self.assertIn("missing_problem", str(ctx.exception))
+
+    def test_unknown_current_focus_path_reports_reference(self) -> None:
+        save_yaml(
+            self.root / "current_state.yaml",
+            {
+                "current_stage": "stage_text",
+                "current_focus_path": ["stage_text", "missing_focus"],
+            },
+        )
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        self.assertIn("missing_focus", str(ctx.exception))
+
+    def test_graph_json_deduplicates_parent_child_edges(self) -> None:
+        nodes = load_nodes(self.root)
+
+        graph = graph_to_json(nodes, ["stage_text", "problem_text", "option_t5"])
+        edge_pairs = {(edge["from"], edge["to"]) for edge in graph["edges"]}
+
+        self.assertEqual(len(edge_pairs), len(graph["edges"]))
+        self.assertIn(("stage_text", "problem_text"), edge_pairs)
+        self.assertIn(("problem_text", "option_t5"), edge_pairs)
+
+    def test_derive_focus_path_follows_parent_chain(self) -> None:
+        nodes = load_nodes(self.root)
+
+        self.assertEqual(derive_focus_path(nodes, "stage_text"), ["stage_text"])
+        self.assertEqual(derive_focus_path(nodes, "problem_text"), ["stage_text", "problem_text"])
+        self.assertEqual(derive_focus_path(nodes, "option_t5"), ["stage_text", "problem_text", "option_t5"])
+        self.assertEqual(derive_focus_path(nodes, "exp_t5"), ["stage_text", "problem_text", "option_t5", "exp_t5"])
+        self.assertEqual(
+            derive_focus_path(nodes, "decision_t5"),
+            ["stage_text", "problem_text", "option_t5", "decision_t5"],
+        )
+
+    def test_derive_focus_path_reports_missing_parent(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "exp_orphan",
+                "type": "experiment",
+                "title": "Orphan run",
+                "status": "planned",
+                "parent": "missing_option",
+            },
+        )
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValueError) as ctx:
+            derive_focus_path(nodes, "exp_orphan")
+
+        self.assertIn("missing_option", str(ctx.exception))
+
+    def test_explicit_edges_are_loaded_validated_and_deduplicated(self) -> None:
+        save_yaml(
+            self.root / "graph" / "edges.yaml",
+            {
+                "edges": [
+                    {
+                        "source": "problem_text",
+                        "target": "option_t5",
+                        "type": "supports",
+                        "label": "supports",
+                        "strength": 0.8,
+                    },
+                    {
+                        "source": "option_t5",
+                        "target": "exp_t5",
+                        "type": "validates",
+                    },
+                    {
+                        "source": "option_t5",
+                        "target": "exp_t5",
+                        "type": "validates",
+                    },
+                ]
+            },
+        )
+        nodes = load_nodes(self.root)
+        explicit_edges = load_explicit_edges(self.root)
+
+        errors = validate_cockpit(self.root, nodes)
+        graph = graph_to_json(nodes, ["stage_text", "problem_text", "option_t5"], explicit_edges=explicit_edges)
+        edge_pairs = [(edge["from"], edge["to"]) for edge in graph["edges"]]
+        explicit_edge = next(
+            edge for edge in graph["edges"] if edge["from"] == "problem_text" and edge["to"] == "option_t5"
+        )
+
+        self.assertEqual(errors, [])
+        self.assertEqual(edge_pairs.count(("option_t5", "exp_t5")), 1)
+        self.assertEqual(explicit_edge["type"], "supports")
+        self.assertEqual(explicit_edge["label"], "supports")
+
+    def test_unknown_explicit_edge_node_reports_error(self) -> None:
+        save_yaml(
+            self.root / "graph" / "edges.yaml",
+            {"edges": [{"source": "missing_node", "target": "option_t5", "type": "supports"}]},
+        )
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        self.assertIn("missing_node", str(ctx.exception))
+
+    def test_graph_json_adds_focus_mode_metadata(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "stage_other",
+                "type": "stage",
+                "title": "Other stage",
+                "status": "done",
+                "children": ["problem_other"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "problem_other",
+                "type": "problem",
+                "title": "Other problem",
+                "status": "resolved",
+                "parent": "stage_other",
+                "children": ["option_old"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_old",
+                "type": "option",
+                "title": "Old option",
+                "status": "rejected",
+                "parent": "problem_other",
+            },
+        )
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "problem_text"
+        current["focus_mode"] = {
+            "default_depth": 2,
+            "hide_statuses": ["rejected", "parked", "archived", "resolved"],
+        }
+        nodes = load_nodes(self.root)
+
+        graph = graph_to_json(nodes, current["current_focus_path"], current)
+        graph_nodes = {node["id"]: node for node in graph["nodes"]}
+
+        self.assertEqual(graph["current_focus_node"], "problem_text")
+        self.assertTrue(graph_nodes["problem_text"]["is_current_focus"])
+        self.assertEqual(graph_nodes["problem_text"]["focus_role"], "current")
+        self.assertEqual(graph_nodes["problem_text"]["focus_visible_depth"], 0)
+        self.assertTrue(graph_nodes["stage_text"]["in_focus_path"])
+        self.assertEqual(graph_nodes["stage_text"]["focus_role"], "parent")
+        self.assertEqual(graph_nodes["option_t5"]["focus_role"], "child")
+        self.assertEqual(graph_nodes["exp_t5"]["focus_visible_depth"], 2)
+        self.assertTrue(graph_nodes["exp_t5"]["is_focus_visible"])
+        self.assertFalse(graph_nodes["option_old"]["is_focus_visible"])
+        self.assertTrue(graph_nodes["option_old"]["is_hidden_by_focus"])
+
+    def test_agent_context_resolves_focus_node_details(self) -> None:
+        nodes = load_nodes(self.root)
+
+        context = build_agent_context(self.root, nodes)
+
+        self.assertEqual(context["current_stage"], "stage_text")
+        self.assertEqual(context["current_stage_title"], "Text")
+        self.assertEqual(context["linked_nodes"][0]["title"], "Text")
+
+    def test_link_rows_parse_node_links_and_resource_paths(self) -> None:
+        note_path = self.root / "notes" / "problems" / "problem_text.md"
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.write_text("# Problem note\n", encoding="utf-8")
+        config_path = self.root / "configs" / "exp_t5.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("ok: true\n", encoding="utf-8")
+
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["links"] = {
+            "notes": "notes/problems/problem_text.md",
+            "external": "https://example.com/problem",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["config_path"] = "configs/exp_t5.yaml"
+        experiment["run_id"] = "run-123"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        write_node(
+            self.root,
+            {
+                "id": "artifact_fig",
+                "type": "artifact",
+                "title": "Figure",
+                "status": "active",
+                "path": "figures/missing.png",
+            },
+        )
+        nodes = load_nodes(self.root)
+
+        rows = build_link_rows(self.root, nodes)
+        by_kind = {(row["node_id"], row["kind"], row["label"]): row for row in rows}
+        context = node_context(nodes["problem_text"])
+
+        self.assertTrue(by_kind[("problem_text", "link", "notes")]["exists"])
+        self.assertIsNone(by_kind[("problem_text", "link", "external")]["exists"])
+        self.assertTrue(by_kind[("exp_t5", "config_path", "config_path")]["exists"])
+        self.assertIsNone(by_kind[("exp_t5", "run_id", "run_id")]["exists"])
+        self.assertFalse(by_kind[("artifact_fig", "path", "path")]["exists"])
+        self.assertEqual(context["links"][0]["target"], "notes/problems/problem_text.md")
+
+    def test_experiment_matrix_contains_experiment_rows(self) -> None:
+        nodes = load_nodes(self.root)
+
+        rows = build_experiment_matrix(nodes)
+
+        self.assertEqual(rows[0]["id"], "exp_t5")
+        self.assertEqual(rows[0]["parent"], "option_t5")
+
+    def test_experiment_findings_enter_context_and_matrix(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["findings"] = [
+            {
+                "id": "exp_t5_finding_001",
+                "statement": "T5 improves replace following.",
+                "confidence": "medium",
+                "evidence": ["exp_t5"],
+                "outcome": "positive",
+                "metrics": ["replace_following"],
+                "linked_artifacts": [],
+                "created_at": "2026-04-27",
+            }
+        ]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+
+        context = node_context(nodes["exp_t5"])
+        rows = build_experiment_matrix(nodes)
+
+        self.assertEqual(context["findings"][0]["statement"], "T5 improves replace following.")
+        self.assertEqual(rows[0]["findings_count"], 1)
+        self.assertEqual(rows[0]["latest_finding"], "T5 improves replace following.")
+
+    def test_invalid_finding_fields_report_validation_error(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["findings"] = [
+            {
+                "id": "bad_finding",
+                "statement": "Bad finding.",
+                "confidence": "certain",
+                "outcome": "great",
+                "linked_artifacts": ["missing_artifact"],
+            }
+        ]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        message = str(ctx.exception)
+        self.assertIn("findings[1].confidence", message)
+        self.assertIn("findings[1].outcome", message)
+        self.assertIn("missing_artifact", message)
+
+    def test_branch_comparison_summarizes_problem_options(self) -> None:
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["pros"] = ["Uses strong text prior"]
+        option["cons"] = ["Needs cache"]
+        option["evidence_strength"] = "medium"
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["result_summary"] = "Improved edit following."
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_option"] = "option_t5"
+        nodes = load_nodes(self.root)
+
+        rows = build_branch_comparison(nodes, current=current)
+
+        self.assertEqual(rows[0]["id"], "option_t5")
+        self.assertEqual(rows[0]["evidence_strength"], "medium")
+        self.assertEqual(rows[0]["experiment_count"], 1)
+        self.assertEqual(rows[0]["latest_result"], "Improved edit following.")
+        self.assertTrue(rows[0]["is_current_best"])
+
+    def test_decision_trace_resolves_context_and_evidence(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative option",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
+        decision["supporting_experiments"] = ["exp_t5"]
+        decision["alternatives_considered"] = ["option_alt"]
+        decision["consequences"] = ["Prioritize T5 branch"]
+        save_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml", decision)
+        nodes = load_nodes(self.root)
+
+        trace = build_decision_trace(nodes, "decision_t5")
+
+        self.assertEqual(trace["decision"]["id"], "decision_t5")
+        self.assertEqual(trace["stage"]["id"], "stage_text")
+        self.assertEqual(trace["problem"]["id"], "problem_text")
+        self.assertEqual(trace["option"]["id"], "option_t5")
+        self.assertEqual(trace["supporting_experiments"][0]["id"], "exp_t5")
+        self.assertEqual(trace["alternatives_considered"][0]["id"], "option_alt")
+        self.assertEqual(trace["consequences"], ["Prioritize T5 branch"])
+
+    def test_v2_statuses_and_current_focus_node_pass_validation(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_cache",
+                "type": "artifact",
+                "title": "Feature cache",
+                "status": "draft",
+                "summary": "FLAN-T5 feature cache.",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_cancelled",
+                "type": "experiment",
+                "title": "Cancelled run",
+                "status": "cancelled",
+                "summary": "Superseded before launch.",
+            },
+        )
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "problem_text"
+        current["focus_mode"] = {
+            "default_depth": 2,
+            "hide_statuses": ["rejected", "parked", "archived"],
+            "show_resolved": False,
+            "show_rejected": False,
+            "show_parked": False,
+        }
+        save_yaml(self.root / "current_state.yaml", current)
+        nodes = load_nodes(self.root)
+
+        errors = validate_cockpit(self.root, nodes)
+
+        self.assertEqual(errors, [])
+
+    def test_unknown_current_focus_node_reports_reference(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "missing_focus"
+        save_yaml(self.root / "current_state.yaml", current)
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        self.assertIn("current_focus_node", str(ctx.exception))
+        self.assertIn("missing_focus", str(ctx.exception))
+
+    def test_invalid_focus_mode_hide_status_reports_error(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["focus_mode"] = {"hide_statuses": ["unknown_status"]}
+        save_yaml(self.root / "current_state.yaml", current)
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        self.assertIn("focus_mode.hide_statuses", str(ctx.exception))
+        self.assertIn("unknown_status", str(ctx.exception))
+
+    def test_focus_context_pack_contains_local_context(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["current_best_option"] = "option_t5"
+        problem["blockers"] = ["Need feature cache"]
+        problem["next_actions"] = ["Run focused ablation"]
+        problem["agent_context"] = {
+            "include": True,
+            "role": "focus",
+            "key_files": ["ltx_trainer/modules/semantic_ribbon_vnext.py"],
+            "next_action_hint": "Implement the focused feature cache.",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["linked_artifacts"] = ["artifact_cache"]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        write_node(
+            self.root,
+            {
+                "id": "artifact_cache",
+                "type": "artifact",
+                "title": "Feature cache",
+                "status": "active",
+                "summary": "FLAN-T5 feature cache.",
+            },
+        )
+
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "problem_text"
+        save_yaml(self.root / "current_state.yaml", current)
+        nodes = load_nodes(self.root)
+
+        context = build_focus_context(self.root, nodes)
+
+        self.assertEqual(context["focus_node"]["id"], "problem_text")
+        self.assertEqual(context["current_best_option"], "option_t5")
+        self.assertEqual(context["blockers"], ["Need feature cache"])
+        self.assertIn("Run ablation", context["next_actions"])
+        self.assertIn("Run focused ablation", context["next_actions"])
+        self.assertEqual(context["local_neighbors"]["parents"][0]["id"], "stage_text")
+        self.assertEqual(context["local_neighbors"]["children"][0]["id"], "option_t5")
+        self.assertEqual(context["local_neighbors"]["experiments"][0]["id"], "exp_t5")
+        self.assertEqual(context["local_neighbors"]["decisions"][0]["id"], "decision_t5")
+        self.assertEqual(context["local_neighbors"]["artifacts"][0]["id"], "artifact_cache")
+        self.assertEqual(context["knowledge_index"][0]["node_id"], "problem_text")
+
+
+if __name__ == "__main__":
+    unittest.main()

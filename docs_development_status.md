@@ -1,0 +1,315 @@
+# Research Cockpit 开发状态
+
+## Notes/Search v1 更新（2026-04-27）
+
+本批已把结构化 YAML 状态进一步连接到长篇研究记录和产物路径，重点是“可创建 note、可看资源、可搜节点”，仍然保持 YAML 为真相源，Markdown notes 只作为辅助长文本记录。
+
+已完成：
+
+- 新增 `scripts/create_note.py`：支持为 `problem`、`option`、`experiment`、`decision` 创建 Markdown 模板，并写回节点 YAML 的 `links.notes`。
+- 新增 `build_link_rows(root, nodes)`：统一汇总 `links`、`linked_artifacts`、`config_path`、`path`、`run_id` 等资源引用。
+- `scripts/build_dashboard.py` 新增输出 `research_cockpit/dashboards/linked_resources.json`。
+- `node_context(...)` 增加标准化 `links`；`focus_context_pack.json` 的 `knowledge_index` 已纳入当前 focus 附近的 note/config/file 路径。
+- UI 新增“资源 / Resources”页签，支持按节点类型、资源类型和存在状态过滤。
+- Research Graph 节点详情选择器增加搜索框，支持按 `id/title/summary/tags/status/type` 查找节点。
+- 节点详情 Summary 区将 `links` 展示为可读资源表；Actions 区为可支持 note 的节点显示 `create_note.py` 命令模板。
+- Data Health 增加 linked resource 摘要；缺失本地资源路径仅作为 warning，不阻断 `validate_cockpit.py`。
+
+当前 dashboard 输出文件为：
+
+- `graph_view.json`
+- `agent_context_pack.json`
+- `focus_context_pack.json`
+- `current_state.md`
+- `current_state.json`
+- `experiment_matrix.json`
+- `linked_resources.json`
+
+下一批候选：
+
+- 新增 `suggest_next_actions.py`，基于 active problem、blocked node、缺失 evidence 和 stale experiment 生成候选下一步动作。
+- 增强 `promote_decision.py`，从已有 findings 自动汇总 supporting evidence。
+- 在 UI 中进一步突出 focus path 的下一步推进建议。
+- 后续再考虑全文搜索和 Markdown 在线编辑；本阶段不引入。
+
+## 当前阶段
+
+当前项目处于 **Notes/Search v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索。
+
+已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
+
+- YAML 节点仍然是研究状态的真相源。
+- Python 脚本负责校验、维护和生成 dashboard/context 文件。
+- Streamlit + PyVis 提供可交互图谱和表格视图。
+- Agent 可以优先读取 `research_cockpit/dashboards/agent_context_pack.json` 获取当前上下文。
+- 前端已支持中文/英文界面切换，默认中文。
+
+## 已完成能力
+
+### 数据与校验
+
+- 支持 `stage`、`problem`、`option`、`experiment`、`decision`、`artifact` 节点。
+- 对节点类型、状态枚举、`parent` / `children` 引用、`current_focus_path`、`current_focus_node` 和 `focus_mode` 做一致性校验。
+- 状态枚举已兼容 v2 的 `experiment.cancelled`、`artifact.draft` 和 `artifact.archived`，同时保留旧数据可用状态。
+- v2 研究字段会随 YAML 原样保留，并在 context 中提取常用字段，例如 evidence、blockers、next_actions 和 agent_context。
+- experiment 节点支持结构化 `findings` 列表，用于记录实验观察、置信度、指标、关联 artifact 和结论方向。
+- 图边生成会去重，避免同时写 `parent` 和 `children` 时出现重复边。
+- 支持可选 `research_cockpit/graph/edges.yaml`，用于声明 `source`、`target`、`type`、`label` 和 `strength` 显式边；显式边会与 parent/children 派生边合并去重。
+
+### 维护脚本
+
+- `scripts/add_node.py`：新增节点，按节点类型设置默认状态，并校验父节点。
+- `scripts/update_status.py`：更新节点状态、摘要和实验结果摘要。
+- `scripts/set_focus.py`：更新当前主线，包括 stage/problem/option/focus node/focus path；传入 `--focus-node` 时可自动从 parent 链推导 focus path；默认会重建 dashboard/context 文件。
+- `scripts/validate_cockpit.py`：独立运行数据健康检查，支持人类可读输出和 `--json` 输出。
+- `scripts/record_finding.py`：向 experiment 节点追加结构化 finding，并可同步更新 `result_summary`。
+- `scripts/promote_decision.py`：从 option 和 supporting experiments 生成 decision；accepted decision 会同步更新 option/problem 状态。
+- `scripts/build_dashboard.py`：生成前先校验，再输出 dashboard 和 agent context 文件。
+
+### Dashboard 输出
+
+当前会生成：
+
+- `graph_view.json`
+- `agent_context_pack.json`
+- `focus_context_pack.json`
+- `current_state.md`
+- `current_state.json`
+- `experiment_matrix.json`
+
+这些文件是可再生成产物，但当前 MVP 建议保留在仓库中，方便人和 agent 快速读取上下文。
+
+### 前端 UI
+
+Streamlit 页面现在包含：
+
+- 总览
+- 研究图谱
+- 方案比较
+- 决策追踪
+- 资源
+- 实验矩阵
+- 决策
+- Agent 上下文
+- 数据健康
+
+图谱页保留 PyVis 交互图，支持节点类型和状态过滤，并高亮当前 focus path。节点详情通过右侧选择器查看。前端已修复 Windows GBK 写 HTML 导致中文界面报错的问题。
+
+第二批后，图谱页已成为默认首屏，并默认使用 Focus Depth 2：
+
+- 读取 `current_focus_node`，当前焦点节点会使用红色粗边框并自动调用 PyVis `network.focus()` 聚焦。
+- `graph_view.json` 中每个节点包含 `is_current_focus`、`in_focus_path`、`focus_role`、`focus_visible_depth`、`is_focus_visible` 和 `is_hidden_by_focus`。
+- 默认隐藏 `focus_mode.hide_statuses` 中的状态，例如 rejected、parked、archived；用户仍可在状态过滤器中手动显示。
+- 右侧节点详情默认选中当前 focus node，并按 Summary / Evidence / Actions / Agent Context 分区展示。
+- 节点详情 Actions 区支持一键“设为当前焦点”，会写回 `current_state.yaml` 并重建 dashboard/context。
+- 节点详情 Evidence 区展示 experiment findings。
+- experiment 节点 Actions 区展示可复制的 `record_finding.py` 命令模板。
+- option 节点 Actions 区展示可复制的 `promote_decision.py` 命令模板。
+- problem/option/experiment/decision 节点 Actions 区展示可复制的 `create_note.py` 命令模板。
+- 图谱详情选择器上方支持按 `id/title/summary/tags/status/type` 搜索节点。
+- 方案比较页按当前 problem 汇总候选 option 的状态、证据强度、实验数量、最新结果、优缺点和拒绝原因。
+- 决策追踪页展示 Decision -> Option -> Problem -> Stage 链路、支持实验、备选方案和 consequences。
+- 资源页汇总 notes、config、artifact path、run id 和 linked artifacts，并支持存在状态过滤。
+
+### 测试
+
+已有 `unittest` 测试覆盖：
+
+- 有效 cockpit 数据校验。
+- 非法状态、未知父节点、未知 focus path 的错误报告。
+- 图边去重。
+- Agent context 解析。
+- Focus context 解析和 dashboard 输出。
+- Focus Graph 元数据和前端 Focus Mode 过滤。
+- CLI 写入行为，包括 `set_focus.py --focus-node` 后自动重建 dashboard/context。
+- `set_focus.py --focus-node` 省略 `--path` 时自动推导路径。
+- 可选 `edges.yaml` 的加载、校验、合并和图谱输出。
+- 方案比较和决策追踪 helper 输出。
+- 独立 `validate_cockpit.py` CLI 成功/失败退出码。
+- `record_finding.py` 写入 experiment findings，并拒绝非法节点和未知 artifact。
+- `promote_decision.py` 创建 proposed decision；accepted decision 同步更新 option/problem。
+- Dashboard 生成文件。
+- 中文节点图谱 HTML 生成。
+
+当前验证命令：
+
+```powershell
+D:\Tools\miniconda3\envs\aigc\python.exe -m unittest discover -s tests
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
+```
+
+## 当前技术决策
+
+- **暂不迁移 React Flow**：当前阶段优先稳定数据层、脚本和测试闭环；React Flow 留到图交互复杂度上升后再评估。
+- **保留 YAML 作为真相源**：方便人工编辑、git diff、agent 读取和脚本生成。
+- **dashboard 文件可提交**：虽然可再生成，但对 agent 上下文启动很有价值。
+- **不强制 notes 联动**：节点可以声明 `links`，但当前 UI 只展示链接字段，不解析 Markdown 正文。
+- **不引入额外测试框架**：当前使用标准库 `unittest`，避免为 MVP 增加依赖复杂度。
+
+## 已知限制
+
+- PyVis 图节点点击不能直接驱动右侧详情面板；当前通过选择器查看节点详情。
+- 图布局仍依赖 force layout，大图规模上来后可读性会下降。
+- 状态更新脚本只做结构化 YAML 修改，不会同步更新长篇 notes。
+- 当前没有全文搜索、标签过滤、时间线视图或历史变更视图。
+- 暂未接入 MLflow、DVC、Git branch/commit 等外部研究产物。
+- Streamlit 适合 MVP 和内网使用，若要长期作为主 UI，后续需要更完整的前端工程方案。
+
+## 已完成规划：v2 P0 / P1 第一批
+
+规划来源：
+
+- `research_cockpit_v2_specs/README.md`
+- `research_cockpit_v2_specs/docs/A_node_schema_v2.md`
+- `research_cockpit_v2_specs/docs/B_ui_interaction_spec.md`
+- `research_cockpit_v2_specs/schemas/node_v2.schema.yaml`
+
+本阶段目标不是一次性完成完整 v2，而是在现有 Streamlit + PyVis + YAML + Python scripts 架构上补齐最关键的研究导航闭环：
+
+> 打开 cockpit 后默认看到当前研究焦点、当前问题、活跃方案、相关证据、阻塞项和下一步动作；agent 能读取聚焦后的 context pack，而不必加载全局背景。
+
+### 范围边界
+
+本阶段纳入：
+
+- v2 节点字段的兼容支持，包括 focus、evidence、agent_context 和研究工作流字段。
+- `current_focus_node` 和 `focus_mode` 的读取、校验和默认值。
+- 新增 `focus_context_pack.json` 生成。
+- 研究图谱默认进入 Focus Mode，并提供 Depth 1 / Depth 2 / Global 视图。
+- 右侧节点详情升级为 Summary / Evidence / Actions / Agent Context 四个信息区。
+- 扩展 `set_focus.py`，让 CLI 能维护 `current_focus_node` 并重建 dashboard。
+- 补充模型、生成器、脚本和 UI 相关测试。
+
+本阶段暂不纳入：
+
+- React Flow 迁移。
+- MLflow、DVC、Git branch/commit 自动同步。
+- 全量 YAML 数据迁移。
+- 节点全文搜索、快捷键、minimap、saved filters。
+- UI 内直接写回复杂节点内容。
+
+### 实施任务拆分
+
+1. **v2 schema 兼容层**（已完成）
+   - 扩展状态白名单，支持 v2 状态，例如 experiment 的 `cancelled`、artifact 的 `draft` 和 `archived`。
+   - 保留当前 YAML 兼容性，避免一次性迁移已有数据。
+   - 校验 `current_focus_node`、`focus_mode.hide_statuses`、focus path 和引用字段。
+   - 验收：旧数据仍通过校验；v2 示例字段能被加载并保留；非法 focus node 会给出清晰错误。
+
+2. **Focus Context Pack 生成**（已完成）
+   - 在模型层新增聚焦上下文构建逻辑，解析 focus node、focus path、父节点、子节点、兄弟方案、实验、决策、artifact、blockers 和 next actions。
+   - `scripts/build_dashboard.py` 额外输出 `research_cockpit/dashboards/focus_context_pack.json`。
+   - 验收：生成器输出 6 个 dashboard 文件；focus context 包含 `focus_node`、`focus_path`、`local_neighbors`、`current_best_option`、`blockers`、`next_actions` 和 `knowledge_index`。
+
+3. **Focus Graph 数据**
+   - 在 `graph_view.json` 中增加 focus 相关字段，例如 `is_current_focus`、`in_focus_path`、`focus_role`、`focus_priority`。
+   - 支持按 Depth 1 / Depth 2 / Global 生成或过滤可见节点。
+   - 默认隐藏与当前焦点无关的 rejected、parked、archived、resolved 节点。
+   - 验收：Focus Mode 不再展示大量无关历史分支；当前 focus path 始终可见。
+
+4. **UI P0 优化**
+   - Research Graph 默认进入 Focus Mode。
+   - 增加 Depth 1 / Depth 2 / Global 切换和图例。
+   - 节点详情改为 Summary / Evidence / Actions / Agent Context 结构。
+   - 保留 Streamlit 选择器作为详情查看入口；PyVis 点击驱动右侧面板可后置。
+   - 验收：用户打开页面即可在 10 秒内识别当前问题、活跃方案、证据强度、阻塞项和下一步动作。
+
+5. **Set Focus 闭环**（已完成）
+   - 扩展 `scripts/set_focus.py`，支持 `--focus-node <id>`。
+   - 设置焦点后重建 dashboard，确保 UI 和 agent context 同步。
+   - UI 内按钮先作为后续增强；本阶段可以先展示明确的 CLI 命令提示。
+   - 验收：通过 CLI 切换 focus 后，`current_state.json`、`graph_view.json`、`agent_context_pack.json` 和 `focus_context_pack.json` 同步变化。
+
+6. **测试与文档**
+   - 增加 v2 fixture，覆盖 v2 字段、状态和 current focus。
+   - 增加 focus context、focus graph 过滤和 dashboard 输出测试。
+   - 更新 README 的维护流程和 agent 读取顺序。
+   - 验收：`unittest discover -s tests` 通过；`build_dashboard.py` 可稳定生成所有 dashboard 文件。
+
+### 推荐执行顺序
+
+第一批已完成：
+
+1. v2 schema 兼容层。
+2. `focus_context_pack.json` 生成。
+
+这两项已经作为后续 Focus Mode UI 和 agent 聚焦工作的数据基础落地。
+
+第二批已完成：
+
+1. Focus Graph 数据增强。
+2. Research Graph 默认 Focus Mode。
+3. 右侧详情信息区重组。
+
+第三批已完成：
+
+1. `set_focus.py --focus-node` 闭环。
+2. README 和状态文档补齐。
+
+第四批已完成：
+
+1. 前端一键设为当前焦点，并由脚本自动推导 focus path。
+2. Branch Comparison / 方案比较只读视图。
+3. Decision Trace / 决策追踪只读视图。
+4. 可选 `graph/edges.yaml` 显式边加载、校验、合并和基础样式。
+
+第五批已完成：
+
+1. `validate_cockpit.py` 独立校验命令。
+2. `record_finding.py` 实验观察记录工作流。
+3. `promote_decision.py` 从 option/experiment 推进到 decision 的工作流。
+4. Experiment Matrix、node context 和 UI 节点详情对 findings 的轻量展示。
+
+第六批已完成：
+
+1. `create_note.py` note 模板创建与 `links.notes` 写回。
+2. `linked_resources.json` 资源索引输出。
+3. Resources / 资源页、节点搜索和节点详情资源表。
+4. `focus_context_pack.json` 的 `knowledge_index` 纳入当前 focus 附近的 note/config/file 路径。
+
+下一批建议进入“行动建议与证据汇总”层：`suggest_next_actions.py`、决策证据自动汇总、focus path 下一步推进提示。
+
+## 后续可优化
+
+### 第一优先级：稳定性和可维护性
+
+- 为节点 schema 写更明确的字段说明，降低手写 YAML 出错概率。
+- 增加 dashboard 生成的快照测试或结构测试，防止 context pack 字段回退。
+- 为 linked resources 增加更清晰的路径约定说明，例如仓库内相对路径、URL、外部路径和 run id 的区别。
+
+### 第二优先级：研究工作流
+
+- 增加 `suggest_next_actions.py`，基于 active problem、blocked node 和缺失 evidence 生成候选下一步。
+- 增强 `promote_decision.py`，支持从已有 findings 自动汇总 supporting evidence。
+- 为 notes 增加推荐写作模板和命名约定，但仍不反向解析 Markdown 正文。
+
+### 第三优先级：UI 交互
+
+- 增加按 stage、priority、blocking、decision_state 的过滤。
+- 资源页增加更明确的缺失资源修复入口，例如复制相对路径或跳转到节点详情。
+- 增加当前 focus path 的专门视图，突出“现在应该推进什么”。
+- 增强决策追踪视图：增加按 problem/option 过滤、证据强度排序和更清晰的链路布局。
+- 如果图交互成为核心需求，再迁移到 React Flow。
+
+### 第四优先级：外部系统同步
+
+- 从 MLflow 同步实验状态、run id、metrics 和 artifact links。
+- 从 DVC 或数据 manifest 同步 dataset artifact 节点。
+- 从 Git branch/commit 同步代码变更证据。
+- 支持导出 Mermaid 或静态 SVG，方便写周报和论文材料。
+
+## 阶段验收标准
+
+v2 P0 阶段完成后，应满足：
+
+- 旧版 cockpit YAML 不需要全量迁移也能继续工作。
+- v2 示例字段可以进入节点 YAML，并在 dashboard/context 中保留或展示。
+- `focus_context_pack.json` 可生成，且 agent 能优先从其中读取当前局部上下文。
+- Research Graph 默认展示当前焦点附近的图谱，而不是全局图。
+- 当前 focus node、focus path、阻塞项、下一步动作在 UI 中清晰可见。
+- `set_focus.py` 能维护当前焦点，并触发 dashboard/context 同步更新。
+- 所有新增模型、脚本和生成器行为都有测试覆盖。
+
+更长期的目标仍然是 **Research Workflow v1**：
+
+> 让研究者完成一次完整闭环：发现问题 -> 建立方案 -> 运行实验 -> 记录结果 -> 形成决策 -> 更新当前主线。

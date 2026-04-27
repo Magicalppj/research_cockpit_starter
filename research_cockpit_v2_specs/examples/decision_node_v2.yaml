@@ -1,0 +1,29 @@
+id: decision_flan_t5_clap
+type: decision
+title: Adopt FLAN-T5-XL + CLAP for event branch
+status: proposed
+priority: high
+parent: option_flan_t5_clap
+summary: Keep LTX/Gemma global prompt path, use FLAN-T5-XL for event tokens and CLAP as event semantic anchor.
+decision_status: proposed
+derived_from:
+  - option_flan_t5_clap
+supporting_experiments:
+  - exp_041_flan_t5_only
+  - exp_042_flan_t5_clap
+alternatives_considered:
+  - option_gemma_baseline
+  - option_umt5_clap
+consequences:
+  - Regenerate timeline feature cache.
+  - Modify Semantic Ribbon initializer.
+  - Update edit-program inference context builder.
+next_required_actions:
+  - Complete FLAN-T5-only ablation.
+  - Complete FLAN-T5 + CLAP ablation.
+evidence_strength: none
+agent_context:
+  include: true
+  role: background
+  key_questions:
+    - Is the evidence strong enough to accept this decision?

@@ -1,0 +1,197 @@
+{
+  "project_name": "Audio Edit Research Cockpit",
+  "current_stage": "stage_text_encoder",
+  "current_stage_title": "Text Encoder Redesign",
+  "current_problem": "problem_event_text_weak",
+  "current_problem_title": "Event-level text control is weak",
+  "current_option": "option_flan_t5_clap",
+  "current_option_title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+  "current_focus_node": "problem_event_text_weak",
+  "current_focus_node_title": "Event-level text control is weak",
+  "focus_mode": {
+    "default_depth": 2,
+    "hide_statuses": [
+      "rejected",
+      "parked",
+      "archived"
+    ],
+    "show_resolved": false,
+    "show_rejected": false,
+    "show_parked": false
+  },
+  "current_hypothesis": "Event-level old/new text control can be improved by using FLAN-T5-XL token features plus CLAP audio-semantic anchors in the Semantic Ribbon branch.\n",
+  "current_focus_path": [
+    "stage_text_encoder",
+    "problem_event_text_weak"
+  ],
+  "open_risks": [
+    "Need train/inference parity for FLAN-T5 + CLAP timeline features.",
+    "Need to verify whether CLAP anchor improves remove/replace under overlap.",
+    "Need to avoid mixing legacy timeline inference with edit-program inference."
+  ],
+  "next_actions": [
+    "Regenerate timeline feature cache with FLAN-T5-XL token features.",
+    "Add CLAP anchor projection to EventStateInitializer.",
+    "Run FLAN-T5-only ablation on Audio Edit Dataset v2_150.",
+    "Run FLAN-T5 + CLAP ablation and compare local edit following."
+  ],
+  "linked_nodes": [
+    {
+      "id": "stage_text_encoder",
+      "type": "stage",
+      "title": "Text Encoder Redesign",
+      "status": "active",
+      "priority": "high",
+      "summary": "Improve event-level old/new text understanding for local audio editing.",
+      "question": null,
+      "hypothesis": null,
+      "evidence_strength": null,
+      "evidence_summary": null,
+      "current_best_option": null,
+      "decision_state": null,
+      "outcome": null,
+      "result_summary": null,
+      "supporting_experiments": [],
+      "contradicting_experiments": [],
+      "supporting_decisions": [],
+      "linked_artifacts": [],
+      "links": [],
+      "findings": [],
+      "implementation_steps": [],
+      "success_criteria": [],
+      "agent_context": null,
+      "next_actions": [
+        "Implement FLAN-T5 timeline features",
+        "Add CLAP semantic anchor"
+      ],
+      "blockers": []
+    },
+    {
+      "id": "problem_event_text_weak",
+      "type": "problem",
+      "title": "Event-level text control is weak",
+      "status": "active",
+      "priority": "critical",
+      "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
+      "question": "How can the model respond more strongly to fine-grained old/new event text edits?",
+      "hypothesis": null,
+      "evidence_strength": null,
+      "evidence_summary": null,
+      "current_best_option": "option_flan_t5_clap",
+      "decision_state": null,
+      "outcome": null,
+      "result_summary": null,
+      "supporting_experiments": [],
+      "contradicting_experiments": [],
+      "supporting_decisions": [],
+      "linked_artifacts": [],
+      "links": [],
+      "findings": [],
+      "implementation_steps": [],
+      "success_criteria": [],
+      "agent_context": null,
+      "next_actions": [
+        "Run FLAN-T5-only ablation",
+        "Run FLAN-T5 + CLAP ablation"
+      ],
+      "blockers": [
+        "Need new feature cache",
+        "Need ablation runs"
+      ]
+    }
+  ],
+  "active_problems": [
+    {
+      "id": "problem_event_text_weak",
+      "title": "Event-level text control is weak",
+      "status": "active",
+      "priority": "critical",
+      "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
+      "blockers": [
+        "Need new feature cache",
+        "Need ablation runs"
+      ],
+      "next_actions": [
+        "Run FLAN-T5-only ablation",
+        "Run FLAN-T5 + CLAP ablation"
+      ]
+    },
+    {
+      "id": "problem_remove_overlap_weak",
+      "title": "Remove and replace under overlap remain hard",
+      "status": "active",
+      "priority": "high",
+      "summary": "Without explicit source decomposition, the model must learn local semantic suppression and preserve non-target components.",
+      "blockers": [],
+      "next_actions": [
+        "Design targeted-change loss",
+        "Use stem_edit_mask in compute_loss"
+      ]
+    }
+  ],
+  "active_options": [
+    {
+      "id": "option_flan_t5_clap",
+      "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+      "status": "active",
+      "priority": "high",
+      "summary": "Main candidate for event/edit branch text encoding.",
+      "decision_state": "promising"
+    },
+    {
+      "id": "option_remove_suppression_head",
+      "title": "Remove-specific suppression branch",
+      "status": "open",
+      "priority": null,
+      "summary": "Add a remove-specific branch to make remove more than old_text + op embedding.",
+      "decision_state": "open"
+    },
+    {
+      "id": "option_stem_preserve_loss",
+      "title": "Stem-aware preserve and targeted-change loss",
+      "status": "open",
+      "priority": null,
+      "summary": "Use synthetic stem supervision to preserve non-target overlap components and enforce target change.",
+      "decision_state": "open"
+    }
+  ],
+  "recent_decisions": [
+    {
+      "id": "decision_flan_t5_clap",
+      "title": "Adopt FLAN-T5-XL + CLAP for event branch",
+      "status": "proposed",
+      "summary": "Keep LTX/Gemma global prompt path, use FLAN-T5-XL for event tokens and CLAP as event semantic anchor.",
+      "supporting_experiments": [
+        "exp_041_flan_t5_only",
+        "exp_042_flan_t5_clap"
+      ],
+      "consequences": [
+        "Regenerate timeline cache",
+        "Modify Semantic Ribbon initializer",
+        "Update inference context builder"
+      ]
+    },
+    {
+      "id": "decision_tts_boundary",
+      "title": "Do not make TTS add a main neural editing task",
+      "status": "accepted",
+      "summary": "TTS add can be handled by TTS + traditional mixing; the neural editor focuses on remove/replace/local rewriting.",
+      "supporting_experiments": [],
+      "consequences": [
+        "TTS event can be a normal event for remove/replace",
+        "Add-only TTS is a DSP baseline"
+      ]
+    },
+    {
+      "id": "decision_unified_edit_program",
+      "title": "Use unified edit-program formulation",
+      "status": "accepted",
+      "summary": "Treat text-to-audio generation as add edits from silence, and reference editing as local semantic rewriting.",
+      "supporting_experiments": [],
+      "consequences": [
+        "Use base_audio + edits as the user-level schema",
+        "Train add/remove/replace/identity in one strategy"
+      ]
+    }
+  ]
+}

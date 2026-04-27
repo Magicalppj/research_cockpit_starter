@@ -1,0 +1,41 @@
+[
+  {
+    "id": "exp_001_demo200_gemma",
+    "title": "Demo-200 Gemma baseline",
+    "status": "done",
+    "dataset": "dataset_demo_200",
+    "backbone": "ltx23_audio_branch",
+    "parent": "option_gemma_baseline",
+    "summary": "Overfits reconstruction but generalizes poorly to counterfactual text edits.",
+    "result": "The model tends to memorize sample texture rather than learn editable event-text mapping.",
+    "outcome": "negative",
+    "findings_count": 0,
+    "latest_finding": null
+  },
+  {
+    "id": "exp_041_flan_t5_only",
+    "title": "FLAN-T5-XL event branch only",
+    "status": "planned",
+    "dataset": "dataset_v2_150",
+    "backbone": "ltx23_audio_branch",
+    "parent": "option_flan_t5_clap",
+    "summary": "Ablation to test whether FLAN-T5 improves event-level token understanding.",
+    "result": null,
+    "outcome": null,
+    "findings_count": 0,
+    "latest_finding": null
+  },
+  {
+    "id": "exp_042_flan_t5_clap",
+    "title": "FLAN-T5-XL + CLAP anchor",
+    "status": "planned",
+    "dataset": "dataset_v2_150",
+    "backbone": "ltx23_audio_branch",
+    "parent": "option_flan_t5_clap",
+    "summary": "Ablation to test whether CLAP anchor improves old/new edit direction and audio-semantic grounding.",
+    "result": null,
+    "outcome": null,
+    "findings_count": 0,
+    "latest_finding": null
+  }
+]

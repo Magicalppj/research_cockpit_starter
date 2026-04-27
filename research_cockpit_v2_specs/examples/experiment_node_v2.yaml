@@ -1,0 +1,32 @@
+id: exp_042_flan_t5_clap
+type: experiment
+title: FLAN-T5-XL + CLAP event branch
+status: planned
+priority: high
+parent: option_flan_t5_clap
+summary: Ablation to test whether CLAP anchor improves old/new edit direction and audio-semantic grounding.
+dataset: dataset_v2_150
+backbone: ltx23_audio_branch
+code_branch: feature/flan-t5-clap-ribbon
+config_path: configs/exp_042_flan_t5_clap.yaml
+run_id: null
+metrics:
+  - replace_following
+  - remove_success
+  - overlap_preserve
+  - local_semantic_contrast
+success_condition:
+  - Beats Gemma baseline on replace_following.
+  - Improves remove_success without hurting preserve_score.
+  - No regression on from-silence add generation.
+result_summary: null
+outcome: null
+linked_artifacts:
+  - dataset_v2_150
+focus_priority: 80
+agent_context:
+  include: true
+  role: evidence
+  key_files:
+    - configs/exp_042_flan_t5_clap.yaml
+  next_action_hint: Launch run after feature cache is regenerated.
