@@ -1,0 +1,11 @@
+id: exp_001_demo200_gemma
+type: experiment
+title: Demo-200 Gemma baseline
+status: done
+parent: option_gemma_baseline
+dataset: dataset_demo_200
+backbone: ltx23_audio_branch
+summary: Overfits reconstruction but generalizes poorly to counterfactual text edits.
+result_summary: The model tends to memorize sample texture rather than learn editable
+  event-text mapping.
+outcome: negative

@@ -1,0 +1,10 @@
+id: decision_tts_boundary
+type: decision
+title: Do not make TTS add a main neural editing task
+status: accepted
+parent: stage_task_formulation
+summary: TTS add can be handled by TTS + traditional mixing; the neural editor focuses
+  on remove/replace/local rewriting.
+consequences:
+- TTS event can be a normal event for remove/replace
+- Add-only TTS is a DSP baseline

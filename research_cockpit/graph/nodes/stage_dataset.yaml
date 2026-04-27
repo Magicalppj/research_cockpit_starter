@@ -1,0 +1,9 @@
+id: stage_dataset
+type: stage
+title: Dataset Construction
+status: active
+priority: high
+summary: Build Audio Edit Dataset v2_150 with event atoms, captions, edit pairs, and
+  training manifests.
+children:
+- dataset_v2_150

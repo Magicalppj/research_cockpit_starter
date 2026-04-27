@@ -1,0 +1,11 @@
+id: option_gemma_baseline
+type: option
+title: Keep Gemma-only event features
+status: rejected
+priority: low
+parent: problem_event_text_weak
+summary: Current baseline; useful for comparison but weak for event-level edit control.
+children:
+- exp_001_demo200_gemma
+decision_state: rejected
+current_conclusion: Good reconstruction, weak edit generalization.

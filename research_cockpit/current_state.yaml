@@ -1,0 +1,20 @@
+current_stage: stage_text_encoder
+current_problem: problem_event_text_weak
+current_option: option_flan_t5_clap
+current_focus_path:
+  - stage_text_encoder
+  - problem_event_text_weak
+  - option_flan_t5_clap
+current_hypothesis: >
+  Event-level old/new text control can be improved by using FLAN-T5-XL token
+  features plus CLAP audio-semantic anchors in the Semantic Ribbon branch.
+open_risks:
+  - Need train/inference parity for FLAN-T5 + CLAP timeline features.
+  - Need to verify whether CLAP anchor improves remove/replace under overlap.
+  - Need to avoid mixing legacy timeline inference with edit-program inference.
+next_actions:
+  - Regenerate timeline feature cache with FLAN-T5-XL token features.
+  - Add CLAP anchor projection to EventStateInitializer.
+  - Run FLAN-T5-only ablation on Audio Edit Dataset v2_150.
+  - Run FLAN-T5 + CLAP ablation and compare local edit following.
+updated_at: "2026-04-27"

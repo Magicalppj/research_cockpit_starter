@@ -1,0 +1,12 @@
+id: dataset_v2_150
+type: artifact
+artifact_type: dataset
+title: Audio Edit Dataset v2_150
+status: active
+parent: stage_dataset
+summary: 150 editable classes, 7.2k event atoms, 20k+ edit pairs, 10s scenes.
+links:
+  figure: figures/dataset_pipeline_v2_150.png
+next_actions:
+- Run quality filter audit
+- Export FLAN-T5 + CLAP feature cache

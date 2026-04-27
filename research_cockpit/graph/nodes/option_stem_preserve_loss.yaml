@@ -1,0 +1,8 @@
+id: option_stem_preserve_loss
+type: option
+title: Stem-aware preserve and targeted-change loss
+status: open
+parent: problem_remove_overlap_weak
+summary: Use synthetic stem supervision to preserve non-target overlap components
+  and enforce target change.
+decision_state: open

@@ -1,0 +1,9 @@
+id: option_umt5_clap
+type: option
+title: UMT5 + CLAP multilingual branch
+status: parked
+priority: medium
+parent: problem_event_text_weak
+summary: Potential multilingual alternative if Chinese or mixed-language event text
+  becomes central.
+decision_state: open

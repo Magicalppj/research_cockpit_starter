@@ -1,0 +1,21 @@
+id: problem_event_text_weak
+type: problem
+title: Event-level text control is weak
+status: active
+priority: critical
+parent: stage_text_encoder
+question: How can the model respond more strongly to fine-grained old/new event text
+  edits?
+summary: Gemma-based event features are likely insufficient for precise old/new edit
+  control.
+children:
+- option_gemma_baseline
+- option_flan_t5_clap
+- option_umt5_clap
+current_best_option: option_flan_t5_clap
+blockers:
+- Need new feature cache
+- Need ablation runs
+next_actions:
+- Run FLAN-T5-only ablation
+- Run FLAN-T5 + CLAP ablation

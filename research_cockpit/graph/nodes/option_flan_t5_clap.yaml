@@ -1,0 +1,20 @@
+id: option_flan_t5_clap
+type: option
+title: FLAN-T5-XL tokens + CLAP semantic anchor
+status: active
+priority: high
+parent: problem_event_text_weak
+hypothesis: FLAN-T5 improves token-level event understanding, while CLAP improves
+  audio-semantic alignment.
+summary: Main candidate for event/edit branch text encoding.
+children:
+- exp_041_flan_t5_only
+- exp_042_flan_t5_clap
+- decision_flan_t5_clap
+decision_state: promising
+pros:
+- Strong token-level text features
+- Audio-aligned CLAP event anchor
+cons:
+- Requires new feature cache
+- More training/inference complexity

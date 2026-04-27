@@ -1,0 +1,7 @@
+id: option_remove_suppression_head
+type: option
+title: Remove-specific suppression branch
+status: open
+parent: problem_remove_overlap_weak
+summary: Add a remove-specific branch to make remove more than old_text + op embedding.
+decision_state: open

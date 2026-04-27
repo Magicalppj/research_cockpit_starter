@@ -1,0 +1,6 @@
+pyyaml>=6.0
+pydantic>=2.0
+networkx>=3.2
+pandas>=2.0
+streamlit>=1.32
+pyvis>=0.3.2
