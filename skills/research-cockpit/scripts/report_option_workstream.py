@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import date
 from pathlib import Path
 import sys
@@ -34,7 +35,8 @@ def report_option_workstream(
     recommendation: str,
     summary: str,
     rebuild_dashboard: bool = True,
-) -> Path:
+    dry_run: bool = False,
+) -> Path | dict[str, Any]:
     if recommendation not in VALID_WORKSTREAM_RECOMMENDATIONS:
         allowed = ", ".join(sorted(VALID_WORKSTREAM_RECOMMENDATIONS))
         raise ValueError(f"Invalid recommendation {recommendation!r}; allowed: {allowed}")
@@ -83,6 +85,27 @@ def report_option_workstream(
     candidate = dict(nodes)
     candidate[option_id] = ResearchNode.from_dict(data)
     validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
+    preview = {
+        "dry_run": dry_run,
+        "changed": not dry_run,
+        "option_id": option_id,
+        "agent_id": agent_id,
+        "recommendation": recommendation,
+        "path": str(option_path),
+        "evidence_summary": evidence,
+        "before": {
+            "agent_workstream": before_workstream,
+            "workstream_report": before_report,
+        },
+        "after": {
+            "agent_workstream": data["agent_workstream"],
+            "workstream_report": data["workstream_report"],
+        },
+    }
+    if dry_run:
+        preview["changed"] = False
+        return preview
+
     save_yaml(option_path, data)
     append_interaction_log(
         root,
@@ -119,6 +142,8 @@ def main() -> None:
     parser.add_argument("--agent", required=True, dest="agent_id")
     parser.add_argument("--recommend", required=True, choices=sorted(VALID_WORKSTREAM_RECOMMENDATIONS))
     parser.add_argument("--summary", required=True)
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -130,10 +155,29 @@ def main() -> None:
             recommendation=args.recommend,
             summary=args.summary,
             rebuild_dashboard=not args.no_build,
+            dry_run=args.dry_run,
         )
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc
+
+    if args.json:
+        if isinstance(out, dict):
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps({
+                "dry_run": False,
+                "changed": True,
+                "option_id": args.option_id,
+                "agent_id": args.agent_id,
+                "recommendation": args.recommend,
+                "path": str(out),
+            }, ensure_ascii=False, indent=2))
+        return
+
+    if args.dry_run:
+        print(f"Would report option workstream {args.option_id} with recommendation {args.recommend}.")
+        return
 
     print(f"Reported option workstream {args.option_id}: {out}")
     if not args.no_build:

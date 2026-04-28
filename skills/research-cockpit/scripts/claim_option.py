@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import date
 from pathlib import Path
 import sys
@@ -45,7 +46,8 @@ def claim_option(
     status: str = "claimed",
     force: bool = False,
     rebuild_dashboard: bool = True,
-) -> Path:
+    dry_run: bool = False,
+) -> Path | dict[str, Any]:
     if status not in VALID_CLAIM_STATUSES:
         allowed = ", ".join(sorted(VALID_CLAIM_STATUSES))
         raise ValueError(f"Invalid claim status {status!r}; allowed: {allowed}")
@@ -91,6 +93,21 @@ def claim_option(
     current = load_yaml(root / "current_state.yaml")
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
+    preview = {
+        "dry_run": dry_run,
+        "changed": not dry_run,
+        "option_id": option_id,
+        "agent_id": agent_id,
+        "status": status,
+        "force": force,
+        "path": str(option_path),
+        "before": {"agent_workstream": before_workstream},
+        "after": {"agent_workstream": data["agent_workstream"]},
+    }
+    if dry_run:
+        preview["changed"] = False
+        return preview
+
     save_yaml(option_path, data)
     command = f"{script_command('claim_option.py')} --option {option_id} --agent {agent_id} --status {status}"
     if force:
@@ -123,6 +140,8 @@ def main() -> None:
     parser.add_argument("--objective")
     parser.add_argument("--status", choices=sorted(VALID_CLAIM_STATUSES), default="claimed")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -135,10 +154,30 @@ def main() -> None:
             status=args.status,
             force=args.force,
             rebuild_dashboard=not args.no_build,
+            dry_run=args.dry_run,
         )
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc
+
+    if args.json:
+        if isinstance(out, dict):
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps({
+                "dry_run": False,
+                "changed": True,
+                "option_id": args.option_id,
+                "agent_id": args.agent_id,
+                "status": args.status,
+                "force": args.force,
+                "path": str(out),
+            }, ensure_ascii=False, indent=2))
+        return
+
+    if args.dry_run:
+        print(f"Would claim {args.option_id} for {args.agent_id} with status {args.status}.")
+        return
 
     print(f"Claimed {args.option_id} for {args.agent_id}: {out}")
     if not args.no_build:

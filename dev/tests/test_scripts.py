@@ -298,6 +298,74 @@ class ScriptBehaviorTests(unittest.TestCase):
         data = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
         self.assertEqual(data["agent_workstream"]["owner"], "agent_b")
 
+    def test_claim_option_cli_dry_run_json_previews_without_writing(self) -> None:
+        script = SKILL_ROOT / "scripts" / "claim_option.py"
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        before = option_path.read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--agent",
+                "agent_t5",
+                "--objective",
+                "Evaluate T5 path",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        after = option_path.read_text(encoding="utf-8")
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["option_id"], "option_t5")
+        self.assertEqual(payload["agent_id"], "agent_t5")
+        self.assertIsNone(payload["before"]["agent_workstream"])
+        self.assertEqual(payload["after"]["agent_workstream"]["owner"], "agent_t5")
+        self.assertEqual(payload["after"]["agent_workstream"]["status"], "claimed")
+        self.assertEqual(before, after)
+        self.assertFalse((self.root / "graph" / "interaction_log.yaml").exists())
+        self.assertFalse((self.root / "dashboards").exists())
+
+    def test_claim_option_cli_dry_run_conflict_does_not_write(self) -> None:
+        script = SKILL_ROOT / "scripts" / "claim_option.py"
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        claim_option(self.root, option_id="option_t5", agent_id="agent_a", rebuild_dashboard=False)
+        before = option_path.read_text(encoding="utf-8")
+        before_event_count = len(interaction_events(self.root))
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--agent",
+                "agent_b",
+                "--dry-run",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        after = option_path.read_text(encoding="utf-8")
+
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("already claimed", out.stdout)
+        self.assertEqual(before, after)
+        self.assertEqual(len(interaction_events(self.root)), before_event_count)
+
     def test_option_workstream_context_cli_outputs_json(self) -> None:
         script = SKILL_ROOT / "scripts" / "option_workstream_context.py"
 
@@ -343,6 +411,92 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(event["option_id"], "option_t5")
         self.assertEqual(event["recommendation"], "continue")
         self.assertEqual(event["after"]["workstream_report"]["summary"], "Evidence is promising but incomplete.")
+
+    def test_report_option_workstream_cli_dry_run_json_previews_without_writing(self) -> None:
+        script = SKILL_ROOT / "scripts" / "report_option_workstream.py"
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        claim_option(self.root, option_id="option_t5", agent_id="agent_t5", rebuild_dashboard=False)
+        record_finding(
+            self.root,
+            experiment_id="exp_t5",
+            statement="T5 improves text alignment.",
+            confidence="medium",
+            outcome="positive",
+            rebuild_dashboard=False,
+        )
+        before = option_path.read_text(encoding="utf-8")
+        before_event_count = len(interaction_events(self.root))
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--agent",
+                "agent_t5",
+                "--recommend",
+                "continue",
+                "--summary",
+                "Evidence is promising but incomplete.",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        after = option_path.read_text(encoding="utf-8")
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["option_id"], "option_t5")
+        self.assertEqual(payload["agent_id"], "agent_t5")
+        self.assertEqual(payload["recommendation"], "continue")
+        self.assertEqual(payload["before"]["agent_workstream"]["status"], "claimed")
+        self.assertEqual(payload["after"]["agent_workstream"]["status"], "reported")
+        self.assertEqual(payload["after"]["workstream_report"]["finding_count"], 1)
+        self.assertEqual(payload["evidence_summary"]["findings_count"], 1)
+        self.assertEqual(before, after)
+        self.assertEqual(len(interaction_events(self.root)), before_event_count)
+        self.assertFalse((self.root / "dashboards").exists())
+
+    def test_report_option_workstream_cli_dry_run_owner_mismatch_does_not_write(self) -> None:
+        script = SKILL_ROOT / "scripts" / "report_option_workstream.py"
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        claim_option(self.root, option_id="option_t5", agent_id="agent_a", rebuild_dashboard=False)
+        before = option_path.read_text(encoding="utf-8")
+        before_event_count = len(interaction_events(self.root))
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--agent",
+                "agent_b",
+                "--recommend",
+                "continue",
+                "--summary",
+                "Evidence is promising but incomplete.",
+                "--dry-run",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        after = option_path.read_text(encoding="utf-8")
+
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("owned by agent_a", out.stdout)
+        self.assertEqual(before, after)
+        self.assertEqual(len(interaction_events(self.root)), before_event_count)
 
     def test_option_workstream_context_payload_summarizes_option(self) -> None:
         payload = option_workstream_context_payload(self.root, option_id="option_t5")
@@ -404,6 +558,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(by_name["skill_smoke_test.py"]["mutating"])
         self.assertTrue(by_name["record_finding.py"]["mutating"])
         self.assertTrue(by_name["record_finding.py"]["supports_no_build"])
+        self.assertTrue(by_name["claim_option.py"]["supports_json"])
+        self.assertTrue(by_name["claim_option.py"]["supports_dry_run"])
+        self.assertTrue(by_name["report_option_workstream.py"]["supports_json"])
+        self.assertTrue(by_name["report_option_workstream.py"]["supports_dry_run"])
         self.assertTrue(by_name["update_decision_checklist.py"]["mutating"])
         self.assertTrue(by_name["update_decision_checklist.py"]["supports_no_build"])
         self.assertTrue(by_name["cleanup_suggestion_lifecycle.py"]["supports_dry_run"])

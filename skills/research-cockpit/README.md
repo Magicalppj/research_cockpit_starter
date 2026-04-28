@@ -92,12 +92,14 @@ python scripts\record_finding.py --experiment experiment_demo_prompt_refinement 
 Follow an option as an agent workstream:
 
 ```powershell
+python scripts\claim_option.py --option option_demo_prompt_refinement --agent agent_demo --objective "Evaluate the prompt refinement branch." --dry-run --json
 python scripts\claim_option.py --option option_demo_prompt_refinement --agent agent_demo --objective "Evaluate the prompt refinement branch."
 python scripts\option_workstream_context.py --option option_demo_prompt_refinement --json
+python scripts\report_option_workstream.py --option option_demo_prompt_refinement --agent agent_demo --recommend continue --summary "Promising evidence, but more evaluation is needed." --dry-run --json
 python scripts\report_option_workstream.py --option option_demo_prompt_refinement --agent agent_demo --recommend continue --summary "Promising evidence, but more evaluation is needed."
 ```
 
-`claim_option.py` enforces a single active owner for an option while its workstream status is `claimed`, `in_progress`, or `blocked`. Use `--force` only when intentionally transferring ownership. Agents can branch under the claimed option by adding child `problem` nodes, then child `option` / `experiment` / `decision` nodes. `report_option_workstream.py` writes a report back to the option but does not accept a decision or close the upstream problem.
+`claim_option.py` enforces a single active owner for an option while its workstream status is `claimed`, `in_progress`, or `blocked`. Use `--force` only when intentionally transferring ownership. Agents can branch under the claimed option by adding child `problem` nodes, then child `option` / `experiment` / `decision` nodes. `report_option_workstream.py` writes a report back to the option but does not accept a decision or close the upstream problem. For both scripts, `--dry-run --json` previews validation and before/after workstream fields without writing YAML, appending interaction log events, or rebuilding dashboards.
 
 Promote an option into a decision:
 

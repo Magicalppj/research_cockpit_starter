@@ -115,8 +115,10 @@ python scripts\search_knowledge.py --query "..." --source resource --json
 Option workstreams:
 
 ```powershell
+python scripts\claim_option.py --option <option_id> --agent <agent_id> --objective "..." --dry-run --json
 python scripts\claim_option.py --option <option_id> --agent <agent_id> --objective "..."
 python scripts\option_workstream_context.py --option <option_id> --json
+python scripts\report_option_workstream.py --option <option_id> --agent <agent_id> --recommend <accept|reject|continue> --summary "..." --dry-run --json
 python scripts\report_option_workstream.py --option <option_id> --agent <agent_id> --recommend <accept|reject|continue> --summary "..."
 ```
 
@@ -128,7 +130,7 @@ python scripts\build_dashboard.py
 
 ## Critical Workflows
 
-**Option-following agents:** claim one option, inspect its workstream context, work inside that option's child subtree, record findings on experiments, then report `accept`, `reject`, or `continue` back to the option. The preferred branch shape is `option -> problem -> option -> experiment/decision`. `claim_option.py` enforces a single active owner while status is `claimed`, `in_progress`, or `blocked`; use `--force` only when intentionally transferring ownership. A workstream report is evidence for the upstream problem, not a decision acceptance.
+**Option-following agents:** preview `claim_option.py` and `report_option_workstream.py` with `--dry-run --json` before the real write, then claim one option, inspect its workstream context, work inside that option's child subtree, record findings on experiments, and report `accept`, `reject`, or `continue` back to the option. The preferred branch shape is `option -> problem -> option -> experiment/decision`. `claim_option.py` enforces a single active owner while status is `claimed`, `in_progress`, or `blocked`; use `--force` only when intentionally transferring ownership. A workstream report is evidence for the upstream problem, not a decision acceptance.
 
 **Decision acceptance:** evidence must be recorded before acceptance. The normal gate flow is `record_finding.py -> update_decision_evidence.py -> update_decision_checklist.py -> check_decision_acceptance.py -> accept_decision.py`. Use `update_decision_checklist.py` to add alternatives, consequences, and next required actions without changing decision status. Only run `accept_decision.py` if `ready` is true. `promote_decision.py --status accepted` uses the same quality gate. Do not use `update_status.py` to accept a decision.
 
