@@ -1,9 +1,9 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-04-28T04:52:12.681113Z",
-    "source_git_commit": "9694303",
-    "worktree_dirty": true,
+    "generated_at": "2026-04-28T04:57:23.129537Z",
+    "source_git_commit": "f01f433",
+    "worktree_dirty": false,
     "current_state_updated_at": "2026-04-27"
   },
   "focus_node": {
