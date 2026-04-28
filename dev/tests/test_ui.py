@@ -34,6 +34,8 @@ from ui.view_helpers import (
     format_suggestion_lifecycle_rows,
     filter_action_suggestions,
     filter_graph_for_view,
+    graph_view_state_from_saved_view,
+    graph_filter_options,
     filter_search_results,
     filter_node_ids,
     format_node_option,
@@ -145,6 +147,145 @@ class UiRenderingTests(unittest.TestCase):
 
         self.assertEqual({node["id"] for node in filtered["nodes"]}, {"problem_text", "option_t5"})
         self.assertEqual(filtered["edges"], [{"from": "problem_text", "to": "option_t5", "relation": "child"}])
+
+    def test_graph_filter_supports_branch_workstream_and_evidence_facets(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "stage_text",
+                    "type": "stage",
+                    "status": "active",
+                    "focus_role": "parent",
+                    "stage_id": "stage_text",
+                    "in_current_branch": True,
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                    "has_blockers": False,
+                    "has_evidence": False,
+                    "option_workstream_id": None,
+                },
+                {
+                    "id": "problem_text",
+                    "type": "problem",
+                    "status": "active",
+                    "focus_role": "current",
+                    "stage_id": "stage_text",
+                    "in_current_branch": True,
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 0,
+                    "has_blockers": True,
+                    "has_evidence": False,
+                    "option_workstream_id": None,
+                },
+                {
+                    "id": "option_t5",
+                    "type": "option",
+                    "status": "active",
+                    "focus_role": "child",
+                    "stage_id": "stage_text",
+                    "in_current_branch": True,
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                    "has_blockers": False,
+                    "has_evidence": False,
+                    "option_workstream_id": "option_t5",
+                    "option_workstream_upstream_problem_id": "problem_text",
+                },
+                {
+                    "id": "exp_t5",
+                    "type": "experiment",
+                    "status": "planned",
+                    "focus_role": "child",
+                    "stage_id": "stage_text",
+                    "in_current_branch": True,
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                    "has_blockers": False,
+                    "has_evidence": True,
+                    "option_workstream_id": "option_t5",
+                    "option_workstream_upstream_problem_id": "problem_text",
+                },
+                {
+                    "id": "option_other",
+                    "type": "option",
+                    "status": "open",
+                    "focus_role": "unrelated",
+                    "stage_id": "stage_other",
+                    "in_current_branch": False,
+                    "is_focus_visible": False,
+                    "focus_visible_depth": None,
+                    "has_blockers": False,
+                    "has_evidence": False,
+                    "option_workstream_id": "option_other",
+                    "option_workstream_upstream_problem_id": "problem_other",
+                },
+            ],
+            "edges": [
+                {"from": "problem_text", "to": "option_t5", "relation": "child"},
+                {"from": "option_t5", "to": "exp_t5", "relation": "child"},
+                {"from": "problem_other", "to": "option_other", "relation": "child"},
+            ],
+        }
+
+        branch = filter_graph_for_view(
+            graph,
+            "current_branch",
+            {"stage", "problem", "option", "experiment"},
+            {"active", "open", "planned"},
+            selected_focus_roles={"current", "child"},
+            only_missing_evidence=True,
+        )
+        workstream = filter_graph_for_view(
+            graph,
+            "option_workstream",
+            {"stage", "problem", "option", "experiment"},
+            {"active", "open", "planned"},
+            selected_workstreams={"option_t5"},
+        )
+        options = graph_filter_options(graph)
+
+        self.assertEqual({node["id"] for node in branch["nodes"]}, {"problem_text", "option_t5"})
+        self.assertEqual({node["id"] for node in workstream["nodes"]}, {"problem_text", "option_t5", "exp_t5"})
+        self.assertEqual(options["stages"], ["stage_other", "stage_text"])
+        self.assertIn("option_t5", options["workstreams"])
+
+    def test_saved_graph_view_state_filters_missing_options(self) -> None:
+        state = graph_view_state_from_saved_view(
+            {
+                "scope": "current_branch",
+                "filters": {
+                    "node_types": ["problem", "missing_type"],
+                    "statuses": ["active", "archived"],
+                    "stages": ["stage_text", "stage_old"],
+                    "focus_roles": ["current", "unrelated"],
+                    "workstreams": ["option_t5", "option_old"],
+                    "only_blocking": "true",
+                    "only_next_actions": False,
+                    "only_missing_evidence": True,
+                },
+            },
+            {
+                "types": ["problem", "option"],
+                "statuses": ["active"],
+                "stages": ["stage_text"],
+                "focus_roles": ["current", "child"],
+                "workstreams": ["option_t5"],
+            },
+            {
+                "focus_depth_2": "Focus Depth 2",
+                "current_branch": "Current Branch",
+            },
+        )
+
+        self.assertEqual(state["graph_view_mode"], "Current Branch")
+        self.assertEqual(state["graph_node_types"], ["problem"])
+        self.assertEqual(state["graph_statuses"], ["active"])
+        self.assertEqual(state["graph_stages"], ["stage_text"])
+        self.assertEqual(state["graph_focus_roles"], ["current"])
+        self.assertEqual(state["graph_workstreams"], ["option_t5"])
+        self.assertTrue(state["graph_only_blocking"])
+        self.assertFalse(state["graph_only_next_actions"])
+        self.assertTrue(state["graph_only_missing_evidence"])
 
     def test_pyvis_html_focuses_current_node(self) -> None:
         graph = {

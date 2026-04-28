@@ -1,8 +1,8 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-04-28T10:55:32.936093Z",
-    "source_git_commit": "8ec28c1",
+    "generated_at": "2026-04-28T12:52:54.513285Z",
+    "source_git_commit": "2d9ab17",
     "worktree_dirty": true,
     "current_state_updated_at": "2026-04-28"
   },
@@ -1050,5 +1050,7 @@
       "report": "python scripts\\report_option_workstream.py --option option_demo_prompt_refinement --agent <agent_id> --recommend continue --summary \"Summarize evidence and recommendation\""
     },
     "current_focus_related": false
-  }
+  },
+  "saved_graph_views": [],
+  "recent_interactions": []
 }

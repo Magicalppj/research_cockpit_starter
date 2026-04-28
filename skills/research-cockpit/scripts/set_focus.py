@@ -8,7 +8,15 @@ import sys
 ROOT = Path(__file__).resolve().parents[1] / "research_cockpit"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cockpit.model import derive_focus_fields, load_nodes, load_yaml, save_yaml, validate_cockpit
+from cockpit.model import (
+    append_interaction_log,
+    derive_focus_fields,
+    load_nodes,
+    load_yaml,
+    save_yaml,
+    script_command,
+    validate_cockpit,
+)
 from scripts.build_dashboard import build_dashboard
 
 
@@ -32,6 +40,13 @@ def set_focus(
     nodes = load_nodes(root)
     current_path = root / "current_state.yaml"
     current = load_yaml(current_path)
+    before = {
+        "current_stage": current.get("current_stage"),
+        "current_problem": current.get("current_problem"),
+        "current_option": current.get("current_option"),
+        "current_focus_node": current.get("current_focus_node"),
+        "current_focus_path": current.get("current_focus_path", []) or [],
+    }
 
     focus_node = focus_node or problem
     if not focus_node:
@@ -68,6 +83,22 @@ def set_focus(
 
     validate_cockpit(root, nodes, current, raise_on_error=True)
     save_yaml(current_path, current)
+    after = {
+        "current_stage": current.get("current_stage"),
+        "current_problem": current.get("current_problem"),
+        "current_option": current.get("current_option"),
+        "current_focus_node": current.get("current_focus_node"),
+        "current_focus_path": current.get("current_focus_path", []) or [],
+    }
+    append_interaction_log(
+        root,
+        kind="set_focus",
+        actor="researcher",
+        node_id=focus_node,
+        command=f"{script_command('set_focus.py')} --focus-node {focus_node}",
+        before=before,
+        after=after,
+    )
     if rebuild_dashboard:
         build_dashboard(root)
     return current_path

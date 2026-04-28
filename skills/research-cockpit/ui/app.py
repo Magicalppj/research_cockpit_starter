@@ -30,8 +30,10 @@ from cockpit.model import (
     build_suggestion_lifecycle_summary,
     graph_to_json,
     load_explicit_edges,
+    load_graph_views,
     load_nodes,
     load_yaml,
+    upsert_graph_view,
     validate_cockpit,
 )
 from ui.view_helpers import (
@@ -56,6 +58,8 @@ from ui.view_helpers import (
     filter_graph_for_view,
     filter_node_ids,
     filter_search_results,
+    graph_view_state_from_saved_view,
+    graph_filter_options,
     format_action_suggestion_rows,
     format_comparison_rows,
     format_decision_checklist,
@@ -69,6 +73,7 @@ from ui.view_helpers import (
     format_suggestion_lifecycle_rows,
     ordered_tab_labels,
 )
+from scripts.build_dashboard import build_dashboard
 from scripts.set_focus import set_focus as save_current_focus
 from scripts.apply_suggestion import apply_suggestion as queue_suggestion
 from scripts.update_suggestion_state import update_suggestion_state as set_suggestion_state
@@ -120,6 +125,8 @@ UI_TEXT = {
         "none": "无",
         "no_summary": "暂无摘要。",
         "links": "链接",
+        "parent": "父节点",
+        "children": "子节点",
         "create_note_command": "创建笔记命令",
         "search_nodes": "搜索节点",
         "resource_type": "资源类型",
@@ -142,7 +149,15 @@ UI_TEXT = {
         "view_mode": "视图范围",
         "focus_depth_1": "Focus 深度 1",
         "focus_depth_2": "Focus 深度 2",
+        "current_branch": "当前分支",
+        "option_workstream_view": "方案工作流",
         "global_graph": "全局图谱",
+        "stages": "阶段",
+        "focus_roles": "Focus 关系",
+        "workstreams_filter": "方案工作流",
+        "only_blocking": "仅阻塞节点",
+        "only_next_actions": "仅含下一步节点",
+        "only_missing_evidence": "仅缺证据节点",
         "legend": "图例",
         "legend_current": "当前焦点：红色粗边框",
         "legend_path": "当前路径：橙色边框",
@@ -150,6 +165,7 @@ UI_TEXT = {
         "legend_depth_2": "Depth 2：实验、决策、产物",
         "summary_tab": "摘要",
         "evidence_tab": "证据",
+        "resources_tab": "资源",
         "actions_tab": "行动",
         "agent_tab": "Agent 上下文",
         "set_focus_command": "设为当前焦点命令",
@@ -243,6 +259,8 @@ UI_TEXT = {
         "none": "None",
         "no_summary": "No summary.",
         "links": "Links",
+        "parent": "Parent",
+        "children": "Children",
         "create_note_command": "Create Note Command",
         "search_nodes": "Search nodes",
         "resource_type": "Resource Type",
@@ -265,7 +283,15 @@ UI_TEXT = {
         "view_mode": "View Mode",
         "focus_depth_1": "Focus Depth 1",
         "focus_depth_2": "Focus Depth 2",
+        "current_branch": "Current Branch",
+        "option_workstream_view": "Option Workstream",
         "global_graph": "Global Graph",
+        "stages": "Stages",
+        "focus_roles": "Focus Relations",
+        "workstreams_filter": "Option Workstreams",
+        "only_blocking": "Only blockers",
+        "only_next_actions": "Only next actions",
+        "only_missing_evidence": "Only missing evidence",
         "legend": "Legend",
         "legend_current": "Current focus: red border",
         "legend_path": "Focus path: orange border",
@@ -273,6 +299,7 @@ UI_TEXT = {
         "legend_depth_2": "Depth 2: experiments, decisions, artifacts",
         "summary_tab": "Summary",
         "evidence_tab": "Evidence",
+        "resources_tab": "Resources",
         "actions_tab": "Actions",
         "agent_tab": "Agent Context",
         "set_focus_command": "Set Current Focus Command",
@@ -373,6 +400,16 @@ EXTRA_UI_TEXT = {
         "option_context_command": "方案工作流上下文命令",
         "report_option_command": "回报方案工作流命令",
         "no_option_workstreams": "暂无方案工作流记录。",
+        "saved_graph_views": "已保存图谱视图",
+        "no_saved_graph_views": "尚未保存图谱视图。",
+        "load_saved_view": "加载视图",
+        "save_current_view": "保存当前视图",
+        "graph_view_title": "视图标题",
+        "graph_view_title_placeholder": "例如：当前分支阻塞项",
+        "graph_view_saved": "图谱视图已保存。",
+        "graph_view_save_failed": "保存图谱视图失败：",
+        "graph_view_loaded": "图谱视图已加载。",
+        "graph_view_title_required": "请先填写视图标题。",
     },
     "en": {
         "suggestion_state": "Suggestion State",
@@ -419,6 +456,16 @@ EXTRA_UI_TEXT = {
         "option_context_command": "Option Workstream Context Command",
         "report_option_command": "Report Option Workstream Command",
         "no_option_workstreams": "No option workstreams recorded.",
+        "saved_graph_views": "Saved Graph Views",
+        "no_saved_graph_views": "No saved graph views yet.",
+        "load_saved_view": "Load View",
+        "save_current_view": "Save Current View",
+        "graph_view_title": "View Title",
+        "graph_view_title_placeholder": "Example: Current branch blockers",
+        "graph_view_saved": "Graph view saved.",
+        "graph_view_save_failed": "Failed to save graph view:",
+        "graph_view_loaded": "Graph view loaded.",
+        "graph_view_title_required": "Enter a view title first.",
     },
 }
 
@@ -440,6 +487,7 @@ def load_graph_data():
     link_rows = build_link_rows(RESEARCH_ROOT, nodes)
     search_index = build_search_index(RESEARCH_ROOT, nodes, current)
     option_workstreams = build_option_workstream_rows(nodes)
+    saved_graph_views = load_graph_views(RESEARCH_ROOT)
     action_suggestions = build_action_suggestions(RESEARCH_ROOT, nodes, current, link_rows)
     all_action_suggestions = build_action_suggestions(
         RESEARCH_ROOT,
@@ -459,6 +507,7 @@ def load_graph_data():
         all_action_suggestions,
         search_index,
         option_workstreams,
+        saved_graph_views,
     )
 
 
@@ -569,9 +618,10 @@ def render_node_detail(
 
     node = nodes[node_id]
     st.subheader(node.title)
-    summary_tab, evidence_tab, actions_tab, agent_tab = st.tabs([
+    summary_tab, evidence_tab, resources_tab, actions_tab, agent_tab = st.tabs([
         text["summary_tab"],
         text["evidence_tab"],
+        text["resources_tab"],
         text["actions_tab"],
         text["agent_tab"],
     ])
@@ -589,10 +639,11 @@ def render_node_detail(
         if node.tags:
             st.write(text["tags"])
             st.write(", ".join(node.tags))
-        node_link_rows = [row for row in (link_rows or []) if row.get("node_id") == node_id]
-        if node_link_rows:
-            st.write(text["links"])
-            st.dataframe(pd.DataFrame(format_resource_rows(node_link_rows)), use_container_width=True, hide_index=True)
+        c3, c4 = st.columns(2)
+        c3.write(text["parent"])
+        c3.code(node.parent or text["none"])
+        c4.write(text["children"])
+        c4.code(", ".join(node.children) if node.children else text["none"])
 
     with evidence_tab:
         evidence_fields = [
@@ -632,6 +683,13 @@ def render_node_detail(
                 use_container_width=True,
                 hide_index=True,
             )
+
+    with resources_tab:
+        node_link_rows = [row for row in (link_rows or []) if row.get("node_id") == node_id]
+        if node_link_rows:
+            st.dataframe(pd.DataFrame(format_resource_rows(node_link_rows)), use_container_width=True, hide_index=True)
+        else:
+            st.caption(text["no_resources"])
 
     with actions_tab:
         if current:
@@ -762,17 +820,64 @@ def render_dashboard(
         st.error(text["data_health_warning"].format(count=len(validation_errors)))
 
 
-def render_graph_tab(nodes: dict, graph: dict, current: dict, text: dict[str, str], link_rows: list[dict]) -> None:
-    all_types = sorted({node["type"] for node in graph["nodes"]})
-    all_statuses = sorted({node["status"] for node in graph["nodes"]})
+def render_graph_tab(
+    nodes: dict,
+    graph: dict,
+    current: dict,
+    text: dict[str, str],
+    link_rows: list[dict],
+    saved_graph_views: list[dict],
+) -> None:
+    options = graph_filter_options(graph)
+    all_types = options["types"] or sorted({node["type"] for node in graph["nodes"]})
+    all_statuses = options["statuses"] or sorted({node["status"] for node in graph["nodes"]})
+    all_stages = options["stages"]
+    all_focus_roles = options["focus_roles"]
+    all_workstreams = options["workstreams"]
+    mode_label_to_value = {
+        text["focus_depth_2"]: "focus_depth_2",
+        text["focus_depth_1"]: "focus_depth_1",
+        text["current_branch"]: "current_branch",
+        text["option_workstream_view"]: "option_workstream",
+        text["global_graph"]: "global",
+    }
+    mode_value_to_label = {value: label for label, value in mode_label_to_value.items()}
+
+    message = st.session_state.pop("graph_view_message", None)
+    if message:
+        st.success(message)
+
+    saved_view_by_id = {str(view.get("id")): view for view in saved_graph_views if view.get("id")}
+    if saved_view_by_id:
+        load_left, load_right = st.columns([3, 1])
+        selected_view_id = load_left.selectbox(
+            text["saved_graph_views"],
+            [""] + sorted(saved_view_by_id),
+            format_func=lambda value: text["none"] if not value else (
+                f"{saved_view_by_id[value].get('title')} | {value}"
+            ),
+            key="graph_saved_view_selected",
+        )
+        if load_right.button(
+            text["load_saved_view"],
+            disabled=not selected_view_id,
+            key="graph_load_saved_view",
+            use_container_width=True,
+        ):
+            state = graph_view_state_from_saved_view(
+                saved_view_by_id[selected_view_id],
+                options,
+                mode_value_to_label,
+            )
+            for key, value in state.items():
+                st.session_state[key] = value
+            st.session_state["graph_view_message"] = text["graph_view_loaded"]
+            st.rerun()
+    else:
+        st.caption(text["no_saved_graph_views"])
 
     controls, detail = st.columns([2, 1])
     with controls:
-        mode_label_to_value = {
-            text["focus_depth_2"]: "focus_depth_2",
-            text["focus_depth_1"]: "focus_depth_1",
-            text["global_graph"]: "global",
-        }
         view_label = st.radio(
             text["view_mode"],
             list(mode_label_to_value),
@@ -796,7 +901,86 @@ def render_graph_tab(nodes: dict, graph: dict, current: dict, text: dict[str, st
                 key="graph_statuses",
             )
         )
-        filtered_graph = filter_graph_for_view(graph, view_mode, selected_types, selected_statuses)
+        advanced_left, advanced_mid, advanced_right = st.columns(3)
+        selected_stages = set(advanced_left.multiselect(
+            text["stages"],
+            all_stages,
+            default=all_stages,
+            key="graph_stages",
+        ))
+        selected_focus_roles = set(advanced_mid.multiselect(
+            text["focus_roles"],
+            all_focus_roles,
+            default=all_focus_roles,
+            key="graph_focus_roles",
+        ))
+        default_workstreams = [
+            current.get("current_option")
+            for _ in [0]
+            if current.get("current_option") in all_workstreams
+        ]
+        if view_mode == "option_workstream" and not default_workstreams and all_workstreams:
+            default_workstreams = [all_workstreams[0]]
+        selected_workstreams = set(advanced_right.multiselect(
+            text["workstreams_filter"],
+            all_workstreams,
+            default=default_workstreams if view_mode == "option_workstream" else [],
+            key="graph_workstreams",
+        ))
+        flag_left, flag_mid, flag_right = st.columns(3)
+        only_blocking = flag_left.checkbox(text["only_blocking"], value=False, key="graph_only_blocking")
+        only_next_actions = flag_mid.checkbox(text["only_next_actions"], value=False, key="graph_only_next_actions")
+        only_missing_evidence = flag_right.checkbox(
+            text["only_missing_evidence"],
+            value=False,
+            key="graph_only_missing_evidence",
+        )
+        save_left, save_right = st.columns([3, 1])
+        view_title = save_left.text_input(
+            text["graph_view_title"],
+            value="",
+            placeholder=text["graph_view_title_placeholder"],
+            key="graph_view_save_title",
+        )
+        if save_right.button(text["save_current_view"], key="graph_save_current_view", use_container_width=True):
+            if not view_title.strip():
+                st.warning(text["graph_view_title_required"])
+            else:
+                view = {
+                    "title": view_title.strip(),
+                    "scope": view_mode,
+                    "filters": {
+                        "node_types": [value for value in all_types if value in selected_types],
+                        "statuses": [value for value in all_statuses if value in selected_statuses],
+                        "stages": [value for value in all_stages if value in selected_stages],
+                        "focus_roles": [value for value in all_focus_roles if value in selected_focus_roles],
+                        "workstreams": [value for value in all_workstreams if value in selected_workstreams],
+                        "only_blocking": only_blocking,
+                        "only_next_actions": only_next_actions,
+                        "only_missing_evidence": only_missing_evidence,
+                    },
+                    "saved_focus_node_id": graph.get("current_focus_node"),
+                    "saved_focus_path": current.get("current_focus_path", []) or [],
+                }
+                try:
+                    upsert_graph_view(RESEARCH_ROOT, view)
+                    build_dashboard(RESEARCH_ROOT)
+                    st.session_state["graph_view_message"] = text["graph_view_saved"]
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"{text['graph_view_save_failed']} {exc}")
+        filtered_graph = filter_graph_for_view(
+            graph,
+            view_mode,
+            selected_types,
+            selected_statuses,
+            selected_stages=selected_stages,
+            selected_focus_roles=selected_focus_roles,
+            selected_workstreams=selected_workstreams,
+            only_blocking=only_blocking,
+            only_next_actions=only_next_actions,
+            only_missing_evidence=only_missing_evidence,
+        )
         render_pyvis_graph(filtered_graph, set(), set(), graph.get("current_focus_node"))
         with st.expander(text["legend"], expanded=True):
             st.write(text["legend_current"])
@@ -1329,6 +1513,7 @@ def main() -> None:
         all_action_suggestions,
         search_index,
         option_workstreams,
+        saved_graph_views,
     ) = load_graph_data()
 
     with st.sidebar:
@@ -1357,7 +1542,7 @@ def main() -> None:
     for label, tab in zip(tab_labels, tabs):
         with tab:
             if label == text["research_graph"]:
-                render_graph_tab(nodes, graph, current, text, link_rows)
+                render_graph_tab(nodes, graph, current, text, link_rows, saved_graph_views)
             elif label == text["dashboard"]:
                 render_dashboard(context, validation_errors, text, action_suggestions)
             elif label == text["branch_comparison"]:

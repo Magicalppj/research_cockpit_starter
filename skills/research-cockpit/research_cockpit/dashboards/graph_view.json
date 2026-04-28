@@ -19,6 +19,14 @@
       "focus_visible_depth": 2,
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
+      "stage_id": "stage_demo_research",
+      "problem_id": "problem_demo_quality_gap",
+      "option_workstream_id": "option_demo_prompt_refinement",
+      "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "in_current_branch": true,
+      "has_blockers": false,
+      "has_next_actions": false,
+      "has_evidence": true,
       "raw": {
         "id": "decision_demo_prompt_refinement",
         "type": "decision",
@@ -53,6 +61,14 @@
       "focus_visible_depth": null,
       "is_focus_visible": false,
       "is_hidden_by_focus": true,
+      "stage_id": "stage_demo_research",
+      "problem_id": "problem_demo_subtask_scope",
+      "option_workstream_id": "option_demo_eval_cases",
+      "option_workstream_upstream_problem_id": "problem_demo_subtask_scope",
+      "in_current_branch": true,
+      "has_blockers": false,
+      "has_next_actions": false,
+      "has_evidence": false,
       "raw": {
         "id": "experiment_demo_eval_cases",
         "type": "experiment",
@@ -85,6 +101,14 @@
       "focus_visible_depth": 2,
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
+      "stage_id": "stage_demo_research",
+      "problem_id": "problem_demo_quality_gap",
+      "option_workstream_id": "option_demo_prompt_refinement",
+      "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "in_current_branch": true,
+      "has_blockers": false,
+      "has_next_actions": false,
+      "has_evidence": false,
       "raw": {
         "id": "experiment_demo_prompt_refinement",
         "type": "experiment",
@@ -117,6 +141,14 @@
       "focus_visible_depth": null,
       "is_focus_visible": false,
       "is_hidden_by_focus": true,
+      "stage_id": "stage_demo_research",
+      "problem_id": "problem_demo_subtask_scope",
+      "option_workstream_id": "option_demo_eval_cases",
+      "option_workstream_upstream_problem_id": "problem_demo_subtask_scope",
+      "in_current_branch": true,
+      "has_blockers": false,
+      "has_next_actions": false,
+      "has_evidence": false,
       "raw": {
         "id": "option_demo_eval_cases",
         "type": "option",
@@ -149,6 +181,14 @@
       "focus_visible_depth": 1,
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
+      "stage_id": "stage_demo_research",
+      "problem_id": "problem_demo_quality_gap",
+      "option_workstream_id": "option_demo_prompt_refinement",
+      "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "in_current_branch": true,
+      "has_blockers": false,
+      "has_next_actions": false,
+      "has_evidence": false,
       "raw": {
         "id": "option_demo_prompt_refinement",
         "type": "option",
@@ -192,6 +232,14 @@
       "focus_visible_depth": 1,
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
+      "stage_id": "stage_demo_research",
+      "problem_id": "problem_demo_quality_gap",
+      "option_workstream_id": "option_demo_retrieval_branch",
+      "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "in_current_branch": true,
+      "has_blockers": false,
+      "has_next_actions": false,
+      "has_evidence": false,
       "raw": {
         "id": "option_demo_retrieval_branch",
         "type": "option",
@@ -228,6 +276,14 @@
       "focus_visible_depth": 0,
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
+      "stage_id": "stage_demo_research",
+      "problem_id": "problem_demo_quality_gap",
+      "option_workstream_id": null,
+      "option_workstream_upstream_problem_id": null,
+      "in_current_branch": true,
+      "has_blockers": true,
+      "has_next_actions": true,
+      "has_evidence": false,
       "raw": {
         "id": "problem_demo_quality_gap",
         "type": "problem",
@@ -269,6 +325,14 @@
       "focus_visible_depth": null,
       "is_focus_visible": false,
       "is_hidden_by_focus": true,
+      "stage_id": "stage_demo_research",
+      "problem_id": "problem_demo_subtask_scope",
+      "option_workstream_id": "option_demo_prompt_refinement",
+      "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "in_current_branch": true,
+      "has_blockers": false,
+      "has_next_actions": true,
+      "has_evidence": false,
       "raw": {
         "id": "problem_demo_subtask_scope",
         "type": "problem",
@@ -305,6 +369,14 @@
       "focus_visible_depth": 1,
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
+      "stage_id": "stage_demo_research",
+      "problem_id": null,
+      "option_workstream_id": null,
+      "option_workstream_upstream_problem_id": null,
+      "in_current_branch": true,
+      "has_blockers": false,
+      "has_next_actions": true,
+      "has_evidence": false,
       "raw": {
         "id": "stage_demo_research",
         "type": "stage",
@@ -390,5 +462,44 @@
     "show_resolved": false,
     "show_rejected": false,
     "show_parked": false
+  },
+  "available_filters": {
+    "types": [
+      "decision",
+      "experiment",
+      "option",
+      "problem",
+      "stage"
+    ],
+    "statuses": [
+      "active",
+      "open",
+      "parked",
+      "planned",
+      "proposed"
+    ],
+    "stages": [
+      "stage_demo_research"
+    ],
+    "problems": [
+      "problem_demo_quality_gap",
+      "problem_demo_subtask_scope"
+    ],
+    "focus_roles": [
+      "child",
+      "current",
+      "parent",
+      "unrelated"
+    ],
+    "workstreams": [
+      "option_demo_eval_cases",
+      "option_demo_prompt_refinement",
+      "option_demo_retrieval_branch"
+    ],
+    "priorities": [
+      "critical",
+      "high",
+      "medium"
+    ]
   }
 }

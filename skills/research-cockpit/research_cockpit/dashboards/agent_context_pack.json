@@ -1,8 +1,8 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-04-28T10:55:32.869046Z",
-    "source_git_commit": "8ec28c1",
+    "generated_at": "2026-04-28T12:52:54.440654Z",
+    "source_git_commit": "2d9ab17",
     "worktree_dirty": true,
     "current_state_updated_at": "2026-04-28"
   },
@@ -163,6 +163,8 @@
     }
   ],
   "active_option_workstreams": [],
+  "saved_graph_views": [],
+  "recent_interactions": [],
   "suggested_next_actions": [
     {
       "kind": "focus_next_action",

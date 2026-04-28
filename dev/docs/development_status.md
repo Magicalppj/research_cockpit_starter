@@ -1,4 +1,55 @@
 # Research Cockpit 开发状态
+## Graph Saved Views v1 更新（2026-04-28）
+
+本批在 Graph Interaction Workbench P0 的基础上补齐可复用图谱视图预设。目标是让研究者把常用的视图范围和筛选条件保存到 repo-native 数据中，后续由 UI 和 agent 继续读取，而不是只停留在一次性前端状态。
+
+已完成：
+
+- 新增 `research_cockpit/graph/graph_views.yaml` 数据契约，保存 `version: 1`、`views`、视图 `id/title/scope/filters`、保存时的 focus node/path 以及创建/更新时间。
+- 新增 `load_graph_views(...)`、`upsert_graph_view(...)` 和 `graph_view_id_from_title(...)`，缺失或非法视图文件会返回稳定空结果，覆盖同名视图时保留 `created_at` 并刷新 `updated_at`。
+- 保存视图时追加 `interaction_log.yaml` 的 `save_graph_view` 事件，记录 `view_id`、`title`、`scope` 和 filters 摘要。
+- `agent_context_pack.json`、`focus_context_pack.json` 和 `current_state.json` 增加 `saved_graph_views`，让 agent 能读取研究者保存的视图预设。
+- Streamlit 图谱页新增保存/加载视图入口；加载视图会把 scope 和 filters 映射回现有 widget state，并过滤当前图谱中已经不存在的筛选项。
+- README 说明 `graph_views.yaml` 是动态查询预设，不是不可变图谱快照。
+
+验证目标：
+
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s dev\tests`
+- `%RESEARCH_COCKPIT_PYTHON% skills\research-cockpit\scripts\skill_smoke_test.py --json`
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_skill_release_check.py --json --skip-mutating --python %RESEARCH_COCKPIT_PYTHON%`
+
+当前仍可升级：
+
+- 将 claim/report/apply suggestion/accept decision 等更多安全操作接入 `interaction_log.yaml`。
+- 做 React Flow / Cytoscape 双向组件 spike，让图谱节点点击直接驱动右侧 inspector。
+- 继续为 mutating scripts 扩展 dry-run coverage。
+
+## Graph Interaction Workbench P0 更新（2026-04-28）
+
+本批按 `dev/specs/graph_interaction_upgrade.md` 的 P0 方案落地图谱交互工作台第一阶段，继续保留 Streamlit + PyVis 外壳，但把图谱数据、筛选能力、节点详情和安全写入记录向后续 React Flow / Cytoscape 迁移方向收拢。
+
+已完成：
+
+- `graph_view.json` 节点新增交互 facet：`stage_id`、`problem_id`、`option_workstream_id`、`option_workstream_upstream_problem_id`、`in_current_branch`、`has_blockers`、`has_next_actions` 和 `has_evidence`。
+- `graph_view.json` 新增 `available_filters`，让前端可以直接读取 type、status、stage、focus role、workstream 和 priority 的可用选项。
+- 图谱页新增 Current Branch 和 Option Workstream 视图；保留 Focus Depth 1、Focus Depth 2 和 Global 视图。
+- 图谱页新增 stage、focus role、option workstream、only blockers、only next actions 和 only missing evidence 过滤。
+- 节点详情扩展为 Summary / Evidence / Resources / Actions / Agent Context 五个面板；Summary 中补充 parent/children，Resources 独立展示关联资源。
+- 新增 `research_cockpit/graph/interaction_log.yaml` 读写能力；从 UI 或脚本执行 `set_focus.py` 后会追加 `set_focus` 事件。
+- `agent_context_pack.json`、`focus_context_pack.json` 和 `current_state.json` 增加 `recent_interactions`，供 agent 查看最近持久化前端操作。
+- 更新 package README，说明图谱工作台视图、筛选和 interaction log。
+
+验证结果：
+
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s dev\tests -p test_model.py`：通过。
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s dev\tests -p test_ui.py`：通过。
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s dev\tests -p test_scripts.py`：通过。
+
+当前仍可升级：
+
+- 将 claim/report/apply suggestion/accept decision 等更多安全操作接入 interaction log。
+- 做 React Flow / Cytoscape 双向组件 spike，让图节点点击直接驱动右侧 inspector。
+
 ## Agent Option Workstream v1 更新（2026-04-28）
 本阶段支持“每个 agent follow 一个方案节点”的最小闭环，采用 `problem -> option -> problem -> option -> experiment/decision` 的递归分支结构。目标是让下游 agent 可以认领一个 option，在该 option 子树内继续拆分问题、方案和实验，最后把证据报告回 option，供上游 problem 做方案比较和最终决策。
 
@@ -19,11 +70,11 @@
 - `python scripts/skill_smoke_test.py --json`：纳入 option workstream context 检查。
 - `python dev/scripts/run_skill_release_check.py --json --skip-mutating`：用于发布前只读回归。
 
-下一批候选：
+候选项状态同步：
 
-- 为 mutating scripts 扩展 dry-run coverage，特别是 `claim_option.py` 和 `report_option_workstream.py`。
-- 增强 option workstream UI，支持从前端安全触发 claim/report，而不是只展示命令模板。
-- 前端图谱交互升级：点击展开节点、编辑节点文本、以 option workstream 为中心过滤图谱。
+- 仍可升级：为 mutating scripts 扩展 dry-run coverage，特别是 `claim_option.py` 和 `report_option_workstream.py`。
+- 仍可升级：增强 option workstream UI，支持从前端安全触发 claim/report，而不是只展示命令模板。
+- 仍可升级：前端图谱交互升级，优先补 option workstream 中心过滤，再评估点击展开节点和节点文本编辑。
 
 ## Agent Skill Release Hardening v1 更新（2026-04-28）
 
@@ -45,11 +96,11 @@
 - `python dev/scripts/run_skill_release_check.py --json` 可作为发布前完整检查入口。
 - `python dev/scripts/run_skill_release_check.py --json --skip-mutating` 可作为较快的只读检查入口。
 
-下一批候选：
+候选项状态同步：
 
-- 扩展 dry-run coverage，让更多 mutating scripts 可预览写入结果。
-- 增强 decision acceptance UI 修复提示，帮助用户补齐 alternatives、consequences 和 next actions。
-- 规划前端图谱交互升级，为可点击展开节点、编辑节点文本和未来前端迁移保留接口边界。
+- 仍可升级：扩展 dry-run coverage，让更多 mutating scripts 可预览写入结果。
+- 部分完成：decision acceptance UI 已展示 checklist 和命令模板；仍可升级为按 blocking failure 给出具体修复命令。
+- 仍可升级：规划前端图谱交互升级，为可点击展开节点、编辑节点文本和未来前端迁移保留接口边界。
 
 ## Agent Skill Forward-Test v1 更新（2026-04-28）
 
@@ -79,12 +130,12 @@
 - 当前仍有一个缺失资源 warning：`figures/dataset_pipeline_v2_150.png`。
 - 这些属于研究数据完整性问题，不阻断 skill packaging，但会影响后续 agent 对当前研究状态的质量判断。
 
-下一批候选：
+候选项状态同步：
 
-- 将 forward-test checklist 固化为发布前回归流程，必要时增加自动化脚本封装。
-- 继续扩展 dry-run coverage，让更多写入脚本支持安全预览。
-- 增强 decision acceptance UI 修复提示，帮助用户补齐 alternatives、consequences 和 next actions。
-- 规划前端图谱交互升级，为可点击展开节点、编辑节点文本和未来前端迁移保留清晰接口边界。
+- 已完成：forward-test checklist 已固化为 `dev/scripts/run_subagent_forward_check.py`，并纳入开发侧测试。
+- 仍可升级：继续扩展 dry-run coverage，让更多写入脚本支持安全预览。
+- 部分完成：decision acceptance UI 已展示 checklist、检查命令、补齐命令和接受命令；仍缺按失败项生成的修复提示。
+- 仍可升级：规划前端图谱交互升级，为可点击展开节点、节点文本编辑和未来前端迁移保留清晰接口边界。
 
 ## Knowledge Search v1 更新（2026-04-28）
 本批补齐 cockpit 内的轻量全文搜索能力，把 Markdown notes 和节点 YAML 文本字段纳入本地索引。范围保持克制：不引入数据库、搜索服务或新依赖，不反向解析 Markdown 状态，也不索引任意 linked file/config 正文。
@@ -99,11 +150,11 @@
 - UI 新增“搜索 / Search”页签，支持查询、来源过滤、节点类型过滤、focus-only、结果数量限制、结果表和 preview；Data Health 增加搜索索引摘要。
 - README 已补充搜索 CLI、UI 页签、dashboard 输出和 agent 读取顺序说明。
 
-下一批候选：
+候选项状态同步：
 
-- decision acceptance checklist 已完成；后续可增加 UI 缺失项修复提示或 acceptance 历史记录。
-- 增加 linked resource text indexing，但需要先明确哪些文件类型可安全读取、如何控制上下文体积。
-- 增加 suggestion lifecycle cleanup，用于清理长期 orphan 的历史记录。
+- 已完成：decision acceptance checklist 已完成；后续仍可增加 UI 缺失项修复提示或 acceptance 历史记录。
+- 已完成：linked resource text indexing 已完成，范围限定为受控本地文本资源、大小上限和跳过原因记录。
+- 已完成：suggestion lifecycle cleanup 已完成，支持 dry-run、条件过滤和 UI 命令模板。
 
 ## Suggestion Lifecycle v1 更新（2026-04-28）
 
@@ -119,11 +170,11 @@
 - Action Guidance UI 增加建议状态过滤、忽略、标记完成和恢复活跃按钮；dismissed/completed 建议不能写入行动队列。
 - Data Health 增加 suggestion lifecycle 摘要，展示 active/dismissed/completed/orphan 数量；orphan 仅作为 warning，不阻断校验。
 
-下一批候选：
+候选项状态同步：
 
-- 增加 notes / Markdown 全文搜索或轻量索引。
-- 增加 decision acceptance checklist，在接受 decision 前提示证据、替代方案和后续影响是否完整。
-- 增加 suggestion lifecycle 清理脚本，用于删除长期 orphan 历史记录。
+- 已完成：notes / Markdown 与 YAML 节点轻量全文搜索已完成。
+- 已完成：decision acceptance checklist 已完成，并纳入 accept/promote 工作流。
+- 已完成：suggestion lifecycle 清理脚本已完成，用于安全清理长期 orphan 历史记录。
 
 ## Decision Evidence Injection v1 更新（2026-04-28）
 
@@ -138,7 +189,7 @@
 - Action Guidance 中 `review_decision` 的 `suggested_command` 已改为调用 `update_decision_evidence.py`，避免对已有 decision 再次生成同名 decision。
 - Decision Trace 会展示自动生成的 evidence summary 文本，并继续展示 supporting experiments、finding 数量、outcome 分布和最新 finding。
 
-下一批候选已推进到 Suggestion Lifecycle v1；剩余重点是全文搜索、decision acceptance checklist 和 lifecycle 历史清理。
+后续状态同步：全文搜索、decision acceptance checklist 和 lifecycle 历史清理均已在后续阶段完成。
 
 ## Action Execution v1 更新（2026-04-27）
 
@@ -152,7 +203,7 @@
 - 写回逻辑会去重；已存在的 action 不重复追加。
 - 写回后更新 `updated_at`、运行统一校验，并默认重建 dashboard/context。
 
-下一批候选已推进到 Decision Evidence Injection v1；剩余重点是 suggestion 生命周期、全文搜索和 decision acceptance checklist。
+后续状态同步：suggestion 生命周期、全文搜索和 decision acceptance checklist 均已在后续阶段完成。
 
 ## Action Guidance v1 更新（2026-04-27）
 
@@ -179,11 +230,11 @@
 - `linked_resources.json`
 - `next_action_suggestions.json`
 
-下一批候选：
+候选项状态同步：
 
-- 允许用户从建议中选择一项写回 `current_state.yaml` 或对应节点。
-- 增强 `promote_decision.py`，自动从 findings 汇总 supporting evidence。
-- 增加全文搜索或 notes 内容索引。
+- 已完成：用户可以从建议中选择一项写回 `current_state.yaml` 或对应节点。
+- 已完成：`promote_decision.py --auto-evidence` 和 `update_decision_evidence.py` 已支持从 findings 汇总 supporting evidence。
+- 已完成：全文搜索和 notes 内容索引已完成。
 
 ## Notes/Search v1 更新（2026-04-27）
 
@@ -210,16 +261,18 @@
 - `experiment_matrix.json`
 - `linked_resources.json`
 
-下一批候选：
+候选项状态同步：
 
-- 新增 `suggest_next_actions.py`，基于 active problem、blocked node、缺失 evidence 和 stale experiment 生成候选下一步动作。
-- 增强 `promote_decision.py`，从已有 findings 自动汇总 supporting evidence。
-- 在 UI 中进一步突出 focus path 的下一步推进建议。
-- 后续再考虑全文搜索和 Markdown 在线编辑；本阶段不引入。
+- 已完成：`suggest_next_actions.py` 已新增，并基于 focus、阻塞项、缺失 evidence、资源缺失等生成候选下一步动作。
+- 已完成：`promote_decision.py` 已支持从已有 findings 自动汇总 supporting evidence。
+- 部分完成：UI 已有 Action Guidance 和 dashboard Top suggestions；仍可升级为当前 focus path 的专门推进视图。
+- 已完成：全文搜索已完成；Markdown 在线编辑仍不纳入当前安全写回范围。
 
 ## 当前阶段
 
-当前项目处于 **Linked Resource Text Indexing v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索；第十二批已完成 decision 接受质量门；第十三批已完成本地 linked resource 正文索引。
+当前项目处于 **Subagent Forward-Test Hardening v1 完成后的升级准备阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索；第十二批已完成 decision 接受质量门；第十三批已完成本地 linked resource 正文索引；第十四批已完成 suggestion lifecycle cleanup；第十五批已完成 agent skill packaging；第十六批已完成公开 demo 数据拆分；第十七批已完成 skill entry 文档契约；第十八批已完成 subagent forward-check hardening 和 decision checklist writer。
+
+当前未闭环重点收敛为三类：mutating scripts dry-run coverage、decision acceptance 动态修复提示、option workstream / 图谱交互升级。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
@@ -250,10 +303,16 @@
 - `scripts/record_finding.py`：向 experiment 节点追加结构化 finding，并可同步更新 `result_summary`。
 - `scripts/promote_decision.py`：从 option 和 supporting experiments 生成 decision；支持 `--auto-evidence` 从已有 findings/result/outcome 自动填充证据；accepted decision 会同步更新 option/problem 状态。
 - `scripts/update_decision_evidence.py`：刷新已有 decision 的 evidence 字段，不改变 decision status，也不关闭 option/problem。
+- `scripts/update_decision_checklist.py`：补齐 decision acceptance checklist 中的 alternatives、consequences 和 next actions 字段。
+- `scripts/check_decision_acceptance.py`：检查 decision 是否满足接受质量门，支持结构化 JSON 输出。
+- `scripts/accept_decision.py`：接受已有 proposed decision，并同步更新 parent option/problem。
 - `scripts/suggest_next_actions.py`：只读生成下一步行动建议，支持 JSON、kind 过滤、limit 和 focus-only。
 - `scripts/apply_suggestion.py`：将建议写入 `current_state.next_actions` 或来源节点 `next_actions`，不直接执行建议命令。
 - `scripts/update_suggestion_state.py`：将建议标记为 dismissed/completed，或恢复为 active；只影响建议展示生命周期。
-- `scripts/search_knowledge.py`：轻量搜索 Markdown notes 和节点 YAML 文本字段，支持 JSON、source/type、limit 和 focus-only 过滤。
+- `scripts/cleanup_suggestion_lifecycle.py`：清理长期 orphan 的 suggestion lifecycle 历史记录，支持 `--dry-run`。
+- `scripts/search_knowledge.py`：轻量搜索 Markdown notes、节点 YAML 文本字段和受控本地 linked resources，支持 JSON、source/type、limit 和 focus-only 过滤。
+- `scripts/claim_option.py`、`scripts/option_workstream_context.py`、`scripts/report_option_workstream.py`：支持 option workstream 的认领、上下文导出和报告回写。
+- `scripts/agent_bootstrap.py`、`scripts/list_agent_commands.py`、`scripts/skill_smoke_test.py`：支持 agent 启动、命令发现和 skill 自检。
 - `scripts/build_dashboard.py`：生成前先校验，再输出 dashboard 和 agent context 文件。
 
 ### Dashboard 输出
@@ -269,6 +328,8 @@
 - `linked_resources.json`
 - `next_action_suggestions.json`
 - `search_index.json`
+- `decision_acceptance_checklists.json`
+- `option_workstreams.json`
 
 这些文件是可再生成产物，但当前 MVP 建议保留在仓库中，方便人和 agent 快速读取上下文。
 
@@ -281,6 +342,7 @@ Streamlit 页面现在包含：
 - 方案比较
 - 决策追踪
 - 行动建议
+- 方案工作流
 - 搜索
 - 资源
 - 实验矩阵
@@ -307,8 +369,10 @@ Streamlit 页面现在包含：
 - 决策追踪页展示 evidence summary，包括实验数量、findings 数量、结果分布和最新 finding。
 - 行动建议页展示建议，可按 kind、priority 和当前 focus 相关性过滤；支持把建议写入当前行动队列或来源节点行动队列。
 - 行动建议页支持按生命周期状态过滤，并可忽略、标记完成或恢复建议；非 active 建议不能写入行动队列。
-- 搜索页支持对 Markdown notes 和节点 YAML 文本字段进行轻量全文检索，可按 source、node type、focus-only 和结果数量过滤，并展示结果 preview。
-- 资源页汇总 notes、config、artifact path、run id 和 linked artifacts，并支持存在状态过滤。
+- 搜索页支持对 Markdown notes、节点 YAML 文本字段和受控本地 linked resources 进行轻量全文检索，可按 source、node type、focus-only 和结果数量过滤，并展示结果 preview。
+- 资源页汇总 notes、config、artifact path、run id 和 linked artifacts，并支持存在状态、索引状态和跳过原因过滤。
+- 决策追踪页和 decision 节点详情展示 acceptance checklist，并提供 check、update checklist 和 accept 命令模板。
+- 方案工作流页展示 active option workstreams，并提供 claim、context 和 report 命令模板。
 
 ### 测试
 
@@ -332,13 +396,20 @@ Streamlit 页面现在包含：
 - 中文节点图谱 HTML 生成。
 - 行动建议生成、CLI 过滤、dashboard 输出和 UI helper。
 - 建议 lifecycle 的稳定 key、dismissed/completed 过滤、CLI 写入、恢复和 Data Health 摘要。
-- 搜索索引生成、notes 关联、YAML 字段检索、focus-only 过滤、CLI 查询、dashboard 输出和 UI helper。
+- suggestion lifecycle cleanup 的 dry-run、真实清理、年龄过滤和 orphan 保护。
+- 搜索索引生成、notes 关联、YAML 字段检索、resource 正文索引、focus-only 过滤、CLI 查询、dashboard 输出和 UI helper。
+- decision acceptance checklist、decision 接受命令、decision checklist writer 和阻塞项保护。
+- option workstream context、claim/report 脚本和 dashboard/context 输出。
+- skill release check、skill smoke test 和 subagent forward-check harness。
 
 当前验证命令：
 
 ```powershell
 python -m unittest discover -s dev\tests
-python scripts\build_dashboard.py
+python skills\research-cockpit\scripts\skill_smoke_test.py --json
+python dev\scripts\run_skill_release_check.py --json --skip-mutating
+python dev\scripts\run_subagent_forward_check.py --json
+python dev\scripts\run_subagent_forward_check.py --json --skip-mutating
 ```
 
 ## 当前技术决策
@@ -346,7 +417,7 @@ python scripts\build_dashboard.py
 - **暂不迁移 React Flow**：当前阶段优先稳定数据层、脚本和测试闭环；React Flow 留到图交互复杂度上升后再评估。
 - **保留 YAML 作为真相源**：方便人工编辑、git diff、agent 读取和脚本生成。
 - **dashboard 文件可提交**：虽然可再生成，但对 agent 上下文启动很有价值。
-- **不强制 notes 联动**：节点可以声明 `links`，但当前 UI 只展示链接字段，不解析 Markdown 正文。
+- **不反向解析 notes**：节点可以声明 `links`，搜索和资源页会索引受控文本资源，但 Markdown 正文仍不反向写回 YAML 状态。
 - **不引入额外测试框架**：当前使用标准库 `unittest`，避免为 MVP 增加依赖复杂度。
 
 ## 已知限制
@@ -354,7 +425,9 @@ python scripts\build_dashboard.py
 - PyVis 图节点点击不能直接驱动右侧详情面板；当前通过选择器查看节点详情。
 - 图布局仍依赖 force layout，大图规模上来后可读性会下降。
 - 状态更新脚本只做结构化 YAML 修改，不会同步更新长篇 notes。
-- 当前全文搜索只覆盖 Markdown notes 和节点 YAML 文本字段，尚未索引任意 linked file/config；也还没有标签过滤、时间线视图或历史变更视图。
+- 全文搜索已覆盖 Markdown notes、节点 YAML 文本字段和受控本地 linked resources；仍不索引外部 URL、run id、绝对路径、二进制文件和任意代码文件，也还没有时间线视图或历史变更视图。
+- 多数写入脚本尚未支持 `--dry-run`；当前只有 suggestion lifecycle cleanup 已完成真实 dry-run 闭环。
+- decision acceptance UI 已展示 checklist 和命令模板，但尚未按 blocking failure 生成动态修复提示，也尚未记录 acceptance 历史。
 - 暂未接入 MLflow、DVC、Git branch/commit 等外部研究产物。
 - Streamlit 适合 MVP 和内网使用，若要长期作为主 UI，后续需要更完整的前端工程方案。
 
@@ -498,12 +571,13 @@ python scripts\build_dashboard.py
 4. Action Guidance UI 生命周期过滤和写回入口。
 5. Data Health suggestion lifecycle 摘要。
 
-下一批建议进入“历史维护与决策体验增强”层：suggestion lifecycle 历史清理、decision acceptance checklist 后续增强、资源索引策略微调。
+后续状态同步：suggestion lifecycle 历史清理和 linked resource text indexing 已完成；decision acceptance checklist 仍可继续增强 UI 修复提示和 acceptance 历史。
 
 ## 后续可优化
 
 ### 第一优先级：稳定性和可维护性
 
+- 为 `claim_option.py`、`report_option_workstream.py` 等写入脚本补充 `--dry-run`，再按风险扩展到其他 mutating scripts。
 - 为节点 schema 写更明确的字段说明，降低手写 YAML 出错概率。
 - 增加 dashboard 生成的快照测试或结构测试，防止 context pack 字段回退。
 - 为 linked resources 增加更清晰的路径约定说明，例如仓库内相对路径、URL、外部路径和 run id 的区别。
@@ -511,14 +585,16 @@ python scripts\build_dashboard.py
 ### 第二优先级：研究工作流
 
 - 增强 decision acceptance checklist，例如 UI 缺失项修复提示、acceptance 历史记录或更细的检查等级。
-- 增加 suggestion lifecycle 清理脚本，删除长期 orphan 历史记录。
 - 为 notes 增加推荐写作模板和命名约定，但仍不反向解析 Markdown 正文。
+- 为当前 focus path 增加专门推进视图，突出“现在应该推进什么”。
 
 ### 第三优先级：UI 交互
 
 - 增加按 stage、priority、blocking、decision_state 的过滤。
 - 资源页增加更明确的缺失资源修复入口，例如复制相对路径或跳转到节点详情。
-- 增加当前 focus path 的专门视图，突出“现在应该推进什么”。
+- 增加 option workstream 中心过滤图谱，方便 agent 只查看自己认领的分支。
+- 增强图谱 selector / 点击展开能力，让节点选择能直接驱动详情区或局部展开。
+- 在明确写回边界后，再评估安全的节点文本编辑能力。
 - 增强决策追踪视图：增加按 problem/option 过滤、证据强度排序和更清晰的链路布局。
 - 如果图交互成为核心需求，再迁移到 React Flow。
 
@@ -560,11 +636,11 @@ v2 P0 阶段完成后，应满足：
 - Decision Trace 和 decision 节点详情会展示 acceptance checklist；decision 节点 Actions 区展示 `check_decision_acceptance.py` 和 `accept_decision.py` 命令模板。
 - README 已补充检查和接受 decision 的维护流程说明。
 
-下一批候选：
+候选项状态同步：
 
-- linked resource text indexing：把受控类型的本地 linked files/config 纳入搜索索引。
-- suggestion lifecycle cleanup：清理长期 orphan 的 suggestion lifecycle 历史记录。
-- decision acceptance checklist 后续增强：增加 UI 中的缺失项修复提示或 acceptance 历史记录。
+- 已完成：linked resource text indexing 已把受控类型的本地 linked files/config 纳入搜索索引。
+- 已完成：suggestion lifecycle cleanup 已支持清理长期 orphan 的 suggestion lifecycle 历史记录。
+- 仍可升级：decision acceptance checklist 后续增强，增加 UI 中的缺失项修复提示或 acceptance 历史记录。
 
 ## Linked Resource Text Indexing v1 更新（2026-04-28）
 
@@ -581,11 +657,11 @@ v2 P0 阶段完成后，应满足：
 - Search 页会自动出现 resource source；Resources 页显示资源是否已索引、是否截断和跳过原因；Data Health 增加 resource text index 摘要。
 - README 已补充资源正文索引范围、允许类型、128KB 截断策略和 `--source resource` 示例。
 
-下一批候选：
+候选项状态同步：
 
-- suggestion lifecycle cleanup：清理长期 orphan 的 suggestion lifecycle 历史记录。
-- decision acceptance checklist 后续增强：增加 UI 缺失项修复提示或 acceptance 历史记录。
-- resource indexing 策略微调：按项目需要评估是否纳入代码文件或更细的文件大小策略。
+- 已完成：suggestion lifecycle cleanup 已支持清理长期 orphan 的 suggestion lifecycle 历史记录。
+- 仍可升级：decision acceptance checklist 后续增强，增加 UI 缺失项修复提示或 acceptance 历史记录。
+- 仍可升级：resource indexing 策略微调，按项目需要评估是否纳入代码文件或更细的文件大小策略。
 
 ## Suggestion Lifecycle Cleanup v1 更新（2026-04-28）
 
@@ -599,7 +675,7 @@ v2 P0 阶段完成后，应满足：
 - Data Health 会展示 orphan lifecycle 明细，并提供 dry-run 与真实清理命令模板；UI 不自动执行清理。
 - README 已补充 lifecycle cleanup 的命令、dry-run 示例和边界说明。
 
-下一批候选：
+当前仍可升级：
 
 - decision acceptance checklist 后续增强：在 UI 中给出缺失项修复提示，或记录 acceptance 历史。
 - resource indexing 策略微调：按项目需要评估是否纳入代码文件或调整大小策略。
@@ -620,11 +696,11 @@ v2 P0 阶段完成后，应满足：
 - README 已补充 “Using as Agent Skill” 流程，所有公开命令示例改为通用 `python`。
 - 新增公开化扫描测试，禁止 README、docs、`cockpit/`、`ui/`、`scripts/` 和 dashboard JSON 中出现真实本机路径或用户名。
 
-下一批候选：
+候选项状态同步：
 
-- dry-run coverage 扩展：让更多写入脚本支持预览变更。
-- decision acceptance UI 修复提示：在 checklist 缺项时给出对应脚本或 YAML 字段建议。
-- 前端图谱交互升级：为可点击展开节点、编辑节点文本和更换前端框架继续收拢数据接口。
+- 仍可升级：dry-run coverage 扩展，让更多写入脚本支持预览变更。
+- 部分完成：decision acceptance UI 已展示 checklist 和命令模板；仍缺按 checklist 缺项生成的具体修复提示。
+- 仍可升级：前端图谱交互升级，为可点击展开节点、编辑节点文本和更换前端框架继续收拢数据接口。
 
 ## Open Skill Demo Data Split v1 更新（2026-04-28）
 
@@ -670,8 +746,30 @@ v2 P0 阶段完成后，应满足：
 - `python dev\scripts\run_subagent_forward_check.py --json`
 - `python dev\scripts\run_subagent_forward_check.py --json --skip-mutating`
 
-下一批候选：
+当前仍可升级：
 
-- 为 decision acceptance 失败增加轻量 UI 修复提示。
-- 为更多 mutating scripts 扩展 dry-run 覆盖。
-- 考虑升级图谱交互，支持点击展开和更安全的节点文本编辑。
+- 为 decision acceptance 失败增加轻量 UI 修复提示，并考虑记录 acceptance 历史。
+- 为更多 mutating scripts 扩展 dry-run 覆盖，优先处理 option workstream 的 claim/report。
+- 升级图谱交互，优先补 option workstream 中心过滤和 selector / 点击展开，再评估更安全的节点文本编辑。
+
+## 当前升级候选总览（2026-04-28）
+
+已完成并不再作为待办：
+
+- forward-test harness、release check 和 portable skill startup 验证。
+- decision acceptance checklist、`update_decision_checklist.py` 和 accept gate 工作流。
+- notes/YAML/resource 轻量搜索、linked resource text indexing 和 suggestion lifecycle cleanup。
+- agent skill packaging、公开 demo 数据拆分和 skill entry 文档契约。
+- 图谱 Focus Mode、Depth 过滤、Current Branch / Option Workstream 视图、节点搜索、focus 高亮、交互 facet 和 `set_focus` interaction log。
+
+部分完成但仍可增强：
+
+- decision acceptance UI 已展示 checklist 和固定命令模板，仍缺按 blocking failure 生成的动态修复提示和 acceptance 历史。
+- dry-run coverage 已在 `cleanup_suggestion_lifecycle.py` 上验证，仍需推广到更多写入脚本。
+- option workstream 已有数据模型、脚本、context、中心化图谱视图和 UI 命令模板，仍缺更直接的前端写回入口。
+
+建议下一批优先级：
+
+1. dry-run coverage 扩展：优先 `claim_option.py` 和 `report_option_workstream.py`。
+2. decision acceptance 动态修复提示：让 checklist failure 直接指向 `update_decision_checklist.py`、`update_decision_evidence.py` 或对应 YAML 字段。
+3. 图谱 component spike：验证 React Flow / Cytoscape 是否能替代 PyVis，让节点点击直接驱动右侧 inspector。

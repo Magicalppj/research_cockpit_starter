@@ -185,6 +185,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(current["current_focus_node"], "option_t5")
         self.assertEqual(graph["current_focus_node"], "option_t5")
         self.assertEqual(focus_context["focus_node"]["id"], "option_t5")
+        interaction_log = load_yaml(self.root / "graph" / "interaction_log.yaml")
+        self.assertEqual(interaction_log["events"][0]["kind"], "set_focus")
+        self.assertEqual(interaction_log["events"][0]["node_id"], "option_t5")
+        self.assertIn("recent_interactions", focus_context)
 
     def test_set_focus_derives_path_when_focus_node_is_supplied(self) -> None:
         set_focus(
@@ -246,6 +250,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIsInstance(option_workstreams, list)
         self.assertIn("active_option_workstreams", context)
         self.assertIn("option_workstream_context", focus_context)
+        self.assertIn("saved_graph_views", context)
+        self.assertIn("saved_graph_views", focus_context)
         self.assertIn("stage_text", nodes)
         self.assertIn("metadata", context)
         self.assertIn("metadata", focus_context)

@@ -18,7 +18,8 @@ streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501
 
 Then open the forwarded port in your browser.
 The UI opens on the Research Graph in Focus Mode by default.
-The graph detail panel can set any visible node as the current focus. The UI also includes Branch Comparison, Decision Trace, Action Guidance, Search, Resources, and node search views for read-only research review.
+The graph workbench supports Focus Depth, Current Branch, Option Workstream, and Global views, plus filters for node type, status, stage, focus role, workstream, blockers, next actions, and missing evidence. The graph detail panel can set any visible node as the current focus and records that durable operation in `research_cockpit/graph/interaction_log.yaml`. The UI also includes Branch Comparison, Decision Trace, Action Guidance, Search, Resources, and node search views for research review.
+Researchers can save reusable graph filter presets from the graph workbench. Saved presets are stored in `research_cockpit/graph/graph_views.yaml` as dynamic views over the current graph data, not immutable graph snapshots. Saving a view appends a `save_graph_view` event to `interaction_log.yaml` and refreshes dashboard/context outputs so agents can read `saved_graph_views`.
 
 By default commands use `python`. If your environment needs a specific interpreter, set `RESEARCH_COCKPIT_PYTHON`; generated command templates will use that value.
 If `agent_bootstrap.py` reports missing modules, install this package's dependencies with `python -m pip install -r requirements.txt` or use an interpreter that already has them.
@@ -41,6 +42,7 @@ ssh -L 8501:localhost:8501 user@remote-gpu-server
 - Markdown notes contain detailed reasoning.
 - Python scripts build dashboard JSON/Markdown.
 - Streamlit + PyVis renders an interactive graph.
+- Saved graph views live in `research_cockpit/graph/graph_views.yaml` and preserve reusable scopes/filters for long-running research review.
 - Agents read `research_cockpit/dashboards/agent_context_pack.json` first, then use
   `research_cockpit/dashboards/focus_context_pack.json` for the current local focus.
 
@@ -220,12 +222,14 @@ Save this as `research_cockpit/graph/edges.yaml` when you need semantic edges be
 - Missing local resource paths are shown as warnings in Data Health; they do not fail validation.
 - URLs, run ids, and absolute/external paths are marked as unknown because they are not checked on the local filesystem.
 - The Research Graph detail selector has a search box over node id, title, summary, tags, status, and type.
+- The Research Graph has Current Focus, Current Branch, Option Workstream, and Global views. Use these with graph filters to inspect long-running research branches without rendering every unrelated node.
+- Setting a node as current focus from the UI updates `current_state.yaml`, rebuilds dashboard/context files, and appends an event to `research_cockpit/graph/interaction_log.yaml` so agents can inspect recent human actions.
 - The Search tab performs lightweight full-text search over Markdown notes, YAML node text fields, and indexed local linked resources, with filters for source, node type, focus-only results, and result limit.
 - The Resources tab shows whether a linked resource was indexed, truncated, or skipped.
 - `research_cockpit/dashboards/search_index.json` stores the generated search entries. Context packs only include `search_index_summary`, so agents see counts and nearby entries without loading full note text by default.
 
 Agents should read `agent_context_pack.json` first, then `focus_context_pack.json`. The focus context now includes a `knowledge_index` with nearby linked note/config/file paths so agents can decide which long-form notes or artifacts to open next.
-Both context packs also include `suggested_next_actions` for read-only planning and `search_index_summary` for deciding whether to run `search_knowledge.py`. When current focus is inside an option branch, `focus_context_pack.json` also includes `option_workstream_context` so a subagent can inspect the branch it should follow.
+Both context packs also include `suggested_next_actions`, `recent_interactions`, and `search_index_summary` for deciding whether to run `search_knowledge.py`. When current focus is inside an option branch, `focus_context_pack.json` also includes `option_workstream_context` so a subagent can inspect the branch it should follow.
 
 ## Using as Agent Skill
 
@@ -253,7 +257,7 @@ Recommended agent read order:
 5. Use mutating scripts for YAML writes; avoid manual edits unless a script does not cover the operation.
 6. Run `validate_cockpit.py` and `build_dashboard.py` after mutating data.
 
-Context packs include `metadata.schema_version`, `metadata.generated_at`, `metadata.source_git_commit`, `metadata.worktree_dirty`, and `metadata.current_state_updated_at` so agents can judge whether generated context is fresh.
+Context packs include `metadata.schema_version`, `metadata.generated_at`, `metadata.source_git_commit`, `metadata.worktree_dirty`, and `metadata.current_state_updated_at` so agents can judge whether generated context is fresh. They also include `saved_graph_views`, which are reusable graph scope/filter presets created by the researcher.
 
 For subagent validation, pass the skill folder path and a concrete cockpit task. In the development workspace that path is `skills/research-cockpit`; in an exported package it is the exported directory itself. The bootstrap payload also exposes this path under `skill.path`.
 
@@ -265,6 +269,8 @@ research_cockpit/
   graph/
     nodes/*.yaml
     edges.yaml
+    graph_views.yaml
+    interaction_log.yaml
   notes/
     problems/*.md
     options/*.md

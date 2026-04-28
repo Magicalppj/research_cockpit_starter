@@ -376,21 +376,138 @@ def default_selected_statuses(graph: dict, all_statuses: list[str]) -> list[str]
     return defaults or all_statuses
 
 
+def graph_filter_options(graph: dict) -> dict[str, list[str]]:
+    available = graph.get("available_filters") or {}
+    keys = ("types", "statuses", "stages", "focus_roles", "workstreams", "priorities")
+    options: dict[str, list[str]] = {}
+    for key in keys:
+        if key in available:
+            options[key] = sorted(str(value) for value in available.get(key, []) if value not in (None, ""))
+            continue
+        field_name = {
+            "types": "type",
+            "statuses": "status",
+            "stages": "stage_id",
+            "focus_roles": "focus_role",
+            "workstreams": "option_workstream_id",
+            "priorities": "priority",
+        }[key]
+        options[key] = sorted(
+            {
+                str(node[field_name])
+                for node in graph.get("nodes", [])
+                if node.get(field_name) not in (None, "")
+            }
+        )
+    return options
+
+
+def _saved_view_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _filter_saved_values(values: object, allowed_values: list[str]) -> list[str]:
+    if isinstance(values, str):
+        raw_values = [values]
+    elif isinstance(values, (list, tuple, set)):
+        raw_values = values
+    else:
+        raw_values = []
+
+    allowed = set(allowed_values)
+    out: list[str] = []
+    seen: set[str] = set()
+    for value in raw_values:
+        item = str(value)
+        if item not in allowed or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def graph_view_state_from_saved_view(
+    view: dict,
+    options: dict[str, list[str]],
+    mode_value_to_label: dict[str, str],
+) -> dict[str, object]:
+    filters = view.get("filters") if isinstance(view.get("filters"), dict) else {}
+    scope = str(view.get("scope") or "focus_depth_2")
+    mode_label = (
+        mode_value_to_label.get(scope)
+        or mode_value_to_label.get("focus_depth_2")
+        or next(iter(mode_value_to_label.values()), scope)
+    )
+    return {
+        "graph_view_mode": mode_label,
+        "graph_node_types": _filter_saved_values(filters.get("node_types"), options.get("types", [])),
+        "graph_statuses": _filter_saved_values(filters.get("statuses"), options.get("statuses", [])),
+        "graph_stages": _filter_saved_values(filters.get("stages"), options.get("stages", [])),
+        "graph_focus_roles": _filter_saved_values(filters.get("focus_roles"), options.get("focus_roles", [])),
+        "graph_workstreams": _filter_saved_values(filters.get("workstreams"), options.get("workstreams", [])),
+        "graph_only_blocking": _saved_view_bool(filters.get("only_blocking", False)),
+        "graph_only_next_actions": _saved_view_bool(filters.get("only_next_actions", False)),
+        "graph_only_missing_evidence": _saved_view_bool(filters.get("only_missing_evidence", False)),
+    }
+
+
 def filter_graph_for_view(
     graph: dict,
     view_mode: str,
     selected_types: set[str],
     selected_statuses: set[str],
+    selected_stages: set[str] | None = None,
+    selected_focus_roles: set[str] | None = None,
+    selected_workstreams: set[str] | None = None,
+    *,
+    only_blocking: bool = False,
+    only_next_actions: bool = False,
+    only_missing_evidence: bool = False,
 ) -> dict:
     max_depth = {"focus_depth_1": 1, "focus_depth_2": 2}.get(view_mode)
     visible_nodes = []
     included = set()
+    selected_stages = selected_stages or set()
+    selected_focus_roles = selected_focus_roles or set()
+    selected_workstreams = selected_workstreams or set()
+    upstream_problem_ids = {
+        str(node.get("option_workstream_upstream_problem_id"))
+        for node in graph.get("nodes", [])
+        if node.get("option_workstream_id") in selected_workstreams
+        and node.get("option_workstream_upstream_problem_id")
+    }
 
     for node in graph["nodes"]:
         if selected_types and node["type"] not in selected_types:
             continue
         if selected_statuses and node["status"] not in selected_statuses:
             continue
+        if selected_stages and node.get("stage_id") not in selected_stages:
+            continue
+        if selected_focus_roles and node.get("focus_role") not in selected_focus_roles:
+            continue
+        if selected_workstreams:
+            in_workstream = node.get("option_workstream_id") in selected_workstreams
+            is_upstream_problem = node.get("id") in upstream_problem_ids
+            if not in_workstream and not is_upstream_problem:
+                continue
+        if only_blocking and not node.get("has_blockers"):
+            continue
+        if only_next_actions and not node.get("has_next_actions"):
+            continue
+        if only_missing_evidence and node.get("has_evidence"):
+            continue
+        if view_mode == "current_branch" and not node.get("in_current_branch"):
+            continue
+        if view_mode == "option_workstream" and selected_workstreams:
+            in_workstream = node.get("option_workstream_id") in selected_workstreams
+            is_upstream_problem = node.get("id") in upstream_problem_ids
+            if not in_workstream and not is_upstream_problem:
+                continue
         if max_depth is not None:
             depth = node.get("focus_visible_depth")
             if not node.get("is_focus_visible") or depth is None or depth > max_depth:

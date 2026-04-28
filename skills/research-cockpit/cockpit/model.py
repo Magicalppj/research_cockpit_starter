@@ -72,6 +72,28 @@ DEFAULT_FOCUS_MODE = {
     "show_parked": False,
 }
 
+VALID_GRAPH_VIEW_SCOPES = {
+    "focus_depth_2",
+    "focus_depth_1",
+    "current_branch",
+    "option_workstream",
+    "global",
+}
+
+GRAPH_VIEW_FILTER_LIST_KEYS = (
+    "node_types",
+    "statuses",
+    "stages",
+    "focus_roles",
+    "workstreams",
+)
+
+GRAPH_VIEW_FILTER_BOOL_KEYS = (
+    "only_blocking",
+    "only_next_actions",
+    "only_missing_evidence",
+)
+
 STATUS_COLORS = {
     "draft": "#D9E8FF",
     "planned": "#D9E8FF",
@@ -151,6 +173,196 @@ def save_yaml(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def load_interaction_log(root: Path) -> dict[str, Any]:
+    data = load_yaml(root / "graph" / "interaction_log.yaml")
+    events = data.get("events", [])
+    if not isinstance(events, list):
+        events = []
+    return {"events": events}
+
+
+def append_interaction_log(
+    root: Path,
+    *,
+    kind: str,
+    actor: str = "researcher",
+    node_id: str | None = None,
+    command: str | None = None,
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    created_at = _utc_timestamp()
+    raw_id = "_".join(str(part) for part in (created_at, kind, node_id or "event") if part)
+    event_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw_id)
+    event: dict[str, Any] = {
+        "id": event_id,
+        "kind": str(kind),
+        "actor": str(actor),
+        "created_at": created_at,
+    }
+    if node_id:
+        event["node_id"] = str(node_id)
+    if command:
+        event["command"] = str(command)
+    if before:
+        event["before"] = before
+    if after:
+        event["after"] = after
+    if extra:
+        event.update(extra)
+
+    log = load_interaction_log(root)
+    log["events"].append(event)
+    save_yaml(root / "graph" / "interaction_log.yaml", log)
+    return event
+
+
+def recent_interactions(root: Path, limit: int = 5) -> list[dict[str, Any]]:
+    events = load_interaction_log(root).get("events", [])
+    return list(reversed(events[-limit:]))
+
+
+def graph_view_id_from_title(title: str, fallback_timestamp: str | None = None) -> str:
+    slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(title or "").strip()).strip("_").lower()
+    if slug:
+        return slug
+    timestamp = fallback_timestamp or _utc_timestamp()
+    fallback = re.sub(r"[^A-Za-z0-9_.-]+", "_", timestamp).strip("_")
+    return f"graph_view_{fallback}"
+
+
+def _normal_string_list(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, (str, int, float)):
+        raw_values = [value]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = value
+    else:
+        return []
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw_values:
+        if item in (None, ""):
+            continue
+        text = str(item)
+        if text in seen:
+            continue
+        seen.add(text)
+        out.append(text)
+    return out
+
+
+def _normal_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _normal_graph_view_filters(data: Any) -> dict[str, Any]:
+    raw = data if isinstance(data, dict) else {}
+    filters: dict[str, Any] = {}
+    for key in GRAPH_VIEW_FILTER_LIST_KEYS:
+        filters[key] = _normal_string_list(raw.get(key))
+    for key in GRAPH_VIEW_FILTER_BOOL_KEYS:
+        filters[key] = _normal_bool(raw.get(key, False))
+    return filters
+
+
+def _normal_graph_view(raw: Any, *, timestamp: str | None = None) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+
+    title = str(raw.get("title") or raw.get("id") or "Untitled graph view").strip() or "Untitled graph view"
+    view_id = str(raw.get("id") or graph_view_id_from_title(title, timestamp)).strip()
+    view_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", view_id).strip("_").lower()
+    if not view_id:
+        view_id = graph_view_id_from_title(title, timestamp)
+
+    scope = str(raw.get("scope") or "focus_depth_2")
+    if scope not in VALID_GRAPH_VIEW_SCOPES:
+        scope = "focus_depth_2"
+
+    saved_focus_node_id = raw.get("saved_focus_node_id")
+    view = {
+        "id": view_id,
+        "title": title,
+        "scope": scope,
+        "filters": _normal_graph_view_filters(raw.get("filters")),
+        "saved_focus_node_id": None if saved_focus_node_id in (None, "") else str(saved_focus_node_id),
+        "saved_focus_path": _normal_string_list(raw.get("saved_focus_path")),
+        "created_at": str(raw.get("created_at") or timestamp or ""),
+        "updated_at": str(raw.get("updated_at") or timestamp or ""),
+    }
+    return view
+
+
+def load_graph_views(root: Path) -> list[dict[str, Any]]:
+    data = load_yaml(root / "graph" / "graph_views.yaml")
+    raw_views = data.get("views", []) if isinstance(data, dict) else []
+    if not isinstance(raw_views, list):
+        return []
+
+    views: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in raw_views:
+        view = _normal_graph_view(raw)
+        if not view or view["id"] in seen:
+            continue
+        seen.add(view["id"])
+        views.append(view)
+    return views
+
+
+def upsert_graph_view(root: Path, view: dict[str, Any]) -> dict[str, Any]:
+    timestamp = _utc_timestamp()
+    normalized = _normal_graph_view(view, timestamp=timestamp)
+    if not normalized:
+        raise ValueError("graph view must be a mapping")
+
+    existing_views = load_graph_views(root)
+    next_views: list[dict[str, Any]] = []
+    replaced = False
+    before: dict[str, Any] | None = None
+    for existing in existing_views:
+        if existing["id"] == normalized["id"]:
+            before = existing
+            normalized["created_at"] = existing.get("created_at") or timestamp
+            normalized["updated_at"] = timestamp
+            next_views.append(normalized)
+            replaced = True
+        else:
+            next_views.append(existing)
+
+    if not replaced:
+        normalized["created_at"] = normalized.get("created_at") or timestamp
+        normalized["updated_at"] = timestamp
+        next_views.append(normalized)
+
+    save_yaml(root / "graph" / "graph_views.yaml", {"version": 1, "views": next_views})
+    append_interaction_log(
+        root,
+        kind="save_graph_view",
+        before=before,
+        after=normalized,
+        extra={
+            "view_id": normalized["id"],
+            "title": normalized["title"],
+            "scope": normalized["scope"],
+            "filters": normalized["filters"],
+        },
+    )
+    return normalized
 
 
 def load_nodes(root: Path) -> dict[str, ResearchNode]:
@@ -371,6 +583,106 @@ def _graph_child_ids(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
     return child_ids + implicit_children
 
 
+def _graph_descendant_ids(nodes: dict[str, ResearchNode], node_id: str) -> set[str]:
+    descendants: set[str] = set()
+    stack = list(_graph_child_ids(nodes, node_id)) if node_id in nodes else []
+    while stack:
+        child_id = stack.pop()
+        if child_id in descendants or child_id not in nodes:
+            continue
+        descendants.add(child_id)
+        stack.extend(_graph_child_ids(nodes, child_id))
+    return descendants
+
+
+def _safe_node_path(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
+    try:
+        return derive_focus_path(nodes, node_id)
+    except ValueError:
+        return [node_id] if node_id in nodes else []
+
+
+def _node_has_evidence(node: ResearchNode) -> bool:
+    if node.raw.get("findings"):
+        return True
+    for field_name in (
+        "evidence_summary",
+        "evidence_strength",
+        "result_summary",
+        "outcome",
+        "current_conclusion",
+    ):
+        if node.raw.get(field_name):
+            return True
+    for field_name in (
+        "supporting_experiments",
+        "contradicting_experiments",
+        "supporting_decisions",
+        "linked_artifacts",
+    ):
+        if node.raw.get(field_name):
+            return True
+    return False
+
+
+def _graph_interaction_metadata(
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    current = current or {}
+    focus_node_id = focus_node_id_from_current(current, nodes) if current else None
+    current_branch_ids = set(str(node_id) for node_id in current.get("current_focus_path", []) or [])
+    if focus_node_id and focus_node_id in nodes:
+        current_branch_ids.add(focus_node_id)
+        current_branch_ids.update(_graph_descendant_ids(nodes, focus_node_id))
+
+    metadata: dict[str, dict[str, Any]] = {}
+    for node in nodes.values():
+        path = _safe_node_path(nodes, node.id)
+        stage_id = _node_id_by_type_in_path(nodes, path, "stage")
+        problem_id = _node_id_by_type_in_path(nodes, path, "problem", nearest=True)
+        option_id = _node_id_by_type_in_path(nodes, path, "option", nearest=True)
+        upstream_problem_id = None
+        if option_id and option_id in nodes:
+            option_path = _safe_node_path(nodes, option_id)
+            upstream_problem_id = _node_id_by_type_in_path(nodes, option_path, "problem", nearest=True)
+
+        metadata[node.id] = {
+            "stage_id": stage_id,
+            "problem_id": problem_id,
+            "option_workstream_id": option_id,
+            "option_workstream_upstream_problem_id": upstream_problem_id,
+            "in_current_branch": node.id in current_branch_ids,
+            "has_blockers": bool(node.raw.get("blockers")),
+            "has_next_actions": bool(node.raw.get("next_actions")),
+            "has_evidence": _node_has_evidence(node),
+        }
+    return metadata
+
+
+def _graph_available_filters(nodes: list[dict[str, Any]]) -> dict[str, list[str]]:
+    fields = {
+        "types": "type",
+        "statuses": "status",
+        "stages": "stage_id",
+        "problems": "problem_id",
+        "focus_roles": "focus_role",
+        "workstreams": "option_workstream_id",
+        "priorities": "priority",
+    }
+    out: dict[str, list[str]] = {}
+    for key, field_name in fields.items():
+        values = sorted(
+            {
+                str(node[field_name])
+                for node in nodes
+                if node.get(field_name) not in (None, "")
+            }
+        )
+        out[key] = values
+    return out
+
+
 def _focus_graph_metadata(
     nodes: dict[str, ResearchNode],
     current_focus_path: list[str],
@@ -468,6 +780,7 @@ def graph_to_json(
     current_focus_path = current_focus_path or []
     focus_set = set(current_focus_path)
     focus_metadata = _focus_graph_metadata(nodes, current_focus_path, current)
+    interaction_metadata = _graph_interaction_metadata(nodes, current)
     current_focus_node = focus_node_id_from_current(current or {}, nodes) if current else None
 
     out_nodes = []
@@ -485,6 +798,7 @@ def graph_to_json(
             "shape": TYPE_SHAPES.get(node.type, "box"),
             "is_focus": node.id in focus_set,
             **focus_metadata.get(node.id, {}),
+            **interaction_metadata.get(node.id, {}),
             "raw": node.raw,
         })
     out_edges = iter_graph_edges(nodes, explicit_edges)
@@ -494,6 +808,7 @@ def graph_to_json(
         "current_focus_path": current_focus_path,
         "current_focus_node": current_focus_node,
         "focus_mode": focus_mode_from_current(current or {}),
+        "available_filters": _graph_available_filters(out_nodes),
     }
 
 
@@ -1736,6 +2051,8 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         "active_option_workstreams": [
             row for row in option_workstreams if row.get("workstream_status") in ACTIVE_WORKSTREAM_STATUSES
         ],
+        "saved_graph_views": load_graph_views(root),
+        "recent_interactions": recent_interactions(root),
         "suggested_next_actions": build_action_suggestions(root, nodes, current),
         "search_index_summary": build_search_index_summary(search_index),
     }
@@ -1939,6 +2256,8 @@ def build_focus_context(
         "suggested_next_actions": suggested_next_actions,
         "search_index_summary": build_search_index_summary(search_index),
         "option_workstream_context": option_workstream_context,
+        "saved_graph_views": load_graph_views(root),
+        "recent_interactions": recent_interactions(root),
     }
 
 
@@ -1960,6 +2279,8 @@ def build_current_state_payload(root: Path, nodes: dict[str, ResearchNode], curr
         "open_risks": current.get("open_risks", []),
         "next_actions": current.get("next_actions", []),
         "updated_at": current.get("updated_at"),
+        "saved_graph_views": load_graph_views(root),
+        "recent_interactions": recent_interactions(root),
         "linked_nodes": [
             node_context(nodes[node_id])
             for node_id in current.get("current_focus_path", []) or []

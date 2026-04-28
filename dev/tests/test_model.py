@@ -34,6 +34,10 @@ from cockpit.model import (
     build_suggestion_lifecycle_summary,
     derive_focus_path,
     graph_to_json,
+    append_interaction_log,
+    graph_view_id_from_title,
+    load_graph_views,
+    load_interaction_log,
     load_explicit_edges,
     load_yaml,
     load_nodes,
@@ -41,6 +45,7 @@ from cockpit.model import (
     python_command,
     save_yaml,
     search_knowledge,
+    upsert_graph_view,
     validate_cockpit,
 )
 
@@ -333,6 +338,140 @@ class ModelValidationTests(unittest.TestCase):
         self.assertFalse(graph_nodes["option_old"]["is_focus_visible"])
         self.assertTrue(graph_nodes["option_old"]["is_hidden_by_focus"])
 
+    def test_graph_json_adds_interaction_facets(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["blockers"] = ["Need annotation policy"]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["agent_workstream"] = {
+            "owner": "agent_t5",
+            "status": "claimed",
+            "objective": "Evaluate T5 path",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["findings"] = [
+            {
+                "id": "exp_t5_finding_001",
+                "statement": "T5 helps.",
+                "confidence": "medium",
+                "outcome": "positive",
+            }
+        ]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "problem_text"
+        nodes = load_nodes(self.root)
+
+        graph = graph_to_json(nodes, current["current_focus_path"], current)
+        graph_nodes = {node["id"]: node for node in graph["nodes"]}
+
+        self.assertEqual(graph_nodes["problem_text"]["stage_id"], "stage_text")
+        self.assertEqual(graph_nodes["option_t5"]["problem_id"], "problem_text")
+        self.assertEqual(graph_nodes["exp_t5"]["option_workstream_id"], "option_t5")
+        self.assertTrue(graph_nodes["problem_text"]["has_blockers"])
+        self.assertTrue(graph_nodes["exp_t5"]["has_evidence"])
+        self.assertFalse(graph_nodes["decision_t5"]["has_evidence"])
+        self.assertTrue(graph_nodes["option_t5"]["in_current_branch"])
+        self.assertIn("stage_text", graph["available_filters"]["stages"])
+        self.assertIn("option_t5", graph["available_filters"]["workstreams"])
+
+    def test_interaction_log_appends_events(self) -> None:
+        event = append_interaction_log(
+            self.root,
+            kind="set_focus",
+            actor="researcher",
+            node_id="problem_text",
+            command="python scripts\\set_focus.py --focus-node problem_text",
+            before={"current_focus_node": "option_t5"},
+            after={"current_focus_node": "problem_text"},
+        )
+
+        log = load_interaction_log(self.root)
+
+        self.assertEqual(event["kind"], "set_focus")
+        self.assertEqual(log["events"][0]["node_id"], "problem_text")
+        self.assertEqual(log["events"][0]["before"]["current_focus_node"], "option_t5")
+
+    def test_load_graph_views_handles_missing_and_invalid_data(self) -> None:
+        self.assertEqual(load_graph_views(self.root), [])
+
+        save_yaml(self.root / "graph" / "graph_views.yaml", {"version": 1, "views": "bad"})
+        self.assertEqual(load_graph_views(self.root), [])
+
+        save_yaml(
+            self.root / "graph" / "graph_views.yaml",
+            {
+                "version": 1,
+                "views": [
+                    "bad",
+                    {
+                        "id": "Bad View!",
+                        "title": "Branch blockers",
+                        "scope": "unknown",
+                        "filters": {
+                            "node_types": ["problem", "", "problem"],
+                            "statuses": "active",
+                            "only_blocking": "yes",
+                        },
+                        "saved_focus_node_id": "problem_text",
+                        "saved_focus_path": ["stage_text", None, "problem_text"],
+                    },
+                ],
+            },
+        )
+
+        views = load_graph_views(self.root)
+
+        self.assertEqual(len(views), 1)
+        self.assertEqual(views[0]["id"], "bad_view")
+        self.assertEqual(views[0]["scope"], "focus_depth_2")
+        self.assertEqual(views[0]["filters"]["node_types"], ["problem"])
+        self.assertEqual(views[0]["filters"]["statuses"], ["active"])
+        self.assertTrue(views[0]["filters"]["only_blocking"])
+        self.assertFalse(views[0]["filters"]["only_next_actions"])
+        self.assertEqual(views[0]["saved_focus_path"], ["stage_text", "problem_text"])
+
+    def test_upsert_graph_view_preserves_created_at_and_logs_event(self) -> None:
+        first = upsert_graph_view(
+            self.root,
+            {
+                "title": "Current Branch Blockers",
+                "scope": "current_branch",
+                "filters": {
+                    "node_types": ["problem", "option"],
+                    "statuses": ["active", "open"],
+                    "only_blocking": True,
+                },
+                "saved_focus_node_id": "problem_text",
+                "saved_focus_path": ["stage_text", "problem_text"],
+            },
+        )
+
+        second = upsert_graph_view(
+            self.root,
+            {
+                "id": first["id"],
+                "title": "Current Branch Blockers",
+                "scope": "global",
+                "filters": {"node_types": ["stage"], "only_blocking": False},
+            },
+        )
+        views = load_graph_views(self.root)
+        log = load_interaction_log(self.root)
+
+        self.assertEqual(first["id"], "current_branch_blockers")
+        self.assertEqual(len(views), 1)
+        self.assertEqual(second["created_at"], first["created_at"])
+        self.assertEqual(views[0]["scope"], "global")
+        self.assertEqual(log["events"][-1]["kind"], "save_graph_view")
+        self.assertEqual(log["events"][-1]["view_id"], first["id"])
+        self.assertIn("filters", log["events"][-1])
+
+    def test_graph_view_id_from_title_falls_back_for_non_ascii_title(self) -> None:
+        self.assertEqual(graph_view_id_from_title("Current Branch Blockers"), "current_branch_blockers")
+        self.assertTrue(graph_view_id_from_title("当前分支", "2026-04-28T00:00:00Z").startswith("graph_view_"))
+
     def test_agent_context_resolves_focus_node_details(self) -> None:
         nodes = load_nodes(self.root)
 
@@ -341,6 +480,23 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(context["current_stage"], "stage_text")
         self.assertEqual(context["current_stage_title"], "Text")
         self.assertEqual(context["linked_nodes"][0]["title"], "Text")
+
+    def test_context_packs_include_saved_graph_views(self) -> None:
+        upsert_graph_view(
+            self.root,
+            {
+                "title": "Current Branch",
+                "scope": "current_branch",
+                "filters": {"node_types": ["problem"]},
+            },
+        )
+        nodes = load_nodes(self.root)
+
+        context = build_agent_context(self.root, nodes)
+        focus_context = build_focus_context(self.root, nodes)
+
+        self.assertEqual(context["saved_graph_views"][0]["id"], "current_branch")
+        self.assertEqual(focus_context["saved_graph_views"][0]["scope"], "current_branch")
 
     def test_link_rows_parse_node_links_and_resource_paths(self) -> None:
         note_path = self.root / "notes" / "problems" / "problem_text.md"
