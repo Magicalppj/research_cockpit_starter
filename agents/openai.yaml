@@ -1,0 +1,6 @@
+display_name: Research Cockpit
+short_description: Inspect and update a YAML-backed research cockpit with generated agent context packs.
+default_prompt: >
+  Start with python scripts\agent_bootstrap.py --json. Read the generated
+  context packs before editing. Use workflow scripts for supported YAML writes,
+  then run validation and rebuild dashboard context.

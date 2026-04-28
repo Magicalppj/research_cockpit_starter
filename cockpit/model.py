@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 import hashlib
+import os
 import re
+import subprocess
 import yaml
 import networkx as nx
 
@@ -35,6 +37,7 @@ ALL_KNOWN_STATUSES = {status for statuses in VALID_STATUSES_BY_TYPE.values() for
 VALID_FINDING_CONFIDENCES = {"weak", "medium", "strong"}
 VALID_FINDING_OUTCOMES = {"positive", "negative", "mixed", "inconclusive"}
 VALID_SUGGESTION_LIFECYCLE_STATES = {"active", "dismissed", "completed"}
+CONTEXT_SCHEMA_VERSION = "agent_context_v1"
 
 SEARCH_NODE_TEXT_FIELDS = (
     "question",
@@ -783,10 +786,46 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
     return rows
 
 
-def _workflow_command(script_name: str, *parts: str) -> str:
-    command = [r"D:\Tools\miniconda3\envs\aigc\python.exe", fr"scripts\{script_name}"]
+def python_command() -> str:
+    return os.environ.get("RESEARCH_COCKPIT_PYTHON", "").strip() or "python"
+
+
+def script_command(script_name: str, *parts: str) -> str:
+    command = [python_command(), fr"scripts\{script_name}"]
     command.extend(parts)
     return " ".join(str(part) for part in command if part not in ("", None))
+
+
+def _workflow_command(script_name: str, *parts: str) -> str:
+    return script_command(script_name, *parts)
+
+
+def _git_output(repo_root: Path, *args: str) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, ValueError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def build_context_metadata(root: Path, current: dict[str, Any]) -> dict[str, Any]:
+    repo_root = root.parent
+    status = _git_output(repo_root, "status", "--porcelain")
+    return {
+        "schema_version": CONTEXT_SCHEMA_VERSION,
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "source_git_commit": _git_output(repo_root, "rev-parse", "--short", "HEAD"),
+        "worktree_dirty": bool(status),
+        "current_state_updated_at": current.get("updated_at"),
+    }
 
 
 def _priority_rank(priority: str | None) -> int:
@@ -1595,6 +1634,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
     search_index = build_search_index(root, nodes, current)
 
     return {
+        "metadata": build_context_metadata(root, current),
         "project_name": "Audio Edit Research Cockpit",
         "current_stage": current.get("current_stage"),
         "current_stage_title": node_title(nodes, current.get("current_stage")),
@@ -1793,6 +1833,7 @@ def build_focus_context(
     search_index = build_search_index(root, nodes, current)
 
     return {
+        "metadata": build_context_metadata(root, current),
         "focus_node": node_context(focus_node) if focus_node else None,
         "focus_path": _ordered_node_contexts(nodes, path_ids),
         "focus_path_ids": path_ids,

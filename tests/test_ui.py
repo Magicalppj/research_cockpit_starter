@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 import unittest
@@ -252,12 +253,24 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(edge_style_for_type("unknown")["color"], "#888888")
 
     def test_workflow_command_templates_are_copyable(self) -> None:
+        previous = os.environ.pop("RESEARCH_COCKPIT_PYTHON", None)
+        self.addCleanup(
+            lambda: (
+                os.environ.__setitem__("RESEARCH_COCKPIT_PYTHON", previous)
+                if previous is not None
+                else os.environ.pop("RESEARCH_COCKPIT_PYTHON", None)
+            )
+        )
         finding_command = build_record_finding_command("exp_t5")
         decision_command = build_promote_decision_command("option_t5")
         check_command = build_check_decision_acceptance_command("decision_t5")
         accept_command = build_accept_decision_command("decision_t5")
         note_command = build_create_note_command("problem_text")
+        commands = [finding_command, decision_command, check_command, accept_command, note_command]
 
+        self.assertTrue(all(command.startswith("python scripts\\") for command in commands))
+        self.assertFalse(any("D:\\Tools" in command for command in commands))
+        self.assertFalse(any("miniconda" in command.lower() for command in commands))
         self.assertIn("scripts\\record_finding.py", finding_command)
         self.assertIn("--experiment exp_t5", finding_command)
         self.assertIn("--confidence medium", finding_command)
@@ -270,6 +283,21 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("--id decision_t5", accept_command)
         self.assertIn("scripts\\create_note.py", note_command)
         self.assertIn("--node problem_text", note_command)
+
+    def test_workflow_command_templates_use_python_env_override(self) -> None:
+        previous = os.environ.get("RESEARCH_COCKPIT_PYTHON")
+        os.environ["RESEARCH_COCKPIT_PYTHON"] = "uv run python"
+        self.addCleanup(
+            lambda: (
+                os.environ.__setitem__("RESEARCH_COCKPIT_PYTHON", previous)
+                if previous is not None
+                else os.environ.pop("RESEARCH_COCKPIT_PYTHON", None)
+            )
+        )
+
+        command = build_record_finding_command("exp_t5")
+
+        self.assertTrue(command.startswith("uv run python scripts\\record_finding.py"))
 
     def test_format_finding_rows_keeps_missing_fields_readable(self) -> None:
         rows = format_finding_rows([

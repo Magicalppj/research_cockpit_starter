@@ -5,6 +5,7 @@ import unittest
 import uuid
 from datetime import date
 from pathlib import Path
+import os
 import sys
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -24,6 +25,7 @@ from cockpit.model import (
     build_link_rows,
     build_search_index,
     build_search_index_summary,
+    build_context_metadata,
     build_suggestion_lifecycle_rows,
     build_suggestion_lifecycle_summary,
     derive_focus_path,
@@ -32,6 +34,7 @@ from cockpit.model import (
     load_yaml,
     load_nodes,
     node_context,
+    python_command,
     save_yaml,
     search_knowledge,
     validate_cockpit,
@@ -604,6 +607,46 @@ class ModelValidationTests(unittest.TestCase):
         self.assertFalse(by_action["Node queued action"]["queued_in_current"])
         self.assertTrue(by_action["Node queued action"]["queued_in_node"])
         self.assertEqual([item["id"] for item in suggestions], [f"next_action_{index:03d}" for index in range(1, len(suggestions) + 1)])
+
+    def test_action_suggestions_generate_public_commands(self) -> None:
+        previous = os.environ.pop("RESEARCH_COCKPIT_PYTHON", None)
+        try:
+            nodes = load_nodes(self.root)
+            current = load_yaml(self.root / "current_state.yaml")
+
+            suggestions = build_action_suggestions(self.root, nodes, current)
+            commands = [item["suggested_command"] for item in suggestions if item.get("suggested_command")]
+
+            self.assertEqual(python_command(), "python")
+            self.assertTrue(commands)
+            self.assertTrue(all(command.startswith("python scripts\\") for command in commands))
+            self.assertFalse(any("D:\\Tools" in command for command in commands))
+            self.assertFalse(any("miniconda" in command.lower() for command in commands))
+        finally:
+            if previous is not None:
+                os.environ["RESEARCH_COCKPIT_PYTHON"] = previous
+
+    def test_python_command_allows_environment_override(self) -> None:
+        previous = os.environ.get("RESEARCH_COCKPIT_PYTHON")
+        os.environ["RESEARCH_COCKPIT_PYTHON"] = "uv run python"
+        try:
+            self.assertEqual(python_command(), "uv run python")
+        finally:
+            if previous is None:
+                os.environ.pop("RESEARCH_COCKPIT_PYTHON", None)
+            else:
+                os.environ["RESEARCH_COCKPIT_PYTHON"] = previous
+
+    def test_context_metadata_contains_freshness_fields(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+
+        metadata = build_context_metadata(self.root, current)
+
+        self.assertEqual(metadata["schema_version"], "agent_context_v1")
+        self.assertIn("generated_at", metadata)
+        self.assertIn("source_git_commit", metadata)
+        self.assertIsInstance(metadata["worktree_dirty"], bool)
+        self.assertEqual(metadata["current_state_updated_at"], current.get("updated_at"))
 
     def test_action_suggestions_use_stable_keys_and_filter_lifecycle_states(self) -> None:
         nodes = load_nodes(self.root)

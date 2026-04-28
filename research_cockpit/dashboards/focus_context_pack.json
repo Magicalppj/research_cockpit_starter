@@ -1,4 +1,11 @@
 {
+  "metadata": {
+    "schema_version": "agent_context_v1",
+    "generated_at": "2026-04-28T04:19:06.651532Z",
+    "source_git_commit": "53a30e0",
+    "worktree_dirty": false,
+    "current_state_updated_at": "2026-04-27"
+  },
   "focus_node": {
     "id": "problem_event_text_weak",
     "type": "problem",
@@ -545,7 +552,7 @@
       "related_node_ids": [
         "stage_text_encoder"
       ],
-      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id problem_event_text_weak --status blocked",
+      "suggested_command": "python scripts\\update_status.py --id problem_event_text_weak --status blocked",
       "is_focus_related": true,
       "key": "sg_06faae6937c0c44d",
       "lifecycle_state": "active",
@@ -565,7 +572,7 @@
       "related_node_ids": [
         "stage_text_encoder"
       ],
-      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id problem_event_text_weak --status blocked",
+      "suggested_command": "python scripts\\update_status.py --id problem_event_text_weak --status blocked",
       "is_focus_related": true,
       "key": "sg_fcf7b1cbb32353d4",
       "lifecycle_state": "active",
@@ -585,7 +592,7 @@
       "related_node_ids": [
         "option_flan_t5_clap"
       ],
-      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id exp_041_flan_t5_only --status running",
+      "suggested_command": "python scripts\\update_status.py --id exp_041_flan_t5_only --status running",
       "is_focus_related": true,
       "key": "sg_edbf4e9688e94be9",
       "lifecycle_state": "active",
@@ -605,7 +612,7 @@
       "related_node_ids": [
         "option_flan_t5_clap"
       ],
-      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_status.py --id exp_042_flan_t5_clap --status running",
+      "suggested_command": "python scripts\\update_status.py --id exp_042_flan_t5_clap --status running",
       "is_focus_related": true,
       "key": "sg_74ba5dfb1155457c",
       "lifecycle_state": "active",
@@ -625,7 +632,7 @@
       "related_node_ids": [
         "option_flan_t5_clap"
       ],
-      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_decision_evidence.py --id decision_flan_t5_clap",
+      "suggested_command": "python scripts\\update_decision_evidence.py --id decision_flan_t5_clap",
       "is_focus_related": true,
       "key": "sg_782b4b88cbb686c4",
       "lifecycle_state": "active",
@@ -645,7 +652,7 @@
       "related_node_ids": [
         "option_gemma_baseline"
       ],
-      "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\record_finding.py --experiment exp_001_demo200_gemma --statement \"Describe the finding\" --confidence medium",
+      "suggested_command": "python scripts\\record_finding.py --experiment exp_001_demo200_gemma --statement \"Describe the finding\" --confidence medium",
       "is_focus_related": true,
       "key": "sg_1b6a38e73eb8d4a1",
       "lifecycle_state": "active",

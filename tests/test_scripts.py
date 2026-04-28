@@ -15,11 +15,13 @@ sys.path.insert(0, str(ROOT_DIR))
 from cockpit.model import load_nodes, load_yaml, save_yaml
 from scripts.accept_decision import accept_decision
 from scripts.add_node import add_node
+from scripts.agent_bootstrap import agent_bootstrap_payload
 from scripts.apply_suggestion import apply_suggestion
 from scripts.build_dashboard import build_dashboard
 from scripts.check_decision_acceptance import decision_acceptance_payload
 from scripts.cleanup_suggestion_lifecycle import cleanup_suggestion_lifecycle
 from scripts.create_note import create_note
+from scripts.list_agent_commands import agent_command_manifest
 from scripts.promote_decision import promote_decision
 from scripts.record_finding import record_finding
 from scripts.set_focus import set_focus
@@ -232,6 +234,68 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIsInstance(search_index, list)
         self.assertIsInstance(checklists, list)
         self.assertIn("stage_text", nodes)
+        self.assertIn("metadata", context)
+        self.assertIn("metadata", focus_context)
+        self.assertIsInstance(context["metadata"]["worktree_dirty"], bool)
+
+    def test_agent_bootstrap_payload_reports_context_without_building_by_default(self) -> None:
+        payload = agent_bootstrap_payload(self.root, build=False)
+
+        self.assertTrue(payload["validation"]["ok"])
+        self.assertEqual(payload["focus"]["current_focus_node"], "problem_text")
+        self.assertFalse(payload["context_paths"]["agent_context_pack"]["exists"])
+        self.assertIn("top_suggestions", payload)
+        self.assertIn("search_summary", payload)
+        self.assertIsInstance(payload["git"]["worktree_dirty"], bool)
+
+    def test_agent_bootstrap_cli_json_builds_when_requested(self) -> None:
+        script = ROOT_DIR / "scripts" / "agent_bootstrap.py"
+
+        default_out = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        build_out = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--json", "--build"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(default_out.returncode, 0)
+        self.assertEqual(build_out.returncode, 0)
+        default_payload = json.loads(default_out.stdout)
+        build_payload = json.loads(build_out.stdout)
+        self.assertTrue(default_payload["validation"]["ok"])
+        self.assertTrue(build_payload["context_paths"]["agent_context_pack"]["exists"])
+        self.assertTrue((self.root / "dashboards" / "agent_context_pack.json").exists())
+
+    def test_list_agent_commands_manifest_marks_mutating_scripts(self) -> None:
+        manifest = agent_command_manifest()
+        by_name = {item["name"]: item for item in manifest}
+
+        self.assertFalse(by_name["validate_cockpit.py"]["mutating"])
+        self.assertFalse(by_name["search_knowledge.py"]["mutating"])
+        self.assertTrue(by_name["record_finding.py"]["mutating"])
+        self.assertTrue(by_name["record_finding.py"]["supports_no_build"])
+        self.assertTrue(by_name["cleanup_suggestion_lifecycle.py"]["supports_dry_run"])
+
+    def test_list_agent_commands_cli_outputs_json(self) -> None:
+        script = ROOT_DIR / "scripts" / "list_agent_commands.py"
+
+        out = subprocess.run(
+            [sys.executable, str(script), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0)
+        payload = json.loads(out.stdout)
+        self.assertIn("commands", payload)
+        self.assertIn("record_finding.py", {item["name"] for item in payload["commands"]})
 
     def test_create_note_generates_note_links_node_and_rebuilds_dashboard(self) -> None:
         note_path = create_note(self.root, node_id="problem_text")

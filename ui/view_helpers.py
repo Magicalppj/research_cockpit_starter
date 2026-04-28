@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from cockpit.model import search_knowledge
+from cockpit.model import script_command, search_knowledge
 
 
 def ordered_tab_labels(text: dict[str, str]) -> list[str]:
@@ -35,7 +35,7 @@ def format_node_option(nodes: dict, node_id: str) -> str:
 
 
 def build_set_focus_command(current: dict, focus_node_id: str) -> str:
-    parts = [r"D:\Tools\miniconda3\envs\aigc\python.exe", r"scripts\set_focus.py"]
+    parts = [script_command("set_focus.py")]
     for field, flag in (
         ("current_stage", "--stage"),
         ("current_problem", "--problem"),
@@ -50,7 +50,7 @@ def build_set_focus_command(current: dict, focus_node_id: str) -> str:
 
 def build_record_finding_command(experiment_id: str) -> str:
     return (
-        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\record_finding.py"
+        f"{script_command('record_finding.py')}"
         f" --experiment {experiment_id}"
         ' --statement "Describe the finding"'
         " --confidence medium"
@@ -60,7 +60,7 @@ def build_record_finding_command(experiment_id: str) -> str:
 
 def build_promote_decision_command(option_id: str) -> str:
     return (
-        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\promote_decision.py"
+        f"{script_command('promote_decision.py')}"
         " --id decision_new"
         f" --option {option_id}"
         ' --title "Decision title"'
@@ -71,28 +71,28 @@ def build_promote_decision_command(option_id: str) -> str:
 
 def build_check_decision_acceptance_command(decision_id: str) -> str:
     return (
-        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\check_decision_acceptance.py"
+        f"{script_command('check_decision_acceptance.py')}"
         f" --id {decision_id}"
     )
 
 
 def build_accept_decision_command(decision_id: str) -> str:
     return (
-        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\accept_decision.py"
+        f"{script_command('accept_decision.py')}"
         f" --id {decision_id}"
     )
 
 
 def build_create_note_command(node_id: str) -> str:
     return (
-        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\create_note.py"
+        f"{script_command('create_note.py')}"
         f" --node {node_id}"
     )
 
 
 def build_apply_suggestion_command(suggestion_id: str, target: str = "current") -> str:
     return (
-        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\apply_suggestion.py"
+        f"{script_command('apply_suggestion.py')}"
         f" --id {suggestion_id}"
         f" --target {target}"
     )
@@ -100,7 +100,7 @@ def build_apply_suggestion_command(suggestion_id: str, target: str = "current") 
 
 def build_update_suggestion_state_command(suggestion_id: str, state: str) -> str:
     return (
-        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\update_suggestion_state.py"
+        f"{script_command('update_suggestion_state.py')}"
         f" --id {suggestion_id}"
         f" --state {state}"
     )
@@ -112,7 +112,7 @@ def build_cleanup_suggestion_lifecycle_command(
     state: str = "all",
     older_than_days: int | None = None,
 ) -> str:
-    command = r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\cleanup_suggestion_lifecycle.py"
+    command = script_command("cleanup_suggestion_lifecycle.py")
     if dry_run:
         command += " --dry-run"
     command += f" --state {state}"

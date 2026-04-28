@@ -251,8 +251,8 @@ Streamlit 页面现在包含：
 当前验证命令：
 
 ```powershell
-D:\Tools\miniconda3\envs\aigc\python.exe -m unittest discover -s tests
-D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
+python -m unittest discover -s tests
+python scripts\build_dashboard.py
 ```
 
 ## 当前技术决策
@@ -518,3 +518,24 @@ v2 P0 阶段完成后，应满足：
 - decision acceptance checklist 后续增强：在 UI 中给出缺失项修复提示，或记录 acceptance 历史。
 - resource indexing 策略微调：按项目需要评估是否纳入代码文件或调整大小策略。
 - 前端图谱交互升级：为后续可点击展开、编辑节点文本和可能的前端迁移继续拆分接口边界。
+
+## Agent Skill Packaging v1 更新（2026-04-28）
+
+本批把项目整理为更适合 agent 调用和开源复用的 skill-ready 形态，重点去除本机私有解释器路径，统一使用通用 `python` 命令，并允许通过 `RESEARCH_COCKPIT_PYTHON` 覆盖。
+
+已完成：
+
+- 新增 `cockpit.model.python_command(...)` / `script_command(...)`，统一生成脚本命令模板；UI、action suggestions 和 context pack 不再写入本机私有 Python 路径。
+- `agent_context_pack.json` 和 `focus_context_pack.json` 增加 `metadata`，包含 schema version、生成时间、git commit、worktree dirty 状态和 `current_state.updated_at`。
+- 新增 `scripts/agent_bootstrap.py --json [--build]`，作为 agent 启动入口，输出 validation、focus、context 路径、Top suggestions、search summary 和 git 状态。
+- 新增 `scripts/list_agent_commands.py --json`，列出主要脚本的用途、是否写入、是否支持 `--json` / `--dry-run` / `--no-build`。
+- 新增根目录 `AGENTS.md` 和 `SKILL.md`，记录 agent 工作边界、读取顺序、写入规则和验证命令。
+- 新增 `agents/openai.yaml`，为后续安装为 agent skill 提供展示名和默认说明。
+- README 已补充 “Using as Agent Skill” 流程，所有公开命令示例改为通用 `python`。
+- 新增公开化扫描测试，禁止 README、docs、`cockpit/`、`ui/`、`scripts/` 和 dashboard JSON 中出现真实本机路径或用户名。
+
+下一批候选：
+
+- dry-run coverage 扩展：让更多写入脚本支持预览变更。
+- decision acceptance UI 修复提示：在 checklist 缺项时给出对应脚本或 YAML 字段建议。
+- 前端图谱交互升级：为可点击展开节点、编辑节点文本和更换前端框架继续收拢数据接口。
