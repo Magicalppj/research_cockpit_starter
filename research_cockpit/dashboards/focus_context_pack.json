@@ -657,9 +657,13 @@
     }
   ],
   "search_index_summary": {
-    "entry_count": 18,
+    "entry_count": 19,
     "note_count": 0,
     "node_count": 18,
+    "resource_count": 0,
+    "resource_truncated_count": 0,
+    "resource_skipped_count": 1,
+    "focus_resource_count": 0,
     "unlinked_note_count": 0,
     "focus_entry_count": 8,
     "focus_entries": [

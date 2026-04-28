@@ -133,7 +133,7 @@
 
 ## 当前阶段
 
-当前项目处于 **Decision Acceptance Checklist v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索；第十二批已完成 decision 接受质量门。
+当前项目处于 **Linked Resource Text Indexing v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索；第十二批已完成 decision 接受质量门；第十三批已完成本地 linked resource 正文索引。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
@@ -412,7 +412,7 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 4. Action Guidance UI 生命周期过滤和写回入口。
 5. Data Health suggestion lifecycle 摘要。
 
-下一批建议进入“索引扩展与历史维护”层：linked resource text indexing、suggestion lifecycle 历史清理、decision acceptance checklist 后续增强。
+下一批建议进入“历史维护与决策体验增强”层：suggestion lifecycle 历史清理、decision acceptance checklist 后续增强、资源索引策略微调。
 
 ## 后续可优化
 
@@ -479,3 +479,24 @@ v2 P0 阶段完成后，应满足：
 - linked resource text indexing：把受控类型的本地 linked files/config 纳入搜索索引。
 - suggestion lifecycle cleanup：清理长期 orphan 的 suggestion lifecycle 历史记录。
 - decision acceptance checklist 后续增强：增加 UI 中的缺失项修复提示或 acceptance 历史记录。
+
+## Linked Resource Text Indexing v1 更新（2026-04-28）
+
+本批把安全的本地 linked resources 正文纳入轻量搜索索引，让 Search 页和 agent 能检索 notes/YAML 之外的配置、数据说明和轻量文本产物。范围保持保守：不引入新依赖，不索引外部 URL、run id、绝对路径或二进制文件，也不把资源正文反向解析为结构化状态。
+
+已完成：
+
+- `build_search_index(...)` 新增 `source="resource"` 条目，复用 `build_link_rows(...)` 中的 `links.*`、`config_path` 和 `path` 等本地相对路径。
+- 资源正文索引仅允许 `.md`、`.txt`、`.yaml`、`.yml`、`.json`、`.toml`、`.csv`、`.tsv`；`notes/**/*.md` 仍作为 `note` source，避免重复索引。
+- 单个资源最多读取 128KB，超过时设置 `truncated=True`，并记录 `bytes_read`。
+- 跳过 URL、run id、绝对路径、缺失文件、unsupported suffix、linked artifact id 等资源，并在 entry metadata 中记录 `skip_reason`，但不作为校验失败。
+- `build_search_index_summary(...)` 增加 resource count、truncated count、skipped count 和 focus resource count。
+- `scripts/search_knowledge.py --source resource` 已可搜索 indexed resource。
+- Search 页会自动出现 resource source；Resources 页显示资源是否已索引、是否截断和跳过原因；Data Health 增加 resource text index 摘要。
+- README 已补充资源正文索引范围、允许类型、128KB 截断策略和 `--source resource` 示例。
+
+下一批候选：
+
+- suggestion lifecycle cleanup：清理长期 orphan 的 suggestion lifecycle 历史记录。
+- decision acceptance checklist 后续增强：增加 UI 缺失项修复提示或 acceptance 历史记录。
+- resource indexing 策略微调：按项目需要评估是否纳入代码文件或更细的文件大小策略。

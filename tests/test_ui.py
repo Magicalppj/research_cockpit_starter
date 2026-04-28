@@ -32,6 +32,7 @@ from ui.view_helpers import (
     filter_search_results,
     filter_node_ids,
     format_node_option,
+    format_resource_index_rows,
     format_search_result_rows,
     ordered_tab_labels,
 )
@@ -317,6 +318,38 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(rows[1]["exists"], "unknown")
         self.assertEqual(rows[2]["exists"], "missing")
 
+    def test_format_resource_index_rows_marks_indexed_truncated_and_skipped(self) -> None:
+        rows = format_resource_index_rows(
+            [
+                {"node_id": "problem_text", "label": "context", "target": "resources/context.txt", "exists": True},
+                {"node_id": "problem_text", "label": "plot", "target": "figures/plot.png", "exists": True},
+            ],
+            [
+                {
+                    "source": "resource",
+                    "node_id": "problem_text",
+                    "resource_label": "context",
+                    "target": "resources/context.txt",
+                    "truncated": True,
+                    "skip_reason": "",
+                },
+                {
+                    "source": "resource",
+                    "node_id": "problem_text",
+                    "resource_label": "plot",
+                    "target": "figures/plot.png",
+                    "truncated": False,
+                    "skip_reason": "unsupported_extension",
+                },
+            ],
+        )
+
+        self.assertEqual(rows[0]["indexed"], "yes")
+        self.assertEqual(rows[0]["truncated"], "yes")
+        self.assertEqual(rows[0]["skip_reason"], "")
+        self.assertEqual(rows[1]["indexed"], "")
+        self.assertEqual(rows[1]["skip_reason"], "unsupported_extension")
+
     def test_action_suggestion_helpers_format_and_filter_rows(self) -> None:
         suggestions = [
             {
@@ -398,13 +431,27 @@ class UiRenderingTests(unittest.TestCase):
                 "updated_at": "",
                 "is_focus_related": False,
             },
+            {
+                "entry_id": "resource:problem_text:context:resources/context.txt",
+                "source": "resource",
+                "node_id": "problem_text",
+                "node_type": "problem",
+                "node_title": "Weak text",
+                "title": "context",
+                "path": "resources/context.txt",
+                "text": "Needle appears in a linked resource.",
+                "updated_at": "",
+                "is_focus_related": True,
+                "truncated": False,
+                "skip_reason": "",
+            },
         ]
 
-        results = filter_search_results(index, "needle", {"node"}, {"problem"}, focus_only=True, limit=5)
+        results = filter_search_results(index, "needle", {"resource"}, {"problem"}, focus_only=True, limit=5)
         rows = format_search_result_rows(results)
 
-        self.assertEqual([item["entry_id"] for item in results], ["node:problem_text"])
-        self.assertEqual(rows[0]["source"], "node")
+        self.assertEqual([item["entry_id"] for item in results], ["resource:problem_text:context:resources/context.txt"])
+        self.assertEqual(rows[0]["source"], "resource")
         self.assertEqual(rows[0]["node"], "problem_text")
         self.assertIn("Needle", rows[0]["snippet"])
 

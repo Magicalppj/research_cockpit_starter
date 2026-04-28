@@ -134,15 +134,16 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\update_suggestion_state.py --id
 
 `dismissed` and `completed` only affect suggestion visibility. They do not execute the suggested command or change the underlying experiment, decision, or resource state. `active` restores a suggestion by removing its lifecycle record.
 
-Search notes and YAML node fields:
+Search notes, YAML node fields, and indexed local resources:
 
 ```powershell
 D:\Tools\miniconda3\envs\aigc\python.exe scripts\search_knowledge.py --query t5
 D:\Tools\miniconda3\envs\aigc\python.exe scripts\search_knowledge.py --query "event text" --json --focus-only
 D:\Tools\miniconda3\envs\aigc\python.exe scripts\search_knowledge.py --query cache --source note --limit 5
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\search_knowledge.py --query cache --source resource --json
 ```
 
-`search_knowledge.py` validates cockpit data first, then searches Markdown notes under `research_cockpit/notes/**/*.md` and selected YAML node text fields. It does not parse Markdown back into structured state and does not index arbitrary linked files.
+`search_knowledge.py` validates cockpit data first, then searches Markdown notes under `research_cockpit/notes/**/*.md`, selected YAML node text fields, and safe local linked resources. Resource indexing is limited to repo-relative paths under `research_cockpit/` with these suffixes: `.md`, `.txt`, `.yaml`, `.yml`, `.json`, `.toml`, `.csv`, `.tsv`. Each resource is capped at 128KB and marked as truncated when larger. URLs, run ids, absolute paths, missing files, unsupported suffixes, and note files already indexed as notes are skipped for resource full-text search.
 
 Create a linked Markdown note:
 
@@ -180,7 +181,8 @@ Save this as `research_cockpit/graph/edges.yaml` when you need semantic edges be
 - Missing local resource paths are shown as warnings in Data Health; they do not fail validation.
 - URLs, run ids, and absolute/external paths are marked as unknown because they are not checked on the local filesystem.
 - The Research Graph detail selector has a search box over node id, title, summary, tags, status, and type.
-- The Search tab performs lightweight full-text search over Markdown notes and YAML node text fields, with filters for source, node type, focus-only results, and result limit.
+- The Search tab performs lightweight full-text search over Markdown notes, YAML node text fields, and indexed local linked resources, with filters for source, node type, focus-only results, and result limit.
+- The Resources tab shows whether a linked resource was indexed, truncated, or skipped.
 - `research_cockpit/dashboards/search_index.json` stores the generated search entries. Context packs only include `search_index_summary`, so agents see counts and nearby entries without loading full note text by default.
 
 Agents should read `agent_context_pack.json` first, then `focus_context_pack.json`. The focus context now includes a `knowledge_index` with nearby linked note/config/file paths so agents can decide which long-form notes or artifacts to open next.

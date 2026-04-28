@@ -214,5 +214,23 @@
     "text": "stage_text_encoder\nstage\nText Encoder Redesign\nactive\nhigh\nImprove event-level old/new text understanding for local audio editing.\ntext-encoder\nsemantic-control\nImplement FLAN-T5 timeline features\nAdd CLAP semantic anchor",
     "updated_at": "",
     "is_focus_related": true
+  },
+  {
+    "entry_id": "resource:dataset_v2_150:figure:figures/dataset_pipeline_v2_150.png",
+    "source": "resource",
+    "node_id": "dataset_v2_150",
+    "node_type": "artifact",
+    "node_title": "Audio Edit Dataset v2_150",
+    "title": "Audio Edit Dataset v2_150 / figure",
+    "path": "figures/dataset_pipeline_v2_150.png",
+    "text": "",
+    "updated_at": "",
+    "is_focus_related": false,
+    "resource_kind": "link",
+    "resource_label": "figure",
+    "target": "figures/dataset_pipeline_v2_150.png",
+    "truncated": false,
+    "bytes_read": 0,
+    "skip_reason": "missing"
   }
 ]

@@ -152,6 +152,31 @@ def format_resource_rows(rows: list[dict]) -> list[dict]:
     return formatted
 
 
+def format_resource_index_rows(rows: list[dict], search_index: list[dict]) -> list[dict]:
+    by_resource = {
+        (
+            str(entry.get("node_id") or ""),
+            str(entry.get("resource_label") or ""),
+            str(entry.get("target") or ""),
+        ): entry
+        for entry in search_index
+        if entry.get("source") == "resource"
+    }
+    formatted = format_resource_rows(rows)
+    for row in formatted:
+        key = (
+            str(row.get("node_id") or ""),
+            str(row.get("label") or ""),
+            str(row.get("target") or ""),
+        )
+        entry = by_resource.get(key) or {}
+        skip_reason = str(entry.get("skip_reason") or "")
+        row["indexed"] = "yes" if entry and not skip_reason else ""
+        row["truncated"] = "yes" if entry.get("truncated") else ""
+        row["skip_reason"] = skip_reason
+    return formatted
+
+
 def format_action_suggestion_rows(suggestions: list[dict]) -> list[dict]:
     formatted = []
     for suggestion in suggestions:
@@ -216,6 +241,7 @@ def format_search_result_rows(results: list[dict]) -> list[dict]:
             "node_type": result.get("node_type") or "",
             "title": result.get("title") or "",
             "path": result.get("path") or "",
+            "truncated": "yes" if result.get("truncated") else "",
             "snippet": result.get("snippet") or "",
         })
     return rows

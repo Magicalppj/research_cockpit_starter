@@ -396,6 +396,95 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(by_entry["note:notes/misc/free.md"]["node_id"], None)
         self.assertEqual(by_entry["note:notes/problems/problem_text.md"]["title"], "Problem Note")
 
+    def test_search_index_includes_local_linked_text_resources(self) -> None:
+        resource_path = self.root / "resources" / "problem_context.txt"
+        resource_path.parent.mkdir(parents=True, exist_ok=True)
+        resource_path.write_text("Resource needle for CLAP cache.\n", encoding="utf-8")
+        config_path = self.root / "configs" / "exp_t5.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text("cache: resource needle\n", encoding="utf-8")
+        note_path = self.root / "notes" / "problems" / "problem_text.md"
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.write_text("# Linked note\nDo not duplicate as resource.\n", encoding="utf-8")
+
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["links"] = {
+            "context": "resources/problem_context.txt",
+            "notes": "notes/problems/problem_text.md",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["config_path"] = "configs/exp_t5.yaml"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        index = build_search_index(self.root, nodes, current)
+        resource_entries = [entry for entry in index if entry["source"] == "resource" and not entry.get("skip_reason")]
+        resource_paths = {entry["path"] for entry in resource_entries}
+        results = search_knowledge(index, "resource needle", sources={"resource"}, focus_only=True)
+
+        self.assertIn("resources/problem_context.txt", resource_paths)
+        self.assertIn("configs/exp_t5.yaml", resource_paths)
+        self.assertNotIn("notes/problems/problem_text.md", resource_paths)
+        self.assertTrue(all(item["source"] == "resource" for item in results))
+        self.assertTrue(all(item["is_focus_related"] for item in results))
+
+    def test_search_index_tracks_skipped_resources_without_searching_them(self) -> None:
+        png_path = self.root / "figures" / "plot.png"
+        png_path.parent.mkdir(parents=True, exist_ok=True)
+        png_path.write_bytes(b"\x89PNG\r\n")
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["links"] = {
+            "external": "https://example.com/report.txt",
+            "missing": "resources/missing.txt",
+            "plot": "figures/plot.png",
+            "absolute": str((self.root / "outside.txt").resolve()),
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["run_id"] = "run-123"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        index = build_search_index(self.root, nodes, current)
+        skipped = {
+            entry["resource_label"]: entry["skip_reason"]
+            for entry in index
+            if entry["source"] == "resource" and entry.get("skip_reason")
+        }
+        results = search_knowledge(index, "example missing plot run-123", sources={"resource"})
+
+        self.assertEqual(skipped["external"], "external")
+        self.assertEqual(skipped["missing"], "missing")
+        self.assertEqual(skipped["plot"], "unsupported_extension")
+        self.assertEqual(skipped["absolute"], "absolute_path")
+        self.assertEqual(skipped["run_id"], "run_id")
+        self.assertEqual(results, [])
+
+    def test_search_index_truncates_large_resources_and_summarizes_resource_counts(self) -> None:
+        big_path = self.root / "resources" / "big.txt"
+        big_path.parent.mkdir(parents=True, exist_ok=True)
+        big_path.write_text("early needle\n" + ("x" * (140 * 1024)), encoding="utf-8")
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["links"] = {"big": "resources/big.txt"}
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        index = build_search_index(self.root, nodes, current)
+        entry = next(item for item in index if item.get("path") == "resources/big.txt")
+        summary = build_search_index_summary(index)
+        results = search_knowledge(index, "early needle", sources={"resource"})
+
+        self.assertTrue(entry["truncated"])
+        self.assertEqual(entry["bytes_read"], 128 * 1024)
+        self.assertGreaterEqual(summary["resource_count"], 1)
+        self.assertEqual(summary["resource_truncated_count"], 1)
+        self.assertGreaterEqual(summary["focus_resource_count"], 1)
+        self.assertEqual(results[0]["source"], "resource")
+
     def test_search_knowledge_matches_node_fields_case_insensitively_and_focus_only(self) -> None:
         problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
         problem["blockers"] = ["Need CLAP cache parity"]

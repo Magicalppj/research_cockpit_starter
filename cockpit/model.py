@@ -52,6 +52,9 @@ SEARCH_NODE_TEXT_FIELDS = (
     "current_conclusion",
 )
 
+RESOURCE_SEARCH_ALLOWED_SUFFIXES = {".md", ".txt", ".yaml", ".yml", ".json", ".toml", ".csv", ".tsv"}
+RESOURCE_SEARCH_MAX_BYTES = 128 * 1024
+
 DEFAULT_FOCUS_MODE = {
     "default_depth": 2,
     "hide_statuses": ["rejected", "parked", "archived"],
@@ -1137,6 +1140,127 @@ def _node_search_text(node: ResearchNode) -> str:
     return "\n".join(part for part in parts if part not in (None, ""))
 
 
+def _resource_entry_id(node_id: str, label: str, target: str) -> str:
+    return f"resource:{node_id}:{label}:{target}"
+
+
+def _resource_search_entry(
+    row: dict[str, Any],
+    *,
+    path: str,
+    text: str = "",
+    truncated: bool = False,
+    bytes_read: int = 0,
+    skip_reason: str = "",
+) -> dict[str, Any]:
+    node_id = str(row.get("node_id") or "")
+    label = str(row.get("label") or row.get("kind") or "")
+    title = f"{row.get('node_title') or node_id} / {label}".strip(" /")
+    return {
+        "entry_id": _resource_entry_id(node_id, label, path or str(row.get("target") or "")),
+        "source": "resource",
+        "node_id": node_id or None,
+        "node_type": row.get("node_type"),
+        "node_title": row.get("node_title"),
+        "title": title,
+        "path": path,
+        "text": text,
+        "updated_at": "",
+        "is_focus_related": False,
+        "resource_kind": row.get("kind"),
+        "resource_label": label,
+        "target": str(row.get("target") or ""),
+        "truncated": truncated,
+        "bytes_read": bytes_read,
+        "skip_reason": skip_reason,
+    }
+
+
+def _resource_path_under_root(root: Path, target: str) -> tuple[Path | None, str]:
+    normalized = _normalize_relative_path(target)
+    if not normalized:
+        return None, ""
+    path = Path(target)
+    if path.is_absolute():
+        return None, normalized
+    candidate = (root / normalized).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except ValueError:
+        return None, normalized
+    return candidate, normalized
+
+
+def _resource_skip_reason(
+    root: Path,
+    row: dict[str, Any],
+    normalized_note_paths: set[str],
+) -> tuple[str, Path | None, str]:
+    target = str(row.get("target") or "")
+    normalized = _normalize_relative_path(target)
+    kind = str(row.get("kind") or "")
+    if normalized in normalized_note_paths and normalized.lower().endswith(".md"):
+        return "indexed_as_note", None, normalized
+    if kind == "run_id":
+        return "run_id", None, normalized or target
+    if kind == "linked_artifact":
+        return "linked_artifact", None, normalized or target
+    if Path(target).is_absolute():
+        return "absolute_path", None, normalized or target
+    if _is_external_target(target):
+        return "external", None, normalized or target
+    path, normalized = _resource_path_under_root(root, target)
+    if path is None:
+        return "outside_root", None, normalized or target
+    if row.get("exists") is False:
+        return "missing", path, normalized
+    if row.get("exists") is not True:
+        return "unknown", path, normalized
+    if path.suffix.lower() not in RESOURCE_SEARCH_ALLOWED_SUFFIXES:
+        return "unsupported_extension", path, normalized
+    if not path.is_file():
+        return "not_file", path, normalized
+    return "", path, normalized
+
+
+def _read_resource_text(path: Path) -> tuple[str, bool, int]:
+    with path.open("rb") as handle:
+        data = handle.read(RESOURCE_SEARCH_MAX_BYTES + 1)
+    truncated = len(data) > RESOURCE_SEARCH_MAX_BYTES
+    data = data[:RESOURCE_SEARCH_MAX_BYTES]
+    return data.decode("utf-8", errors="replace"), truncated, len(data)
+
+
+def _resource_search_entries(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any],
+    note_paths: dict[str, str],
+) -> list[dict[str, Any]]:
+    focus_ids = _focus_related_ids(nodes, current) if current else set()
+    normalized_note_paths = set(note_paths)
+    entries: list[dict[str, Any]] = []
+    for row in build_link_rows(root, nodes):
+        skip_reason, path, normalized = _resource_skip_reason(root, row, normalized_note_paths)
+        if skip_reason == "indexed_as_note":
+            continue
+        if skip_reason:
+            entry = _resource_search_entry(row, path=normalized or str(row.get("target") or ""), skip_reason=skip_reason)
+        else:
+            assert path is not None
+            text, truncated, bytes_read = _read_resource_text(path)
+            entry = _resource_search_entry(
+                row,
+                path=normalized,
+                text=text,
+                truncated=truncated,
+                bytes_read=bytes_read,
+            )
+        entry["is_focus_related"] = bool(entry.get("node_id") in focus_ids)
+        entries.append(entry)
+    return entries
+
+
 def build_search_index(
     root: Path,
     nodes: dict[str, ResearchNode],
@@ -1182,6 +1306,7 @@ def build_search_index(
                 "updated_at": str(node.raw.get("updated_at") or "") if node else "",
                 "is_focus_related": bool(node and node.id in focus_ids),
             })
+    entries.extend(_resource_search_entries(root, nodes, current, note_paths))
     return entries
 
 
@@ -1253,6 +1378,12 @@ def _search_result_from_entry(entry: dict[str, Any], query: str, score: int) -> 
         "preview": make_search_snippet(text, query, width=700),
         "updated_at": entry.get("updated_at"),
         "is_focus_related": bool(entry.get("is_focus_related")),
+        "resource_kind": entry.get("resource_kind"),
+        "resource_label": entry.get("resource_label"),
+        "target": entry.get("target"),
+        "truncated": bool(entry.get("truncated")),
+        "bytes_read": entry.get("bytes_read"),
+        "skip_reason": entry.get("skip_reason"),
     }
 
 
@@ -1274,6 +1405,8 @@ def search_knowledge(
     results: list[dict[str, Any]] = []
 
     for entry in index:
+        if entry.get("skip_reason"):
+            continue
         if selected_sources and entry.get("source") not in selected_sources:
             continue
         if selected_node_types and entry.get("node_type") not in selected_node_types:
@@ -1313,6 +1446,10 @@ def _search_summary_entry(entry: dict[str, Any]) -> dict[str, Any]:
 def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: int = 8) -> dict[str, Any]:
     note_count = 0
     node_count = 0
+    resource_count = 0
+    resource_truncated_count = 0
+    resource_skipped_count = 0
+    focus_resource_count = 0
     unlinked_note_count = 0
     focus_entry_count = 0
     focus_entries: list[dict[str, Any]] = []
@@ -1325,7 +1462,16 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
                 unlinked_note_count += 1
         if source == "node":
             node_count += 1
-        if entry.get("is_focus_related"):
+        if source == "resource":
+            if entry.get("skip_reason"):
+                resource_skipped_count += 1
+            else:
+                resource_count += 1
+                if entry.get("truncated"):
+                    resource_truncated_count += 1
+                if entry.get("is_focus_related"):
+                    focus_resource_count += 1
+        if entry.get("is_focus_related") and not entry.get("skip_reason"):
             focus_entry_count += 1
             if len(focus_entries) < focus_entry_limit:
                 focus_entries.append(_search_summary_entry(entry))
@@ -1334,6 +1480,10 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
         "entry_count": len(index),
         "note_count": note_count,
         "node_count": node_count,
+        "resource_count": resource_count,
+        "resource_truncated_count": resource_truncated_count,
+        "resource_skipped_count": resource_skipped_count,
+        "focus_resource_count": focus_resource_count,
         "unlinked_note_count": unlinked_note_count,
         "focus_entry_count": focus_entry_count,
         "focus_entries": focus_entries,

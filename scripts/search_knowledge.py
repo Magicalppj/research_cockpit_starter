@@ -41,7 +41,7 @@ def main() -> None:
     parser.add_argument("--query", required=True)
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--source", action="append", choices=["note", "node"], dest="sources")
+    parser.add_argument("--source", action="append", choices=["note", "node", "resource"], dest="sources")
     parser.add_argument("--node-type", action="append", dest="node_types")
     parser.add_argument("--focus-only", action="store_true")
     args = parser.parse_args()

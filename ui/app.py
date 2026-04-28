@@ -55,6 +55,7 @@ from ui.view_helpers import (
     format_evidence_summary,
     format_finding_rows,
     format_node_option,
+    format_resource_index_rows,
     format_resource_rows,
     format_search_result_rows,
     ordered_tab_labels,
@@ -344,6 +345,10 @@ EXTRA_UI_TEXT = {
         "node_entries": "Node 条目",
         "unlinked_notes": "未关联笔记",
         "related_node": "关联节点",
+        "resource_entries": "资源正文条目",
+        "resource_truncated": "截断资源",
+        "resource_skipped": "跳过资源",
+        "focus_resources": "Focus 资源",
         "decision_acceptance_checklist": "决策接受质量门",
         "decision_ready": "该 decision 已满足接受条件。",
         "decision_not_ready": "该 decision 尚未满足接受条件。",
@@ -378,6 +383,10 @@ EXTRA_UI_TEXT = {
         "node_entries": "Node Entries",
         "unlinked_notes": "Unlinked Notes",
         "related_node": "Related Node",
+        "resource_entries": "Resource Entries",
+        "resource_truncated": "Truncated Resources",
+        "resource_skipped": "Skipped Resources",
+        "focus_resources": "Focus Resources",
         "decision_acceptance_checklist": "Decision Acceptance Checklist",
         "decision_ready": "This decision is ready for acceptance.",
         "decision_not_ready": "This decision is not ready for acceptance.",
@@ -1011,10 +1020,11 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
 
 def render_search(search_index: list[dict], nodes: dict, text: dict[str, str]) -> None:
     summary = build_search_index_summary(search_index)
-    m1, m2, m3 = st.columns(3)
+    m1, m2, m3, m4 = st.columns(4)
     m1.metric(text["node_entries"], summary["node_count"])
     m2.metric(text["note_entries"], summary["note_count"])
-    m3.metric(text["unlinked_notes"], summary["unlinked_note_count"])
+    m3.metric(text["resource_entries"], summary["resource_count"])
+    m4.metric(text["unlinked_notes"], summary["unlinked_note_count"])
 
     sources = sorted({entry.get("source", "") for entry in search_index if entry.get("source")})
     node_types = sorted({entry.get("node_type", "") for entry in search_index if entry.get("node_type")})
@@ -1081,12 +1091,12 @@ def render_search(search_index: list[dict], nodes: dict, text: dict[str, str]) -
         )
 
 
-def render_resources(link_rows: list[dict], text: dict[str, str]) -> None:
+def render_resources(link_rows: list[dict], search_index: list[dict], text: dict[str, str]) -> None:
     if not link_rows:
         st.info(text["no_resources"])
         return
 
-    rows = format_resource_rows(link_rows)
+    rows = format_resource_index_rows(link_rows, search_index)
     node_types = sorted({row.get("node_type", "") for row in rows if row.get("node_type")})
     resource_types = sorted({row.get("kind", "") for row in rows if row.get("kind")})
     exists_values = ["yes", "missing", "unknown"]
@@ -1222,6 +1232,11 @@ def render_data_health(
     k2.metric(text["node_entries"], search_summary["node_count"])
     k3.metric(text["note_entries"], search_summary["note_count"])
     k4.metric(text["unlinked_notes"], search_summary["unlinked_note_count"])
+    r1, r2, r3, r4 = st.columns(4)
+    r1.metric(text["resource_entries"], search_summary["resource_count"])
+    r2.metric(text["resource_truncated"], search_summary["resource_truncated_count"])
+    r3.metric(text["resource_skipped"], search_summary["resource_skipped_count"])
+    r4.metric(text["focus_resources"], search_summary["focus_resource_count"])
 
 
 def main() -> None:
@@ -1275,7 +1290,7 @@ def main() -> None:
             elif label == text["search"]:
                 render_search(search_index, nodes, text)
             elif label == text["resources"]:
-                render_resources(link_rows, text)
+                render_resources(link_rows, search_index, text)
             elif label == text["experiment_matrix"]:
                 render_experiment_matrix(nodes, text)
             elif label == text["decisions"]:

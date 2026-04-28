@@ -221,6 +221,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("search_index_summary", context)
         self.assertIn("suggested_next_actions", focus_context)
         self.assertIn("search_index_summary", focus_context)
+        self.assertIn("resource_count", context["search_index_summary"])
+        self.assertIn("resource_skipped_count", focus_context["search_index_summary"])
         self.assertEqual(focus_context["focus_node"]["id"], "problem_text")
         self.assertEqual(matrix[0]["id"], "exp_t5")
         self.assertIsInstance(links, list)
@@ -377,9 +379,15 @@ class ScriptBehaviorTests(unittest.TestCase):
         note_path = self.root / "notes" / "problems" / "problem_text.md"
         note_path.parent.mkdir(parents=True, exist_ok=True)
         note_path.write_text("# Search Note\nNeedle note for T5 branch.\n", encoding="utf-8")
+        resource_path = self.root / "resources" / "problem_context.txt"
+        resource_path.parent.mkdir(parents=True, exist_ok=True)
+        resource_path.write_text("Needle resource context for T5 branch.\n", encoding="utf-8")
         problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
         problem["summary"] = "Needle YAML problem summary."
-        problem["links"] = {"notes": "notes/problems/problem_text.md"}
+        problem["links"] = {
+            "notes": "notes/problems/problem_text.md",
+            "context": "resources/problem_context.txt",
+        }
         save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
 
         json_out = subprocess.run(
@@ -395,6 +403,22 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         note_only = subprocess.run(
             [sys.executable, str(script), "--root", str(self.root), "--query", "needle", "--source", "note", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        resource_only = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--query",
+                "needle",
+                "--source",
+                "resource",
+                "--json",
+            ],
             capture_output=True,
             text=True,
             check=False,
@@ -443,6 +467,10 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertEqual(note_only.returncode, 0)
         self.assertEqual({item["source"] for item in json.loads(note_only.stdout)}, {"note"})
+        self.assertEqual(resource_only.returncode, 0)
+        resource_results = json.loads(resource_only.stdout)
+        self.assertEqual({item["source"] for item in resource_results}, {"resource"})
+        self.assertEqual(resource_results[0]["path"], "resources/problem_context.txt")
         self.assertEqual(node_problem.returncode, 0)
         node_results = json.loads(node_problem.stdout)
         self.assertEqual(len(node_results), 1)
