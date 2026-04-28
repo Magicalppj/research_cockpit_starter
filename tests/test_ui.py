@@ -26,8 +26,10 @@ from ui.app import (
     format_evidence_summary,
     filter_action_suggestions,
     filter_graph_for_view,
+    filter_search_results,
     filter_node_ids,
     format_node_option,
+    format_search_result_rows,
     ordered_tab_labels,
 )
 
@@ -180,6 +182,7 @@ class UiRenderingTests(unittest.TestCase):
             "branch_comparison": "方案比较",
             "decision_trace": "决策追踪",
             "action_guidance": "行动建议",
+            "search": "搜索",
             "resources": "资源",
             "experiment_matrix": "实验矩阵",
             "decisions": "决策",
@@ -193,6 +196,7 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("方案比较", labels)
         self.assertIn("决策追踪", labels)
         self.assertIn("行动建议", labels)
+        self.assertIn("搜索", labels)
         self.assertIn("资源", labels)
 
     def test_format_comparison_rows_keeps_tables_readable(self) -> None:
@@ -334,6 +338,42 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("--target node", node_command)
         self.assertIn("scripts\\update_suggestion_state.py", lifecycle_command)
         self.assertIn("--state completed", lifecycle_command)
+
+    def test_search_helpers_format_and_filter_results(self) -> None:
+        index = [
+            {
+                "entry_id": "node:problem_text",
+                "source": "node",
+                "node_id": "problem_text",
+                "node_type": "problem",
+                "node_title": "Weak text",
+                "title": "Weak text",
+                "path": "graph/nodes/problem_text.yaml",
+                "text": "Needle appears in YAML summary.",
+                "updated_at": "",
+                "is_focus_related": True,
+            },
+            {
+                "entry_id": "note:notes/free.md",
+                "source": "note",
+                "node_id": None,
+                "node_type": None,
+                "node_title": None,
+                "title": "Free note",
+                "path": "notes/free.md",
+                "text": "Needle appears in an old note.",
+                "updated_at": "",
+                "is_focus_related": False,
+            },
+        ]
+
+        results = filter_search_results(index, "needle", {"node"}, {"problem"}, focus_only=True, limit=5)
+        rows = format_search_result_rows(results)
+
+        self.assertEqual([item["entry_id"] for item in results], ["node:problem_text"])
+        self.assertEqual(rows[0]["source"], "node")
+        self.assertEqual(rows[0]["node"], "problem_text")
+        self.assertIn("Needle", rows[0]["snippet"])
 
     def test_format_evidence_summary_degrades_without_findings(self) -> None:
         summary = format_evidence_summary({

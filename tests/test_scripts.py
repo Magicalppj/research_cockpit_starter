@@ -200,6 +200,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "experiment_matrix.json",
             "linked_resources.json",
             "next_action_suggestions.json",
+            "search_index.json",
         }
 
         self.assertEqual({path.name for path in paths}, expected)
@@ -208,15 +209,19 @@ class ScriptBehaviorTests(unittest.TestCase):
         matrix = json.loads((self.root / "dashboards" / "experiment_matrix.json").read_text(encoding="utf-8"))
         links = json.loads((self.root / "dashboards" / "linked_resources.json").read_text(encoding="utf-8"))
         suggestions = json.loads((self.root / "dashboards" / "next_action_suggestions.json").read_text(encoding="utf-8"))
+        search_index = json.loads((self.root / "dashboards" / "search_index.json").read_text(encoding="utf-8"))
         nodes = load_nodes(self.root)
 
         self.assertEqual(context["linked_nodes"][0]["id"], "stage_text")
         self.assertIn("suggested_next_actions", context)
+        self.assertIn("search_index_summary", context)
         self.assertIn("suggested_next_actions", focus_context)
+        self.assertIn("search_index_summary", focus_context)
         self.assertEqual(focus_context["focus_node"]["id"], "problem_text")
         self.assertEqual(matrix[0]["id"], "exp_t5")
         self.assertIsInstance(links, list)
         self.assertIsInstance(suggestions, list)
+        self.assertIsInstance(search_index, list)
         self.assertIn("stage_text", nodes)
 
     def test_create_note_generates_note_links_node_and_rebuilds_dashboard(self) -> None:
@@ -354,6 +359,102 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         failed = subprocess.run(
             [sys.executable, str(script), "--root", str(self.root)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("invalid status", failed.stdout)
+
+    def test_search_knowledge_cli_outputs_json_and_filters(self) -> None:
+        script = ROOT_DIR / "scripts" / "search_knowledge.py"
+        note_path = self.root / "notes" / "problems" / "problem_text.md"
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.write_text("# Search Note\nNeedle note for T5 branch.\n", encoding="utf-8")
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["summary"] = "Needle YAML problem summary."
+        problem["links"] = {"notes": "notes/problems/problem_text.md"}
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        json_out = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--query", "needle", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(json_out.returncode, 0)
+        results = json.loads(json_out.stdout)
+        self.assertGreaterEqual(len(results), 2)
+        self.assertIn("snippet", results[0])
+
+        note_only = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--query", "needle", "--source", "note", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        node_problem = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--query",
+                "needle",
+                "--source",
+                "node",
+                "--node-type",
+                "problem",
+                "--limit",
+                "1",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        focus_only = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--query",
+                "needle",
+                "--focus-only",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        empty = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--query", "missing-needle", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(note_only.returncode, 0)
+        self.assertEqual({item["source"] for item in json.loads(note_only.stdout)}, {"note"})
+        self.assertEqual(node_problem.returncode, 0)
+        node_results = json.loads(node_problem.stdout)
+        self.assertEqual(len(node_results), 1)
+        self.assertEqual(node_results[0]["node_type"], "problem")
+        self.assertEqual(focus_only.returncode, 0)
+        self.assertTrue(all(item["is_focus_related"] for item in json.loads(focus_only.stdout)))
+        self.assertEqual(empty.returncode, 0)
+        self.assertEqual(json.loads(empty.stdout), [])
+
+    def test_search_knowledge_cli_fails_on_invalid_cockpit(self) -> None:
+        script = ROOT_DIR / "scripts" / "search_knowledge.py"
+        bad = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        bad["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", bad)
+
+        failed = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--query", "t5"],
             capture_output=True,
             text=True,
             check=False,

@@ -1,5 +1,24 @@
 # Research Cockpit 开发状态
 
+## Knowledge Search v1 更新（2026-04-28）
+本批补齐 cockpit 内的轻量全文搜索能力，把 Markdown notes 和节点 YAML 文本字段纳入本地索引。范围保持克制：不引入数据库、搜索服务或新依赖，不反向解析 Markdown 状态，也不索引任意 linked file/config 正文。
+
+已完成：
+
+- 新增 `build_search_index(root, nodes, current=None)`，生成 `node` 与 `note` 两类搜索条目；note 会优先通过 `links.notes` 关联到节点，未关联 note 也会进入索引。
+- 新增 `search_knowledge(...)` 和 `make_search_snippet(...)`，支持大小写不敏感匹配、稳定评分、片段提取、source/node type/focus-only/limit 过滤。
+- 新增 `build_search_index_summary(...)`，用于 agent/context 和 Data Health 展示计数、focus 附近 entry 与未关联 note 数量，不把全文塞进 context pack。
+- `scripts/build_dashboard.py` 新增输出 `research_cockpit/dashboards/search_index.json`；`agent_context_pack.json` 与 `focus_context_pack.json` 增加 `search_index_summary`。
+- 新增 `scripts/search_knowledge.py`，支持 `--query`、`--json`、`--limit`、`--source note|node`、`--node-type` 和 `--focus-only`。
+- UI 新增“搜索 / Search”页签，支持查询、来源过滤、节点类型过滤、focus-only、结果数量限制、结果表和 preview；Data Health 增加搜索索引摘要。
+- README 已补充搜索 CLI、UI 页签、dashboard 输出和 agent 读取顺序说明。
+
+下一批候选：
+
+- 增加 decision acceptance checklist，在接受 decision 前检查 evidence、alternatives、consequences 和 next actions 是否完整。
+- 增加 linked resource text indexing，但需要先明确哪些文件类型可安全读取、如何控制上下文体积。
+- 增加 suggestion lifecycle cleanup，用于清理长期 orphan 的历史记录。
+
 ## Suggestion Lifecycle v1 更新（2026-04-28）
 
 本批补齐 Action Guidance 的建议生命周期闭环，让用户可以把建议标记为 `dismissed` 或 `completed`，避免已处理建议反复出现。生命周期只写入 `current_state.yaml`，不执行建议命令，也不改变 experiment/decision/resource 的真实状态。
@@ -114,7 +133,7 @@
 
 ## 当前阶段
 
-当前项目处于 **Suggestion Lifecycle v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环。
+当前项目处于 **Knowledge Search v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
@@ -148,6 +167,7 @@
 - `scripts/suggest_next_actions.py`：只读生成下一步行动建议，支持 JSON、kind 过滤、limit 和 focus-only。
 - `scripts/apply_suggestion.py`：将建议写入 `current_state.next_actions` 或来源节点 `next_actions`，不直接执行建议命令。
 - `scripts/update_suggestion_state.py`：将建议标记为 dismissed/completed，或恢复为 active；只影响建议展示生命周期。
+- `scripts/search_knowledge.py`：轻量搜索 Markdown notes 和节点 YAML 文本字段，支持 JSON、source/type、limit 和 focus-only 过滤。
 - `scripts/build_dashboard.py`：生成前先校验，再输出 dashboard 和 agent context 文件。
 
 ### Dashboard 输出
@@ -162,6 +182,7 @@
 - `experiment_matrix.json`
 - `linked_resources.json`
 - `next_action_suggestions.json`
+- `search_index.json`
 
 这些文件是可再生成产物，但当前 MVP 建议保留在仓库中，方便人和 agent 快速读取上下文。
 
@@ -174,6 +195,7 @@ Streamlit 页面现在包含：
 - 方案比较
 - 决策追踪
 - 行动建议
+- 搜索
 - 资源
 - 实验矩阵
 - 决策
@@ -199,6 +221,7 @@ Streamlit 页面现在包含：
 - 决策追踪页展示 evidence summary，包括实验数量、findings 数量、结果分布和最新 finding。
 - 行动建议页展示建议，可按 kind、priority 和当前 focus 相关性过滤；支持把建议写入当前行动队列或来源节点行动队列。
 - 行动建议页支持按生命周期状态过滤，并可忽略、标记完成或恢复建议；非 active 建议不能写入行动队列。
+- 搜索页支持对 Markdown notes 和节点 YAML 文本字段进行轻量全文检索，可按 source、node type、focus-only 和结果数量过滤，并展示结果 preview。
 - 资源页汇总 notes、config、artifact path、run id 和 linked artifacts，并支持存在状态过滤。
 
 ### 测试
@@ -223,6 +246,7 @@ Streamlit 页面现在包含：
 - 中文节点图谱 HTML 生成。
 - 行动建议生成、CLI 过滤、dashboard 输出和 UI helper。
 - 建议 lifecycle 的稳定 key、dismissed/completed 过滤、CLI 写入、恢复和 Data Health 摘要。
+- 搜索索引生成、notes 关联、YAML 字段检索、focus-only 过滤、CLI 查询、dashboard 输出和 UI helper。
 
 当前验证命令：
 
@@ -244,7 +268,7 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 - PyVis 图节点点击不能直接驱动右侧详情面板；当前通过选择器查看节点详情。
 - 图布局仍依赖 force layout，大图规模上来后可读性会下降。
 - 状态更新脚本只做结构化 YAML 修改，不会同步更新长篇 notes。
-- 当前没有全文搜索、标签过滤、时间线视图或历史变更视图。
+- 当前全文搜索只覆盖 Markdown notes 和节点 YAML 文本字段，尚未索引任意 linked file/config；也还没有标签过滤、时间线视图或历史变更视图。
 - 暂未接入 MLflow、DVC、Git branch/commit 等外部研究产物。
 - Streamlit 适合 MVP 和内网使用，若要长期作为主 UI，后续需要更完整的前端工程方案。
 
@@ -388,7 +412,7 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 4. Action Guidance UI 生命周期过滤和写回入口。
 5. Data Health suggestion lifecycle 摘要。
 
-下一批建议进入“检索与决策质量门”层：notes/全文搜索、decision acceptance checklist、suggestion lifecycle 历史清理。
+下一批建议进入“决策质量门与索引扩展”层：decision acceptance checklist、linked resource text indexing、suggestion lifecycle 历史清理。
 
 ## 后续可优化
 

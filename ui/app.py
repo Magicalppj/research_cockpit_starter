@@ -22,11 +22,14 @@ from cockpit.model import (
     build_decision_trace,
     build_experiment_matrix,
     build_link_rows,
+    build_search_index,
+    build_search_index_summary,
     build_suggestion_lifecycle_summary,
     graph_to_json,
     load_explicit_edges,
     load_nodes,
     load_yaml,
+    search_knowledge,
     validate_cockpit,
 )
 from scripts.set_focus import set_focus as save_current_focus
@@ -301,6 +304,19 @@ EXTRA_UI_TEXT = {
         "active": "活跃",
         "dismissed": "已忽略",
         "completed": "已完成",
+        "search": "搜索",
+        "search_query": "搜索内容",
+        "search_source": "来源",
+        "search_node_type": "节点类型",
+        "search_limit": "结果数量",
+        "search_results": "搜索结果",
+        "search_preview": "内容预览",
+        "no_search_results": "未找到搜索结果。",
+        "search_index": "搜索索引",
+        "note_entries": "Note 条目",
+        "node_entries": "Node 条目",
+        "unlinked_notes": "未关联笔记",
+        "related_node": "关联节点",
     },
     "en": {
         "suggestion_state": "Suggestion State",
@@ -317,6 +333,19 @@ EXTRA_UI_TEXT = {
         "active": "Active",
         "dismissed": "Dismissed",
         "completed": "Completed",
+        "search": "Search",
+        "search_query": "Search Query",
+        "search_source": "Source",
+        "search_node_type": "Node Type",
+        "search_limit": "Result Limit",
+        "search_results": "Search Results",
+        "search_preview": "Preview",
+        "no_search_results": "No search results.",
+        "search_index": "Search Index",
+        "note_entries": "Note Entries",
+        "node_entries": "Node Entries",
+        "unlinked_notes": "Unlinked Notes",
+        "related_node": "Related Node",
     },
 }
 
@@ -336,6 +365,7 @@ def load_graph_data():
     graph = graph_to_json(nodes, current.get("current_focus_path", []), current, explicit_edges)
     context = build_agent_context(RESEARCH_ROOT, nodes)
     link_rows = build_link_rows(RESEARCH_ROOT, nodes)
+    search_index = build_search_index(RESEARCH_ROOT, nodes, current)
     action_suggestions = build_action_suggestions(RESEARCH_ROOT, nodes, current, link_rows)
     all_action_suggestions = build_action_suggestions(
         RESEARCH_ROOT,
@@ -344,7 +374,17 @@ def load_graph_data():
         link_rows,
         include_inactive=True,
     )
-    return nodes, current, graph, context, validation_errors, link_rows, action_suggestions, all_action_suggestions
+    return (
+        nodes,
+        current,
+        graph,
+        context,
+        validation_errors,
+        link_rows,
+        action_suggestions,
+        all_action_suggestions,
+        search_index,
+    )
 
 
 def ordered_tab_labels(text: dict[str, str]) -> list[str]:
@@ -354,6 +394,7 @@ def ordered_tab_labels(text: dict[str, str]) -> list[str]:
         "branch_comparison",
         "decision_trace",
         "action_guidance",
+        "search",
         "resources",
         "experiment_matrix",
         "decisions",
@@ -512,6 +553,42 @@ def filter_action_suggestions(
         and suggestion.get("lifecycle_state", "active") in selected_states
         and (not focus_only or suggestion.get("is_focus_related"))
     ]
+
+
+def filter_search_results(
+    search_index: list[dict],
+    query: str,
+    selected_sources: set[str],
+    selected_node_types: set[str],
+    *,
+    focus_only: bool,
+    limit: int,
+) -> list[dict]:
+    sources = selected_sources or None
+    node_types = selected_node_types or None
+    return search_knowledge(
+        search_index,
+        query,
+        sources=sources,
+        node_types=node_types,
+        focus_only=focus_only,
+        limit=limit,
+    )
+
+
+def format_search_result_rows(results: list[dict]) -> list[dict]:
+    rows = []
+    for result in results:
+        rows.append({
+            "score": result.get("score"),
+            "source": result.get("source"),
+            "node": result.get("node_id") or "",
+            "node_type": result.get("node_type") or "",
+            "title": result.get("title") or "",
+            "path": result.get("path") or "",
+            "snippet": result.get("snippet") or "",
+        })
+    return rows
 
 
 def format_evidence_summary(summary: dict) -> dict:
@@ -1138,6 +1215,60 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
                 st.error(f"{text['queue_failed']} {exc}")
 
 
+def render_search(search_index: list[dict], nodes: dict, text: dict[str, str]) -> None:
+    summary = build_search_index_summary(search_index)
+    m1, m2, m3 = st.columns(3)
+    m1.metric(text["node_entries"], summary["node_count"])
+    m2.metric(text["note_entries"], summary["note_count"])
+    m3.metric(text["unlinked_notes"], summary["unlinked_note_count"])
+
+    sources = sorted({entry.get("source", "") for entry in search_index if entry.get("source")})
+    node_types = sorted({entry.get("node_type", "") for entry in search_index if entry.get("node_type")})
+    query = st.text_input(text["search_query"], value="")
+    c1, c2, c3, c4 = st.columns(4)
+    selected_sources = set(c1.multiselect(text["search_source"], sources, default=sources))
+    selected_node_types = set(c2.multiselect(text["search_node_type"], node_types, default=node_types))
+    focus_only = c3.checkbox(text["focus_related"], value=False)
+    limit = int(c4.number_input(text["search_limit"], min_value=1, max_value=100, value=20, step=1))
+
+    results = filter_search_results(
+        search_index,
+        query,
+        selected_sources,
+        set() if selected_node_types == set(node_types) else selected_node_types,
+        focus_only=focus_only,
+        limit=limit,
+    )
+    if not results:
+        st.info(text["no_search_results"])
+        return
+
+    st.subheader(text["search_results"])
+    st.dataframe(pd.DataFrame(format_search_result_rows(results)), use_container_width=True, hide_index=True)
+    selected = st.selectbox(
+        text["search_preview"],
+        results,
+        format_func=lambda item: f"{item.get('score')} | {item.get('source')} | {item.get('title')}",
+    )
+    st.text_area(text["search_preview"], selected.get("preview") or selected.get("snippet") or "", height=220)
+
+    node_id = selected.get("node_id")
+    node = nodes.get(node_id) if node_id else None
+    if node:
+        st.subheader(text["related_node"])
+        st.dataframe(
+            pd.DataFrame([{
+                "id": node.id,
+                "type": node.type,
+                "status": node.status,
+                "title": node.title,
+                "summary": node.summary,
+            }]),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
 def render_resources(link_rows: list[dict], text: dict[str, str]) -> None:
     if not link_rows:
         st.info(text["no_resources"])
@@ -1207,6 +1338,7 @@ def render_data_health(
     link_rows: list[dict],
     action_suggestions: list[dict],
     all_action_suggestions: list[dict],
+    search_index: list[dict],
 ) -> None:
     if validation_errors:
         st.error(text["validation_failed"])
@@ -1255,6 +1387,14 @@ def render_data_health(
     if lifecycle_summary["orphan"]:
         st.warning(f"{lifecycle_summary['orphan']} suggestion lifecycle record(s) no longer match current suggestions.")
 
+    st.subheader(text["search_index"])
+    search_summary = build_search_index_summary(search_index)
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric(text["search_index"], search_summary["entry_count"])
+    k2.metric(text["node_entries"], search_summary["node_count"])
+    k3.metric(text["note_entries"], search_summary["note_count"])
+    k4.metric(text["unlinked_notes"], search_summary["unlinked_note_count"])
+
 
 def main() -> None:
     (
@@ -1266,6 +1406,7 @@ def main() -> None:
         link_rows,
         action_suggestions,
         all_action_suggestions,
+        search_index,
     ) = load_graph_data()
 
     with st.sidebar:
@@ -1303,6 +1444,8 @@ def main() -> None:
                 render_decision_trace(nodes, text)
             elif label == text["action_guidance"]:
                 render_action_guidance(all_action_suggestions, text)
+            elif label == text["search"]:
+                render_search(search_index, nodes, text)
             elif label == text["resources"]:
                 render_resources(link_rows, text)
             elif label == text["experiment_matrix"]:
@@ -1321,6 +1464,7 @@ def main() -> None:
                     link_rows,
                     action_suggestions,
                     all_action_suggestions,
+                    search_index,
                 )
 
 

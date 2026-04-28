@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 import hashlib
+import re
 import yaml
 import networkx as nx
 
@@ -33,6 +34,23 @@ ALL_KNOWN_STATUSES = {status for statuses in VALID_STATUSES_BY_TYPE.values() for
 VALID_FINDING_CONFIDENCES = {"weak", "medium", "strong"}
 VALID_FINDING_OUTCOMES = {"positive", "negative", "mixed", "inconclusive"}
 VALID_SUGGESTION_LIFECYCLE_STATES = {"active", "dismissed", "completed"}
+
+SEARCH_NODE_TEXT_FIELDS = (
+    "question",
+    "hypothesis",
+    "result_summary",
+    "evidence_summary",
+    "findings",
+    "next_actions",
+    "blockers",
+    "pros",
+    "cons",
+    "rejection_reason",
+    "alternatives_considered",
+    "consequences",
+    "next_required_actions",
+    "current_conclusion",
+)
 
 DEFAULT_FOCUS_MODE = {
     "default_depth": 2,
@@ -1042,6 +1060,270 @@ def build_suggestion_lifecycle_summary(current: dict[str, Any], suggestions: lis
     return counts
 
 
+def _normalize_relative_path(value: Any) -> str:
+    path = str(value or "").strip().replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    return path.lstrip("/")
+
+
+def _relative_to_root(root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _node_file_paths(root: Path) -> dict[str, str]:
+    paths: dict[str, str] = {}
+    for path in sorted((root / "graph" / "nodes").glob("*.yaml")):
+        data = load_yaml(path)
+        node_id = data.get("id")
+        if node_id:
+            paths[str(node_id)] = _relative_to_root(root, path)
+    return paths
+
+
+def _node_note_paths(nodes: dict[str, ResearchNode]) -> dict[str, str]:
+    note_paths: dict[str, str] = {}
+    for node in nodes.values():
+        links = node.raw.get("links")
+        if not isinstance(links, dict):
+            continue
+        note_path = links.get("notes")
+        if note_path:
+            note_paths[_normalize_relative_path(note_path)] = node.id
+    return note_paths
+
+
+def _first_markdown_heading(text: str, fallback: str) -> str:
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            title = stripped.lstrip("#").strip()
+            if title:
+                return title
+    return fallback
+
+
+def _flatten_search_values(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, dict):
+        values: list[str] = []
+        for key in sorted(value):
+            values.extend(_flatten_search_values(value[key]))
+        return values
+    if isinstance(value, list):
+        values = []
+        for item in value:
+            values.extend(_flatten_search_values(item))
+        return values
+    return [str(value)]
+
+
+def _node_search_text(node: ResearchNode) -> str:
+    parts = [
+        node.id,
+        node.type,
+        node.title,
+        node.status,
+        node.priority or "",
+        node.summary,
+        *node.tags,
+    ]
+    for field_name in SEARCH_NODE_TEXT_FIELDS:
+        parts.extend(_flatten_search_values(node.raw.get(field_name)))
+    return "\n".join(part for part in parts if part not in (None, ""))
+
+
+def build_search_index(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    current = current or {}
+    focus_ids = _focus_related_ids(nodes, current) if current else set()
+    node_paths = _node_file_paths(root)
+    note_paths = _node_note_paths(nodes)
+    entries: list[dict[str, Any]] = []
+
+    for node in sorted(nodes.values(), key=lambda item: item.id):
+        entries.append({
+            "entry_id": f"node:{node.id}",
+            "source": "node",
+            "node_id": node.id,
+            "node_type": node.type,
+            "node_title": node.title,
+            "title": node.title,
+            "path": node_paths.get(node.id, ""),
+            "text": _node_search_text(node),
+            "updated_at": str(node.raw.get("updated_at") or ""),
+            "is_focus_related": node.id in focus_ids,
+        })
+
+    notes_dir = root / "notes"
+    if notes_dir.exists():
+        for path in sorted(notes_dir.glob("**/*.md")):
+            rel_path = _relative_to_root(root, path)
+            normalized = _normalize_relative_path(rel_path)
+            text = path.read_text(encoding="utf-8", errors="replace")
+            node_id = note_paths.get(normalized)
+            node = nodes.get(node_id) if node_id else None
+            entries.append({
+                "entry_id": f"note:{normalized}",
+                "source": "note",
+                "node_id": node.id if node else None,
+                "node_type": node.type if node else None,
+                "node_title": node.title if node else None,
+                "title": _first_markdown_heading(text, path.stem),
+                "path": normalized,
+                "text": text,
+                "updated_at": str(node.raw.get("updated_at") or "") if node else "",
+                "is_focus_related": bool(node and node.id in focus_ids),
+            })
+    return entries
+
+
+def _search_terms(query: str) -> list[str]:
+    return [term.lower() for term in query.split() if term.strip()]
+
+
+def _count_occurrences(text: str, needle: str) -> int:
+    if not needle:
+        return 0
+    return text.count(needle)
+
+
+def _search_score(entry: dict[str, Any], query: str, terms: list[str]) -> int:
+    phrase = query.lower()
+    title = str(entry.get("title") or "").lower()
+    path = str(entry.get("path") or "").lower()
+    text = str(entry.get("text") or "").lower()
+    score = 0
+    score += 40 * _count_occurrences(title, phrase)
+    score += 12 * _count_occurrences(text, phrase)
+    score += 4 * _count_occurrences(path, phrase)
+    for term in terms:
+        score += 10 * _count_occurrences(title, term)
+        score += _count_occurrences(text, term)
+        score += 2 * _count_occurrences(path, term)
+    return score
+
+
+def make_search_snippet(text: str, query: str, width: int = 180) -> str:
+    clean = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not clean:
+        return ""
+    lower = clean.lower()
+    phrase = query.lower().strip()
+    terms = _search_terms(query)
+    positions = []
+    if phrase:
+        pos = lower.find(phrase)
+        if pos >= 0:
+            positions.append(pos)
+    for term in terms:
+        pos = lower.find(term)
+        if pos >= 0:
+            positions.append(pos)
+    start_at = min(positions) if positions else 0
+    start = max(0, start_at - width // 2)
+    end = min(len(clean), start + width)
+    snippet = clean[start:end].strip()
+    if start > 0:
+        snippet = "..." + snippet
+    if end < len(clean):
+        snippet += "..."
+    return snippet
+
+
+def search_knowledge(
+    index: list[dict[str, Any]],
+    query: str,
+    *,
+    sources: set[str] | list[str] | None = None,
+    node_types: set[str] | list[str] | None = None,
+    limit: int | None = 20,
+    focus_only: bool = False,
+) -> list[dict[str, Any]]:
+    query = query.strip()
+    if not query or limit == 0:
+        return []
+    selected_sources = set(sources or [])
+    selected_node_types = set(node_types or [])
+    terms = _search_terms(query)
+    results: list[dict[str, Any]] = []
+
+    for entry in index:
+        if selected_sources and entry.get("source") not in selected_sources:
+            continue
+        if selected_node_types and entry.get("node_type") not in selected_node_types:
+            continue
+        if focus_only and not entry.get("is_focus_related"):
+            continue
+        score = _search_score(entry, query, terms)
+        if score <= 0:
+            continue
+        results.append({
+            "entry_id": entry.get("entry_id"),
+            "score": score,
+            "source": entry.get("source"),
+            "node_id": entry.get("node_id"),
+            "node_type": entry.get("node_type"),
+            "node_title": entry.get("node_title"),
+            "title": entry.get("title"),
+            "path": entry.get("path"),
+            "snippet": make_search_snippet(str(entry.get("text") or ""), query),
+            "preview": make_search_snippet(str(entry.get("text") or ""), query, width=700),
+            "updated_at": entry.get("updated_at"),
+            "is_focus_related": bool(entry.get("is_focus_related")),
+        })
+
+    results.sort(
+        key=lambda item: (
+            -int(item.get("score") or 0),
+            str(item.get("source") or ""),
+            str(item.get("node_id") or ""),
+            str(item.get("path") or ""),
+            str(item.get("entry_id") or ""),
+        )
+    )
+    if limit is None:
+        return results
+    return results[:max(0, limit)]
+
+
+def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: int = 8) -> dict[str, Any]:
+    note_count = len([entry for entry in index if entry.get("source") == "note"])
+    node_count = len([entry for entry in index if entry.get("source") == "node"])
+    unlinked_note_count = len([
+        entry
+        for entry in index
+        if entry.get("source") == "note" and not entry.get("node_id")
+    ])
+    focus_entries = [
+        {
+            "entry_id": entry.get("entry_id"),
+            "source": entry.get("source"),
+            "node_id": entry.get("node_id"),
+            "node_type": entry.get("node_type"),
+            "title": entry.get("title"),
+            "path": entry.get("path"),
+        }
+        for entry in index
+        if entry.get("is_focus_related")
+    ][:focus_entry_limit]
+    return {
+        "entry_count": len(index),
+        "note_count": note_count,
+        "node_count": node_count,
+        "unlinked_note_count": unlinked_note_count,
+        "focus_entry_count": len([entry for entry in index if entry.get("is_focus_related")]),
+        "focus_entries": focus_entries,
+    }
+
+
 def node_context(node: ResearchNode) -> dict[str, Any]:
     return {
         "id": node.id,
@@ -1098,6 +1380,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         n for n in nodes.values()
         if n.type == "decision" and n.status in {"accepted", "proposed"}
     ]
+    search_index = build_search_index(root, nodes, current)
 
     return {
         "project_name": "Audio Edit Research Cockpit",
@@ -1150,6 +1433,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
             for n in sorted(recent_decisions, key=lambda item: item.id)
         ],
         "suggested_next_actions": build_action_suggestions(root, nodes, current),
+        "search_index_summary": build_search_index_summary(search_index),
     }
 
 
@@ -1294,6 +1578,7 @@ def build_focus_context(
         for suggestion in build_action_suggestions(root, nodes, current)
         if suggestion.get("is_focus_related")
     ]
+    search_index = build_search_index(root, nodes, current)
 
     return {
         "focus_node": node_context(focus_node) if focus_node else None,
@@ -1327,6 +1612,7 @@ def build_focus_context(
         "next_actions": next_actions,
         "knowledge_index": _knowledge_index(nodes, knowledge_node_ids),
         "suggested_next_actions": suggested_next_actions,
+        "search_index_summary": build_search_index_summary(search_index),
     }
 
 

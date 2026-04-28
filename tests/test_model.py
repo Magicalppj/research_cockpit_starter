@@ -20,6 +20,8 @@ from cockpit.model import (
     build_focus_context,
     build_experiment_matrix,
     build_link_rows,
+    build_search_index,
+    build_search_index_summary,
     build_suggestion_lifecycle_summary,
     derive_focus_path,
     graph_to_json,
@@ -28,6 +30,7 @@ from cockpit.model import (
     load_nodes,
     node_context,
     save_yaml,
+    search_knowledge,
     validate_cockpit,
 )
 
@@ -370,6 +373,70 @@ class ModelValidationTests(unittest.TestCase):
         self.assertIsNone(by_kind[("exp_t5", "run_id", "run_id")]["exists"])
         self.assertFalse(by_kind[("artifact_fig", "path", "path")]["exists"])
         self.assertEqual(context["links"][0]["target"], "notes/problems/problem_text.md")
+
+    def test_search_index_links_notes_and_indexes_unlinked_notes(self) -> None:
+        linked_note = self.root / "notes" / "problems" / "problem_text.md"
+        linked_note.parent.mkdir(parents=True, exist_ok=True)
+        linked_note.write_text("# Problem Note\nSemantic ribbon note for T5 branch.\n", encoding="utf-8")
+        unlinked_note = self.root / "notes" / "misc" / "free.md"
+        unlinked_note.parent.mkdir(parents=True, exist_ok=True)
+        unlinked_note.write_text("# Free Note\nUnlinked latent edit observation.\n", encoding="utf-8")
+
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["links"] = {"notes": "notes/problems/problem_text.md"}
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        index = build_search_index(self.root, nodes, current)
+        by_entry = {entry["entry_id"]: entry for entry in index}
+
+        self.assertEqual(by_entry["note:notes/problems/problem_text.md"]["node_id"], "problem_text")
+        self.assertEqual(by_entry["note:notes/misc/free.md"]["node_id"], None)
+        self.assertEqual(by_entry["note:notes/problems/problem_text.md"]["title"], "Problem Note")
+
+    def test_search_knowledge_matches_node_fields_case_insensitively_and_focus_only(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["blockers"] = ["Need CLAP cache parity"]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["findings"] = [{"statement": "CLAP cache improves event following.", "confidence": "medium"}]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        unlinked_note = self.root / "notes" / "archive" / "old.md"
+        unlinked_note.parent.mkdir(parents=True, exist_ok=True)
+        unlinked_note.write_text("# Old\nCLAP cache unrelated archive.\n", encoding="utf-8")
+
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+        index = build_search_index(self.root, nodes, current)
+
+        results = search_knowledge(index, "clap CACHE")
+        focus_results = search_knowledge(index, "clap cache", focus_only=True)
+        problem_result = next(item for item in results if item["node_id"] == "problem_text")
+
+        self.assertGreater(problem_result["score"], 0)
+        self.assertIn("CLAP cache", problem_result["snippet"])
+        self.assertTrue(all(item["is_focus_related"] for item in focus_results))
+        self.assertNotIn("note:notes/archive/old.md", {item["entry_id"] for item in focus_results})
+
+    def test_search_index_summary_counts_sources_without_full_text(self) -> None:
+        note_path = self.root / "notes" / "problems" / "problem_text.md"
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.write_text("# Problem Note\nFocus note.\n", encoding="utf-8")
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["links"] = {"notes": "notes/problems/problem_text.md"}
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        index = build_search_index(self.root, nodes, current)
+        summary = build_search_index_summary(index)
+
+        self.assertEqual(summary["note_count"], 1)
+        self.assertEqual(summary["node_count"], len(nodes))
+        self.assertEqual(summary["unlinked_note_count"], 0)
+        self.assertGreater(summary["focus_entry_count"], 0)
+        self.assertNotIn("text", summary["focus_entries"][0])
 
     def test_experiment_matrix_contains_experiment_rows(self) -> None:
         nodes = load_nodes(self.root)

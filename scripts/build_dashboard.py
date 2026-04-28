@@ -14,6 +14,7 @@ from cockpit.model import (
     build_experiment_matrix,
     build_focus_context,
     build_link_rows,
+    build_search_index,
     graph_to_json,
     load_explicit_edges,
     load_nodes,
@@ -35,6 +36,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
     experiment_matrix = build_experiment_matrix(nodes)
     linked_resources = build_link_rows(root, nodes)
     action_suggestions = build_action_suggestions(root, nodes, current, linked_resources)
+    search_index = build_search_index(root, nodes, current)
 
     dash = root / "dashboards"
     dash.mkdir(parents=True, exist_ok=True)
@@ -48,6 +50,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
         dash / "experiment_matrix.json",
         dash / "linked_resources.json",
         dash / "next_action_suggestions.json",
+        dash / "search_index.json",
     ]
     outputs[0].write_text(json.dumps(graph_json, indent=2, ensure_ascii=False), encoding="utf-8")
     outputs[1].write_text(json.dumps(context, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -57,6 +60,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
     outputs[5].write_text(json.dumps(experiment_matrix, indent=2, ensure_ascii=False), encoding="utf-8")
     outputs[6].write_text(json.dumps(linked_resources, indent=2, ensure_ascii=False), encoding="utf-8")
     outputs[7].write_text(json.dumps(action_suggestions, indent=2, ensure_ascii=False), encoding="utf-8")
+    outputs[8].write_text(json.dumps(search_index, indent=2, ensure_ascii=False), encoding="utf-8")
     return outputs
 
 

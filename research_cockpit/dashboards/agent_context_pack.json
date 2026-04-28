@@ -459,5 +459,78 @@
       "queued_in_current": false,
       "queued_in_node": false
     }
-  ]
+  ],
+  "search_index_summary": {
+    "entry_count": 18,
+    "note_count": 0,
+    "node_count": 18,
+    "unlinked_note_count": 0,
+    "focus_entry_count": 8,
+    "focus_entries": [
+      {
+        "entry_id": "node:decision_flan_t5_clap",
+        "source": "node",
+        "node_id": "decision_flan_t5_clap",
+        "node_type": "decision",
+        "title": "Adopt FLAN-T5-XL + CLAP for event branch",
+        "path": "graph/nodes/decision_flan_t5_clap.yaml"
+      },
+      {
+        "entry_id": "node:exp_041_flan_t5_only",
+        "source": "node",
+        "node_id": "exp_041_flan_t5_only",
+        "node_type": "experiment",
+        "title": "FLAN-T5-XL event branch only",
+        "path": "graph/nodes/exp_041_flan_t5_only.yaml"
+      },
+      {
+        "entry_id": "node:exp_042_flan_t5_clap",
+        "source": "node",
+        "node_id": "exp_042_flan_t5_clap",
+        "node_type": "experiment",
+        "title": "FLAN-T5-XL + CLAP anchor",
+        "path": "graph/nodes/exp_042_flan_t5_clap.yaml"
+      },
+      {
+        "entry_id": "node:option_flan_t5_clap",
+        "source": "node",
+        "node_id": "option_flan_t5_clap",
+        "node_type": "option",
+        "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+        "path": "graph/nodes/option_flan_t5_clap.yaml"
+      },
+      {
+        "entry_id": "node:option_gemma_baseline",
+        "source": "node",
+        "node_id": "option_gemma_baseline",
+        "node_type": "option",
+        "title": "Keep Gemma-only event features",
+        "path": "graph/nodes/option_gemma_baseline.yaml"
+      },
+      {
+        "entry_id": "node:option_umt5_clap",
+        "source": "node",
+        "node_id": "option_umt5_clap",
+        "node_type": "option",
+        "title": "UMT5 + CLAP multilingual branch",
+        "path": "graph/nodes/option_umt5_clap.yaml"
+      },
+      {
+        "entry_id": "node:problem_event_text_weak",
+        "source": "node",
+        "node_id": "problem_event_text_weak",
+        "node_type": "problem",
+        "title": "Event-level text control is weak",
+        "path": "graph/nodes/problem_event_text_weak.yaml"
+      },
+      {
+        "entry_id": "node:stage_text_encoder",
+        "source": "node",
+        "node_id": "stage_text_encoder",
+        "node_type": "stage",
+        "title": "Text Encoder Redesign",
+        "path": "graph/nodes/stage_text_encoder.yaml"
+      }
+    ]
+  }
 }

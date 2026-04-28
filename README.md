@@ -18,7 +18,7 @@ streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501
 
 Then open the forwarded port in your browser.
 The UI opens on the Research Graph in Focus Mode by default.
-The graph detail panel can set any visible node as the current focus. The UI also includes Branch Comparison, Decision Trace, Action Guidance, Resources, and node search views for read-only research review.
+The graph detail panel can set any visible node as the current focus. The UI also includes Branch Comparison, Decision Trace, Action Guidance, Search, Resources, and node search views for read-only research review.
 
 On the current Windows workstation, the verified interpreter is:
 
@@ -119,6 +119,16 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\update_suggestion_state.py --id
 
 `dismissed` and `completed` only affect suggestion visibility. They do not execute the suggested command or change the underlying experiment, decision, or resource state. `active` restores a suggestion by removing its lifecycle record.
 
+Search notes and YAML node fields:
+
+```powershell
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\search_knowledge.py --query t5
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\search_knowledge.py --query "event text" --json --focus-only
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\search_knowledge.py --query cache --source note --limit 5
+```
+
+`search_knowledge.py` validates cockpit data first, then searches Markdown notes under `research_cockpit/notes/**/*.md` and selected YAML node text fields. It does not parse Markdown back into structured state and does not index arbitrary linked files.
+
 Create a linked Markdown note:
 
 ```powershell
@@ -155,9 +165,11 @@ Save this as `research_cockpit/graph/edges.yaml` when you need semantic edges be
 - Missing local resource paths are shown as warnings in Data Health; they do not fail validation.
 - URLs, run ids, and absolute/external paths are marked as unknown because they are not checked on the local filesystem.
 - The Research Graph detail selector has a search box over node id, title, summary, tags, status, and type.
+- The Search tab performs lightweight full-text search over Markdown notes and YAML node text fields, with filters for source, node type, focus-only results, and result limit.
+- `research_cockpit/dashboards/search_index.json` stores the generated search entries. Context packs only include `search_index_summary`, so agents see counts and nearby entries without loading full note text by default.
 
 Agents should read `agent_context_pack.json` first, then `focus_context_pack.json`. The focus context now includes a `knowledge_index` with nearby linked note/config/file paths so agents can decide which long-form notes or artifacts to open next.
-Both context packs also include `suggested_next_actions` for read-only planning.
+Both context packs also include `suggested_next_actions` for read-only planning and `search_index_summary` for deciding whether to run `search_knowledge.py`.
 
 ## Directory Layout
 
@@ -188,6 +200,7 @@ scripts/
   suggest_next_actions.py
   apply_suggestion.py
   update_suggestion_state.py
+  search_knowledge.py
 ui/
   app.py
 ```
