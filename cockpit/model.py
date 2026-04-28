@@ -1238,6 +1238,24 @@ def make_search_snippet(text: str, query: str, width: int = 180) -> str:
     return snippet
 
 
+def _search_result_from_entry(entry: dict[str, Any], query: str, score: int) -> dict[str, Any]:
+    text = str(entry.get("text") or "")
+    return {
+        "entry_id": entry.get("entry_id"),
+        "score": score,
+        "source": entry.get("source"),
+        "node_id": entry.get("node_id"),
+        "node_type": entry.get("node_type"),
+        "node_title": entry.get("node_title"),
+        "title": entry.get("title"),
+        "path": entry.get("path"),
+        "snippet": make_search_snippet(text, query),
+        "preview": make_search_snippet(text, query, width=700),
+        "updated_at": entry.get("updated_at"),
+        "is_focus_related": bool(entry.get("is_focus_related")),
+    }
+
+
 def search_knowledge(
     index: list[dict[str, Any]],
     query: str,
@@ -1265,20 +1283,7 @@ def search_knowledge(
         score = _search_score(entry, query, terms)
         if score <= 0:
             continue
-        results.append({
-            "entry_id": entry.get("entry_id"),
-            "score": score,
-            "source": entry.get("source"),
-            "node_id": entry.get("node_id"),
-            "node_type": entry.get("node_type"),
-            "node_title": entry.get("node_title"),
-            "title": entry.get("title"),
-            "path": entry.get("path"),
-            "snippet": make_search_snippet(str(entry.get("text") or ""), query),
-            "preview": make_search_snippet(str(entry.get("text") or ""), query, width=700),
-            "updated_at": entry.get("updated_at"),
-            "is_focus_related": bool(entry.get("is_focus_related")),
-        })
+        results.append(_search_result_from_entry(entry, query, score))
 
     results.sort(
         key=lambda item: (
@@ -1294,32 +1299,43 @@ def search_knowledge(
     return results[:max(0, limit)]
 
 
+def _search_summary_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "entry_id": entry.get("entry_id"),
+        "source": entry.get("source"),
+        "node_id": entry.get("node_id"),
+        "node_type": entry.get("node_type"),
+        "title": entry.get("title"),
+        "path": entry.get("path"),
+    }
+
+
 def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: int = 8) -> dict[str, Any]:
-    note_count = len([entry for entry in index if entry.get("source") == "note"])
-    node_count = len([entry for entry in index if entry.get("source") == "node"])
-    unlinked_note_count = len([
-        entry
-        for entry in index
-        if entry.get("source") == "note" and not entry.get("node_id")
-    ])
-    focus_entries = [
-        {
-            "entry_id": entry.get("entry_id"),
-            "source": entry.get("source"),
-            "node_id": entry.get("node_id"),
-            "node_type": entry.get("node_type"),
-            "title": entry.get("title"),
-            "path": entry.get("path"),
-        }
-        for entry in index
-        if entry.get("is_focus_related")
-    ][:focus_entry_limit]
+    note_count = 0
+    node_count = 0
+    unlinked_note_count = 0
+    focus_entry_count = 0
+    focus_entries: list[dict[str, Any]] = []
+
+    for entry in index:
+        source = entry.get("source")
+        if source == "note":
+            note_count += 1
+            if not entry.get("node_id"):
+                unlinked_note_count += 1
+        if source == "node":
+            node_count += 1
+        if entry.get("is_focus_related"):
+            focus_entry_count += 1
+            if len(focus_entries) < focus_entry_limit:
+                focus_entries.append(_search_summary_entry(entry))
+
     return {
         "entry_count": len(index),
         "note_count": note_count,
         "node_count": node_count,
         "unlinked_note_count": unlinked_note_count,
-        "focus_entry_count": len([entry for entry in index if entry.get("is_focus_related")]),
+        "focus_entry_count": focus_entry_count,
         "focus_entries": focus_entries,
     }
 
