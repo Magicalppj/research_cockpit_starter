@@ -18,6 +18,7 @@ from run_skill_release_check import (
     release_check_payload,
     runtime_dependency_track,
 )
+from run_subagent_forward_check import subagent_forward_check_payload
 
 
 class SkillReleaseCheckTests(unittest.TestCase):
@@ -102,6 +103,39 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertTrue(by_name["isolated_mutation"]["passed"], by_name["isolated_mutation"])
         self.assertEqual(by_name["isolated_mutation"]["summary"]["source_changed"], False)
         self.assertGreaterEqual(len(by_name["isolated_mutation"]["summary"]["copy_changed_files"]), 1)
+
+    def test_subagent_forward_check_skip_mutating_runs_read_only_tracks(self) -> None:
+        payload = subagent_forward_check_payload(
+            SKILL_ROOT,
+            python=sys.executable,
+            temp_parent=self.tmp_root,
+            skip_mutating=True,
+            keep_temp=False,
+        )
+        by_name = {track["name"]: track for track in payload["tracks"]}
+
+        self.assertTrue(payload["ok"], payload)
+        self.assertFalse(payload["original_package_changed"])
+        self.assertTrue(by_name["track_a_read_only_agent"]["passed"], by_name["track_a_read_only_agent"])
+        self.assertTrue(by_name["track_e_portable_skill_agent"]["passed"], by_name["track_e_portable_skill_agent"])
+        self.assertEqual(by_name["track_b_prompt_refinement_workstream"]["skipped"], True)
+
+    def test_subagent_forward_check_mutating_tracks_only_change_copies(self) -> None:
+        payload = subagent_forward_check_payload(
+            SKILL_ROOT,
+            python=sys.executable,
+            temp_parent=self.tmp_root,
+            skip_mutating=False,
+            keep_temp=False,
+        )
+        by_name = {track["name"]: track for track in payload["tracks"]}
+
+        self.assertTrue(payload["ok"], payload)
+        self.assertFalse(payload["original_package_changed"])
+        self.assertTrue(by_name["track_b_prompt_refinement_workstream"]["passed"], by_name["track_b_prompt_refinement_workstream"])
+        self.assertTrue(by_name["track_c_retrieval_branch_agent"]["passed"], by_name["track_c_retrieval_branch_agent"])
+        self.assertTrue(by_name["track_d_decision_gate_agent"]["passed"], by_name["track_d_decision_gate_agent"])
+        self.assertGreater(by_name["track_d_decision_gate_agent"]["summary"]["copy_changed_count"], 0)
 
 
 if __name__ == "__main__":

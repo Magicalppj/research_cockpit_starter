@@ -84,6 +84,16 @@ def build_accept_decision_command(decision_id: str) -> str:
     )
 
 
+def build_update_decision_checklist_command(decision_id: str) -> str:
+    return (
+        f"{script_command('update_decision_checklist.py')}"
+        f" --id {decision_id}"
+        " --alternative <option_id>"
+        ' --consequence "Describe downstream impact"'
+        ' --next-required-action "Describe required follow-up"'
+    )
+
+
 def build_create_note_command(node_id: str) -> str:
     return (
         f"{script_command('create_note.py')}"

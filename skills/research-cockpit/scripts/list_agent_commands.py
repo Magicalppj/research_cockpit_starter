@@ -160,6 +160,15 @@ COMMANDS: list[dict[str, object]] = [
         "recommended_when": "Update evidence before reviewing a proposed decision.",
     },
     {
+        "name": "update_decision_checklist.py",
+        "purpose": "Append checklist metadata for an existing decision without changing decision status.",
+        "mutating": True,
+        "supports_json": False,
+        "supports_dry_run": False,
+        "supports_no_build": True,
+        "recommended_when": "Fill alternatives, consequences, and next actions before accepting a decision.",
+    },
+    {
         "name": "accept_decision.py",
         "purpose": "Accept an existing decision and sync parent option/problem state.",
         "mutating": True,

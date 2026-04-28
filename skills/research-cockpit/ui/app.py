@@ -46,6 +46,7 @@ from ui.view_helpers import (
     build_record_finding_command,
     build_report_option_workstream_command,
     build_set_focus_command,
+    build_update_decision_checklist_command,
     build_update_suggestion_state_command,
     context_rows,
     default_detail_node_id,
@@ -367,6 +368,7 @@ EXTRA_UI_TEXT = {
         "decision_not_ready": "该 decision 尚未满足接受条件。",
         "check_decision_command": "检查决策接受条件命令",
         "accept_decision_command": "接受决策命令",
+        "update_decision_checklist_command": "更新决策检查清单命令",
         "claim_option_command": "认领方案工作流命令",
         "option_context_command": "方案工作流上下文命令",
         "report_option_command": "回报方案工作流命令",
@@ -412,6 +414,7 @@ EXTRA_UI_TEXT = {
         "decision_not_ready": "This decision is not ready for acceptance.",
         "check_decision_command": "Check Decision Acceptance Command",
         "accept_decision_command": "Accept Decision Command",
+        "update_decision_checklist_command": "Update Decision Checklist Command",
         "claim_option_command": "Claim Option Workstream Command",
         "option_context_command": "Option Workstream Context Command",
         "report_option_command": "Report Option Workstream Command",
@@ -657,6 +660,8 @@ def render_node_detail(
         if node.type == "decision":
             st.write(text["check_decision_command"])
             st.code(build_check_decision_acceptance_command(node_id), language="powershell")
+            st.write(text["update_decision_checklist_command"])
+            st.code(build_update_decision_checklist_command(node_id), language="powershell")
             st.write(text["accept_decision_command"])
             st.code(build_accept_decision_command(node_id), language="powershell")
         if node.type in {"problem", "option", "experiment", "decision"}:

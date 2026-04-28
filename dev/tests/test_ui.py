@@ -10,7 +10,7 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 SKILL_ROOT = ROOT_DIR / "skills" / "research-cockpit"
 sys.path.insert(0, str(SKILL_ROOT))
 
-from ui.app import build_pyvis_html
+from ui.app import build_pyvis_html, get_text
 from ui.view_helpers import (
     build_accept_decision_command,
     build_apply_suggestion_command,
@@ -20,6 +20,7 @@ from ui.view_helpers import (
     build_promote_decision_command,
     build_record_finding_command,
     build_set_focus_command,
+    build_update_decision_checklist_command,
     build_update_suggestion_state_command,
     default_detail_node_id,
     default_selected_statuses,
@@ -43,6 +44,11 @@ from ui.view_helpers import (
 
 
 class UiRenderingTests(unittest.TestCase):
+    def test_update_decision_checklist_label_is_localized(self) -> None:
+        text = get_text("中文")
+
+        self.assertEqual(text["update_decision_checklist_command"], "更新决策检查清单命令")
+
     def test_app_multiselects_use_explicit_keys(self) -> None:
         source = (SKILL_ROOT / "ui" / "app.py").read_text(encoding="utf-8")
         start = 0
@@ -265,9 +271,10 @@ class UiRenderingTests(unittest.TestCase):
         finding_command = build_record_finding_command("exp_t5")
         decision_command = build_promote_decision_command("option_t5")
         check_command = build_check_decision_acceptance_command("decision_t5")
+        checklist_command = build_update_decision_checklist_command("decision_t5")
         accept_command = build_accept_decision_command("decision_t5")
         note_command = build_create_note_command("problem_text")
-        commands = [finding_command, decision_command, check_command, accept_command, note_command]
+        commands = [finding_command, decision_command, check_command, checklist_command, accept_command, note_command]
 
         self.assertTrue(all(command.startswith("python scripts\\") for command in commands))
         self.assertFalse(any("D:\\Tools" in command for command in commands))
@@ -280,6 +287,9 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("--status proposed", decision_command)
         self.assertIn("scripts\\check_decision_acceptance.py", check_command)
         self.assertIn("--id decision_t5", check_command)
+        self.assertIn("scripts\\update_decision_checklist.py", checklist_command)
+        self.assertIn("--alternative <option_id>", checklist_command)
+        self.assertIn("--next-required-action", checklist_command)
         self.assertIn("scripts\\accept_decision.py", accept_command)
         self.assertIn("--id decision_t5", accept_command)
         self.assertIn("scripts\\create_note.py", note_command)

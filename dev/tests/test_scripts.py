@@ -34,6 +34,7 @@ from scripts.set_focus import set_focus
 from scripts.skill_smoke_test import missing_modules_for_python, skill_smoke_test_payload
 from scripts.suggest_next_actions import select_suggestions
 from scripts.update_decision_evidence import update_decision_evidence
+from scripts.update_decision_checklist import update_decision_checklist
 from scripts.update_suggestion_state import update_suggestion_state
 from scripts.update_status import update_status
 
@@ -379,6 +380,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(by_name["skill_smoke_test.py"]["mutating"])
         self.assertTrue(by_name["record_finding.py"]["mutating"])
         self.assertTrue(by_name["record_finding.py"]["supports_no_build"])
+        self.assertTrue(by_name["update_decision_checklist.py"]["mutating"])
+        self.assertTrue(by_name["update_decision_checklist.py"]["supports_no_build"])
         self.assertTrue(by_name["cleanup_suggestion_lifecycle.py"]["supports_dry_run"])
         self.assertTrue(by_name["build_dashboard.py"]["writes_generated_files"])
 
@@ -1133,6 +1136,156 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         self.assertEqual(failed.returncode, 1)
         self.assertIn("missing_decision", failed.stdout)
+
+    def test_update_decision_checklist_appends_fields_and_dedupes(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+                "alternatives_considered": ["option_alt"],
+                "consequences": ["Update docs."],
+                "next_required_actions": ["Run smoke test."],
+            },
+        )
+
+        result = update_decision_checklist(
+            self.root,
+            decision_id="decision_t5",
+            alternatives=["option_alt"],
+            consequences=["Update docs.", "Notify downstream agent."],
+            next_required_actions=["Run smoke test.", "Review checklist."],
+            evidence_summary="Evidence is ready for review.",
+        )
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
+
+        self.assertEqual(result["added"]["alternatives_considered"], [])
+        self.assertEqual(decision["alternatives_considered"], ["option_alt"])
+        self.assertEqual(decision["consequences"], ["Update docs.", "Notify downstream agent."])
+        self.assertEqual(decision["next_required_actions"], ["Run smoke test.", "Review checklist."])
+        self.assertEqual(decision["evidence_summary"], "Evidence is ready for review.")
+        self.assertEqual(decision["status"], "proposed")
+        self.assertTrue((self.root / "dashboards" / "decision_acceptance_checklists.json").exists())
+
+    def test_update_decision_checklist_rejects_bad_inputs(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+            },
+        )
+
+        with self.assertRaises(ValueError) as missing:
+            update_decision_checklist(self.root, decision_id="missing_decision", rebuild_dashboard=False)
+        self.assertIn("missing_decision", str(missing.exception))
+
+        with self.assertRaises(ValueError) as wrong_type:
+            update_decision_checklist(self.root, decision_id="option_t5", rebuild_dashboard=False)
+        self.assertIn("decision", str(wrong_type.exception))
+
+        with self.assertRaises(ValueError) as missing_alt:
+            update_decision_checklist(
+                self.root,
+                decision_id="decision_t5",
+                alternatives=["missing_option"],
+                rebuild_dashboard=False,
+            )
+        self.assertIn("missing_option", str(missing_alt.exception))
+
+        with self.assertRaises(ValueError) as wrong_alt_type:
+            update_decision_checklist(
+                self.root,
+                decision_id="decision_t5",
+                alternatives=["problem_text"],
+                rebuild_dashboard=False,
+            )
+        self.assertIn("option", str(wrong_alt_type.exception))
+
+    def test_update_decision_checklist_cli_reports_success_and_failure(self) -> None:
+        script = SKILL_ROOT / "scripts" / "update_decision_checklist.py"
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+            },
+        )
+
+        ok = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--id",
+                "decision_t5",
+                "--alternative",
+                "option_alt",
+                "--consequence",
+                "Update docs.",
+                "--next-required-action",
+                "Review checklist.",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        failed = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--id",
+                "decision_t5",
+                "--alternative",
+                "missing_option",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(ok.returncode, 0)
+        self.assertIn("Updated decision checklist", ok.stdout)
+        self.assertFalse((self.root / "dashboards" / "decision_acceptance_checklists.json").exists())
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("missing_option", failed.stdout)
 
     def test_check_decision_acceptance_cli_json_reports_ready_and_failures(self) -> None:
         script = SKILL_ROOT / "scripts" / "check_decision_acceptance.py"

@@ -89,6 +89,7 @@ Experiment evidence and decisions:
 python scripts\record_finding.py --experiment <experiment_id> --statement "..." --confidence <weak|medium|strong>
 python scripts\promote_decision.py --id <decision_id> --option <option_id> --title "..." --summary "..." --status proposed --auto-evidence
 python scripts\update_decision_evidence.py --id <decision_id>
+python scripts\update_decision_checklist.py --id <decision_id> --alternative <option_id> --consequence "..." --next-required-action "..."
 python scripts\check_decision_acceptance.py --id <decision_id> --json
 python scripts\accept_decision.py --id <decision_id>
 ```
@@ -129,7 +130,7 @@ python scripts\build_dashboard.py
 
 **Option-following agents:** claim one option, inspect its workstream context, work inside that option's child subtree, record findings on experiments, then report `accept`, `reject`, or `continue` back to the option. The preferred branch shape is `option -> problem -> option -> experiment/decision`. `claim_option.py` enforces a single active owner while status is `claimed`, `in_progress`, or `blocked`; use `--force` only when intentionally transferring ownership. A workstream report is evidence for the upstream problem, not a decision acceptance.
 
-**Decision acceptance:** evidence must be recorded before acceptance. Refresh evidence with `update_decision_evidence.py`, check readiness with `check_decision_acceptance.py --json`, and only then run `accept_decision.py` if `ready` is true. `promote_decision.py --status accepted` uses the same quality gate. Do not use `update_status.py` to accept a decision.
+**Decision acceptance:** evidence must be recorded before acceptance. The normal gate flow is `record_finding.py -> update_decision_evidence.py -> update_decision_checklist.py -> check_decision_acceptance.py -> accept_decision.py`. Use `update_decision_checklist.py` to add alternatives, consequences, and next required actions without changing decision status. Only run `accept_decision.py` if `ready` is true. `promote_decision.py --status accepted` uses the same quality gate. Do not use `update_status.py` to accept a decision.
 
 **Action suggestions:** suggestions are generated guidance, not completed facts. Use `apply_suggestion.py` to queue a suggestion into `current_state.next_actions` or the source node, `update_suggestion_state.py` to dismiss/complete/restore it, and `cleanup_suggestion_lifecycle.py --dry-run` before removing stale lifecycle history.
 

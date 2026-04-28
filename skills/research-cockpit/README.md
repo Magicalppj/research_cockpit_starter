@@ -113,6 +113,14 @@ python scripts\update_decision_evidence.py --id decision_demo_prompt_refinement
 
 `update_decision_evidence.py` only updates evidence-related fields on an existing decision. It does not accept or reject the decision, and it does not close the parent option/problem.
 
+Update checklist metadata for an existing decision:
+
+```powershell
+python scripts\update_decision_checklist.py --id decision_demo_prompt_refinement --alternative option_demo_retrieval_branch --consequence "Keep the retrieval branch available as a fallback." --next-required-action "Run a follow-up smoke test after acceptance."
+```
+
+`update_decision_checklist.py` appends alternatives, consequences, and next required actions without changing decision status. Duplicate values are ignored. Use `--evidence-summary` only for a deliberate manual evidence summary override; the preferred evidence path is still `update_decision_evidence.py`.
+
 Check whether a decision is ready to accept:
 
 ```powershell
@@ -274,6 +282,7 @@ scripts/
   record_finding.py
   promote_decision.py
   update_decision_evidence.py
+  update_decision_checklist.py
   check_decision_acceptance.py
   accept_decision.py
   create_note.py

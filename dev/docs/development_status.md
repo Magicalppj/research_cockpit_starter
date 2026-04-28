@@ -625,26 +625,53 @@ v2 P0 阶段完成后，应满足：
 - dry-run coverage 扩展：让更多写入脚本支持预览变更。
 - decision acceptance UI 修复提示：在 checklist 缺项时给出对应脚本或 YAML 字段建议。
 - 前端图谱交互升级：为可点击展开节点、编辑节点文本和更换前端框架继续收拢数据接口。
-## Open Skill Demo Data Split v1 (2026-04-28)
 
-This update separates publishable skill runtime assets from private research assets. The `skills/research-cockpit/research_cockpit/` bundle now contains only a small generic demo graph that exercises the core workflow without exposing personal research content.
+## Open Skill Demo Data Split v1 更新（2026-04-28）
 
-Completed:
+本批将可发布的 skill 运行时资产与私有研究资产拆开。`skills/research-cockpit/research_cockpit/` 包内现在只保留一组小型通用 demo graph，用来覆盖核心工作流，同时避免暴露个人研究内容。
 
-- Replaced bundled private research nodes with public demo nodes: `stage_demo_research`, `problem_demo_quality_gap`, `option_demo_prompt_refinement`, `option_demo_retrieval_branch`, nested demo problem/option nodes, demo experiments, and a demo decision.
-- Regenerated dashboard/context outputs from the demo graph so exported context packs no longer include private project terms.
-- Updated skill README examples to use generic demo IDs and generic search queries.
-- Extended the release public scan to reject known private research terms in the publishable skill package.
+已完成：
 
-Notes:
+- 将包内私有研究节点替换为公开 demo 节点：`stage_demo_research`、`problem_demo_quality_gap`、`option_demo_prompt_refinement`、`option_demo_retrieval_branch`、嵌套 demo problem/option 节点、demo experiments 和一个 demo decision。
+- 基于 demo graph 重新生成 dashboard/context 输出，确保导出的 context pack 不再包含私有项目术语。
+- 更新 skill README 示例，改用通用 demo ID 和通用搜索查询。
+- 扩展 release public scan，拒绝可发布 skill package 中出现已知私有研究术语。
 
-- This cleans the current working tree content for future packaging. If the repository history itself will be published, use an export archive or history rewrite so old private assets are not recoverable from prior commits.
-- Development docs and tests remain outside the skill package under `dev/`.
-## Skill Entry Documentation v1 (2026-04-28)
+备注：
 
-This update rewrites the package `SKILL.md` as an agent-facing operating contract for project-local installation under `.agent/skills/research-cockpit/` or `.codex/skills/research-cockpit/`.
+- 这会清理当前工作树内容，便于后续打包。如果还要发布仓库历史，应使用导出归档或重写历史，避免旧提交中的私有资产可被恢复。
+- 开发文档和测试仍保留在 skill package 外的 `dev/` 目录下。
 
-Completed:
+## Skill Entry Documentation v1 更新（2026-04-28）
 
-- Expanded the skill entry with data-root semantics, demo-data caveats, read order, write boundaries, workflow routing, critical decision/option/suggestion rules, subagent validation boundaries, references, and verification commands.
-- Synchronized the package README and `agents/openai.yaml` with the project-local skill installation scenario.
+本批将 package `SKILL.md` 重写为面向 agent 的操作契约，适配项目内安装到 `.agent/skills/research-cockpit/` 或 `.codex/skills/research-cockpit/` 的场景。
+
+已完成：
+
+- 扩展 skill entry，补充 data-root 语义、demo data 注意事项、读取顺序、写入边界、工作流路由、关键 decision/option/suggestion 规则、subagent 验证边界、参考资料和验证命令。
+- 同步 package README 和 `agents/openai.yaml`，匹配项目本地 skill 安装场景。
+
+## Subagent Forward-Test Hardening v1 更新（2026-04-28）
+
+本阶段补齐手动 subagent 测试暴露的缺口：agent 不再需要手动编辑 decision YAML，就能补齐非 evidence 类 acceptance checklist 字段。
+
+本批已完成：
+
+- 在可发布 skill package 中新增 `scripts/update_decision_checklist.py`。它会追加 `alternatives_considered`、`consequences` 和 `next_required_actions`，仅在显式传参时覆盖 `evidence_summary`，同时更新 `updated_at`、校验数据，并在未使用 `--no-build` 时重建 dashboard/context。
+- 更新 agent command manifest、UI command template、`SKILL.md` 和 package README，使 decision gate 流程变为 `record_finding.py -> update_decision_evidence.py -> update_decision_checklist.py -> check_decision_acceptance.py -> accept_decision.py`。
+- 新增开发侧 harness `dev/scripts/run_subagent_forward_check.py`，模拟只读 agent 启动、prompt refinement workstream 执行、retrieval branch 扩展、decision gate 补齐和复制包中的 portable skill 启动。
+- 为新的 checklist writer 和 forward-check harness 增加测试。写入型 track 只在 `.test_tmp/subagent_runs/` 下操作，并断言原始 package 未被修改。
+
+当前验证目标：
+
+- `python -m unittest discover -s dev\tests`
+- `python skills\research-cockpit\scripts\skill_smoke_test.py --json`
+- `python dev\scripts\run_skill_release_check.py --json --skip-mutating`
+- `python dev\scripts\run_subagent_forward_check.py --json`
+- `python dev\scripts\run_subagent_forward_check.py --json --skip-mutating`
+
+下一批候选：
+
+- 为 decision acceptance 失败增加轻量 UI 修复提示。
+- 为更多 mutating scripts 扩展 dry-run 覆盖。
+- 考虑升级图谱交互，支持点击展开和更安全的节点文本编辑。

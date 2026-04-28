@@ -32,6 +32,7 @@ REQUIRED_PACKAGE_PATHS = (
     "scripts/claim_option.py",
     "scripts/option_workstream_context.py",
     "scripts/report_option_workstream.py",
+    "scripts/update_decision_checklist.py",
     "ui/app.py",
     "research_cockpit/current_state.yaml",
     "agents/openai.yaml",
