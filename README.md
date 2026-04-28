@@ -134,6 +134,15 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\update_suggestion_state.py --id
 
 `dismissed` and `completed` only affect suggestion visibility. They do not execute the suggested command or change the underlying experiment, decision, or resource state. `active` restores a suggestion by removing its lifecycle record.
 
+Clean up orphan suggestion lifecycle records:
+
+```powershell
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\cleanup_suggestion_lifecycle.py --dry-run --json
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\cleanup_suggestion_lifecycle.py --state completed --older-than-days 30
+```
+
+`cleanup_suggestion_lifecycle.py` only removes lifecycle records whose stable suggestion key no longer matches current generated suggestions. `--dry-run` previews candidates without writing YAML. `--older-than-days` ignores records with missing or invalid dates.
+
 Search notes, YAML node fields, and indexed local resources:
 
 ```powershell
@@ -219,6 +228,7 @@ scripts/
   suggest_next_actions.py
   apply_suggestion.py
   update_suggestion_state.py
+  cleanup_suggestion_lifecycle.py
   search_knowledge.py
 ui/
   app.py

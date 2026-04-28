@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -1061,6 +1062,51 @@ def build_suggestion_lifecycle_summary(current: dict[str, Any], suggestions: lis
             if str(key) not in suggestion_keys:
                 counts["orphan"] += 1
     return counts
+
+
+def _parse_lifecycle_date(value: Any) -> date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return date.fromisoformat(text[:10])
+    except ValueError:
+        return None
+
+
+def build_suggestion_lifecycle_rows(
+    current: dict[str, Any],
+    suggestions: list[dict[str, Any]],
+    *,
+    today: date | None = None,
+) -> list[dict[str, Any]]:
+    today = today or date.today()
+    by_key = {str(item.get("key")): item for item in suggestions if item.get("key")}
+    lifecycle = current.get("suggestion_lifecycle")
+    if not isinstance(lifecycle, dict):
+        return []
+
+    rows: list[dict[str, Any]] = []
+    for key, raw_record in sorted(lifecycle.items(), key=lambda item: str(item[0])):
+        record = raw_record if isinstance(raw_record, dict) else {}
+        key_text = str(key)
+        suggestion = by_key.get(key_text)
+        updated_at = str(record.get("updated_at") or "")
+        updated_date = _parse_lifecycle_date(updated_at)
+        rows.append({
+            "key": key_text,
+            "suggestion_id": str(suggestion.get("id") or "") if suggestion else "",
+            "state": str(record.get("state") or ""),
+            "reason": str(record.get("reason") or ""),
+            "updated_at": updated_at,
+            "action": str(record.get("action") or (suggestion or {}).get("action") or ""),
+            "kind": str(record.get("kind") or (suggestion or {}).get("kind") or ""),
+            "source_node_id": str(record.get("source_node_id") or (suggestion or {}).get("source_node_id") or ""),
+            "active_match": suggestion is not None,
+            "orphan": suggestion is None,
+            "age_days": (today - updated_date).days if updated_date else None,
+        })
+    return rows
 
 
 def _normalize_relative_path(value: Any) -> str:

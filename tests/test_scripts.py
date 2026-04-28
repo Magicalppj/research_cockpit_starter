@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import unittest
 import uuid
+from datetime import date
 from pathlib import Path
 import sys
 
@@ -17,6 +18,7 @@ from scripts.add_node import add_node
 from scripts.apply_suggestion import apply_suggestion
 from scripts.build_dashboard import build_dashboard
 from scripts.check_decision_acceptance import decision_acceptance_payload
+from scripts.cleanup_suggestion_lifecycle import cleanup_suggestion_lifecycle
 from scripts.create_note import create_note
 from scripts.promote_decision import promote_decision
 from scripts.record_finding import record_finding
@@ -624,6 +626,130 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         self.assertEqual(failed.returncode, 1)
         self.assertIn("missing_suggestion", failed.stdout)
+
+    def test_cleanup_suggestion_lifecycle_dry_run_and_age_filter(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["suggestion_lifecycle"] = {
+            "old_completed": {
+                "state": "completed",
+                "reason": "Resolved old suggestion.",
+                "updated_at": "2000-01-01",
+                "action": "Old action",
+                "kind": "run_experiment",
+                "source_node_id": "exp_old",
+            },
+            "fresh_dismissed": {
+                "state": "dismissed",
+                "reason": "Recent dismissal.",
+                "updated_at": str(date.today()),
+                "action": "Fresh action",
+                "kind": "record_finding",
+                "source_node_id": "exp_old",
+            },
+            "bad_date": {
+                "state": "dismissed",
+                "reason": "Bad date stays when age filtered.",
+                "updated_at": "not-a-date",
+                "action": "Bad date action",
+                "kind": "record_finding",
+                "source_node_id": "exp_old",
+            },
+        }
+        save_yaml(self.root / "current_state.yaml", current)
+
+        dry_run = cleanup_suggestion_lifecycle(
+            self.root,
+            dry_run=True,
+            older_than_days=1,
+            rebuild_dashboard=False,
+        )
+        after_dry_run = load_yaml(self.root / "current_state.yaml")
+        cleaned = cleanup_suggestion_lifecycle(
+            self.root,
+            older_than_days=1,
+            rebuild_dashboard=False,
+        )
+        after_clean = load_yaml(self.root / "current_state.yaml")
+
+        self.assertEqual(dry_run["candidate_count"], 1)
+        self.assertFalse(dry_run["changed"])
+        self.assertIn("old_completed", after_dry_run["suggestion_lifecycle"])
+        self.assertEqual(cleaned["removed_count"], 1)
+        self.assertTrue(cleaned["changed"])
+        self.assertNotIn("old_completed", after_clean["suggestion_lifecycle"])
+        self.assertIn("fresh_dismissed", after_clean["suggestion_lifecycle"])
+        self.assertIn("bad_date", after_clean["suggestion_lifecycle"])
+        self.assertEqual(after_clean["updated_at"], str(date.today()))
+
+    def test_cleanup_suggestion_lifecycle_cli_json_and_noop(self) -> None:
+        script = ROOT_DIR / "scripts" / "cleanup_suggestion_lifecycle.py"
+        current = load_yaml(self.root / "current_state.yaml")
+        current["suggestion_lifecycle"] = {
+            "old_completed": {
+                "state": "completed",
+                "reason": "Resolved old suggestion.",
+                "updated_at": "2000-01-01",
+                "action": "Old action",
+                "kind": "run_experiment",
+                "source_node_id": "exp_old",
+            },
+            "old_dismissed": {
+                "state": "dismissed",
+                "reason": "Dismissed old suggestion.",
+                "updated_at": "2000-01-01",
+                "action": "Dismissed action",
+                "kind": "record_finding",
+                "source_node_id": "exp_old",
+            },
+        }
+        save_yaml(self.root / "current_state.yaml", current)
+
+        dry_run = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--dry-run", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        cleaned = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--state",
+                "completed",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        noop = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--state",
+                "completed",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        after_clean = load_yaml(self.root / "current_state.yaml")
+
+        self.assertEqual(dry_run.returncode, 0)
+        payload = json.loads(dry_run.stdout)
+        self.assertEqual(payload["candidate_count"], 2)
+        self.assertFalse(payload["changed"])
+        self.assertEqual(cleaned.returncode, 0)
+        self.assertIn("Removed 1", cleaned.stdout)
+        self.assertNotIn("old_completed", after_clean["suggestion_lifecycle"])
+        self.assertIn("old_dismissed", after_clean["suggestion_lifecycle"])
+        self.assertEqual(noop.returncode, 0)
+        self.assertIn("No orphan", noop.stdout)
 
     def test_record_finding_appends_finding_and_rebuilds_dashboard(self) -> None:
         write_node(

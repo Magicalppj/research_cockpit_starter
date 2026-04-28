@@ -13,6 +13,7 @@ from ui.view_helpers import (
     build_accept_decision_command,
     build_apply_suggestion_command,
     build_check_decision_acceptance_command,
+    build_cleanup_suggestion_lifecycle_command,
     build_create_note_command,
     build_promote_decision_command,
     build_record_finding_command,
@@ -27,6 +28,7 @@ from ui.view_helpers import (
     format_resource_rows,
     format_action_suggestion_rows,
     format_evidence_summary,
+    format_suggestion_lifecycle_rows,
     filter_action_suggestions,
     filter_graph_for_view,
     filter_search_results,
@@ -404,6 +406,51 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("--target node", node_command)
         self.assertIn("scripts\\update_suggestion_state.py", lifecycle_command)
         self.assertIn("--state completed", lifecycle_command)
+
+    def test_suggestion_lifecycle_cleanup_helpers_format_rows_and_commands(self) -> None:
+        rows = format_suggestion_lifecycle_rows([
+            {
+                "key": "sg_old",
+                "state": "completed",
+                "reason": "Done.",
+                "updated_at": "2026-04-20",
+                "action": "Old action",
+                "kind": "run_experiment",
+                "source_node_id": "exp_old",
+                "active_match": False,
+                "orphan": True,
+                "age_days": 8,
+            },
+            {
+                "key": "sg_current",
+                "state": "dismissed",
+                "reason": "",
+                "updated_at": "not-a-date",
+                "action": "Current action",
+                "kind": "record_finding",
+                "source_node_id": "exp_t5",
+                "active_match": True,
+                "orphan": False,
+                "age_days": None,
+            },
+        ])
+        dry_run_command = build_cleanup_suggestion_lifecycle_command(dry_run=True)
+        clean_completed_command = build_cleanup_suggestion_lifecycle_command(
+            dry_run=False,
+            state="completed",
+            older_than_days=7,
+        )
+
+        self.assertEqual(rows[0]["orphan"], "yes")
+        self.assertEqual(rows[0]["active_match"], "")
+        self.assertEqual(rows[0]["age_days"], 8)
+        self.assertEqual(rows[1]["active_match"], "yes")
+        self.assertEqual(rows[1]["age_days"], "")
+        self.assertIn("scripts\\cleanup_suggestion_lifecycle.py", dry_run_command)
+        self.assertIn("--dry-run", dry_run_command)
+        self.assertIn("--state completed", clean_completed_command)
+        self.assertIn("--older-than-days 7", clean_completed_command)
+        self.assertNotIn("--dry-run", clean_completed_command)
 
     def test_search_helpers_format_and_filter_results(self) -> None:
         index = [

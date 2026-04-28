@@ -106,6 +106,21 @@ def build_update_suggestion_state_command(suggestion_id: str, state: str) -> str
     )
 
 
+def build_cleanup_suggestion_lifecycle_command(
+    *,
+    dry_run: bool = True,
+    state: str = "all",
+    older_than_days: int | None = None,
+) -> str:
+    command = r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\cleanup_suggestion_lifecycle.py"
+    if dry_run:
+        command += " --dry-run"
+    command += f" --state {state}"
+    if older_than_days is not None:
+        command += f" --older-than-days {older_than_days}"
+    return command
+
+
 def edge_style_for_type(edge_type: str | None) -> dict[str, object]:
     styles: dict[str, dict[str, object]] = {
         "supports": {"color": "#16A34A", "dashes": False},
@@ -190,6 +205,18 @@ def format_action_suggestion_rows(suggestions: list[dict]) -> list[dict]:
         row["lifecycle_state"] = row.get("lifecycle_state") or "active"
         row["lifecycle_reason"] = row.get("lifecycle_reason") or ""
         formatted.append(row)
+    return formatted
+
+
+def format_suggestion_lifecycle_rows(rows: list[dict]) -> list[dict]:
+    formatted = []
+    for row in rows:
+        item = dict(row)
+        item["active_match"] = "yes" if item.get("active_match") else ""
+        item["orphan"] = "yes" if item.get("orphan") else ""
+        if item.get("age_days") is None:
+            item["age_days"] = ""
+        formatted.append(item)
     return formatted
 
 

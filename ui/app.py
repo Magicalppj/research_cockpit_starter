@@ -25,6 +25,7 @@ from cockpit.model import (
     build_link_rows,
     build_search_index,
     build_search_index_summary,
+    build_suggestion_lifecycle_rows,
     build_suggestion_lifecycle_summary,
     graph_to_json,
     load_explicit_edges,
@@ -36,6 +37,7 @@ from ui.view_helpers import (
     build_apply_suggestion_command,
     build_accept_decision_command,
     build_check_decision_acceptance_command,
+    build_cleanup_suggestion_lifecycle_command,
     build_create_note_command,
     build_promote_decision_command,
     build_record_finding_command,
@@ -58,6 +60,7 @@ from ui.view_helpers import (
     format_resource_index_rows,
     format_resource_rows,
     format_search_result_rows,
+    format_suggestion_lifecycle_rows,
     ordered_tab_labels,
 )
 from scripts.set_focus import set_focus as save_current_focus
@@ -329,6 +332,9 @@ EXTRA_UI_TEXT = {
         "inactive_queue_disabled": "已忽略或已完成的建议不能写入行动队列。",
         "suggestion_lifecycle": "建议生命周期",
         "orphan_suggestions": "孤立记录",
+        "orphan_details": "孤立建议记录明细",
+        "cleanup_lifecycle_dry_run": "清理前预览命令",
+        "cleanup_lifecycle_apply": "清理孤立记录命令",
         "active": "活跃",
         "dismissed": "已忽略",
         "completed": "已完成",
@@ -367,6 +373,9 @@ EXTRA_UI_TEXT = {
         "inactive_queue_disabled": "Dismissed or completed suggestions cannot be queued.",
         "suggestion_lifecycle": "Suggestion Lifecycle",
         "orphan_suggestions": "Orphan Records",
+        "orphan_details": "Orphan Suggestion Records",
+        "cleanup_lifecycle_dry_run": "Cleanup dry-run command",
+        "cleanup_lifecycle_apply": "Cleanup orphan records command",
         "active": "Active",
         "dismissed": "Dismissed",
         "completed": "Completed",
@@ -1224,6 +1233,18 @@ def render_data_health(
     s4.metric(text["orphan_suggestions"], lifecycle_summary["orphan"])
     if lifecycle_summary["orphan"]:
         st.warning(f"{lifecycle_summary['orphan']} suggestion lifecycle record(s) no longer match current suggestions.")
+        lifecycle_rows = build_suggestion_lifecycle_rows(current, all_action_suggestions)
+        orphan_rows = [row for row in lifecycle_rows if row.get("orphan")]
+        st.caption(text["orphan_details"])
+        st.dataframe(
+            pd.DataFrame(format_suggestion_lifecycle_rows(orphan_rows)),
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.caption(text["cleanup_lifecycle_dry_run"])
+        st.code(build_cleanup_suggestion_lifecycle_command(dry_run=True), language="powershell")
+        st.caption(text["cleanup_lifecycle_apply"])
+        st.code(build_cleanup_suggestion_lifecycle_command(dry_run=False), language="powershell")
 
     st.subheader(text["search_index"])
     search_summary = build_search_index_summary(search_index)

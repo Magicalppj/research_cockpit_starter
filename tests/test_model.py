@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import unittest
 import uuid
+from datetime import date
 from pathlib import Path
 import sys
 
@@ -23,6 +24,7 @@ from cockpit.model import (
     build_link_rows,
     build_search_index,
     build_search_index_summary,
+    build_suggestion_lifecycle_rows,
     build_suggestion_lifecycle_summary,
     derive_focus_path,
     graph_to_json,
@@ -634,13 +636,31 @@ class ModelValidationTests(unittest.TestCase):
     def test_suggestion_lifecycle_validation_and_summary_handle_orphans(self) -> None:
         nodes = load_nodes(self.root)
         current = load_yaml(self.root / "current_state.yaml")
+        current_suggestions = build_action_suggestions(self.root, nodes, current, include_inactive=True)
+        active_key = current_suggestions[0]["key"]
         current["suggestion_lifecycle"] = {
+            active_key: {
+                "state": "dismissed",
+                "reason": "Still relevant but hidden.",
+                "updated_at": "2026-04-27",
+                "action": current_suggestions[0]["action"],
+                "kind": current_suggestions[0]["kind"],
+                "source_node_id": current_suggestions[0]["source_node_id"],
+            },
             "orphan_suggestion": {
                 "state": "completed",
                 "reason": "Old suggestion resolved.",
-                "updated_at": "2026-04-28",
+                "updated_at": "2026-04-20",
                 "action": "Old action",
                 "kind": "run_experiment",
+                "source_node_id": "exp_old",
+            },
+            "bad_date_suggestion": {
+                "state": "dismissed",
+                "reason": "Bad date should not compute age.",
+                "updated_at": "not-a-date",
+                "action": "Old action with bad date",
+                "kind": "record_finding",
                 "source_node_id": "exp_old",
             }
         }
@@ -648,10 +668,18 @@ class ModelValidationTests(unittest.TestCase):
         errors = validate_cockpit(self.root, nodes, current)
         suggestions = build_action_suggestions(self.root, nodes, current, include_inactive=True)
         summary = build_suggestion_lifecycle_summary(current, suggestions)
+        rows = build_suggestion_lifecycle_rows(current, suggestions, today=date(2026, 4, 28))
+        by_key = {row["key"]: row for row in rows}
 
         self.assertEqual(errors, [])
-        self.assertEqual(summary["orphan"], 1)
+        self.assertEqual(summary["orphan"], 2)
         self.assertGreater(summary["active"], 0)
+        self.assertTrue(by_key[active_key]["active_match"])
+        self.assertFalse(by_key[active_key]["orphan"])
+        self.assertFalse(by_key["orphan_suggestion"]["active_match"])
+        self.assertTrue(by_key["orphan_suggestion"]["orphan"])
+        self.assertEqual(by_key["orphan_suggestion"]["age_days"], 8)
+        self.assertIsNone(by_key["bad_date_suggestion"]["age_days"])
 
         current["suggestion_lifecycle"] = {"bad": {"state": "ignored"}}
         with self.assertRaises(ValidationError) as invalid_state:

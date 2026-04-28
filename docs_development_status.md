@@ -500,3 +500,21 @@ v2 P0 阶段完成后，应满足：
 - suggestion lifecycle cleanup：清理长期 orphan 的 suggestion lifecycle 历史记录。
 - decision acceptance checklist 后续增强：增加 UI 缺失项修复提示或 acceptance 历史记录。
 - resource indexing 策略微调：按项目需要评估是否纳入代码文件或更细的文件大小策略。
+
+## Suggestion Lifecycle Cleanup v1 更新（2026-04-28）
+
+本批补齐 suggestion lifecycle 的历史维护能力，重点是安全清理 `current_state.yaml` 中已经无法匹配当前建议 key 的 orphan 记录。它只影响建议历史展示，不执行建议命令，也不改变 experiment、decision 或 resource 的真实状态。
+
+已完成：
+
+- 新增 `build_suggestion_lifecycle_rows(...)`，汇总 lifecycle 明细并标记 `active_match`、`orphan`、`state`、`reason`、`updated_at`、`action`、`kind`、`source_node_id` 和 `age_days`。
+- 新增 `scripts/cleanup_suggestion_lifecycle.py`，支持 `--dry-run`、`--state dismissed|completed|all`、`--older-than-days`、`--json` 和 `--no-build`。
+- 默认只清理 orphan 记录；`--older-than-days` 遇到缺失或非法日期时不会误删。
+- Data Health 会展示 orphan lifecycle 明细，并提供 dry-run 与真实清理命令模板；UI 不自动执行清理。
+- README 已补充 lifecycle cleanup 的命令、dry-run 示例和边界说明。
+
+下一批候选：
+
+- decision acceptance checklist 后续增强：在 UI 中给出缺失项修复提示，或记录 acceptance 历史。
+- resource indexing 策略微调：按项目需要评估是否纳入代码文件或调整大小策略。
+- 前端图谱交互升级：为后续可点击展开、编辑节点文本和可能的前端迁移继续拆分接口边界。
