@@ -1,5 +1,64 @@
 # Research Cockpit 开发状态
 
+## Research Graph Layout Optimization v1 更新（2026-04-28）
+
+本批优化图谱工作台首屏布局和 React Flow 层级关系显示，目标是让研究者进入页面后先看到节点图，再按需展开筛选控件。
+
+已完成：
+
+- 主页面导航从顶部横向 tabs 改为左侧 sidebar radio；sidebar 现在包含语言、页面导航、当前焦点和数据健康。
+- Research Graph 页先渲染图谱和右侧 inspector；视图范围、节点类型/状态/阶段/Focus 关系/方案工作流筛选、保存/加载视图、renderer fallback 和图例下移到图谱下方。
+- React Flow 新增 `dagre` 层级布局，优先使用 `parent` / `contains` / `child` 结构性边生成 left-to-right 层级视图，强化 stage -> problem -> option -> experiment/decision 的阅读顺序。
+- React Flow 节点支持前端临时拖拽；拖拽位置不写 YAML、不追加 `interaction_log.yaml`、不改变 saved graph views，刷新或筛选后按当前 graph data 重新布局。
+- 已重新生成 `ui/graph_component/frontend/build` production 产物。
+
+当前仍可升级：
+
+- 大图体验：继续评估 100+ 节点下 Dagre 布局密度、minimap 可读性和局部展开。
+- 布局持久化：如后续需要保存拖拽位置，应单独设计 graph layout 数据契约和写入边界。
+
+## React Flow Graph Refresh v1 更新（2026-04-28）
+
+本批补齐图谱组件的数据刷新边界说明和 UI 入口。React Flow 组件源码或依赖变更才需要重新 build；后台 agent 修改 YAML/JSON 研究数据后，Streamlit 只需要 rerun 即可重新读取数据并向组件传入新的 graph payload。
+
+已完成：
+
+- Research Graph 页新增 `刷新图谱 / Refresh` 按钮，点击后触发 Streamlit rerun，不写 YAML、不追加 `interaction_log.yaml`、不改变 saved graph views。
+- 确认 `load_graph_data()` 当前未使用 `st.cache_data` / `st.cache_resource`，每次 rerun 都会重新读取 `research_cockpit/` 下的 YAML、graph views 和 dashboard 输入数据。
+- README 和 `SKILL.md` 已说明：普通节点/边/状态数据更新不需要 `npm.cmd run build`；只有修改 React Flow frontend source 时才需要重新 build production assets。
+
+当前行为：
+
+- 后台 agent 持续推进任务并写入节点后，已打开的 Streamlit 不会因为文件变化自动实时刷新。
+- 研究者可以点击图谱页刷新按钮，或者触发任意 Streamlit widget rerun，让图谱和右侧 inspector 基于当前数据重新渲染。
+
+## React Flow Graph Component Spike v1 更新（2026-04-28）
+
+本批完成图谱双向组件第一阶段 spike：默认使用只读 React Flow 组件渲染 Research Graph，让图谱节点点击直接驱动右侧 inspector；PyVis 继续保留为 legacy fallback。
+
+已完成：
+
+- 新增 `skills/research-cockpit/ui/graph_component/`，使用 Vite + React + `@xyflow/react` 构建只读图谱组件，并提交 production `frontend/build` 产物。
+- 新增 Python wrapper，使用 `streamlit.components.v1.declare_component(..., path=frontend/build)` 加载组件；缺失 build 时自动回退到 PyVis。
+- 新增图谱组件 payload adapter，只传递最小渲染字段、边样式和临时布局位置，不把节点 `raw` 传给前端。
+- Streamlit 图谱页默认使用 React Flow；节点点击返回 `selected_node_id` 后会更新 `graph_detail_node`，右侧 inspector 随之切换。右侧搜索/选择器继续保留为键盘和精确选择 fallback。
+- 临时点击选择不写 YAML、不追加 `interaction_log.yaml`、不改变 saved views；持久化研究状态仍通过现有脚本和 model helper 完成。
+- 新增 UI helper 测试，覆盖 payload 不包含 `raw`、点击事件只接受当前可见节点、缺失 build 产物时可检测 fallback。
+
+验证目标：
+
+- `npm.cmd install`
+- `npm.cmd run build`
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s dev\tests`
+- `%RESEARCH_COCKPIT_PYTHON% skills\research-cockpit\scripts\skill_smoke_test.py --json`
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_skill_release_check.py --json --skip-mutating --python %RESEARCH_COCKPIT_PYTHON%`
+
+当前仍可升级：
+
+- React Flow 大图体验：100+ 节点下的布局、minimap 可读性、搜索定位和局部展开。
+- Cytoscape 对照 spike：仅在 React Flow 性能或布局无法满足长期研究图谱时进入。
+- 节点文本/字段编辑：仍需先设计字段级预览、校验和回滚边界。
+
 ## Mutating Script Dry-Run Coverage v1 更新（2026-04-28）
 
 本批继续扩展写入脚本的 dry-run 覆盖，把 action suggestion、decision promotion 和 decision acceptance 的高风险写入路径纳入预览流程。
@@ -21,7 +80,7 @@
 当前仍可升级：
 
 - 继续为 `record_finding.py`、`update_decision_evidence.py` 和 `update_decision_checklist.py` 等写入脚本扩展 dry-run coverage。
-- React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
+- React Flow 大图体验 / Cytoscape 对照 spike：继续验证大规模节点、布局可读性和局部展开。
 - decision acceptance history：记录接受前后的关键状态和 checklist 摘要。
 
 ## Option Workstream Dry-Run Coverage v1 更新（2026-04-28）
@@ -45,7 +104,7 @@
 当前仍可升级：
 
 - 继续为 `record_finding.py`、`update_decision_evidence.py` 和 `update_decision_checklist.py` 等写入脚本扩展 dry-run coverage。
-- React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
+- React Flow 大图体验 / Cytoscape 对照 spike：继续验证大规模节点、布局可读性和局部展开。
 - decision acceptance history：记录接受前后的关键状态和 checklist 摘要。
 
 ## Decision Acceptance Repair Hints v1 更新（2026-04-28）
@@ -68,7 +127,7 @@
 当前仍可升级：
 
 - acceptance history：记录 decision 从 proposed 到 accepted 的历史摘要。
-- React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
+- React Flow 大图体验 / Cytoscape 对照 spike：继续验证大规模节点、布局可读性和局部展开。
 - dry-run coverage 扩展：继续为 record/update evidence/update checklist 等 mutating scripts 增加预览模式。
 
 ## Interaction Log Coverage v1 更新（2026-04-28）
@@ -91,7 +150,7 @@
 
 当前仍可升级：
 
-- React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
+- React Flow 大图体验 / Cytoscape 对照 spike：继续验证大规模节点、布局可读性和局部展开。
 - dry-run coverage 扩展：继续为 mutating scripts 增加预览模式。
 
 ## Graph Saved Views v1 更新（2026-04-28）
@@ -115,7 +174,7 @@
 
 当前仍可升级：
 
-- 做 React Flow / Cytoscape 双向组件 spike，让图谱节点点击直接驱动右侧 inspector。
+- 继续 React Flow 大图体验 / Cytoscape 对照 spike，验证大规模节点、布局可读性和局部展开。
 - 继续为 mutating scripts 扩展 dry-run coverage。
 
 ## Graph Interaction Workbench P0 更新（2026-04-28）
@@ -361,15 +420,15 @@
 
 ## 当前阶段
 
-当前项目处于 **图谱交互和安全写入可追踪性升级阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索；第十二批已完成 decision 接受质量门；第十三批已完成本地 linked resource 正文索引；第十四批已完成 suggestion lifecycle cleanup；第十五批已完成 agent skill packaging；第十六批已完成公开 demo 数据拆分；第十七批已完成 skill entry 文档契约；第十八批已完成 subagent forward-check hardening 和 decision checklist writer；第十九批已完成图谱交互工作台、saved graph views、关键 mutating scripts interaction log 和 decision acceptance UI 修复提示。
+当前项目处于 **图谱交互和安全写入可追踪性升级阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索；第十二批已完成 decision 接受质量门；第十三批已完成本地 linked resource 正文索引；第十四批已完成 suggestion lifecycle cleanup；第十五批已完成 agent skill packaging；第十六批已完成公开 demo 数据拆分；第十七批已完成 skill entry 文档契约；第十八批已完成 subagent forward-check hardening 和 decision checklist writer；第十九批已完成图谱交互工作台、saved graph views、关键 mutating scripts interaction log 和 decision acceptance UI 修复提示；第二十批已完成 mutating scripts dry-run coverage 扩展和 React Flow 双向组件 spike。
 
-当前未闭环重点收敛为三类：mutating scripts dry-run coverage、decision acceptance history、option workstream / 图谱组件升级。
+当前未闭环重点收敛为三类：剩余 mutating scripts dry-run coverage、decision acceptance history、React Flow 大图体验 / Cytoscape 对照 spike。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
 - YAML 节点仍然是研究状态的真相源。
 - Python 脚本负责校验、维护和生成 dashboard/context 文件。
-- Streamlit + PyVis 提供可交互图谱和表格视图。
+- Streamlit + React Flow 提供默认图谱工作台，PyVis 作为 legacy fallback，表格视图仍由 Streamlit 提供。
 - Agent 可以优先读取 `research_cockpit/dashboards/agent_context_pack.json` 获取当前上下文。
 - 前端已支持中文/英文界面切换，默认中文。
 
@@ -505,7 +564,7 @@ python dev\scripts\run_subagent_forward_check.py --json --skip-mutating
 
 ## 当前技术决策
 
-- **暂不迁移 React Flow**：当前阶段优先稳定数据层、脚本和测试闭环；React Flow 留到图交互复杂度上升后再评估。
+- **React Flow 已进入默认图谱渲染路径**：当前只做只读节点选择和 inspector 联动；PyVis 保留为 legacy fallback，Cytoscape 只作为后续性能/布局对照 spike。
 - **保留 YAML 作为真相源**：方便人工编辑、git diff、agent 读取和脚本生成。
 - **dashboard 文件可提交**：虽然可再生成，但对 agent 上下文启动很有价值。
 - **不反向解析 notes**：节点可以声明 `links`，搜索和资源页会索引受控文本资源，但 Markdown 正文仍不反向写回 YAML 状态。
@@ -513,11 +572,11 @@ python dev\scripts\run_subagent_forward_check.py --json --skip-mutating
 
 ## 已知限制
 
-- PyVis 图节点点击不能直接驱动右侧详情面板；当前通过选择器查看节点详情。
-- 图布局仍依赖 force layout，大图规模上来后可读性会下降。
+- React Flow 图节点点击已能驱动右侧详情面板；PyVis fallback 仍通过选择器查看节点详情。
+- React Flow 当前使用 Dagre 层级布局；大图规模上来后仍需继续验证布局密度、局部展开和 minimap 可读性。
 - 状态更新脚本只做结构化 YAML 修改，不会同步更新长篇 notes。
 - 全文搜索已覆盖 Markdown notes、节点 YAML 文本字段和受控本地 linked resources；仍不索引外部 URL、run id、绝对路径、二进制文件和任意代码文件，也还没有时间线视图或历史变更视图。
-- 多数写入脚本尚未支持 `--dry-run`；当前 suggestion lifecycle cleanup、`claim_option.py` 和 `report_option_workstream.py` 已完成真实 dry-run 闭环。
+- 高频写入脚本已覆盖多条 `--dry-run --json` 路径；`record_finding.py`、`update_decision_evidence.py` 和 `update_decision_checklist.py` 仍可继续补预览能力。
 - decision acceptance UI 已展示 checklist、命令模板和按 blocking failure 生成的动态修复提示，但尚未记录 acceptance 历史。
 - 暂未接入 MLflow、DVC、Git branch/commit 等外部研究产物。
 - Streamlit 适合 MVP 和内网使用，若要长期作为主 UI，后续需要更完整的前端工程方案。
@@ -681,13 +740,11 @@ python dev\scripts\run_subagent_forward_check.py --json --skip-mutating
 
 ### 第三优先级：UI 交互
 
-- 增加按 stage、priority、blocking、decision_state 的过滤。
+- React Flow 大图体验：优化 100+ 节点下的布局、minimap 可读性、搜索定位和局部展开。
+- Cytoscape 对照 spike：仅在 React Flow 性能或布局不满足长期研究图谱时进入。
 - 资源页增加更明确的缺失资源修复入口，例如复制相对路径或跳转到节点详情。
-- 增加 option workstream 中心过滤图谱，方便 agent 只查看自己认领的分支。
-- 增强图谱 selector / 点击展开能力，让节点选择能直接驱动详情区或局部展开。
 - 在明确写回边界后，再评估安全的节点文本编辑能力。
 - 增强决策追踪视图：增加按 problem/option 过滤、证据强度排序和更清晰的链路布局。
-- 如果图交互成为核心需求，再迁移到 React Flow。
 
 ### 第四优先级：外部系统同步
 

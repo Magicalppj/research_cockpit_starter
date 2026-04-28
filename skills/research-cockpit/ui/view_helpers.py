@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from cockpit.model import script_command, search_knowledge
 
 
-def ordered_tab_labels(text: dict[str, str]) -> list[str]:
+def ordered_tab_keys(text: dict[str, str]) -> list[str]:
     keys = [
         "research_graph",
         "dashboard",
@@ -18,6 +20,11 @@ def ordered_tab_labels(text: dict[str, str]) -> list[str]:
         "agent_context",
         "data_health",
     ]
+    return [key for key in keys if key in text]
+
+
+def ordered_tab_labels(text: dict[str, str]) -> list[str]:
+    keys = ordered_tab_keys(text)
     return [text[key] for key in keys if key in text]
 
 
@@ -174,6 +181,75 @@ def edge_style_for_type(edge_type: str | None) -> dict[str, object]:
         "contains": {"color": "#888888", "dashes": False},
     }
     return styles.get(str(edge_type or ""), {"color": "#888888", "dashes": False})
+
+
+def build_graph_component_payload(graph: dict, selected_node_id: str | None = None) -> dict[str, Any]:
+    nodes = []
+    included: set[str] = set()
+
+    for node in graph.get("nodes", []):
+        node_id = str(node.get("id") or "")
+        if not node_id:
+            continue
+        included.add(node_id)
+        nodes.append({
+            "id": node_id,
+            "label": str(node.get("label") or node.get("title") or node_id),
+            "title": str(node.get("title") or node.get("label") or ""),
+            "type": str(node.get("type") or ""),
+            "status": str(node.get("status") or ""),
+            "priority": str(node.get("priority") or ""),
+            "color": str(node.get("color") or "#EEEEEE"),
+            "is_current_focus": bool(node.get("is_current_focus")),
+            "is_focus": bool(node.get("is_focus")),
+        })
+
+    edges = []
+    for index, edge in enumerate(graph.get("edges", [])):
+        source = str(edge.get("from") or edge.get("source") or "")
+        target = str(edge.get("to") or edge.get("target") or "")
+        if source not in included or target not in included:
+            continue
+        edge_type = str(edge.get("type") or edge.get("relation") or "")
+        style = edge_style_for_type(edge_type)
+        strength = edge.get("strength")
+        try:
+            width = 1 + min(4, max(0, float(strength) * 4)) if strength is not None else 1
+        except (TypeError, ValueError):
+            width = 1
+        edges.append({
+            "id": f"{source}--{target}--{edge_type or 'edge'}--{index}",
+            "source": source,
+            "target": target,
+            "label": edge.get("label"),
+            "type": edge_type,
+            "color": style["color"],
+            "dashes": bool(style["dashes"]),
+            "width": width,
+        })
+
+    selected = str(selected_node_id) if selected_node_id in included else None
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "selected_node_id": selected,
+    }
+
+
+def graph_component_selected_node_id(value: object, visible_node_ids: list[str] | set[str]) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        selected = value
+    elif isinstance(value, dict):
+        selected = value.get("selected_node_id") or value.get("id")
+    else:
+        selected = getattr(value, "selected_node_id", None) or getattr(value, "id", None)
+
+    if selected in (None, ""):
+        return None
+    node_id = str(selected)
+    return node_id if node_id in set(visible_node_ids) else None
 
 
 def format_comparison_rows(rows: list[dict]) -> list[dict]:

@@ -36,6 +36,7 @@ from cockpit.model import (
     upsert_graph_view,
     validate_cockpit,
 )
+from ui.graph_component import graph_component_build_available, render_research_graph_component
 from ui.view_helpers import (
     build_apply_suggestion_command,
     build_accept_decision_command,
@@ -51,6 +52,7 @@ from ui.view_helpers import (
     build_update_decision_checklist_command,
     build_update_suggestion_state_command,
     context_rows,
+    build_graph_component_payload,
     default_detail_node_id,
     default_selected_statuses,
     edge_style_for_type,
@@ -58,6 +60,7 @@ from ui.view_helpers import (
     filter_graph_for_view,
     filter_node_ids,
     filter_search_results,
+    graph_component_selected_node_id,
     graph_view_state_from_saved_view,
     graph_filter_options,
     format_action_suggestion_rows,
@@ -72,7 +75,7 @@ from ui.view_helpers import (
     format_resource_rows,
     format_search_result_rows,
     format_suggestion_lifecycle_rows,
-    ordered_tab_labels,
+    ordered_tab_keys,
 )
 from scripts.build_dashboard import build_dashboard
 from scripts.set_focus import set_focus as save_current_focus
@@ -864,10 +867,107 @@ def render_graph_tab(
         text["global_graph"]: "global",
     }
     mode_value_to_label = {value: label for label, value in mode_label_to_value.items()}
+    renderer_options = ["React Flow", "PyVis legacy"]
+
+    def selected_values(key: str, available: list[str], default: list[str]) -> list[str]:
+        raw = st.session_state[key] if key in st.session_state else default
+        raw_values = {raw} if isinstance(raw, str) else set(raw or [])
+        return [value for value in available if value in raw_values]
 
     message = st.session_state.pop("graph_view_message", None)
+    header_left, header_right = st.columns([4, 1])
+    header_left.subheader(text["research_graph"])
+    header_right.button("刷新图谱 / Refresh", key="graph_refresh_data", use_container_width=True)
     if message:
         st.success(message)
+
+    view_label = st.session_state.get("graph_view_mode", text["focus_depth_2"])
+    if view_label not in mode_label_to_value:
+        view_label = text["focus_depth_2"]
+    view_mode = mode_label_to_value.get(view_label, "focus_depth_2")
+    selected_types = set(selected_values("graph_node_types", all_types, all_types))
+    selected_statuses = set(selected_values(
+        "graph_statuses",
+        all_statuses,
+        default_selected_statuses(graph, all_statuses),
+    ))
+    selected_stages = set(selected_values("graph_stages", all_stages, all_stages))
+    selected_focus_roles = set(selected_values("graph_focus_roles", all_focus_roles, all_focus_roles))
+    default_workstreams = [
+        current.get("current_option")
+        for _ in [0]
+        if current.get("current_option") in all_workstreams
+    ]
+    if view_mode == "option_workstream" and not default_workstreams and all_workstreams:
+        default_workstreams = [all_workstreams[0]]
+    selected_workstreams = set(selected_values(
+        "graph_workstreams",
+        all_workstreams,
+        default_workstreams if view_mode == "option_workstream" else [],
+    ))
+    only_blocking = bool(st.session_state.get("graph_only_blocking", False))
+    only_next_actions = bool(st.session_state.get("graph_only_next_actions", False))
+    only_missing_evidence = bool(st.session_state.get("graph_only_missing_evidence", False))
+    renderer_label = st.session_state.get("graph_renderer", "React Flow")
+    if renderer_label not in renderer_options:
+        renderer_label = "React Flow"
+
+    filtered_graph = filter_graph_for_view(
+        graph,
+        view_mode,
+        selected_types,
+        selected_statuses,
+        selected_stages=selected_stages,
+        selected_focus_roles=selected_focus_roles,
+        selected_workstreams=selected_workstreams,
+        only_blocking=only_blocking,
+        only_next_actions=only_next_actions,
+        only_missing_evidence=only_missing_evidence,
+    )
+    visible_node_ids = [node["id"] for node in filtered_graph["nodes"] if node["id"] in nodes]
+    current_detail_node = st.session_state.get("graph_detail_node")
+    if current_detail_node not in visible_node_ids:
+        current_detail_node = default_detail_node_id(graph, visible_node_ids)
+        if current_detail_node:
+            st.session_state["graph_detail_node"] = current_detail_node
+
+    graph_area, detail = st.columns([2, 1])
+    with graph_area:
+        use_react_flow = renderer_label == "React Flow" and graph_component_build_available()
+        if use_react_flow:
+            payload = build_graph_component_payload(filtered_graph, selected_node_id=current_detail_node)
+            component_value = render_research_graph_component(
+                payload,
+                selected_node_id=current_detail_node,
+                key="research_graph_component",
+            )
+            clicked_node_id = graph_component_selected_node_id(component_value, visible_node_ids)
+            if clicked_node_id and clicked_node_id != st.session_state.get("graph_detail_node"):
+                st.session_state["graph_detail_node"] = clicked_node_id
+                st.session_state["graph_node_search"] = ""
+        else:
+            if renderer_label == "React Flow":
+                st.caption("React Flow build missing; using PyVis fallback.")
+            render_pyvis_graph(filtered_graph, set(), set(), current_detail_node or graph.get("current_focus_node"))
+
+    with detail:
+        search_query = st.text_input(text["search_nodes"], value="", key="graph_node_search")
+        search_scope = {node_id: nodes[node_id] for node_id in (visible_node_ids or sorted(nodes.keys()))}
+        detail_options = filter_node_ids(search_scope, search_query)
+        selected_detail_node = st.session_state.get("graph_detail_node")
+        default_id = selected_detail_node if selected_detail_node in detail_options else default_detail_node_id(graph, detail_options)
+        if not detail_options:
+            st.info(text["select_node_hint"])
+            return
+        default_index = detail_options.index(default_id) if default_id in detail_options else 0
+        node_id = st.selectbox(
+            text["inspect_node"],
+            detail_options,
+            index=default_index,
+            format_func=lambda value: format_node_option(nodes, value),
+            key="graph_detail_node",
+        )
+        render_node_detail(nodes, node_id, text, current, link_rows)
 
     saved_view_by_id = {str(view.get("id")): view for view in saved_graph_views if view.get("id")}
     if saved_view_by_id:
@@ -898,12 +998,12 @@ def render_graph_tab(
     else:
         st.caption(text["no_saved_graph_views"])
 
-    controls, detail = st.columns([2, 1])
+    controls = st.expander("图谱控制 / Graph Controls", expanded=False)
     with controls:
         view_label = st.radio(
             text["view_mode"],
             list(mode_label_to_value),
-            index=0,
+            index=list(mode_label_to_value).index(view_label),
             horizontal=True,
             key="graph_view_mode",
         )
@@ -912,14 +1012,14 @@ def render_graph_tab(
         selected_types = set(filter_left.multiselect(
             text["node_types"],
             all_types,
-            default=all_types,
+            default=[value for value in all_types if value in selected_types],
             key="graph_node_types",
         ))
         selected_statuses = set(
             filter_right.multiselect(
                 text["statuses"],
                 all_statuses,
-                default=default_selected_statuses(graph, all_statuses),
+                default=[value for value in all_statuses if value in selected_statuses],
                 key="graph_statuses",
             )
         )
@@ -927,35 +1027,39 @@ def render_graph_tab(
         selected_stages = set(advanced_left.multiselect(
             text["stages"],
             all_stages,
-            default=all_stages,
+            default=[value for value in all_stages if value in selected_stages],
             key="graph_stages",
         ))
         selected_focus_roles = set(advanced_mid.multiselect(
             text["focus_roles"],
             all_focus_roles,
-            default=all_focus_roles,
+            default=[value for value in all_focus_roles if value in selected_focus_roles],
             key="graph_focus_roles",
         ))
-        default_workstreams = [
-            current.get("current_option")
-            for _ in [0]
-            if current.get("current_option") in all_workstreams
-        ]
-        if view_mode == "option_workstream" and not default_workstreams and all_workstreams:
-            default_workstreams = [all_workstreams[0]]
         selected_workstreams = set(advanced_right.multiselect(
             text["workstreams_filter"],
             all_workstreams,
-            default=default_workstreams if view_mode == "option_workstream" else [],
+            default=[value for value in all_workstreams if value in selected_workstreams],
             key="graph_workstreams",
         ))
         flag_left, flag_mid, flag_right = st.columns(3)
-        only_blocking = flag_left.checkbox(text["only_blocking"], value=False, key="graph_only_blocking")
-        only_next_actions = flag_mid.checkbox(text["only_next_actions"], value=False, key="graph_only_next_actions")
+        only_blocking = flag_left.checkbox(text["only_blocking"], value=only_blocking, key="graph_only_blocking")
+        only_next_actions = flag_mid.checkbox(
+            text["only_next_actions"],
+            value=only_next_actions,
+            key="graph_only_next_actions",
+        )
         only_missing_evidence = flag_right.checkbox(
             text["only_missing_evidence"],
-            value=False,
+            value=only_missing_evidence,
             key="graph_only_missing_evidence",
+        )
+        renderer_label = st.radio(
+            "Graph Renderer",
+            renderer_options,
+            index=renderer_options.index(renderer_label),
+            horizontal=True,
+            key="graph_renderer",
         )
         save_left, save_right = st.columns([3, 1])
         view_title = save_left.text_input(
@@ -991,43 +1095,12 @@ def render_graph_tab(
                     st.rerun()
                 except Exception as exc:
                     st.error(f"{text['graph_view_save_failed']} {exc}")
-        filtered_graph = filter_graph_for_view(
-            graph,
-            view_mode,
-            selected_types,
-            selected_statuses,
-            selected_stages=selected_stages,
-            selected_focus_roles=selected_focus_roles,
-            selected_workstreams=selected_workstreams,
-            only_blocking=only_blocking,
-            only_next_actions=only_next_actions,
-            only_missing_evidence=only_missing_evidence,
-        )
-        render_pyvis_graph(filtered_graph, set(), set(), graph.get("current_focus_node"))
-        with st.expander(text["legend"], expanded=True):
-            st.write(text["legend_current"])
-            st.write(text["legend_path"])
-            st.write(text["legend_depth_1"])
-            st.write(text["legend_depth_2"])
-
-    with detail:
-        visible_node_ids = [node["id"] for node in filtered_graph["nodes"] if node["id"] in nodes]
-        search_query = st.text_input(text["search_nodes"], value="", key="graph_node_search")
-        search_scope = {node_id: nodes[node_id] for node_id in (visible_node_ids or sorted(nodes.keys()))}
-        detail_options = filter_node_ids(search_scope, search_query)
-        default_id = default_detail_node_id(graph, detail_options)
-        if not detail_options:
-            st.info(text["select_node_hint"])
-            return
-        default_index = detail_options.index(default_id) if default_id in detail_options else 0
-        node_id = st.selectbox(
-            text["inspect_node"],
-            detail_options,
-            index=default_index,
-            format_func=lambda value: format_node_option(nodes, value),
-            key="graph_detail_node",
-        )
-        render_node_detail(nodes, node_id, text, current, link_rows)
+        st.write(f"**{text['legend']}**")
+        legend_left, legend_right = st.columns(2)
+        legend_left.write(text["legend_current"])
+        legend_left.write(text["legend_path"])
+        legend_right.write(text["legend_depth_1"])
+        legend_right.write(text["legend_depth_2"])
 
 
 def render_branch_comparison(nodes: dict, current: dict, text: dict[str, str]) -> None:
@@ -1542,11 +1615,20 @@ def main() -> None:
     with st.sidebar:
         language = st.selectbox("界面语言 / Language", ["中文", "English"], index=0)
     text = get_text(language)
-
-    st.title(text["page_title"])
-    st.caption(text["page_caption"])
+    page_keys = ordered_tab_keys(text)
+    default_page_key = "research_graph" if "research_graph" in page_keys else page_keys[0]
+    if st.session_state.get("main_page") not in page_keys:
+        st.session_state["main_page"] = default_page_key
 
     with st.sidebar:
+        page_key = st.radio(
+            "页面 / Page",
+            page_keys,
+            index=page_keys.index(st.session_state["main_page"]),
+            format_func=lambda key: text[key],
+            key="main_page",
+        )
+        st.divider()
         st.header(text["current_focus"])
         st.write(f"{text['stage']}:", current.get("current_stage"))
         st.write(f"{text['problem']}:", current.get("current_problem"))
@@ -1559,45 +1641,44 @@ def main() -> None:
         else:
             st.success(text["valid"])
 
-    tab_labels = ordered_tab_labels(text)
-    tabs = st.tabs(tab_labels)
+    if page_key != "research_graph":
+        st.title(text["page_title"])
+        st.caption(text["page_caption"])
 
-    for label, tab in zip(tab_labels, tabs):
-        with tab:
-            if label == text["research_graph"]:
-                render_graph_tab(nodes, graph, current, text, link_rows, saved_graph_views)
-            elif label == text["dashboard"]:
-                render_dashboard(context, validation_errors, text, action_suggestions)
-            elif label == text["branch_comparison"]:
-                render_branch_comparison(nodes, current, text)
-            elif label == text["decision_trace"]:
-                render_decision_trace(nodes, text)
-            elif label == text["action_guidance"]:
-                render_action_guidance(all_action_suggestions, text)
-            elif label == text["option_workstreams"]:
-                render_option_workstreams(option_workstreams, text)
-            elif label == text["search"]:
-                render_search(search_index, nodes, text)
-            elif label == text["resources"]:
-                render_resources(link_rows, search_index, text)
-            elif label == text["experiment_matrix"]:
-                render_experiment_matrix(nodes, text)
-            elif label == text["decisions"]:
-                render_decisions(nodes, current, text, link_rows)
-            elif label == text["agent_context"]:
-                render_agent_context(context, text)
-            elif label == text["data_health"]:
-                render_data_health(
-                    nodes,
-                    graph,
-                    current,
-                    validation_errors,
-                    text,
-                    link_rows,
-                    action_suggestions,
-                    all_action_suggestions,
-                    search_index,
-                )
+    if page_key == "research_graph":
+        render_graph_tab(nodes, graph, current, text, link_rows, saved_graph_views)
+    elif page_key == "dashboard":
+        render_dashboard(context, validation_errors, text, action_suggestions)
+    elif page_key == "branch_comparison":
+        render_branch_comparison(nodes, current, text)
+    elif page_key == "decision_trace":
+        render_decision_trace(nodes, text)
+    elif page_key == "action_guidance":
+        render_action_guidance(all_action_suggestions, text)
+    elif page_key == "option_workstreams":
+        render_option_workstreams(option_workstreams, text)
+    elif page_key == "search":
+        render_search(search_index, nodes, text)
+    elif page_key == "resources":
+        render_resources(link_rows, search_index, text)
+    elif page_key == "experiment_matrix":
+        render_experiment_matrix(nodes, text)
+    elif page_key == "decisions":
+        render_decisions(nodes, current, text, link_rows)
+    elif page_key == "agent_context":
+        render_agent_context(context, text)
+    elif page_key == "data_health":
+        render_data_health(
+            nodes,
+            graph,
+            current,
+            validation_errors,
+            text,
+            link_rows,
+            action_suggestions,
+            all_action_suggestions,
+            search_index,
+        )
 
 
 if __name__ == "__main__":

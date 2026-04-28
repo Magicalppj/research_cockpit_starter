@@ -37,7 +37,7 @@ REQUIRED_PACKAGE_PATHS = (
     "research_cockpit/current_state.yaml",
     "agents/openai.yaml",
 )
-FORBIDDEN_PACKAGE_PARTS = {"dev", "tests", ".test_tmp"}
+FORBIDDEN_PACKAGE_PARTS = {"dev", "tests", ".test_tmp", "node_modules"}
 FORBIDDEN_STRINGS = (
     "D:" + "\\Tools",
     "C:" + "\\Users" + "\\" + "22" + "339",
@@ -227,7 +227,7 @@ def public_scan_track(skill_path: Path) -> dict[str, Any]:
 
 
 def _copy_skill_package(source: Path, destination: Path) -> None:
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".venv", "venv", ".git", ".test_tmp")
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".venv", "venv", ".git", ".test_tmp", "node_modules")
     shutil.copytree(source, destination, ignore=ignore)
 
 

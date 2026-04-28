@@ -18,7 +18,7 @@ streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501
 
 Then open the forwarded port in your browser.
 The UI opens on the Research Graph in Focus Mode by default.
-The graph workbench supports Focus Depth, Current Branch, Option Workstream, and Global views, plus filters for node type, status, stage, focus role, workstream, blockers, next actions, and missing evidence. The graph detail panel can set any visible node as the current focus and records that durable operation in `research_cockpit/graph/interaction_log.yaml`. The UI also includes Branch Comparison, Decision Trace, Action Guidance, Search, Resources, and node search views for research review.
+The graph workbench supports Focus Depth, Current Branch, Option Workstream, and Global views, plus filters for node type, status, stage, focus role, workstream, blockers, next actions, and missing evidence. The default graph renderer is a read-only React Flow component with Dagre hierarchy layout, temporary node dragging, and node clicks that drive the right-side inspector. PyVis remains available as a legacy fallback. The graph detail panel can set any visible node as the current focus and records that durable operation in `research_cockpit/graph/interaction_log.yaml`. The UI also includes Branch Comparison, Decision Trace, Action Guidance, Search, Resources, and node search views for research review.
 Researchers can save reusable graph filter presets from the graph workbench. Saved presets are stored in `research_cockpit/graph/graph_views.yaml` as dynamic views over the current graph data, not immutable graph snapshots. Saving a view appends a `save_graph_view` event to `interaction_log.yaml` and refreshes dashboard/context outputs so agents can read `saved_graph_views`.
 Key mutating workflow scripts such as claim/report option workstreams, apply suggestion, and accept decision also append concise events to `interaction_log.yaml`.
 
@@ -42,7 +42,7 @@ ssh -L 8501:localhost:8501 user@remote-gpu-server
 - YAML nodes are the source of truth.
 - Markdown notes contain detailed reasoning.
 - Python scripts build dashboard JSON/Markdown.
-- Streamlit + PyVis renders an interactive graph.
+- Streamlit + React Flow renders the graph workbench with sidebar navigation and Dagre hierarchy layout; PyVis remains the legacy fallback.
 - Saved graph views live in `research_cockpit/graph/graph_views.yaml` and preserve reusable scopes/filters for long-running research review.
 - Agents read `research_cockpit/dashboards/agent_context_pack.json` first, then use
   `research_cockpit/dashboards/focus_context_pack.json` for the current local focus.
@@ -68,6 +68,14 @@ python scripts\skill_smoke_test.py --json
 ```
 
 `skill_smoke_test.py` invokes workflow scripts by absolute path, so it is a good first check when a subagent or sandbox cannot reliably set the working directory.
+
+If you edit the React Flow graph component source, rebuild its static assets before launching the UI. Graph data changes in YAML/JSON do not require a React build; use the Research Graph refresh button to rerun Streamlit and reread the current data.
+
+```powershell
+cd ui\graph_component\frontend
+npm.cmd install
+npm.cmd run build
+```
 
 For scripts that accept `--root`, pass the `research_cockpit` data directory, not the package root. When omitted, scripts use the bundled `research_cockpit/` directory.
 

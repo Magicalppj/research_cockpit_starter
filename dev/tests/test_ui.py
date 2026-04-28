@@ -42,8 +42,12 @@ from ui.view_helpers import (
     format_node_option,
     format_resource_index_rows,
     format_search_result_rows,
+    build_graph_component_payload,
+    graph_component_selected_node_id,
+    ordered_tab_keys,
     ordered_tab_labels,
 )
+from ui.graph_component import graph_component_build_available
 
 
 class UiRenderingTests(unittest.TestCase):
@@ -75,6 +79,39 @@ class UiRenderingTests(unittest.TestCase):
         self.assertGreater(len(calls), 0)
         for call in calls:
             self.assertIn("key=", call)
+
+    def test_graph_tab_exposes_manual_refresh_button(self) -> None:
+        source = (SKILL_ROOT / "ui" / "app.py").read_text(encoding="utf-8")
+        refresh_index = source.find('key="graph_refresh_data"')
+
+        self.assertNotEqual(refresh_index, -1)
+        self.assertNotIn("st.rerun()", source[refresh_index:refresh_index + 200])
+
+    def test_main_navigation_uses_sidebar_radio_instead_of_top_tabs(self) -> None:
+        source = (SKILL_ROOT / "ui" / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn('key="main_page"', source)
+        self.assertNotIn("tabs = st.tabs(tab_labels)", source)
+
+    def test_graph_renders_before_control_panel(self) -> None:
+        source = (SKILL_ROOT / "ui" / "app.py").read_text(encoding="utf-8")
+        graph_index = source.find('key="research_graph_component"')
+        controls_index = source.find("Graph Controls")
+
+        self.assertNotEqual(graph_index, -1)
+        self.assertNotEqual(controls_index, -1)
+        self.assertLess(graph_index, controls_index)
+
+    def test_react_flow_component_uses_dagre_dragging_and_smooth_edges(self) -> None:
+        source = (SKILL_ROOT / "ui" / "graph_component" / "frontend" / "src" / "GraphComponent.tsx").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('import dagre from "dagre"', source)
+        self.assertIn('rankdir: "LR"', source)
+        self.assertIn("nodesDraggable", source)
+        self.assertIn('type: "smoothstep"', source)
+        self.assertIn("key={graphKey}", source)
 
     def test_pyvis_html_generation_supports_chinese_without_file_encoding(self) -> None:
         graph = {
@@ -311,11 +348,91 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn('network.focus("problem_text"', html)
         self.assertIn("scale: 1.25", html)
 
+    def test_graph_component_payload_omits_raw_node_data(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "label": "Weak text",
+                    "title": "Focus problem",
+                    "type": "problem",
+                    "status": "active",
+                    "priority": "high",
+                    "color": "#FFE9A8",
+                    "shape": "diamond",
+                    "is_current_focus": True,
+                    "focus_visible_depth": 0,
+                    "raw": {"private": "do not send to component"},
+                },
+                {
+                    "id": "option_t5",
+                    "label": "T5",
+                    "title": "Candidate option",
+                    "type": "option",
+                    "status": "open",
+                    "color": "#FFFFFF",
+                    "shape": "box",
+                    "focus_visible_depth": 1,
+                    "raw": {"private": "do not send to component"},
+                },
+            ],
+            "edges": [{"from": "problem_text", "to": "option_t5", "relation": "contains"}],
+            "current_focus_node": "problem_text",
+        }
+
+        payload = build_graph_component_payload(graph, selected_node_id="option_t5")
+
+        self.assertEqual(payload["selected_node_id"], "option_t5")
+        self.assertEqual([node["id"] for node in payload["nodes"]], ["problem_text", "option_t5"])
+        self.assertNotIn("raw", payload["nodes"][0])
+        self.assertNotIn("position", payload["nodes"][0])
+        self.assertEqual(
+            set(payload["nodes"][0]),
+            {"id", "label", "title", "type", "status", "priority", "color", "is_current_focus", "is_focus"},
+        )
+        self.assertEqual(payload["edges"][0]["source"], "problem_text")
+        self.assertEqual(payload["edges"][0]["target"], "option_t5")
+        self.assertIn("color", payload["edges"][0])
+
+    def test_graph_component_selection_only_accepts_visible_nodes(self) -> None:
+        visible_node_ids = ["problem_text", "option_t5"]
+
+        selected = graph_component_selected_node_id(
+            {"selected_node_id": "option_t5", "event_type": "node_click"},
+            visible_node_ids,
+        )
+        missing = graph_component_selected_node_id(
+            {"selected_node_id": "option_hidden", "event_type": "node_click"},
+            visible_node_ids,
+        )
+
+        self.assertEqual(selected, "option_t5")
+        self.assertIsNone(missing)
+
+    def test_graph_component_build_availability_detects_missing_assets(self) -> None:
+        temp_root = ROOT_DIR / ".test_tmp" / "ui"
+        build_dir = temp_root / "graph_component_build_available"
+        assets_dir = build_dir / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        index_path = build_dir / "index.html"
+        script_path = assets_dir / "index.js"
+        for path in (index_path, script_path):
+            if path.exists():
+                path.unlink()
+
+        self.assertFalse(graph_component_build_available(build_dir))
+
+        index_path.write_text("<div></div>", encoding="utf-8")
+        script_path.write_text("export default {}", encoding="utf-8")
+
+        self.assertTrue(graph_component_build_available(build_dir))
+
     def test_default_detail_and_tab_order_prioritize_research_graph(self) -> None:
         graph = {"current_focus_node": "problem_text"}
         text = {"research_graph": "研究图谱", "dashboard": "总览", "experiment_matrix": "实验矩阵"}
 
         self.assertEqual(default_detail_node_id(graph, ["stage_text", "problem_text"]), "problem_text")
+        self.assertEqual(ordered_tab_keys(text)[0], "research_graph")
         self.assertEqual(ordered_tab_labels(text)[0], "研究图谱")
 
     def test_default_status_filter_uses_focus_mode_hide_statuses(self) -> None:

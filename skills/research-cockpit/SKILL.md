@@ -141,6 +141,8 @@ python scripts\build_dashboard.py
 
 **Notes and resources:** `create_note.py` creates Markdown notes and links them through YAML. Search indexes YAML node text, notes, and safe local text resources. Missing linked resources are warnings, not validation failures.
 
+**UI graph workbench:** the Streamlit Research Graph uses a read-only React Flow component when `ui/graph_component/frontend/build` is present. Node clicks and temporary node dragging are UI-only: clicks drive the right-side inspector, and drag positions are not written to YAML or `interaction_log.yaml`. React Flow uses Dagre hierarchy layout for structural graph edges. Graph data changes do not require rebuilding React Flow; use the graph refresh button to rerun Streamlit and reread YAML/JSON data. PyVis remains the legacy fallback.
+
 ## Subagent Validation
 
 When asking another agent to test this skill, pass the skill folder path plus a concrete cockpit task. Require it to start with `agent_bootstrap.py --json` and report commands, return codes, blockers, and modified files.
