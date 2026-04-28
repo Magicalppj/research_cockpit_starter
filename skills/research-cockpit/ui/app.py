@@ -63,6 +63,7 @@ from ui.view_helpers import (
     format_action_suggestion_rows,
     format_comparison_rows,
     format_decision_checklist,
+    format_decision_repair_hints,
     format_evidence_summary,
     format_finding_rows,
     format_node_option,
@@ -396,6 +397,8 @@ EXTRA_UI_TEXT = {
         "check_decision_command": "检查决策接受条件命令",
         "accept_decision_command": "接受决策命令",
         "update_decision_checklist_command": "更新决策检查清单命令",
+        "decision_repair_hints": "修复建议",
+        "decision_repair_commands": "可复制修复命令",
         "claim_option_command": "认领方案工作流命令",
         "option_context_command": "方案工作流上下文命令",
         "report_option_command": "回报方案工作流命令",
@@ -452,6 +455,8 @@ EXTRA_UI_TEXT = {
         "check_decision_command": "Check Decision Acceptance Command",
         "accept_decision_command": "Accept Decision Command",
         "update_decision_checklist_command": "Update Decision Checklist Command",
+        "decision_repair_hints": "Repair Hints",
+        "decision_repair_commands": "Copyable Repair Commands",
         "claim_option_command": "Claim Option Workstream Command",
         "option_context_command": "Option Workstream Context Command",
         "report_option_command": "Report Option Workstream Command",
@@ -605,6 +610,22 @@ def render_pyvis_graph(
     components.html(html, height=720, scrolling=True)
 
 
+def render_decision_repair_hints(checklist: dict, text: dict[str, str]) -> None:
+    rows = format_decision_repair_hints(checklist)
+    if not rows:
+        return
+
+    st.write(text["decision_repair_hints"])
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    command_rows = [row for row in rows if row.get("suggested_command")]
+    if command_rows:
+        with st.expander(text["decision_repair_commands"]):
+            for row in command_rows:
+                st.caption(f"{row['check_id']}: {row['label']}")
+                st.code(row["suggested_command"], language="powershell")
+
+
 def render_node_detail(
     nodes: dict,
     node_id: str,
@@ -683,6 +704,7 @@ def render_node_detail(
                 use_container_width=True,
                 hide_index=True,
             )
+            render_decision_repair_hints(checklist, text)
 
     with resources_tab:
         node_link_rows = [row for row in (link_rows or []) if row.get("node_id") == node_id]
@@ -1083,6 +1105,7 @@ def render_decision_trace(nodes: dict, text: dict[str, str]) -> None:
     else:
         st.warning(text["decision_not_ready"])
     st.dataframe(pd.DataFrame(format_decision_checklist(checklist)), use_container_width=True, hide_index=True)
+    render_decision_repair_hints(checklist, text)
 
 
 def render_action_guidance(action_suggestions: list[dict], text: dict[str, str]) -> None:

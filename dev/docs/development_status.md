@@ -1,4 +1,28 @@
 # Research Cockpit 开发状态
+
+## Decision Acceptance Repair Hints v1 更新（2026-04-28）
+
+本批在现有 decision acceptance checklist 上补齐 UI 修复提示，让研究者可以从 blocking failure 直接看到对应修复命令或 YAML 字段，而不需要手工反查脚本语义。
+
+已完成：
+
+- 新增 `format_decision_repair_hints(...)`，把 `build_decision_acceptance_checklist(...)` 的 `blocking_failures` 映射为稳定提示行：`check_id`、`label`、`reason`、`repair_kind`、`suggested_command`、`target_field` 和 `details`。
+- Evidence 相关失败会提示 `record_finding.py` 和 `update_decision_evidence.py`；checklist 字段缺失会提示 `update_decision_checklist.py` 对应参数。
+- 结构性失败如 `decision_parent`、`problem_parent` 和 `alternative_refs` 只给出 YAML 字段修复提示，不生成误导性的写入命令。
+- Streamlit 节点详情 Evidence tab 和 Decision Trace 页面都会在 checklist 下方展示修复建议；可复制命令放在展开区中，UI 不直接写 YAML。
+
+验证目标：
+
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s dev\tests`
+- `%RESEARCH_COCKPIT_PYTHON% skills\research-cockpit\scripts\skill_smoke_test.py --json`
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_skill_release_check.py --json --skip-mutating --python %RESEARCH_COCKPIT_PYTHON%`
+
+当前仍可升级：
+
+- acceptance history：记录 decision 从 proposed 到 accepted 的历史摘要。
+- React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
+- dry-run coverage 扩展：继续为 mutating scripts 增加预览模式。
+
 ## Interaction Log Coverage v1 更新（2026-04-28）
 
 本批补齐关键安全写入脚本的持久化操作记录，让 agent 可以从 `interaction_log.yaml` 和 context pack 的 `recent_interactions` 中理解最近的人类/agent 写入动作。
@@ -19,7 +43,6 @@
 
 当前仍可升级：
 
-- decision acceptance UI 修复提示：按 blocking failure 显示对应修复命令或 YAML 字段。
 - React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
 - dry-run coverage 扩展：继续为 mutating scripts 增加预览模式。
 
@@ -122,7 +145,7 @@
 候选项状态同步：
 
 - 仍可升级：扩展 dry-run coverage，让更多 mutating scripts 可预览写入结果。
-- 部分完成：decision acceptance UI 已展示 checklist 和命令模板；仍可升级为按 blocking failure 给出具体修复命令。
+- 已完成：decision acceptance UI 已展示 checklist、命令模板和按 blocking failure 生成的具体修复提示。
 - 仍可升级：规划前端图谱交互升级，为可点击展开节点、编辑节点文本和未来前端迁移保留接口边界。
 
 ## Agent Skill Forward-Test v1 更新（2026-04-28）
@@ -157,7 +180,7 @@
 
 - 已完成：forward-test checklist 已固化为 `dev/scripts/run_subagent_forward_check.py`，并纳入开发侧测试。
 - 仍可升级：继续扩展 dry-run coverage，让更多写入脚本支持安全预览。
-- 部分完成：decision acceptance UI 已展示 checklist、检查命令、补齐命令和接受命令；仍缺按失败项生成的修复提示。
+- 已完成：decision acceptance UI 已展示 checklist、检查命令、补齐命令、接受命令和按失败项生成的修复提示。
 - 仍可升级：规划前端图谱交互升级，为可点击展开节点、节点文本编辑和未来前端迁移保留清晰接口边界。
 
 ## Knowledge Search v1 更新（2026-04-28）
@@ -175,7 +198,7 @@
 
 候选项状态同步：
 
-- 已完成：decision acceptance checklist 已完成；后续仍可增加 UI 缺失项修复提示或 acceptance 历史记录。
+- 已完成：decision acceptance checklist 和 UI 缺失项修复提示已完成；后续仍可增加 acceptance 历史记录。
 - 已完成：linked resource text indexing 已完成，范围限定为受控本地文本资源、大小上限和跳过原因记录。
 - 已完成：suggestion lifecycle cleanup 已完成，支持 dry-run、条件过滤和 UI 命令模板。
 
@@ -293,9 +316,9 @@
 
 ## 当前阶段
 
-当前项目处于 **Subagent Forward-Test Hardening v1 完成后的升级准备阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索；第十二批已完成 decision 接受质量门；第十三批已完成本地 linked resource 正文索引；第十四批已完成 suggestion lifecycle cleanup；第十五批已完成 agent skill packaging；第十六批已完成公开 demo 数据拆分；第十七批已完成 skill entry 文档契约；第十八批已完成 subagent forward-check hardening 和 decision checklist writer。
+当前项目处于 **图谱交互和安全写入可追踪性升级阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索；第十二批已完成 decision 接受质量门；第十三批已完成本地 linked resource 正文索引；第十四批已完成 suggestion lifecycle cleanup；第十五批已完成 agent skill packaging；第十六批已完成公开 demo 数据拆分；第十七批已完成 skill entry 文档契约；第十八批已完成 subagent forward-check hardening 和 decision checklist writer；第十九批已完成图谱交互工作台、saved graph views、关键 mutating scripts interaction log 和 decision acceptance UI 修复提示。
 
-当前未闭环重点收敛为三类：mutating scripts dry-run coverage、decision acceptance 动态修复提示、option workstream / 图谱交互升级。
+当前未闭环重点收敛为三类：mutating scripts dry-run coverage、decision acceptance history、option workstream / 图谱组件升级。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
@@ -450,7 +473,7 @@ python dev\scripts\run_subagent_forward_check.py --json --skip-mutating
 - 状态更新脚本只做结构化 YAML 修改，不会同步更新长篇 notes。
 - 全文搜索已覆盖 Markdown notes、节点 YAML 文本字段和受控本地 linked resources；仍不索引外部 URL、run id、绝对路径、二进制文件和任意代码文件，也还没有时间线视图或历史变更视图。
 - 多数写入脚本尚未支持 `--dry-run`；当前只有 suggestion lifecycle cleanup 已完成真实 dry-run 闭环。
-- decision acceptance UI 已展示 checklist 和命令模板，但尚未按 blocking failure 生成动态修复提示，也尚未记录 acceptance 历史。
+- decision acceptance UI 已展示 checklist、命令模板和按 blocking failure 生成的动态修复提示，但尚未记录 acceptance 历史。
 - 暂未接入 MLflow、DVC、Git branch/commit 等外部研究产物。
 - Streamlit 适合 MVP 和内网使用，若要长期作为主 UI，后续需要更完整的前端工程方案。
 
@@ -594,7 +617,7 @@ python dev\scripts\run_subagent_forward_check.py --json --skip-mutating
 4. Action Guidance UI 生命周期过滤和写回入口。
 5. Data Health suggestion lifecycle 摘要。
 
-后续状态同步：suggestion lifecycle 历史清理和 linked resource text indexing 已完成；decision acceptance checklist 仍可继续增强 UI 修复提示和 acceptance 历史。
+后续状态同步：suggestion lifecycle 历史清理、linked resource text indexing 和 decision acceptance UI 修复提示已完成；decision acceptance checklist 仍可继续增强 acceptance 历史。
 
 ## 后续可优化
 
@@ -607,7 +630,7 @@ python dev\scripts\run_subagent_forward_check.py --json --skip-mutating
 
 ### 第二优先级：研究工作流
 
-- 增强 decision acceptance checklist，例如 UI 缺失项修复提示、acceptance 历史记录或更细的检查等级。
+- 增强 decision acceptance checklist，例如 acceptance 历史记录或更细的检查等级。
 - 为 notes 增加推荐写作模板和命名约定，但仍不反向解析 Markdown 正文。
 - 为当前 focus path 增加专门推进视图，突出“现在应该推进什么”。
 
@@ -663,7 +686,7 @@ v2 P0 阶段完成后，应满足：
 
 - 已完成：linked resource text indexing 已把受控类型的本地 linked files/config 纳入搜索索引。
 - 已完成：suggestion lifecycle cleanup 已支持清理长期 orphan 的 suggestion lifecycle 历史记录。
-- 仍可升级：decision acceptance checklist 后续增强，增加 UI 中的缺失项修复提示或 acceptance 历史记录。
+- 仍可升级：decision acceptance checklist 后续增强，增加 acceptance 历史记录。
 
 ## Linked Resource Text Indexing v1 更新（2026-04-28）
 
@@ -683,7 +706,7 @@ v2 P0 阶段完成后，应满足：
 候选项状态同步：
 
 - 已完成：suggestion lifecycle cleanup 已支持清理长期 orphan 的 suggestion lifecycle 历史记录。
-- 仍可升级：decision acceptance checklist 后续增强，增加 UI 缺失项修复提示或 acceptance 历史记录。
+- 仍可升级：decision acceptance checklist 后续增强，增加 acceptance 历史记录。
 - 仍可升级：resource indexing 策略微调，按项目需要评估是否纳入代码文件或更细的文件大小策略。
 
 ## Suggestion Lifecycle Cleanup v1 更新（2026-04-28）
@@ -700,7 +723,7 @@ v2 P0 阶段完成后，应满足：
 
 当前仍可升级：
 
-- decision acceptance checklist 后续增强：在 UI 中给出缺失项修复提示，或记录 acceptance 历史。
+- decision acceptance checklist 后续增强：记录 acceptance 历史。
 - resource indexing 策略微调：按项目需要评估是否纳入代码文件或调整大小策略。
 - 前端图谱交互升级：为后续可点击展开、编辑节点文本和可能的前端迁移继续拆分接口边界。
 
@@ -722,7 +745,7 @@ v2 P0 阶段完成后，应满足：
 候选项状态同步：
 
 - 仍可升级：dry-run coverage 扩展，让更多写入脚本支持预览变更。
-- 部分完成：decision acceptance UI 已展示 checklist 和命令模板；仍缺按 checklist 缺项生成的具体修复提示。
+- 已完成：decision acceptance UI 已展示 checklist、命令模板和按 checklist 缺项生成的具体修复提示。
 - 仍可升级：前端图谱交互升级，为可点击展开节点、编辑节点文本和更换前端框架继续收拢数据接口。
 
 ## Open Skill Demo Data Split v1 更新（2026-04-28）
@@ -771,7 +794,7 @@ v2 P0 阶段完成后，应满足：
 
 当前仍可升级：
 
-- 为 decision acceptance 失败增加轻量 UI 修复提示，并考虑记录 acceptance 历史。
+- 为 decision acceptance 记录 acceptance 历史。
 - 为更多 mutating scripts 扩展 dry-run 覆盖，优先处理 option workstream 的 claim/report。
 - 升级图谱交互，优先补 option workstream 中心过滤和 selector / 点击展开，再评估更安全的节点文本编辑。
 
@@ -787,12 +810,12 @@ v2 P0 阶段完成后，应满足：
 
 部分完成但仍可增强：
 
-- decision acceptance UI 已展示 checklist 和固定命令模板，仍缺按 blocking failure 生成的动态修复提示和 acceptance 历史。
+- decision acceptance UI 已展示 checklist、固定命令模板和按 blocking failure 生成的动态修复提示，仍缺 acceptance 历史。
 - dry-run coverage 已在 `cleanup_suggestion_lifecycle.py` 上验证，仍需推广到更多写入脚本。
 - option workstream 已有数据模型、脚本、context、中心化图谱视图和 UI 命令模板，仍缺更直接的前端写回入口。
 
 建议下一批优先级：
 
 1. dry-run coverage 扩展：优先 `claim_option.py` 和 `report_option_workstream.py`。
-2. decision acceptance 动态修复提示：让 checklist failure 直接指向 `update_decision_checklist.py`、`update_decision_evidence.py` 或对应 YAML 字段。
-3. 图谱 component spike：验证 React Flow / Cytoscape 是否能替代 PyVis，让节点点击直接驱动右侧 inspector。
+2. 图谱 component spike：验证 React Flow / Cytoscape 是否能替代 PyVis，让节点点击直接驱动右侧 inspector。
+3. decision acceptance history：记录接受前后的关键状态和 checklist 摘要。

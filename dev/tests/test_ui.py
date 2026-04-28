@@ -27,6 +27,7 @@ from ui.view_helpers import (
     edge_style_for_type,
     format_comparison_rows,
     format_decision_checklist,
+    format_decision_repair_hints,
     format_finding_rows,
     format_resource_rows,
     format_action_suggestion_rows,
@@ -720,6 +721,128 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(rows[0]["related_node_ids"], "exp_t5; exp_clap")
         self.assertEqual(rows[1]["blocking"], "")
         self.assertEqual(rows[1]["state"], "warning")
+
+    def test_format_decision_repair_hints_ignores_ready_decisions(self) -> None:
+        rows = format_decision_repair_hints({
+            "decision_id": "decision_t5",
+            "blocking_failures": [],
+        })
+
+        self.assertEqual(rows, [])
+
+    def test_format_decision_repair_hints_maps_checklist_fields_to_command(self) -> None:
+        rows = format_decision_repair_hints({
+            "decision_id": "decision_t5",
+            "blocking_failures": [
+                {
+                    "id": "alternatives_considered",
+                    "label": "Alternatives were considered",
+                    "reason": "alternatives_considered must be non-empty.",
+                    "blocking": True,
+                },
+                {
+                    "id": "consequences",
+                    "label": "Consequences are recorded",
+                    "reason": "consequences must be non-empty.",
+                    "blocking": True,
+                },
+                {
+                    "id": "next_required_actions",
+                    "label": "Next required actions are recorded",
+                    "reason": "next_required_actions must be non-empty.",
+                    "blocking": True,
+                },
+            ],
+        })
+
+        self.assertEqual([row["target_field"] for row in rows], [
+            "alternatives_considered",
+            "consequences",
+            "next_required_actions",
+        ])
+        self.assertTrue(all(row["repair_kind"] == "command" for row in rows))
+        self.assertTrue(all("scripts\\update_decision_checklist.py" in row["suggested_command"] for row in rows))
+        self.assertIn("--alternative <option_id>", rows[0]["suggested_command"])
+        self.assertIn("--consequence", rows[1]["suggested_command"])
+        self.assertIn("--next-required-action", rows[2]["suggested_command"])
+
+    def test_format_decision_repair_hints_maps_evidence_failures_to_commands(self) -> None:
+        rows = format_decision_repair_hints({
+            "decision_id": "decision_t5",
+            "blocking_failures": [
+                {
+                    "id": "supporting_evidence",
+                    "label": "Supporting experiments contain evidence",
+                    "reason": "At least one supporting experiment must contain findings.",
+                    "blocking": True,
+                    "related_node_ids": ["exp_t5"],
+                },
+                {
+                    "id": "evidence_summary",
+                    "label": "Evidence summary is present",
+                    "reason": "evidence_summary must be non-empty.",
+                    "blocking": True,
+                },
+            ],
+        })
+
+        self.assertEqual(rows[0]["repair_kind"], "command")
+        self.assertIn("scripts\\record_finding.py", rows[0]["suggested_command"])
+        self.assertIn("--experiment exp_t5", rows[0]["suggested_command"])
+        self.assertIn("scripts\\update_decision_evidence.py", rows[0]["suggested_command"])
+        self.assertEqual(rows[1]["target_field"], "evidence_summary")
+        self.assertIn("scripts\\update_decision_evidence.py", rows[1]["suggested_command"])
+        self.assertIn("--evidence-summary", rows[1]["suggested_command"])
+
+    def test_format_decision_repair_hints_maps_structural_failures_to_yaml(self) -> None:
+        rows = format_decision_repair_hints({
+            "decision_id": "decision_t5",
+            "blocking_failures": [
+                {
+                    "id": "decision_parent",
+                    "label": "Decision parent is an option",
+                    "reason": "Decision parent must be an option node.",
+                    "blocking": True,
+                },
+                {
+                    "id": "alternative_refs",
+                    "label": "Alternative references are valid",
+                    "reason": "Invalid alternative option reference(s): option_missing",
+                    "blocking": True,
+                    "related_node_ids": ["option_missing"],
+                },
+            ],
+        })
+
+        self.assertEqual([row["repair_kind"] for row in rows], ["yaml", "yaml"])
+        self.assertEqual(rows[0]["target_field"], "parent")
+        self.assertEqual(rows[1]["target_field"], "alternatives_considered")
+        self.assertEqual(rows[0]["suggested_command"], "")
+        self.assertEqual(rows[1]["suggested_command"], "")
+
+    def test_format_decision_repair_hints_maps_invalid_experiment_refs_to_yaml(self) -> None:
+        rows = format_decision_repair_hints({
+            "decision_id": "decision_t5",
+            "blocking_failures": [
+                {
+                    "id": "supporting_experiments",
+                    "label": "Supporting experiments are present",
+                    "reason": "Invalid supporting experiment reference(s): exp_missing",
+                    "blocking": True,
+                    "related_node_ids": ["exp_missing"],
+                },
+            ],
+        })
+
+        self.assertEqual(rows[0]["repair_kind"], "yaml")
+        self.assertEqual(rows[0]["target_field"], "supporting_experiments")
+        self.assertEqual(rows[0]["suggested_command"], "")
+
+    def test_decision_repair_hints_are_rendered_in_decision_views(self) -> None:
+        source = (SKILL_ROOT / "ui" / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn("format_decision_repair_hints", source)
+        self.assertGreaterEqual(source.count("render_decision_repair_hints(checklist, text)"), 2)
 
 
 if __name__ == "__main__":

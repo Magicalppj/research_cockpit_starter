@@ -94,6 +94,13 @@ def build_update_decision_checklist_command(decision_id: str) -> str:
     )
 
 
+def build_update_decision_evidence_command(decision_id: str) -> str:
+    return (
+        f"{script_command('update_decision_evidence.py')}"
+        f" --id {decision_id}"
+    )
+
+
 def build_create_note_command(node_id: str) -> str:
     return (
         f"{script_command('create_note.py')}"
@@ -345,6 +352,144 @@ def format_decision_checklist(checklist: dict) -> list[dict]:
             "reason": item.get("reason"),
             "related_node_ids": "; ".join(str(node_id) for node_id in related),
         })
+    return rows
+
+
+def format_decision_repair_hints(checklist: dict) -> list[dict]:
+    decision_id = str(checklist.get("decision_id") or "<decision_id>")
+    rows = []
+
+    def append_row(
+        item: dict,
+        repair_kind: str,
+        *,
+        suggested_command: str = "",
+        target_field: str = "",
+        details: str = "",
+    ) -> None:
+        rows.append({
+            "check_id": item.get("id") or "",
+            "label": item.get("label") or item.get("id") or "",
+            "reason": item.get("reason") or "",
+            "repair_kind": repair_kind,
+            "suggested_command": suggested_command,
+            "target_field": target_field,
+            "details": details,
+        })
+
+    for item in checklist.get("blocking_failures", []) or []:
+        check_id = str(item.get("id") or "")
+        related = [str(node_id) for node_id in item.get("related_node_ids", []) or []]
+        if check_id == "supporting_experiments":
+            reason = str(item.get("reason") or "")
+            if "Invalid supporting experiment" in reason:
+                append_row(
+                    item,
+                    "yaml",
+                    target_field="supporting_experiments",
+                    details="Replace invalid supporting experiment ids with existing experiment node ids.",
+                )
+            else:
+                append_row(
+                    item,
+                    "command",
+                    suggested_command=build_update_decision_evidence_command(decision_id),
+                    target_field="supporting_experiments",
+                    details=(
+                        "Refresh decision evidence if option experiments already exist; "
+                        "otherwise add supporting experiment ids to the decision YAML."
+                    ),
+                )
+        elif check_id == "supporting_evidence":
+            experiment_id = related[0] if related else "<experiment_id>"
+            append_row(
+                item,
+                "command",
+                suggested_command=(
+                    f"{build_record_finding_command(experiment_id)}\n"
+                    f"{build_update_decision_evidence_command(decision_id)}"
+                ),
+                target_field="findings",
+                details="Record evidence on a supporting experiment, then refresh decision evidence.",
+            )
+        elif check_id == "evidence_strength":
+            append_row(
+                item,
+                "command",
+                suggested_command=build_update_decision_evidence_command(decision_id),
+                target_field="evidence_strength",
+                details="Refresh derived decision evidence after supporting experiments contain findings.",
+            )
+        elif check_id == "evidence_summary":
+            append_row(
+                item,
+                "command",
+                suggested_command=(
+                    f"{build_update_decision_evidence_command(decision_id)}\n"
+                    f"{script_command('update_decision_checklist.py')}"
+                    f" --id {decision_id}"
+                    ' --evidence-summary "Summarize supporting evidence"'
+                ),
+                target_field="evidence_summary",
+                details="Refresh derived evidence, or write a manual evidence summary when needed.",
+            )
+        elif check_id == "alternatives_considered":
+            append_row(
+                item,
+                "command",
+                suggested_command=(
+                    f"{script_command('update_decision_checklist.py')}"
+                    f" --id {decision_id}"
+                    " --alternative <option_id>"
+                ),
+                target_field="alternatives_considered",
+                details="Add at least one alternative option id considered before accepting the decision.",
+            )
+        elif check_id == "consequences":
+            append_row(
+                item,
+                "command",
+                suggested_command=(
+                    f"{script_command('update_decision_checklist.py')}"
+                    f" --id {decision_id}"
+                    ' --consequence "Describe downstream impact"'
+                ),
+                target_field="consequences",
+                details="Record the downstream impact of accepting the decision.",
+            )
+        elif check_id == "next_required_actions":
+            append_row(
+                item,
+                "command",
+                suggested_command=(
+                    f"{script_command('update_decision_checklist.py')}"
+                    f" --id {decision_id}"
+                    ' --next-required-action "Describe required follow-up"'
+                ),
+                target_field="next_required_actions",
+                details="Record the immediate follow-up action required after acceptance.",
+            )
+        elif check_id == "alternative_refs":
+            append_row(
+                item,
+                "yaml",
+                target_field="alternatives_considered",
+                details="Replace invalid alternatives with existing option node ids.",
+            )
+        elif check_id in {"decision_parent", "problem_parent"}:
+            append_row(
+                item,
+                "yaml",
+                target_field="parent",
+                details="Fix the decision -> option -> problem parent chain in graph node YAML.",
+            )
+        else:
+            append_row(
+                item,
+                "yaml",
+                target_field=check_id,
+                details="Review and repair the corresponding decision YAML field.",
+            )
     return rows
 
 

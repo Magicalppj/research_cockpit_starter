@@ -137,7 +137,7 @@ Accept an existing decision:
 python scripts\accept_decision.py --id decision_demo_prompt_refinement
 ```
 
-Acceptance is guarded by the decision checklist. A decision needs valid supporting experiments, evidence content, non-`none` evidence strength, an evidence summary, alternatives, consequences, and next required actions. `promote_decision.py --status accepted` uses the same gate. Use `--force-accept` only for reviewed migration/import exceptions.
+Acceptance is guarded by the decision checklist. A decision needs valid supporting experiments, evidence content, non-`none` evidence strength, an evidence summary, alternatives, consequences, and next required actions. `promote_decision.py --status accepted` uses the same gate. Use `--force-accept` only for reviewed migration/import exceptions. The Streamlit Decision Trace and decision node detail views show repair hints for blocking checklist failures without writing YAML directly.
 
 Review read-only action suggestions:
 
