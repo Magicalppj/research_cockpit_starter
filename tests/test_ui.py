@@ -35,6 +35,30 @@ from ui.view_helpers import (
 
 
 class UiRenderingTests(unittest.TestCase):
+    def test_app_multiselects_use_explicit_keys(self) -> None:
+        source = (ROOT_DIR / "ui" / "app.py").read_text(encoding="utf-8")
+        start = 0
+        calls = []
+        while True:
+            index = source.find(".multiselect(", start)
+            if index == -1:
+                break
+            cursor = index + len(".multiselect(")
+            depth = 1
+            while cursor < len(source) and depth:
+                char = source[cursor]
+                if char == "(":
+                    depth += 1
+                elif char == ")":
+                    depth -= 1
+                cursor += 1
+            calls.append(source[index:cursor])
+            start = cursor
+
+        self.assertGreater(len(calls), 0)
+        for call in calls:
+            self.assertIn("key=", call)
+
     def test_pyvis_html_generation_supports_chinese_without_file_encoding(self) -> None:
         graph = {
             "nodes": [

@@ -665,8 +665,8 @@ def render_dashboard(
         st.subheader(text["next_actions"])
         actions = context.get("next_actions", [])
         if actions:
-            for action in actions:
-                st.checkbox(action, value=False)
+            for index, action in enumerate(actions):
+                st.checkbox(action, value=False, key=f"dashboard_action_{index}")
         else:
             st.caption(text["no_next_actions"])
 
@@ -701,15 +701,22 @@ def render_graph_tab(nodes: dict, graph: dict, current: dict, text: dict[str, st
             list(mode_label_to_value),
             index=0,
             horizontal=True,
+            key="graph_view_mode",
         )
         view_mode = mode_label_to_value.get(view_label or text["focus_depth_2"], "focus_depth_2")
         filter_left, filter_right = st.columns(2)
-        selected_types = set(filter_left.multiselect(text["node_types"], all_types, default=all_types))
+        selected_types = set(filter_left.multiselect(
+            text["node_types"],
+            all_types,
+            default=all_types,
+            key="graph_node_types",
+        ))
         selected_statuses = set(
             filter_right.multiselect(
                 text["statuses"],
                 all_statuses,
                 default=default_selected_statuses(graph, all_statuses),
+                key="graph_statuses",
             )
         )
         filtered_graph = filter_graph_for_view(graph, view_mode, selected_types, selected_statuses)
@@ -722,7 +729,7 @@ def render_graph_tab(nodes: dict, graph: dict, current: dict, text: dict[str, st
 
     with detail:
         visible_node_ids = [node["id"] for node in filtered_graph["nodes"] if node["id"] in nodes]
-        search_query = st.text_input(text["search_nodes"], value="")
+        search_query = st.text_input(text["search_nodes"], value="", key="graph_node_search")
         search_scope = {node_id: nodes[node_id] for node_id in (visible_node_ids or sorted(nodes.keys()))}
         detail_options = filter_node_ids(search_scope, search_query)
         default_id = default_detail_node_id(graph, detail_options)
@@ -735,6 +742,7 @@ def render_graph_tab(nodes: dict, graph: dict, current: dict, text: dict[str, st
             detail_options,
             index=default_index,
             format_func=lambda value: format_node_option(nodes, value),
+            key="graph_detail_node",
         )
         render_node_detail(nodes, node_id, text, current, link_rows)
 
@@ -752,6 +760,7 @@ def render_branch_comparison(nodes: dict, current: dict, text: dict[str, str]) -
         problem_options,
         index=default_index,
         format_func=lambda value: format_node_option(nodes, value),
+        key="branch_comparison_problem",
     )
     rows = build_branch_comparison(nodes, problem_id, current)
     if not rows:
@@ -772,6 +781,7 @@ def render_decision_trace(nodes: dict, text: dict[str, str]) -> None:
         text["inspect_decision"],
         decision_ids,
         format_func=lambda value: format_node_option(nodes, value),
+        key="decision_trace_decision",
     )
     trace = build_decision_trace(nodes, decision_id)
 
@@ -816,17 +826,28 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
     priorities = sorted({suggestion.get("priority", "") for suggestion in action_suggestions if suggestion.get("priority")})
     states = ["active", "dismissed", "completed"]
     kind_filter, priority_filter, state_filter, focus_filter = st.columns(4)
-    selected_kinds = set(kind_filter.multiselect(text["suggestion_kind"], kinds, default=kinds))
-    selected_priorities = set(priority_filter.multiselect(text["suggestion_priority"], priorities, default=priorities))
+    selected_kinds = set(kind_filter.multiselect(
+        text["suggestion_kind"],
+        kinds,
+        default=kinds,
+        key="action_guidance_kinds",
+    ))
+    selected_priorities = set(priority_filter.multiselect(
+        text["suggestion_priority"],
+        priorities,
+        default=priorities,
+        key="action_guidance_priorities",
+    ))
     selected_states = set(
         state_filter.multiselect(
             text["suggestion_state"],
             states,
             default=["active"],
             format_func=lambda value: text.get(value, value),
+            key="action_guidance_states",
         )
     )
-    focus_only = focus_filter.checkbox(text["focus_related"], value=False)
+    focus_only = focus_filter.checkbox(text["focus_related"], value=False, key="action_guidance_focus_only")
 
     filtered = filter_action_suggestions(
         action_suggestions,
@@ -850,6 +871,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
             text["set_focus_command"],
             commands,
             format_func=lambda item: f"{item.get('kind')} | {item.get('source_node_id')}",
+            key="action_guidance_command",
         )
         st.code(selected["suggested_command"], language="powershell")
 
@@ -857,6 +879,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
         text["queue_suggestion"],
         filtered,
         format_func=lambda item: f"{item.get('id')} | {item.get('kind')} | {item.get('source_node_id')}",
+        key="action_guidance_selected_suggestion",
     )
     selected_state = selected_suggestion.get("lifecycle_state", "active")
     selected_key = selected_suggestion.get("key") or selected_suggestion["id"]
@@ -957,12 +980,29 @@ def render_search(search_index: list[dict], nodes: dict, text: dict[str, str]) -
 
     sources = sorted({entry.get("source", "") for entry in search_index if entry.get("source")})
     node_types = sorted({entry.get("node_type", "") for entry in search_index if entry.get("node_type")})
-    query = st.text_input(text["search_query"], value="")
+    query = st.text_input(text["search_query"], value="", key="knowledge_search_query")
     c1, c2, c3, c4 = st.columns(4)
-    selected_sources = set(c1.multiselect(text["search_source"], sources, default=sources))
-    selected_node_types = set(c2.multiselect(text["search_node_type"], node_types, default=node_types))
-    focus_only = c3.checkbox(text["focus_related"], value=False)
-    limit = int(c4.number_input(text["search_limit"], min_value=1, max_value=100, value=20, step=1))
+    selected_sources = set(c1.multiselect(
+        text["search_source"],
+        sources,
+        default=sources,
+        key="knowledge_search_sources",
+    ))
+    selected_node_types = set(c2.multiselect(
+        text["search_node_type"],
+        node_types,
+        default=node_types,
+        key="knowledge_search_node_types",
+    ))
+    focus_only = c3.checkbox(text["focus_related"], value=False, key="knowledge_search_focus_only")
+    limit = int(c4.number_input(
+        text["search_limit"],
+        min_value=1,
+        max_value=100,
+        value=20,
+        step=1,
+        key="knowledge_search_limit",
+    ))
 
     results = filter_search_results(
         search_index,
@@ -982,6 +1022,7 @@ def render_search(search_index: list[dict], nodes: dict, text: dict[str, str]) -
         text["search_preview"],
         results,
         format_func=lambda item: f"{item.get('score')} | {item.get('source')} | {item.get('title')}",
+        key="knowledge_search_selected_result",
     )
     st.text_area(text["search_preview"], selected.get("preview") or selected.get("snippet") or "", height=220)
 
@@ -1013,11 +1054,26 @@ def render_resources(link_rows: list[dict], text: dict[str, str]) -> None:
     exists_values = ["yes", "missing", "unknown"]
 
     type_filter, resource_filter, exists_filter = st.columns(3)
-    selected_node_types = set(type_filter.multiselect(text["node_types"], node_types, default=node_types))
+    selected_node_types = set(type_filter.multiselect(
+        text["node_types"],
+        node_types,
+        default=node_types,
+        key="resources_node_types",
+    ))
     selected_resource_types = set(
-        resource_filter.multiselect(text["resource_type"], resource_types, default=resource_types)
+        resource_filter.multiselect(
+            text["resource_type"],
+            resource_types,
+            default=resource_types,
+            key="resources_resource_types",
+        )
     )
-    selected_exists = set(exists_filter.multiselect(text["resource_exists"], exists_values, default=exists_values))
+    selected_exists = set(exists_filter.multiselect(
+        text["resource_exists"],
+        exists_values,
+        default=exists_values,
+        key="resources_exists",
+    ))
 
     filtered_rows = [
         row
@@ -1052,6 +1108,7 @@ def render_decisions(nodes: dict, current: dict, text: dict[str, str], link_rows
         text["inspect_decision"],
         decision_options,
         format_func=lambda value: text["none"] if not value else format_node_option(nodes, value),
+        key="decisions_detail_decision",
     )
     if decision_id:
         render_node_detail(nodes, decision_id, text, current, link_rows)
