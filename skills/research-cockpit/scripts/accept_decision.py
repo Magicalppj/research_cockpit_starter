@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import date
 from pathlib import Path
 import sys
@@ -32,6 +33,7 @@ def accept_decision(
     decision_id: str,
     force_accept: bool = False,
     rebuild_dashboard: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     nodes = load_nodes(root)
     if decision_id not in nodes:
@@ -87,6 +89,29 @@ def accept_decision(
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
 
+    after = {
+        "decision_status": decision_data.get("status"),
+        "option_status": option_data.get("status"),
+        "option_decision_state": option_data.get("decision_state"),
+        "problem_status": problem_data.get("status"),
+        "problem_resolved_by": problem_data.get("resolved_by"),
+        "problem_current_best_option": problem_data.get("current_best_option"),
+    }
+    result = {
+        "decision_id": decision_id,
+        "option_id": str(option_id),
+        "problem_id": str(problem_id),
+        "forced": force_accept,
+        "dry_run": dry_run,
+        "changed": not dry_run,
+        "checklist": checklist,
+        "before": before,
+        "after": after,
+    }
+    if dry_run:
+        result["changed"] = False
+        return result
+
     save_yaml(decision_path, decision_data)
     save_yaml(option_path, option_data)
     save_yaml(problem_path, problem_data)
@@ -100,14 +125,7 @@ def accept_decision(
         node_id=decision_id,
         command=command,
         before=before,
-        after={
-            "decision_status": decision_data.get("status"),
-            "option_status": option_data.get("status"),
-            "option_decision_state": option_data.get("decision_state"),
-            "problem_status": problem_data.get("status"),
-            "problem_resolved_by": problem_data.get("resolved_by"),
-            "problem_current_best_option": problem_data.get("current_best_option"),
-        },
+        after=after,
         extra={
             "decision_id": decision_id,
             "option_id": str(option_id),
@@ -117,13 +135,7 @@ def accept_decision(
     )
     if rebuild_dashboard:
         build_dashboard(root)
-    return {
-        "decision_id": decision_id,
-        "option_id": str(option_id),
-        "problem_id": str(problem_id),
-        "forced": force_accept,
-        "checklist": checklist,
-    }
+    return result
 
 
 def main() -> None:
@@ -131,6 +143,8 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--id", required=True, dest="decision_id")
     parser.add_argument("--force-accept", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -140,12 +154,21 @@ def main() -> None:
             decision_id=args.decision_id,
             force_accept=args.force_accept,
             rebuild_dashboard=not args.no_build,
+            dry_run=args.dry_run,
         )
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc
 
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
     forced = " with force-accept" if result["forced"] else ""
+    if args.dry_run:
+        print(f"Would accept {result['decision_id']}{forced}")
+        return
+
     print(f"Accepted {result['decision_id']}{forced}")
     if not args.no_build:
         print(f"Rebuilt dashboards under {args.root / 'dashboards'}")

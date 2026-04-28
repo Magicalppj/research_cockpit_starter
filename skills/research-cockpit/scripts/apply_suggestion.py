@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import date
 from pathlib import Path
 import sys
@@ -55,6 +56,7 @@ def apply_suggestion(
     suggestion_id: str,
     target: str = "current",
     rebuild_dashboard: bool = True,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     if target not in VALID_TARGETS:
         allowed = ", ".join(sorted(VALID_TARGETS))
@@ -73,8 +75,9 @@ def apply_suggestion(
         before_actions = list(current.get("next_actions", []) or [])
         changed = _append_action(current, action, "current_state")
         validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
-        save_yaml(root / "current_state.yaml", current)
         after_actions = list(current.get("next_actions", []) or [])
+        if not dry_run:
+            save_yaml(root / "current_state.yaml", current)
     else:
         node_id = source_node_id
         node_path = find_node_file(root, node_id)
@@ -84,8 +87,24 @@ def apply_suggestion(
         candidate = dict(nodes)
         candidate[node_id] = ResearchNode.from_dict(node_data)
         validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
-        save_yaml(node_path, node_data)
         after_actions = list(node_data.get("next_actions", []) or [])
+        if not dry_run:
+            save_yaml(node_path, node_data)
+
+    result = {
+        "suggestion": suggestion,
+        "suggestion_id": suggestion_id,
+        "target": target,
+        "dry_run": dry_run,
+        "changed": False if dry_run else changed,
+        "would_change": changed,
+        "source_node_id": source_node_id,
+        "action": action,
+        "before": {"target": target, "next_actions": before_actions},
+        "after": {"target": target, "next_actions": after_actions},
+    }
+    if dry_run:
+        return result
 
     append_interaction_log(
         root,
@@ -105,11 +124,7 @@ def apply_suggestion(
     )
     if rebuild_dashboard:
         build_dashboard(root)
-    return {
-        "suggestion": suggestion,
-        "target": target,
-        "changed": changed,
-    }
+    return result
 
 
 def main() -> None:
@@ -117,6 +132,8 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--id", required=True, dest="suggestion_id")
     parser.add_argument("--target", choices=sorted(VALID_TARGETS), default="current")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -126,12 +143,24 @@ def main() -> None:
             suggestion_id=args.suggestion_id,
             target=args.target,
             rebuild_dashboard=not args.no_build,
+            dry_run=args.dry_run,
         )
     except (ValidationError, ValueError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc
 
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
     action = result["suggestion"]["action"]
+    if args.dry_run:
+        if result["would_change"]:
+            print(f"Would queue suggestion {args.suggestion_id} to {args.target}: {action}")
+        else:
+            print(f"Suggestion {args.suggestion_id} is already queued in {args.target}: {action}")
+        return
+
     if result["changed"]:
         print(f"Queued suggestion {args.suggestion_id} to {args.target}: {action}")
     else:

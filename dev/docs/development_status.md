@@ -1,5 +1,29 @@
 # Research Cockpit 开发状态
 
+## Mutating Script Dry-Run Coverage v1 更新（2026-04-28）
+
+本批继续扩展写入脚本的 dry-run 覆盖，把 action suggestion、decision promotion 和 decision acceptance 的高风险写入路径纳入预览流程。
+
+已完成：
+
+- `apply_suggestion.py` 新增 `--dry-run` 和 `--json`，会完整生成 suggestion、校验目标 action list，并输出 before/after `next_actions`；dry-run 不写 `current_state.yaml`、节点 YAML、interaction log 或 dashboard。
+- `promote_decision.py` 新增 `--dry-run` 和 `--json`，会完整执行 option/reference/status/evidence gate 校验，并输出将要创建的 decision YAML 以及 accepted 状态下 option/problem 的 before/after 摘要；dry-run 不创建 decision 文件。
+- `accept_decision.py` 新增 `--dry-run` 和 `--json`，会完整执行 acceptance checklist 和 candidate validation，并输出 decision/option/problem 状态变更预览；not-ready 失败路径不写文件或 interaction log。
+- `list_agent_commands.py` 已将 `apply_suggestion.py`、`promote_decision.py` 和 `accept_decision.py` 标记为支持 `--dry-run` / `--json`。
+- README 和 `SKILL.md` 已补充先 dry-run 预览、再真实执行的 action suggestion 和 decision 推荐流程。
+
+验证目标：
+
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s dev\tests`
+- `%RESEARCH_COCKPIT_PYTHON% skills\research-cockpit\scripts\skill_smoke_test.py --json`
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_skill_release_check.py --json --skip-mutating --python %RESEARCH_COCKPIT_PYTHON%`
+
+当前仍可升级：
+
+- 继续为 `record_finding.py`、`update_decision_evidence.py` 和 `update_decision_checklist.py` 等写入脚本扩展 dry-run coverage。
+- React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
+- decision acceptance history：记录接受前后的关键状态和 checklist 摘要。
+
 ## Option Workstream Dry-Run Coverage v1 更新（2026-04-28）
 
 本批把 dry-run 预览能力扩展到 option workstream 的两条关键写入脚本，便于 agent 或研究者在真实修改 YAML、追加 interaction log 和重建 dashboard 前检查状态变化。
@@ -20,7 +44,7 @@
 
 当前仍可升级：
 
-- 继续为 `apply_suggestion.py`、`accept_decision.py` 和 `promote_decision.py` 扩展 dry-run coverage。
+- 继续为 `record_finding.py`、`update_decision_evidence.py` 和 `update_decision_checklist.py` 等写入脚本扩展 dry-run coverage。
 - React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
 - decision acceptance history：记录接受前后的关键状态和 checklist 摘要。
 
@@ -45,7 +69,7 @@
 
 - acceptance history：记录 decision 从 proposed 到 accepted 的历史摘要。
 - React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
-- dry-run coverage 扩展：继续为 apply/accept/promote 等 mutating scripts 增加预览模式。
+- dry-run coverage 扩展：继续为 record/update evidence/update checklist 等 mutating scripts 增加预览模式。
 
 ## Interaction Log Coverage v1 更新（2026-04-28）
 
@@ -644,7 +668,7 @@ python dev\scripts\run_subagent_forward_check.py --json --skip-mutating
 
 ### 第一优先级：稳定性和可维护性
 
-- 为 `apply_suggestion.py`、`accept_decision.py`、`promote_decision.py` 等写入脚本补充 `--dry-run`，再按风险扩展到其他 mutating scripts。
+- 为 `record_finding.py`、`update_decision_evidence.py`、`update_decision_checklist.py` 等剩余写入脚本补充 `--dry-run`，再按风险扩展到其他 mutating scripts。
 - 为节点 schema 写更明确的字段说明，降低手写 YAML 出错概率。
 - 增加 dashboard 生成的快照测试或结构测试，防止 context pack 字段回退。
 - 为 linked resources 增加更清晰的路径约定说明，例如仓库内相对路径、URL、外部路径和 run id 的区别。
@@ -816,7 +840,7 @@ v2 P0 阶段完成后，应满足：
 当前仍可升级：
 
 - 为 decision acceptance 记录 acceptance 历史。
-- 为更多 mutating scripts 扩展 dry-run 覆盖，优先处理 `apply_suggestion.py`、`accept_decision.py` 和 `promote_decision.py`。
+- 为更多 mutating scripts 扩展 dry-run 覆盖，优先处理 `record_finding.py`、`update_decision_evidence.py` 和 `update_decision_checklist.py`。
 - 升级图谱交互，优先补 option workstream 中心过滤和 selector / 点击展开，再评估更安全的节点文本编辑。
 
 ## 当前升级候选总览（2026-04-28）
@@ -832,11 +856,11 @@ v2 P0 阶段完成后，应满足：
 部分完成但仍可增强：
 
 - decision acceptance UI 已展示 checklist、固定命令模板和按 blocking failure 生成的动态修复提示，仍缺 acceptance 历史。
-- dry-run coverage 已在 `cleanup_suggestion_lifecycle.py`、`claim_option.py` 和 `report_option_workstream.py` 上验证，仍需推广到更多写入脚本。
+- dry-run coverage 已在 `cleanup_suggestion_lifecycle.py`、`claim_option.py`、`report_option_workstream.py`、`apply_suggestion.py`、`promote_decision.py` 和 `accept_decision.py` 上验证，仍需推广到更多写入脚本。
 - option workstream 已有数据模型、脚本、context、中心化图谱视图和 UI 命令模板，仍缺更直接的前端写回入口。
 
 建议下一批优先级：
 
 1. 图谱 component spike：验证 React Flow / Cytoscape 是否能替代 PyVis，让节点点击直接驱动右侧 inspector。
-2. dry-run coverage 扩展：继续覆盖 `apply_suggestion.py`、`accept_decision.py` 和 `promote_decision.py`。
+2. dry-run coverage 扩展：继续覆盖 `record_finding.py`、`update_decision_evidence.py` 和 `update_decision_checklist.py`。
 3. decision acceptance history：记录接受前后的关键状态和 checklist 摘要。

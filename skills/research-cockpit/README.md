@@ -104,11 +104,12 @@ python scripts\report_option_workstream.py --option option_demo_prompt_refinemen
 Promote an option into a decision:
 
 ```powershell
+python scripts\promote_decision.py --id decision_demo_prompt_refinement_v2 --option option_demo_prompt_refinement --title "Adopt prompt refinement branch" --summary "Use the refined prompt as the default demo workflow." --status proposed --supporting-experiment experiment_demo_prompt_refinement --evidence-strength medium --dry-run --json
 python scripts\promote_decision.py --id decision_demo_prompt_refinement_v2 --option option_demo_prompt_refinement --title "Adopt prompt refinement branch" --summary "Use the refined prompt as the default demo workflow." --status proposed --supporting-experiment experiment_demo_prompt_refinement --evidence-strength medium
 python scripts\promote_decision.py --id decision_demo_prompt_refinement_v3 --option option_demo_prompt_refinement --title "Adopt prompt refinement branch" --summary "Use the refined prompt as the default demo workflow." --status proposed --auto-evidence
 ```
 
-`--auto-evidence` collects structured experiment `findings`, `result_summary`, and `outcome` from the option branch, then fills `supporting_experiments`, `evidence_strength`, and `evidence_summary`. Explicit `--evidence-strength` values other than `none` are preserved.
+`--auto-evidence` collects structured experiment `findings`, `result_summary`, and `outcome` from the option branch, then fills `supporting_experiments`, `evidence_strength`, and `evidence_summary`. Explicit `--evidence-strength` values other than `none` are preserved. Use `--dry-run --json` to preview the decision YAML and accepted-status side effects before writing files.
 
 Refresh evidence for an existing decision:
 
@@ -136,6 +137,7 @@ python scripts\check_decision_acceptance.py --id decision_demo_prompt_refinement
 Accept an existing decision:
 
 ```powershell
+python scripts\accept_decision.py --id decision_demo_prompt_refinement --dry-run --json
 python scripts\accept_decision.py --id decision_demo_prompt_refinement
 ```
 
@@ -154,11 +156,12 @@ Suggestions are generated from current focus actions, blockers, planned experime
 Queue a suggestion into an action list:
 
 ```powershell
+python scripts\apply_suggestion.py --id next_action_001 --dry-run --json
 python scripts\apply_suggestion.py --id next_action_001
 python scripts\apply_suggestion.py --id next_action_001 --target node
 ```
 
-`apply_suggestion.py` only appends the suggestion text to `current_state.next_actions` or the source node's `next_actions`. It does not run experiments, update statuses, record findings, or create decisions.
+`apply_suggestion.py` only appends the suggestion text to `current_state.next_actions` or the source node's `next_actions`. It does not run experiments, update statuses, record findings, or create decisions. Use `--dry-run --json` to preview the target action list without writing YAML or interaction logs.
 
 Update suggestion lifecycle state:
 

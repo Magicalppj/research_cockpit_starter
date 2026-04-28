@@ -562,6 +562,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["claim_option.py"]["supports_dry_run"])
         self.assertTrue(by_name["report_option_workstream.py"]["supports_json"])
         self.assertTrue(by_name["report_option_workstream.py"]["supports_dry_run"])
+        self.assertTrue(by_name["promote_decision.py"]["supports_json"])
+        self.assertTrue(by_name["promote_decision.py"]["supports_dry_run"])
+        self.assertTrue(by_name["accept_decision.py"]["supports_json"])
+        self.assertTrue(by_name["accept_decision.py"]["supports_dry_run"])
+        self.assertTrue(by_name["apply_suggestion.py"]["supports_json"])
+        self.assertTrue(by_name["apply_suggestion.py"]["supports_dry_run"])
         self.assertTrue(by_name["update_decision_checklist.py"]["mutating"])
         self.assertTrue(by_name["update_decision_checklist.py"]["supports_no_build"])
         self.assertTrue(by_name["cleanup_suggestion_lifecycle.py"]["supports_dry_run"])
@@ -936,6 +942,41 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(failed.returncode, 1)
         self.assertIn("missing_suggestion", failed.stdout)
 
+    def test_apply_suggestion_cli_dry_run_json_previews_without_writing(self) -> None:
+        script = SKILL_ROOT / "scripts" / "apply_suggestion.py"
+        current_path = self.root / "current_state.yaml"
+        before = current_path.read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--id",
+                "next_action_001",
+                "--target",
+                "current",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        after = current_path.read_text(encoding="utf-8")
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["target"], "current")
+        self.assertTrue(payload["would_change"])
+        self.assertEqual(payload["before"]["next_actions"], [])
+        self.assertEqual(len(payload["after"]["next_actions"]), 1)
+        self.assertEqual(before, after)
+        self.assertFalse((self.root / "graph" / "interaction_log.yaml").exists())
+        self.assertFalse((self.root / "dashboards").exists())
+
     def test_update_suggestion_state_writes_dismissed_completed_and_active(self) -> None:
         dismissed = update_suggestion_state(
             self.root,
@@ -1224,6 +1265,94 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(decision["derived_from"], ["option_t5"])
         self.assertEqual(decision["supporting_experiments"], ["exp_t5"])
         self.assertEqual(decision["alternatives_considered"], ["option_alt"])
+
+    def test_promote_decision_cli_dry_run_json_previews_without_writing(self) -> None:
+        script = SKILL_ROOT / "scripts" / "promote_decision.py"
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--id",
+                "decision_t5",
+                "--option",
+                "option_t5",
+                "--title",
+                "Adopt T5",
+                "--summary",
+                "T5 is promising.",
+                "--status",
+                "proposed",
+                "--supporting-experiment",
+                "exp_t5",
+                "--alternative",
+                "option_alt",
+                "--consequence",
+                "Regenerate cache.",
+                "--next-required-action",
+                "Run CLAP ablation.",
+                "--evidence-strength",
+                "medium",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["decision_id"], "decision_t5")
+        self.assertEqual(payload["option_id"], "option_t5")
+        self.assertEqual(payload["decision"]["status"], "proposed")
+        self.assertEqual(payload["decision"]["supporting_experiments"], ["exp_t5"])
+        self.assertFalse((self.root / "graph" / "nodes" / "decision_t5.yaml").exists())
+        self.assertFalse((self.root / "dashboards").exists())
+
+    def test_promote_decision_cli_dry_run_gate_failure_does_not_write(self) -> None:
+        script = SKILL_ROOT / "scripts" / "promote_decision.py"
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--id",
+                "decision_accept_bad",
+                "--option",
+                "option_t5",
+                "--title",
+                "Accept T5",
+                "--summary",
+                "Accept without evidence.",
+                "--status",
+                "accepted",
+                "--dry-run",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("not ready", out.stdout)
+        self.assertFalse((self.root / "graph" / "nodes" / "decision_accept_bad.yaml").exists())
+        self.assertFalse((self.root / "dashboards").exists())
 
     def test_promote_decision_auto_evidence_merges_experiments_and_preserves_explicit_strength(self) -> None:
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
@@ -1557,6 +1686,120 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(event["option_id"], "option_t5")
         self.assertEqual(event["problem_id"], "problem_text")
         self.assertFalse(event["forced"])
+
+    def test_accept_decision_cli_dry_run_json_previews_without_writing(self) -> None:
+        script = SKILL_ROOT / "scripts" / "accept_decision.py"
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["result_summary"] = "Improves edit following."
+        experiment["outcome"] = "positive"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+                "supporting_experiments": ["exp_t5"],
+                "evidence_strength": "medium",
+                "evidence_summary": "1 experiment; outcome positive",
+                "alternatives_considered": ["option_alt"],
+                "consequences": ["Update focus."],
+                "next_required_actions": ["Run CLAP ablation."],
+            },
+        )
+        decision_path = self.root / "graph" / "nodes" / "decision_t5.yaml"
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        before = {
+            "decision": decision_path.read_text(encoding="utf-8"),
+            "option": option_path.read_text(encoding="utf-8"),
+            "problem": problem_path.read_text(encoding="utf-8"),
+        }
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--id",
+                "decision_t5",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        after = {
+            "decision": decision_path.read_text(encoding="utf-8"),
+            "option": option_path.read_text(encoding="utf-8"),
+            "problem": problem_path.read_text(encoding="utf-8"),
+        }
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["decision_id"], "decision_t5")
+        self.assertFalse(payload["forced"])
+        self.assertEqual(payload["before"]["decision_status"], "proposed")
+        self.assertEqual(payload["after"]["decision_status"], "accepted")
+        self.assertEqual(payload["after"]["problem_status"], "resolved")
+        self.assertEqual(before, after)
+        self.assertFalse((self.root / "graph" / "interaction_log.yaml").exists())
+        self.assertFalse((self.root / "dashboards").exists())
+
+    def test_accept_decision_cli_dry_run_not_ready_does_not_write(self) -> None:
+        script = SKILL_ROOT / "scripts" / "accept_decision.py"
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+            },
+        )
+        decision_path = self.root / "graph" / "nodes" / "decision_t5.yaml"
+        before = decision_path.read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--id",
+                "decision_t5",
+                "--dry-run",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        after = decision_path.read_text(encoding="utf-8")
+
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("not ready", out.stdout)
+        self.assertEqual(before, after)
+        self.assertFalse((self.root / "graph" / "interaction_log.yaml").exists())
+        self.assertFalse((self.root / "dashboards").exists())
 
     def test_accept_decision_rejects_not_ready_unless_forced(self) -> None:
         write_node(
