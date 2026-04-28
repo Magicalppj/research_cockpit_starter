@@ -251,7 +251,7 @@ Streamlit 页面现在包含：
 当前验证命令：
 
 ```powershell
-python -m unittest discover -s tests
+python -m unittest discover -s dev\tests
 python scripts\build_dashboard.py
 ```
 

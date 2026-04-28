@@ -8,10 +8,10 @@
 
 ## Package Boundaries
 
-- The reusable Codex skill package lives in `skills/research-cockpit/`.
-- Development logs, design notes, historical requirements, and v2 planning specs live in `dev/`.
-- Runtime code remains at the repository root in `cockpit/`, `scripts/`, `ui/`, and `research_cockpit/`.
-- When preparing a pure skill export, start from `skills/research-cockpit/` and include only the referenced runtime files intentionally.
+- This directory is the reusable Codex skill package.
+- Runtime code, scripts, UI, cockpit data, generated context, requirements, skill metadata, and agent rules stay inside this directory.
+- Development logs, design notes, historical requirements, specs, and tests stay outside the package under the development repository's `dev/` directory.
+- When preparing a pure skill export, copy this directory as-is.
 
 ## Read Order
 
@@ -21,7 +21,9 @@
 4. Use `python scripts\search_knowledge.py --query "..." --json` when more context is needed.
 5. Use `python scripts\list_agent_commands.py --json` to choose safe workflow scripts.
 
-For subagent validation, pass `skills/research-cockpit/` as the skill path and run the task from repository root.
+If the working directory is unreliable, call scripts by absolute path. Scripts derive the package root from their own location, so `python C:\path\to\research-cockpit\scripts\agent_bootstrap.py --json` is valid.
+
+For subagent validation, pass this directory as the skill path and run the task from this directory root.
 
 ## Write Rules
 
@@ -35,13 +37,16 @@ For subagent validation, pass `skills/research-cockpit/` as the skill path and r
 After code or YAML changes, run:
 
 ```powershell
-python -m unittest discover -s tests
+python scripts\skill_smoke_test.py --json
 python scripts\validate_cockpit.py
 python scripts\build_dashboard.py
 ```
+
+In the development repository, run the external test suite from the repository root with `python -m unittest discover -s dev\tests`.
 
 ## Environment
 
 - Default command templates use `python`.
 - Set `RESEARCH_COCKPIT_PYTHON` to override the interpreter in generated command templates.
+- If `agent_bootstrap.py` reports missing modules, run `python -m pip install -r requirements.txt` or use an interpreter with the listed requirements installed.
 - Do not commit local absolute paths, usernames, virtual environment paths, or machine-specific interpreter paths.

@@ -8,8 +8,9 @@ from pathlib import Path
 import os
 import sys
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT_DIR))
+ROOT_DIR = Path(__file__).resolve().parents[2]
+SKILL_ROOT = ROOT_DIR / "skills" / "research-cockpit"
+sys.path.insert(0, str(SKILL_ROOT))
 
 from cockpit.model import (
     ValidationError,

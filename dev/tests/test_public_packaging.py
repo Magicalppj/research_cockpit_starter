@@ -4,7 +4,8 @@ from pathlib import Path
 import unittest
 
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parents[2]
+SKILL_ROOT = ROOT_DIR / "skills" / "research-cockpit"
 FORBIDDEN_STRINGS = (
     "D:\\Tools",
     "C:\\Users\\22339",
@@ -17,7 +18,6 @@ def packaging_files() -> list[Path]:
     paths: list[Path] = []
     for relative in (
         "README.md",
-        "AGENTS.md",
         "dev/docs/development_status.md",
     ):
         path = ROOT_DIR / relative
@@ -25,12 +25,9 @@ def packaging_files() -> list[Path]:
             paths.append(path)
 
     for directory in (
-        ROOT_DIR / "cockpit",
-        ROOT_DIR / "ui",
-        ROOT_DIR / "scripts",
-        ROOT_DIR / "skills",
-        ROOT_DIR / "dev",
-        ROOT_DIR / "research_cockpit" / "dashboards",
+        ROOT_DIR / "dev" / "docs",
+        ROOT_DIR / "dev" / "specs",
+        SKILL_ROOT,
     ):
         if not directory.exists():
             continue
@@ -44,20 +41,31 @@ def packaging_files() -> list[Path]:
 
 class PublicPackagingTests(unittest.TestCase):
     def test_skill_package_uses_dedicated_folder_shape(self) -> None:
-        skill_root = ROOT_DIR / "skills" / "research-cockpit"
-
-        self.assertTrue((skill_root / "SKILL.md").exists())
-        self.assertTrue((skill_root / "agents" / "openai.yaml").exists())
+        self.assertTrue((SKILL_ROOT / "SKILL.md").exists())
+        self.assertTrue((SKILL_ROOT / "AGENTS.md").exists())
+        self.assertTrue((SKILL_ROOT / "agents" / "openai.yaml").exists())
+        self.assertTrue((SKILL_ROOT / "cockpit" / "model.py").exists())
+        self.assertTrue((SKILL_ROOT / "scripts" / "agent_bootstrap.py").exists())
+        self.assertTrue((SKILL_ROOT / "ui" / "app.py").exists())
+        self.assertTrue((SKILL_ROOT / "research_cockpit" / "current_state.yaml").exists())
+        self.assertTrue((SKILL_ROOT / "requirements.txt").exists())
         self.assertFalse((ROOT_DIR / "SKILL.md").exists())
+        self.assertFalse((ROOT_DIR / "AGENTS.md").exists())
         self.assertFalse((ROOT_DIR / "agents" / "openai.yaml").exists())
+        self.assertFalse((ROOT_DIR / "cockpit").exists())
+        self.assertFalse((ROOT_DIR / "scripts").exists())
+        self.assertFalse((ROOT_DIR / "ui").exists())
+        self.assertFalse((ROOT_DIR / "research_cockpit").exists())
 
     def test_development_materials_are_separate_from_skill_package(self) -> None:
         self.assertTrue((ROOT_DIR / "dev" / "docs" / "development_status.md").exists())
         self.assertTrue((ROOT_DIR / "dev" / "docs" / "research_cockpit_design.md").exists())
         self.assertTrue((ROOT_DIR / "dev" / "docs" / "requirements_zh.md").exists())
         self.assertTrue((ROOT_DIR / "dev" / "specs" / "research_cockpit_v2_specs").exists())
+        self.assertTrue((ROOT_DIR / "dev" / "tests").exists())
         self.assertFalse((ROOT_DIR / "docs_development_status.md").exists())
         self.assertFalse((ROOT_DIR / "research_cockpit_v2_specs").exists())
+        self.assertFalse((ROOT_DIR / "tests").exists())
 
     def test_public_packaging_files_do_not_contain_private_paths(self) -> None:
         offenders: list[str] = []

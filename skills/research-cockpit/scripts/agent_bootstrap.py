@@ -1,35 +1,57 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 import sys
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-ROOT = REPO_ROOT / "research_cockpit"
-SKILL_ROOT = REPO_ROOT / "skills" / "research-cockpit"
-sys.path.insert(0, str(REPO_ROOT))
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+ROOT = SKILL_ROOT / "research_cockpit"
+sys.path.insert(0, str(SKILL_ROOT))
 
-from cockpit.model import (
-    ValidationError,
-    build_action_suggestions,
-    build_context_metadata,
-    build_link_rows,
-    build_search_index,
-    build_search_index_summary,
-    focus_node_id_from_current,
-    load_nodes,
-    load_yaml,
-    validate_cockpit,
-)
-from scripts.build_dashboard import build_dashboard
+REQUIRED_MODULES = {
+    "networkx": "networkx",
+    "yaml": "PyYAML",
+}
+
+
+def missing_runtime_dependencies(required: dict[str, str] = REQUIRED_MODULES) -> list[str]:
+    return [module for module in required if importlib.util.find_spec(module) is None]
+
+
+def format_dependency_error(missing: list[str]) -> str:
+    packages = ", ".join(REQUIRED_MODULES.get(module, module) for module in missing)
+    modules = ", ".join(missing)
+    return (
+        f"Missing Python modules: {modules}. "
+        f"From the skill package root, install requirements with `python -m pip install -r requirements.txt` "
+        f"or rerun with an interpreter that already has: {packages}."
+    )
+
+
+_MISSING_DEPENDENCIES = missing_runtime_dependencies()
+
+if not _MISSING_DEPENDENCIES:
+    from cockpit.model import (
+        build_action_suggestions,
+        build_context_metadata,
+        build_link_rows,
+        build_search_index,
+        build_search_index_summary,
+        focus_node_id_from_current,
+        load_nodes,
+        load_yaml,
+        validate_cockpit,
+    )
+    from scripts.build_dashboard import build_dashboard
 
 
 def _display_path(path: Path) -> str:
     try:
-        return path.relative_to(REPO_ROOT).as_posix()
+        return path.relative_to(SKILL_ROOT).as_posix()
     except ValueError:
         return path.as_posix()
 
@@ -53,6 +75,9 @@ def _context_paths(root: Path) -> dict[str, dict[str, Any]]:
 
 
 def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[str, Any]:
+    if _MISSING_DEPENDENCIES:
+        raise RuntimeError(format_dependency_error(_MISSING_DEPENDENCIES))
+
     if build:
         build_dashboard(root)
 
@@ -121,7 +146,7 @@ def main() -> None:
 
     try:
         payload = agent_bootstrap_payload(args.root, build=args.build)
-    except (OSError, ValidationError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         error_payload = {
             "validation": {"ok": False, "errors": [str(exc)]},
             "error": str(exc),

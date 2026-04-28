@@ -6,8 +6,9 @@ import sys
 import unittest
 from types import SimpleNamespace
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT_DIR))
+ROOT_DIR = Path(__file__).resolve().parents[2]
+SKILL_ROOT = ROOT_DIR / "skills" / "research-cockpit"
+sys.path.insert(0, str(SKILL_ROOT))
 
 from ui.app import build_pyvis_html
 from ui.view_helpers import (
@@ -43,7 +44,7 @@ from ui.view_helpers import (
 
 class UiRenderingTests(unittest.TestCase):
     def test_app_multiselects_use_explicit_keys(self) -> None:
-        source = (ROOT_DIR / "ui" / "app.py").read_text(encoding="utf-8")
+        source = (SKILL_ROOT / "ui" / "app.py").read_text(encoding="utf-8")
         start = 0
         calls = []
         while True:

@@ -7,7 +7,7 @@ description: Use this skill to inspect, maintain, and update a YAML-backed resea
 
 Use this repository as a local research cockpit skill when a task depends on the current research graph, focus state, experiment findings, decisions, notes, or action suggestions.
 
-Run commands from the repository root. This skill package is stored at `skills/research-cockpit/`; repository layout and packaging boundaries are summarized in `references/repo-layout.md`.
+Run commands from this skill directory root. In this development repository the path is `skills/research-cockpit/`; when exported, this directory is the whole package. Layout and packaging boundaries are summarized in `references/repo-layout.md`.
 
 ## Start
 
@@ -15,11 +15,19 @@ Run commands from the repository root. This skill package is stored at `skills/r
 python scripts\agent_bootstrap.py --json
 ```
 
+If the agent cannot reliably set its working directory, invoke the script by absolute path. The script derives the package root from its own file location:
+
+```powershell
+python C:\path\to\research-cockpit\scripts\agent_bootstrap.py --json
+```
+
 If dashboard files are stale or missing:
 
 ```powershell
 python scripts\agent_bootstrap.py --json --build
 ```
+
+If `agent_bootstrap.py` reports missing Python modules, install dependencies with `python -m pip install -r requirements.txt` or set `RESEARCH_COCKPIT_PYTHON` to an interpreter that has the requirements installed.
 
 ## Read Order
 
@@ -41,6 +49,7 @@ python scripts\agent_bootstrap.py --json --build
 ```powershell
 python scripts\validate_cockpit.py
 python scripts\build_dashboard.py
+python scripts\skill_smoke_test.py --json
 python scripts\suggest_next_actions.py --json
 python scripts\search_knowledge.py --query "..." --json
 python scripts\record_finding.py --experiment <id> --statement "..." --confidence medium
@@ -51,4 +60,4 @@ Set `RESEARCH_COCKPIT_PYTHON` if command templates should use a custom interpret
 
 ## Subagent Validation
 
-When asking another agent to test this skill, pass the folder path `skills/research-cockpit/` plus a concrete cockpit task, then let it run `agent_bootstrap.py` before choosing commands.
+When asking another agent to test this skill, pass this folder path plus a concrete cockpit task, then let it run `agent_bootstrap.py` before choosing commands.

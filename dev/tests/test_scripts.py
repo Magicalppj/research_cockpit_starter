@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import unittest
@@ -8,14 +9,16 @@ import uuid
 from datetime import date
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT_DIR))
+ROOT_DIR = Path(__file__).resolve().parents[2]
+SKILL_ROOT = ROOT_DIR / "skills" / "research-cockpit"
+sys.path.insert(0, str(SKILL_ROOT))
 
 from cockpit.model import load_nodes, load_yaml, save_yaml
 from scripts.accept_decision import accept_decision
 from scripts.add_node import add_node
-from scripts.agent_bootstrap import agent_bootstrap_payload
+from scripts.agent_bootstrap import agent_bootstrap_payload, format_dependency_error, missing_runtime_dependencies
 from scripts.apply_suggestion import apply_suggestion
 from scripts.build_dashboard import build_dashboard
 from scripts.check_decision_acceptance import decision_acceptance_payload
@@ -25,6 +28,7 @@ from scripts.list_agent_commands import agent_command_manifest
 from scripts.promote_decision import promote_decision
 from scripts.record_finding import record_finding
 from scripts.set_focus import set_focus
+from scripts.skill_smoke_test import skill_smoke_test_payload
 from scripts.suggest_next_actions import select_suggestions
 from scripts.update_decision_evidence import update_decision_evidence
 from scripts.update_suggestion_state import update_suggestion_state
@@ -244,14 +248,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["validation"]["ok"])
         self.assertEqual(payload["focus"]["current_focus_node"], "problem_text")
         self.assertFalse(payload["context_paths"]["agent_context_pack"]["exists"])
-        self.assertEqual(payload["skill"]["path"], "skills/research-cockpit")
+        self.assertEqual(payload["skill"]["path"], ".")
         self.assertTrue(payload["skill"]["exists"])
         self.assertIn("top_suggestions", payload)
         self.assertIn("search_summary", payload)
         self.assertIsInstance(payload["git"]["worktree_dirty"], bool)
 
     def test_agent_bootstrap_cli_json_builds_when_requested(self) -> None:
-        script = ROOT_DIR / "scripts" / "agent_bootstrap.py"
+        script = SKILL_ROOT / "scripts" / "agent_bootstrap.py"
 
         default_out = subprocess.run(
             [sys.executable, str(script), "--root", str(self.root), "--json"],
@@ -274,18 +278,28 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(build_payload["context_paths"]["agent_context_pack"]["exists"])
         self.assertTrue((self.root / "dashboards" / "agent_context_pack.json").exists())
 
+    def test_agent_bootstrap_dependency_error_is_clear(self) -> None:
+        missing = missing_runtime_dependencies({"definitely_missing_module_for_test": "example-package"})
+
+        self.assertEqual(missing, ["definitely_missing_module_for_test"])
+        message = format_dependency_error(missing)
+        self.assertIn("definitely_missing_module_for_test", message)
+        self.assertIn("pip install -r requirements.txt", message)
+
     def test_list_agent_commands_manifest_marks_mutating_scripts(self) -> None:
         manifest = agent_command_manifest()
         by_name = {item["name"]: item for item in manifest}
 
         self.assertFalse(by_name["validate_cockpit.py"]["mutating"])
         self.assertFalse(by_name["search_knowledge.py"]["mutating"])
+        self.assertFalse(by_name["skill_smoke_test.py"]["mutating"])
         self.assertTrue(by_name["record_finding.py"]["mutating"])
         self.assertTrue(by_name["record_finding.py"]["supports_no_build"])
         self.assertTrue(by_name["cleanup_suggestion_lifecycle.py"]["supports_dry_run"])
+        self.assertTrue(by_name["build_dashboard.py"]["writes_generated_files"])
 
     def test_list_agent_commands_cli_outputs_json(self) -> None:
-        script = ROOT_DIR / "scripts" / "list_agent_commands.py"
+        script = SKILL_ROOT / "scripts" / "list_agent_commands.py"
 
         out = subprocess.run(
             [sys.executable, str(script), "--json"],
@@ -298,6 +312,26 @@ class ScriptBehaviorTests(unittest.TestCase):
         payload = json.loads(out.stdout)
         self.assertIn("commands", payload)
         self.assertIn("record_finding.py", {item["name"] for item in payload["commands"]})
+
+    def test_skill_smoke_test_payload_runs_read_only_workflow(self) -> None:
+        payload = skill_smoke_test_payload(root=self.root, query="t5", python_executable=sys.executable)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["root"], str(self.root))
+        by_name = {item["name"]: item for item in payload["checks"]}
+        self.assertTrue(by_name["validate_cockpit"]["passed"])
+        self.assertTrue(by_name["agent_bootstrap"]["passed"])
+        self.assertTrue(by_name["list_agent_commands"]["passed"])
+        self.assertTrue(by_name["search_knowledge"]["passed"])
+        self.assertTrue(by_name["suggest_next_actions"]["passed"])
+        self.assertGreaterEqual(by_name["list_agent_commands"]["summary"]["command_count"], 1)
+
+    def test_skill_smoke_test_uses_python_environment_override(self) -> None:
+        with patch.dict(os.environ, {"RESEARCH_COCKPIT_PYTHON": sys.executable}):
+            payload = skill_smoke_test_payload(root=self.root, query="t5")
+
+        self.assertEqual(payload["python"], sys.executable)
+        self.assertTrue(payload["ok"])
 
     def test_create_note_generates_note_links_node_and_rebuilds_dashboard(self) -> None:
         note_path = create_note(self.root, node_id="problem_text")
@@ -329,7 +363,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("stage", str(ctx.exception))
 
     def test_validate_cockpit_cli_reports_success_and_failure(self) -> None:
-        script = ROOT_DIR / "scripts" / "validate_cockpit.py"
+        script = SKILL_ROOT / "scripts" / "validate_cockpit.py"
 
         ok = subprocess.run(
             [sys.executable, str(script), "--root", str(self.root)],
@@ -353,7 +387,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("invalid status", failed.stdout)
 
     def test_suggest_next_actions_cli_outputs_text_json_and_filters(self) -> None:
-        script = ROOT_DIR / "scripts" / "suggest_next_actions.py"
+        script = SKILL_ROOT / "scripts" / "suggest_next_actions.py"
 
         text = subprocess.run(
             [sys.executable, str(script), "--root", str(self.root), "--limit", "2"],
@@ -388,7 +422,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(len(selected), 1)
 
     def test_suggest_next_actions_cli_filters_lifecycle_state(self) -> None:
-        script = ROOT_DIR / "scripts" / "suggest_next_actions.py"
+        script = SKILL_ROOT / "scripts" / "suggest_next_actions.py"
         update_suggestion_state(
             self.root,
             suggestion_id="next_action_001",
@@ -427,7 +461,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual({item["lifecycle_state"] for item in inactive_suggestions}, {"dismissed"})
 
     def test_suggest_next_actions_cli_fails_on_invalid_cockpit(self) -> None:
-        script = ROOT_DIR / "scripts" / "suggest_next_actions.py"
+        script = SKILL_ROOT / "scripts" / "suggest_next_actions.py"
         bad = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
         bad["status"] = "done"
         save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", bad)
@@ -443,7 +477,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("invalid status", failed.stdout)
 
     def test_search_knowledge_cli_outputs_json_and_filters(self) -> None:
-        script = ROOT_DIR / "scripts" / "search_knowledge.py"
+        script = SKILL_ROOT / "scripts" / "search_knowledge.py"
         note_path = self.root / "notes" / "problems" / "problem_text.md"
         note_path.parent.mkdir(parents=True, exist_ok=True)
         note_path.write_text("# Search Note\nNeedle note for T5 branch.\n", encoding="utf-8")
@@ -549,7 +583,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(json.loads(empty.stdout), [])
 
     def test_search_knowledge_cli_fails_on_invalid_cockpit(self) -> None:
-        script = ROOT_DIR / "scripts" / "search_knowledge.py"
+        script = SKILL_ROOT / "scripts" / "search_knowledge.py"
         bad = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
         bad["status"] = "done"
         save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", bad)
@@ -595,7 +629,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("target", str(bad_target.exception))
 
     def test_apply_suggestion_cli_reports_errors(self) -> None:
-        script = ROOT_DIR / "scripts" / "apply_suggestion.py"
+        script = SKILL_ROOT / "scripts" / "apply_suggestion.py"
 
         ok = subprocess.run(
             [sys.executable, str(script), "--root", str(self.root), "--id", "next_action_001", "--no-build"],
@@ -651,7 +685,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn(key, current.get("suggestion_lifecycle", {}))
 
     def test_update_suggestion_state_rebuilds_dashboard_and_cli_reports_errors(self) -> None:
-        script = ROOT_DIR / "scripts" / "update_suggestion_state.py"
+        script = SKILL_ROOT / "scripts" / "update_suggestion_state.py"
 
         ok = subprocess.run(
             [
@@ -748,7 +782,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(after_clean["updated_at"], str(date.today()))
 
     def test_cleanup_suggestion_lifecycle_cli_json_and_noop(self) -> None:
-        script = ROOT_DIR / "scripts" / "cleanup_suggestion_lifecycle.py"
+        script = SKILL_ROOT / "scripts" / "cleanup_suggestion_lifecycle.py"
         current = load_yaml(self.root / "current_state.yaml")
         current["suggestion_lifecycle"] = {
             "old_completed": {
@@ -977,7 +1011,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("decision", str(wrong_type.exception))
 
     def test_update_decision_evidence_cli_reports_success_and_failure(self) -> None:
-        script = ROOT_DIR / "scripts" / "update_decision_evidence.py"
+        script = SKILL_ROOT / "scripts" / "update_decision_evidence.py"
         write_node(
             self.root,
             {
@@ -1009,7 +1043,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("missing_decision", failed.stdout)
 
     def test_check_decision_acceptance_cli_json_reports_ready_and_failures(self) -> None:
-        script = ROOT_DIR / "scripts" / "check_decision_acceptance.py"
+        script = SKILL_ROOT / "scripts" / "check_decision_acceptance.py"
         write_node(
             self.root,
             {
