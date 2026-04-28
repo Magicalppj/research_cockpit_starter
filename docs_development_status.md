@@ -1,5 +1,25 @@
 # Research Cockpit 开发状态
 
+## Suggestion Lifecycle v1 更新（2026-04-28）
+
+本批补齐 Action Guidance 的建议生命周期闭环，让用户可以把建议标记为 `dismissed` 或 `completed`，避免已处理建议反复出现。生命周期只写入 `current_state.yaml`，不执行建议命令，也不改变 experiment/decision/resource 的真实状态。
+
+已完成：
+
+- 每条 suggestion 增加稳定 `key`，由 `kind + source_node_id + action` 生成；展示用 `next_action_001` 仍保留。
+- `current_state.suggestion_lifecycle` 支持记录 `state`、`reason`、`updated_at`、`action`、`kind` 和 `source_node_id`。
+- `build_action_suggestions(...)` 默认只返回 active 建议；传入 `include_inactive=True` 时返回 dismissed/completed 历史并带 lifecycle metadata。
+- 新增 `scripts/update_suggestion_state.py`，支持 `--state dismissed|completed|active`，可用当前展示 id 或稳定 key 定位建议。
+- `scripts/suggest_next_actions.py` 增加 `--include-inactive` 和 `--state active|dismissed|completed|all`。
+- Action Guidance UI 增加建议状态过滤、忽略、标记完成和恢复活跃按钮；dismissed/completed 建议不能写入行动队列。
+- Data Health 增加 suggestion lifecycle 摘要，展示 active/dismissed/completed/orphan 数量；orphan 仅作为 warning，不阻断校验。
+
+下一批候选：
+
+- 增加 notes / Markdown 全文搜索或轻量索引。
+- 增加 decision acceptance checklist，在接受 decision 前提示证据、替代方案和后续影响是否完整。
+- 增加 suggestion lifecycle 清理脚本，用于删除长期 orphan 历史记录。
+
 ## Decision Evidence Injection v1 更新（2026-04-28）
 
 本批把已有 experiment findings、`result_summary` 和 `outcome` 自动汇总到 decision，减少手工整理证据。范围保持只更新证据字段：不会自动接受 decision，也不会自动关闭 parent option/problem。
@@ -13,11 +33,7 @@
 - Action Guidance 中 `review_decision` 的 `suggested_command` 已改为调用 `update_decision_evidence.py`，避免对已有 decision 再次生成同名 decision。
 - Decision Trace 会展示自动生成的 evidence summary 文本，并继续展示 supporting experiments、finding 数量、outcome 分布和最新 finding。
 
-下一批候选：
-
-- 增加 suggestion dismiss / completed 状态，避免已处理建议反复出现。
-- 增加 notes / Markdown 全文搜索或轻量索引。
-- 增加 decision acceptance checklist，在接受 decision 前提示证据、替代方案和后续影响是否完整。
+下一批候选已推进到 Suggestion Lifecycle v1；剩余重点是全文搜索、decision acceptance checklist 和 lifecycle 历史清理。
 
 ## Action Execution v1 更新（2026-04-27）
 
@@ -98,7 +114,7 @@
 
 ## 当前阶段
 
-当前项目处于 **Decision Evidence Injection v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新。
+当前项目处于 **Suggestion Lifecycle v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
@@ -131,6 +147,7 @@
 - `scripts/update_decision_evidence.py`：刷新已有 decision 的 evidence 字段，不改变 decision status，也不关闭 option/problem。
 - `scripts/suggest_next_actions.py`：只读生成下一步行动建议，支持 JSON、kind 过滤、limit 和 focus-only。
 - `scripts/apply_suggestion.py`：将建议写入 `current_state.next_actions` 或来源节点 `next_actions`，不直接执行建议命令。
+- `scripts/update_suggestion_state.py`：将建议标记为 dismissed/completed，或恢复为 active；只影响建议展示生命周期。
 - `scripts/build_dashboard.py`：生成前先校验，再输出 dashboard 和 agent context 文件。
 
 ### Dashboard 输出
@@ -181,6 +198,7 @@ Streamlit 页面现在包含：
 - 决策追踪页展示 Decision -> Option -> Problem -> Stage 链路、支持实验、备选方案和 consequences。
 - 决策追踪页展示 evidence summary，包括实验数量、findings 数量、结果分布和最新 finding。
 - 行动建议页展示建议，可按 kind、priority 和当前 focus 相关性过滤；支持把建议写入当前行动队列或来源节点行动队列。
+- 行动建议页支持按生命周期状态过滤，并可忽略、标记完成或恢复建议；非 active 建议不能写入行动队列。
 - 资源页汇总 notes、config、artifact path、run id 和 linked artifacts，并支持存在状态过滤。
 
 ### 测试
@@ -204,6 +222,7 @@ Streamlit 页面现在包含：
 - Dashboard 生成文件。
 - 中文节点图谱 HTML 生成。
 - 行动建议生成、CLI 过滤、dashboard 输出和 UI helper。
+- 建议 lifecycle 的稳定 key、dismissed/completed 过滤、CLI 写入、恢复和 Data Health 摘要。
 
 当前验证命令：
 
@@ -361,7 +380,15 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 3. `update_decision_evidence.py` 已有 decision 证据刷新。
 4. Action Guidance 的 `review_decision` 建议命令切换为证据刷新命令。
 
-下一批建议进入“建议生命周期与检索增强”层：suggestion dismiss/completed、notes/全文搜索、decision acceptance checklist。
+第十批已完成：
+
+1. suggestion 稳定 `key` 和 `current_state.suggestion_lifecycle`。
+2. `update_suggestion_state.py` 建议忽略、完成和恢复命令。
+3. `suggest_next_actions.py --include-inactive --state ...` 查询历史建议。
+4. Action Guidance UI 生命周期过滤和写回入口。
+5. Data Health suggestion lifecycle 摘要。
+
+下一批建议进入“检索与决策质量门”层：notes/全文搜索、decision acceptance checklist、suggestion lifecycle 历史清理。
 
 ## 后续可优化
 
@@ -373,8 +400,8 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 
 ### 第二优先级：研究工作流
 
-- 增加 suggestion dismiss / completed 状态，减少已处理建议重复出现。
 - 增加 decision acceptance checklist，在接受 decision 前检查 supporting evidence、alternatives 和 consequences。
+- 增加 suggestion lifecycle 清理脚本，删除长期 orphan 历史记录。
 - 为 notes 增加推荐写作模板和命名约定，但仍不反向解析 Markdown 正文。
 
 ### 第三优先级：UI 交互

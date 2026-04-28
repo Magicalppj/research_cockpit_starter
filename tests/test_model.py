@@ -20,6 +20,7 @@ from cockpit.model import (
     build_focus_context,
     build_experiment_matrix,
     build_link_rows,
+    build_suggestion_lifecycle_summary,
     derive_focus_path,
     graph_to_json,
     load_explicit_edges,
@@ -444,6 +445,67 @@ class ModelValidationTests(unittest.TestCase):
         self.assertFalse(by_action["Node queued action"]["queued_in_current"])
         self.assertTrue(by_action["Node queued action"]["queued_in_node"])
         self.assertEqual([item["id"] for item in suggestions], [f"next_action_{index:03d}" for index in range(1, len(suggestions) + 1)])
+
+    def test_action_suggestions_use_stable_keys_and_filter_lifecycle_states(self) -> None:
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+        first = build_action_suggestions(self.root, nodes, current)
+        run_key = next(item["key"] for item in first if item["kind"] == "run_experiment")
+
+        current["next_actions"] = ["New urgent action"] + current["next_actions"]
+        second = build_action_suggestions(self.root, nodes, current)
+        self.assertEqual(run_key, next(item["key"] for item in second if item["kind"] == "run_experiment"))
+
+        current["suggestion_lifecycle"] = {
+            run_key: {
+                "state": "dismissed",
+                "reason": "Waiting for new cache.",
+                "updated_at": "2026-04-28",
+                "action": "Run planned experiment: T5 ablation",
+                "kind": "run_experiment",
+                "source_node_id": "exp_t5",
+            }
+        }
+        active = build_action_suggestions(self.root, nodes, current)
+        all_suggestions = build_action_suggestions(self.root, nodes, current, include_inactive=True)
+        inactive = next(item for item in all_suggestions if item["key"] == run_key)
+
+        self.assertNotIn(run_key, {item["key"] for item in active})
+        self.assertEqual(inactive["lifecycle_state"], "dismissed")
+        self.assertEqual(inactive["lifecycle_reason"], "Waiting for new cache.")
+
+    def test_suggestion_lifecycle_validation_and_summary_handle_orphans(self) -> None:
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+        current["suggestion_lifecycle"] = {
+            "orphan_suggestion": {
+                "state": "completed",
+                "reason": "Old suggestion resolved.",
+                "updated_at": "2026-04-28",
+                "action": "Old action",
+                "kind": "run_experiment",
+                "source_node_id": "exp_old",
+            }
+        }
+
+        errors = validate_cockpit(self.root, nodes, current)
+        suggestions = build_action_suggestions(self.root, nodes, current, include_inactive=True)
+        summary = build_suggestion_lifecycle_summary(current, suggestions)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(summary["orphan"], 1)
+        self.assertGreater(summary["active"], 0)
+
+        current["suggestion_lifecycle"] = {"bad": {"state": "ignored"}}
+        with self.assertRaises(ValidationError) as invalid_state:
+            validate_cockpit(self.root, nodes, current, raise_on_error=True)
+        self.assertIn("suggestion_lifecycle", str(invalid_state.exception))
+        self.assertIn("ignored", str(invalid_state.exception))
+
+        current["suggestion_lifecycle"] = ["bad"]
+        with self.assertRaises(ValidationError) as invalid_shape:
+            validate_cockpit(self.root, nodes, current, raise_on_error=True)
+        self.assertIn("suggestion_lifecycle", str(invalid_shape.exception))
 
     def test_experiment_findings_enter_context_and_matrix(self) -> None:
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")

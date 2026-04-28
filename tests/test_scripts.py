@@ -21,6 +21,7 @@ from scripts.record_finding import record_finding
 from scripts.set_focus import set_focus
 from scripts.suggest_next_actions import select_suggestions
 from scripts.update_decision_evidence import update_decision_evidence
+from scripts.update_suggestion_state import update_suggestion_state
 from scripts.update_status import update_status
 
 
@@ -306,6 +307,45 @@ class ScriptBehaviorTests(unittest.TestCase):
         selected = select_suggestions(suggestions, kinds=["run_experiment"], limit=1, focus_only=True)
         self.assertEqual(len(selected), 1)
 
+    def test_suggest_next_actions_cli_filters_lifecycle_state(self) -> None:
+        script = ROOT_DIR / "scripts" / "suggest_next_actions.py"
+        update_suggestion_state(
+            self.root,
+            suggestion_id="next_action_001",
+            state="dismissed",
+            reason="Will not run this now.",
+            rebuild_dashboard=False,
+        )
+
+        default_out = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        inactive_out = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--include-inactive",
+                "--state",
+                "dismissed",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(default_out.returncode, 0)
+        self.assertEqual(inactive_out.returncode, 0)
+        default_suggestions = json.loads(default_out.stdout)
+        inactive_suggestions = json.loads(inactive_out.stdout)
+        self.assertNotIn("dismissed", {item["lifecycle_state"] for item in default_suggestions})
+        self.assertEqual({item["lifecycle_state"] for item in inactive_suggestions}, {"dismissed"})
+
     def test_suggest_next_actions_cli_fails_on_invalid_cockpit(self) -> None:
         script = ROOT_DIR / "scripts" / "suggest_next_actions.py"
         bad = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
@@ -366,6 +406,84 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         failed = subprocess.run(
             [sys.executable, str(script), "--root", str(self.root), "--id", "missing_suggestion", "--no-build"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("missing_suggestion", failed.stdout)
+
+    def test_update_suggestion_state_writes_dismissed_completed_and_active(self) -> None:
+        dismissed = update_suggestion_state(
+            self.root,
+            suggestion_id="next_action_001",
+            state="dismissed",
+            reason="Not useful now.",
+            rebuild_dashboard=False,
+        )
+        current = load_yaml(self.root / "current_state.yaml")
+        key = dismissed["suggestion"]["key"]
+
+        self.assertEqual(current["suggestion_lifecycle"][key]["state"], "dismissed")
+        self.assertEqual(current["suggestion_lifecycle"][key]["reason"], "Not useful now.")
+
+        completed = update_suggestion_state(
+            self.root,
+            suggestion_id=key,
+            state="completed",
+            reason="Done manually.",
+            rebuild_dashboard=False,
+        )
+        current = load_yaml(self.root / "current_state.yaml")
+        self.assertEqual(completed["state"], "completed")
+        self.assertEqual(current["suggestion_lifecycle"][key]["state"], "completed")
+
+        restored = update_suggestion_state(
+            self.root,
+            suggestion_id=key,
+            state="active",
+            rebuild_dashboard=False,
+        )
+        current = load_yaml(self.root / "current_state.yaml")
+        self.assertEqual(restored["state"], "active")
+        self.assertNotIn(key, current.get("suggestion_lifecycle", {}))
+
+    def test_update_suggestion_state_rebuilds_dashboard_and_cli_reports_errors(self) -> None:
+        script = ROOT_DIR / "scripts" / "update_suggestion_state.py"
+
+        ok = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--id",
+                "next_action_001",
+                "--state",
+                "completed",
+                "--reason",
+                "Handled outside cockpit.",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(ok.returncode, 0)
+        self.assertIn("completed", ok.stdout)
+        self.assertTrue((self.root / "dashboards" / "next_action_suggestions.json").exists())
+
+        failed = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--root",
+                str(self.root),
+                "--id",
+                "missing_suggestion",
+                "--state",
+                "dismissed",
+                "--no-build",
+            ],
             capture_output=True,
             text=True,
             check=False,

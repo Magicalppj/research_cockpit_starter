@@ -25,6 +25,7 @@ def select_suggestions(
     kinds: list[str] | None = None,
     limit: int | None = None,
     focus_only: bool = False,
+    state: str | None = None,
 ) -> list[dict]:
     selected = suggestions
     if kinds:
@@ -32,6 +33,8 @@ def select_suggestions(
         selected = [item for item in selected if item.get("kind") in allowed]
     if focus_only:
         selected = [item for item in selected if item.get("is_focus_related")]
+    if state and state != "all":
+        selected = [item for item in selected if item.get("lifecycle_state", "active") == state]
     if limit is not None:
         selected = selected[:limit]
     return selected
@@ -61,7 +64,11 @@ def main() -> None:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--kind", action="append", dest="kinds")
     parser.add_argument("--focus-only", action="store_true")
+    parser.add_argument("--include-inactive", action="store_true")
+    parser.add_argument("--state", choices=["active", "dismissed", "completed", "all"])
     args = parser.parse_args()
+    state_filter = args.state or ("all" if args.include_inactive else "active")
+    include_inactive = args.include_inactive or state_filter != "active"
 
     try:
         nodes = load_nodes(args.root)
@@ -69,12 +76,19 @@ def main() -> None:
         explicit_edges = load_explicit_edges(args.root)
         validate_cockpit(args.root, nodes, current, explicit_edges, raise_on_error=True)
         link_rows = build_link_rows(args.root, nodes)
-        suggestions = build_action_suggestions(args.root, nodes, current, link_rows)
+        suggestions = build_action_suggestions(
+            args.root,
+            nodes,
+            current,
+            link_rows,
+            include_inactive=include_inactive,
+        )
         selected = select_suggestions(
             suggestions,
             kinds=args.kinds,
             limit=args.limit,
             focus_only=args.focus_only,
+            state=state_filter,
         )
     except ValidationError as exc:
         print(str(exc))

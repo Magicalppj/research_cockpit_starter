@@ -15,6 +15,7 @@ from ui.app import (
     build_pyvis_html,
     build_record_finding_command,
     build_set_focus_command,
+    build_update_suggestion_state_command,
     default_detail_node_id,
     default_selected_statuses,
     edge_style_for_type,
@@ -22,8 +23,8 @@ from ui.app import (
     format_finding_rows,
     format_resource_rows,
     format_action_suggestion_rows,
-    filter_action_suggestions,
     format_evidence_summary,
+    filter_action_suggestions,
     filter_graph_for_view,
     filter_node_ids,
     format_node_option,
@@ -294,6 +295,8 @@ class UiRenderingTests(unittest.TestCase):
                 "is_focus_related": True,
                 "queued_in_current": True,
                 "queued_in_node": False,
+                "lifecycle_state": "active",
+                "lifecycle_reason": "",
             },
             {
                 "id": "s2",
@@ -308,22 +311,29 @@ class UiRenderingTests(unittest.TestCase):
                 "is_focus_related": False,
                 "queued_in_current": False,
                 "queued_in_node": True,
+                "lifecycle_state": "completed",
+                "lifecycle_reason": "Done manually.",
             },
         ]
 
         rows = format_action_suggestion_rows(suggestions)
-        filtered = filter_action_suggestions(suggestions, {"run_experiment"}, {"high"}, True)
+        filtered = filter_action_suggestions(suggestions, {"run_experiment"}, {"high"}, {"active"}, True)
         current_command = build_apply_suggestion_command("s1", "current")
         node_command = build_apply_suggestion_command("s1", "node")
+        lifecycle_command = build_update_suggestion_state_command("s1", "completed")
 
         self.assertEqual(rows[0]["related_node_ids"], "option_t5")
         self.assertEqual(rows[0]["is_focus_related"], "yes")
         self.assertEqual(rows[0]["queued_in_current"], "yes")
         self.assertEqual(rows[1]["queued_in_node"], "yes")
+        self.assertEqual(rows[1]["lifecycle_state"], "completed")
+        self.assertEqual(rows[1]["lifecycle_reason"], "Done manually.")
         self.assertEqual([item["id"] for item in filtered], ["s1"])
         self.assertIn("scripts\\apply_suggestion.py", current_command)
         self.assertIn("--id s1", current_command)
         self.assertIn("--target node", node_command)
+        self.assertIn("scripts\\update_suggestion_state.py", lifecycle_command)
+        self.assertIn("--state completed", lifecycle_command)
 
     def test_format_evidence_summary_degrades_without_findings(self) -> None:
         summary = format_evidence_summary({

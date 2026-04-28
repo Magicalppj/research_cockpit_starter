@@ -22,6 +22,7 @@ from cockpit.model import (
     build_decision_trace,
     build_experiment_matrix,
     build_link_rows,
+    build_suggestion_lifecycle_summary,
     graph_to_json,
     load_explicit_edges,
     load_nodes,
@@ -30,6 +31,7 @@ from cockpit.model import (
 )
 from scripts.set_focus import set_focus as save_current_focus
 from scripts.apply_suggestion import apply_suggestion as queue_suggestion
+from scripts.update_suggestion_state import update_suggestion_state as set_suggestion_state
 
 
 st.set_page_config(page_title="Audio Edit Research Cockpit", layout="wide")
@@ -283,8 +285,47 @@ UI_TEXT = {
 }
 
 
+EXTRA_UI_TEXT = {
+    "zh": {
+        "suggestion_state": "建议状态",
+        "lifecycle_state": "生命周期状态",
+        "suggestion_reason": "原因",
+        "dismiss_suggestion": "忽略建议",
+        "complete_suggestion": "标记完成",
+        "restore_suggestion": "恢复活跃",
+        "suggestion_state_updated": "建议状态已更新。",
+        "suggestion_state_failed": "更新建议状态失败：",
+        "inactive_queue_disabled": "已忽略或已完成的建议不能写入行动队列。",
+        "suggestion_lifecycle": "建议生命周期",
+        "orphan_suggestions": "孤立记录",
+        "active": "活跃",
+        "dismissed": "已忽略",
+        "completed": "已完成",
+    },
+    "en": {
+        "suggestion_state": "Suggestion State",
+        "lifecycle_state": "Lifecycle State",
+        "suggestion_reason": "Reason",
+        "dismiss_suggestion": "Dismiss suggestion",
+        "complete_suggestion": "Mark completed",
+        "restore_suggestion": "Restore active",
+        "suggestion_state_updated": "Suggestion state updated.",
+        "suggestion_state_failed": "Failed to update suggestion state:",
+        "inactive_queue_disabled": "Dismissed or completed suggestions cannot be queued.",
+        "suggestion_lifecycle": "Suggestion Lifecycle",
+        "orphan_suggestions": "Orphan Records",
+        "active": "Active",
+        "dismissed": "Dismissed",
+        "completed": "Completed",
+    },
+}
+
+
 def get_text(language: str) -> dict[str, str]:
-    return UI_TEXT["zh"] if language == "中文" else UI_TEXT["en"]
+    locale = "zh" if language == "中文" else "en"
+    text = dict(UI_TEXT[locale])
+    text.update(EXTRA_UI_TEXT[locale])
+    return text
 
 
 def load_graph_data():
@@ -296,7 +337,14 @@ def load_graph_data():
     context = build_agent_context(RESEARCH_ROOT, nodes)
     link_rows = build_link_rows(RESEARCH_ROOT, nodes)
     action_suggestions = build_action_suggestions(RESEARCH_ROOT, nodes, current, link_rows)
-    return nodes, current, graph, context, validation_errors, link_rows, action_suggestions
+    all_action_suggestions = build_action_suggestions(
+        RESEARCH_ROOT,
+        nodes,
+        current,
+        link_rows,
+        include_inactive=True,
+    )
+    return nodes, current, graph, context, validation_errors, link_rows, action_suggestions, all_action_suggestions
 
 
 def ordered_tab_labels(text: dict[str, str]) -> list[str]:
@@ -379,6 +427,14 @@ def build_apply_suggestion_command(suggestion_id: str, target: str = "current") 
     )
 
 
+def build_update_suggestion_state_command(suggestion_id: str, state: str) -> str:
+    return (
+        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\update_suggestion_state.py"
+        f" --id {suggestion_id}"
+        f" --state {state}"
+    )
+
+
 def edge_style_for_type(edge_type: str | None) -> dict[str, object]:
     styles: dict[str, dict[str, object]] = {
         "supports": {"color": "#16A34A", "dashes": False},
@@ -435,6 +491,8 @@ def format_action_suggestion_rows(suggestions: list[dict]) -> list[dict]:
         row["is_focus_related"] = "yes" if row.get("is_focus_related") else ""
         row["queued_in_current"] = "yes" if row.get("queued_in_current") else ""
         row["queued_in_node"] = "yes" if row.get("queued_in_node") else ""
+        row["lifecycle_state"] = row.get("lifecycle_state") or "active"
+        row["lifecycle_reason"] = row.get("lifecycle_reason") or ""
         formatted.append(row)
     return formatted
 
@@ -443,6 +501,7 @@ def filter_action_suggestions(
     suggestions: list[dict],
     selected_kinds: set[str],
     selected_priorities: set[str],
+    selected_states: set[str],
     focus_only: bool,
 ) -> list[dict]:
     return [
@@ -450,6 +509,7 @@ def filter_action_suggestions(
         for suggestion in suggestions
         if suggestion.get("kind") in selected_kinds
         and suggestion.get("priority") in selected_priorities
+        and suggestion.get("lifecycle_state", "active") in selected_states
         and (not focus_only or suggestion.get("is_focus_related"))
     ]
 
@@ -944,12 +1004,27 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
 
     kinds = sorted({suggestion.get("kind", "") for suggestion in action_suggestions if suggestion.get("kind")})
     priorities = sorted({suggestion.get("priority", "") for suggestion in action_suggestions if suggestion.get("priority")})
-    kind_filter, priority_filter, focus_filter = st.columns(3)
+    states = ["active", "dismissed", "completed"]
+    kind_filter, priority_filter, state_filter, focus_filter = st.columns(4)
     selected_kinds = set(kind_filter.multiselect(text["suggestion_kind"], kinds, default=kinds))
     selected_priorities = set(priority_filter.multiselect(text["suggestion_priority"], priorities, default=priorities))
+    selected_states = set(
+        state_filter.multiselect(
+            text["suggestion_state"],
+            states,
+            default=["active"],
+            format_func=lambda value: text.get(value, value),
+        )
+    )
     focus_only = focus_filter.checkbox(text["focus_related"], value=False)
 
-    filtered = filter_action_suggestions(action_suggestions, selected_kinds, selected_priorities, focus_only)
+    filtered = filter_action_suggestions(
+        action_suggestions,
+        selected_kinds,
+        selected_priorities,
+        selected_states,
+        focus_only,
+    )
     if not filtered:
         st.info(text["no_action_suggestions"])
         return
@@ -973,6 +1048,63 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
         filtered,
         format_func=lambda item: f"{item.get('id')} | {item.get('kind')} | {item.get('source_node_id')}",
     )
+    selected_state = selected_suggestion.get("lifecycle_state", "active")
+    selected_key = selected_suggestion.get("key") or selected_suggestion["id"]
+    reason = st.text_input(text["suggestion_reason"], value="", key=f"reason_{selected_key}")
+    lifecycle_cols = st.columns(3)
+    with lifecycle_cols[0]:
+        st.code(build_update_suggestion_state_command(str(selected_key), "dismissed"), language="powershell")
+        if st.button(
+            text["dismiss_suggestion"],
+            key=f"dismiss_{selected_key}",
+            disabled=selected_state == "dismissed",
+        ):
+            try:
+                set_suggestion_state(
+                    RESEARCH_ROOT,
+                    suggestion_id=str(selected_key),
+                    state="dismissed",
+                    reason=reason,
+                )
+                st.success(text["suggestion_state_updated"])
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{text['suggestion_state_failed']} {exc}")
+    with lifecycle_cols[1]:
+        st.code(build_update_suggestion_state_command(str(selected_key), "completed"), language="powershell")
+        if st.button(
+            text["complete_suggestion"],
+            key=f"complete_{selected_key}",
+            disabled=selected_state == "completed",
+        ):
+            try:
+                set_suggestion_state(
+                    RESEARCH_ROOT,
+                    suggestion_id=str(selected_key),
+                    state="completed",
+                    reason=reason,
+                )
+                st.success(text["suggestion_state_updated"])
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{text['suggestion_state_failed']} {exc}")
+    with lifecycle_cols[2]:
+        st.code(build_update_suggestion_state_command(str(selected_key), "active"), language="powershell")
+        if st.button(
+            text["restore_suggestion"],
+            key=f"restore_{selected_key}",
+            disabled=selected_state == "active",
+        ):
+            try:
+                set_suggestion_state(RESEARCH_ROOT, suggestion_id=str(selected_key), state="active")
+                st.success(text["suggestion_state_updated"])
+                st.rerun()
+            except Exception as exc:
+                st.error(f"{text['suggestion_state_failed']} {exc}")
+
+    inactive = selected_state != "active"
+    if inactive:
+        st.caption(text["inactive_queue_disabled"])
     current_col, node_col = st.columns(2)
     with current_col:
         st.code(build_apply_suggestion_command(selected_suggestion["id"], "current"), language="powershell")
@@ -981,7 +1113,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
         if st.button(
             text["queue_current"],
             key=f"queue_current_{selected_suggestion['id']}",
-            disabled=bool(selected_suggestion.get("queued_in_current")),
+            disabled=inactive or bool(selected_suggestion.get("queued_in_current")),
         ):
             try:
                 queue_suggestion(RESEARCH_ROOT, suggestion_id=selected_suggestion["id"], target="current")
@@ -996,7 +1128,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
         if st.button(
             text["queue_node"],
             key=f"queue_node_{selected_suggestion['id']}",
-            disabled=bool(selected_suggestion.get("queued_in_node")),
+            disabled=inactive or bool(selected_suggestion.get("queued_in_node")),
         ):
             try:
                 queue_suggestion(RESEARCH_ROOT, suggestion_id=selected_suggestion["id"], target="node")
@@ -1069,10 +1201,12 @@ def render_agent_context(context: dict, text: dict[str, str]) -> None:
 def render_data_health(
     nodes: dict,
     graph: dict,
+    current: dict,
     validation_errors: list[str],
     text: dict[str, str],
     link_rows: list[dict],
     action_suggestions: list[dict],
+    all_action_suggestions: list[dict],
 ) -> None:
     if validation_errors:
         st.error(text["validation_failed"])
@@ -1111,9 +1245,28 @@ def render_data_health(
         st.warning(f"{len(missing_rows)} linked resource(s) are missing.")
         st.dataframe(pd.DataFrame(format_resource_rows(missing_rows)), use_container_width=True, hide_index=True)
 
+    st.subheader(text["suggestion_lifecycle"])
+    lifecycle_summary = build_suggestion_lifecycle_summary(current, all_action_suggestions)
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric(text["active"], lifecycle_summary["active"])
+    s2.metric(text["dismissed"], lifecycle_summary["dismissed"])
+    s3.metric(text["completed"], lifecycle_summary["completed"])
+    s4.metric(text["orphan_suggestions"], lifecycle_summary["orphan"])
+    if lifecycle_summary["orphan"]:
+        st.warning(f"{lifecycle_summary['orphan']} suggestion lifecycle record(s) no longer match current suggestions.")
+
 
 def main() -> None:
-    nodes, current, graph, context, validation_errors, link_rows, action_suggestions = load_graph_data()
+    (
+        nodes,
+        current,
+        graph,
+        context,
+        validation_errors,
+        link_rows,
+        action_suggestions,
+        all_action_suggestions,
+    ) = load_graph_data()
 
     with st.sidebar:
         language = st.selectbox("界面语言 / Language", ["中文", "English"], index=0)
@@ -1149,7 +1302,7 @@ def main() -> None:
             elif label == text["decision_trace"]:
                 render_decision_trace(nodes, text)
             elif label == text["action_guidance"]:
-                render_action_guidance(action_suggestions, text)
+                render_action_guidance(all_action_suggestions, text)
             elif label == text["resources"]:
                 render_resources(link_rows, text)
             elif label == text["experiment_matrix"]:
@@ -1159,7 +1312,16 @@ def main() -> None:
             elif label == text["agent_context"]:
                 render_agent_context(context, text)
             elif label == text["data_health"]:
-                render_data_health(nodes, graph, validation_errors, text, link_rows, action_suggestions)
+                render_data_health(
+                    nodes,
+                    graph,
+                    current,
+                    validation_errors,
+                    text,
+                    link_rows,
+                    action_suggestions,
+                    all_action_suggestions,
+                )
 
 
 if __name__ == "__main__":

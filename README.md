@@ -96,6 +96,7 @@ Review read-only action suggestions:
 ```powershell
 D:\Tools\miniconda3\envs\aigc\python.exe scripts\suggest_next_actions.py
 D:\Tools\miniconda3\envs\aigc\python.exe scripts\suggest_next_actions.py --json --focus-only
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\suggest_next_actions.py --include-inactive --state dismissed --json
 ```
 
 Suggestions are generated from current focus actions, blockers, planned experiments, completed experiments without findings, proposed decisions, and missing local resources. They are read-only and do not update YAML.
@@ -108,6 +109,15 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\apply_suggestion.py --id next_a
 ```
 
 `apply_suggestion.py` only appends the suggestion text to `current_state.next_actions` or the source node's `next_actions`. It does not run experiments, update statuses, record findings, or create decisions.
+
+Update suggestion lifecycle state:
+
+```powershell
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\update_suggestion_state.py --id next_action_011 --state dismissed --reason "Not relevant this week."
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\update_suggestion_state.py --id sg_example_key --state active
+```
+
+`dismissed` and `completed` only affect suggestion visibility. They do not execute the suggested command or change the underlying experiment, decision, or resource state. `active` restores a suggestion by removing its lifecycle record.
 
 Create a linked Markdown note:
 
@@ -177,6 +187,7 @@ scripts/
   create_note.py
   suggest_next_actions.py
   apply_suggestion.py
+  update_suggestion_state.py
 ui/
   app.py
 ```

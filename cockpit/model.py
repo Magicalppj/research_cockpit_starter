@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+import hashlib
 import yaml
 import networkx as nx
 
@@ -31,6 +32,7 @@ DEFAULT_STATUS_BY_TYPE = {
 ALL_KNOWN_STATUSES = {status for statuses in VALID_STATUSES_BY_TYPE.values() for status in statuses}
 VALID_FINDING_CONFIDENCES = {"weak", "medium", "strong"}
 VALID_FINDING_OUTCOMES = {"positive", "negative", "mixed", "inconclusive"}
+VALID_SUGGESTION_LIFECYCLE_STATES = {"active", "dismissed", "completed"}
 
 DEFAULT_FOCUS_MODE = {
     "default_depth": 2,
@@ -649,6 +651,28 @@ def validate_current_state(
                 if value is not None and type(value) is not bool:
                     errors.append(f"current_state.focus_mode.{field} must be a boolean")
 
+    lifecycle = current.get("suggestion_lifecycle")
+    if lifecycle is not None:
+        if not isinstance(lifecycle, dict):
+            errors.append("current_state.suggestion_lifecycle must be a mapping")
+        else:
+            for key, record in lifecycle.items():
+                prefix = f"current_state.suggestion_lifecycle[{key!r}]"
+                if not str(key).strip():
+                    errors.append("current_state.suggestion_lifecycle contains an empty key")
+                    continue
+                if not isinstance(record, dict):
+                    errors.append(f"{prefix} must be a mapping")
+                    continue
+                state = record.get("state")
+                if state not in VALID_SUGGESTION_LIFECYCLE_STATES:
+                    allowed = ", ".join(sorted(VALID_SUGGESTION_LIFECYCLE_STATES))
+                    errors.append(f"{prefix}.state invalid {state!r}; allowed: {allowed}")
+                for field in ("reason", "updated_at", "action", "kind", "source_node_id"):
+                    value = record.get(field)
+                    if value is not None and not isinstance(value, str):
+                        errors.append(f"{prefix}.{field} must be a string")
+
     focus_path = current.get("current_focus_path", []) or []
     if not isinstance(focus_path, list):
         errors.append("current_state.current_focus_path must be a list")
@@ -753,6 +777,11 @@ def _suggestion_priority(node: ResearchNode | None, default: str = "medium") -> 
     return default
 
 
+def suggestion_key(kind: str, source_node_id: str, action: str) -> str:
+    payload = f"{kind}\0{source_node_id}\0{action}".encode("utf-8")
+    return f"sg_{hashlib.sha1(payload).hexdigest()[:16]}"
+
+
 def _focus_related_ids(nodes: dict[str, ResearchNode], current: dict[str, Any]) -> set[str]:
     related = {
         str(node_id)
@@ -811,6 +840,7 @@ def _finalize_suggestions(suggestions: list[dict[str, Any]]) -> list[dict[str, A
         if key in seen:
             continue
         seen.add(key)
+        suggestion["key"] = suggestion_key(key[0], key[1], key[2])
         deduped.append(suggestion)
 
     kind_rank = {
@@ -830,9 +860,41 @@ def _finalize_suggestions(suggestions: list[dict[str, Any]]) -> list[dict[str, A
             str(item.get("action")),
         )
     )
-    for index, suggestion in enumerate(deduped, start=1):
-        suggestion["id"] = f"next_action_{index:03d}"
     return deduped
+
+
+def _apply_suggestion_lifecycle(
+    suggestions: list[dict[str, Any]],
+    current: dict[str, Any],
+    *,
+    include_inactive: bool,
+) -> list[dict[str, Any]]:
+    lifecycle = current.get("suggestion_lifecycle")
+    lifecycle = lifecycle if isinstance(lifecycle, dict) else {}
+    out: list[dict[str, Any]] = []
+    for suggestion in suggestions:
+        key = str(suggestion.get("key") or "")
+        record = lifecycle.get(key)
+        state = "active"
+        reason = ""
+        updated_at = ""
+        if isinstance(record, dict):
+            state = str(record.get("state") or "active")
+            reason = str(record.get("reason") or "")
+            updated_at = str(record.get("updated_at") or "")
+        suggestion["lifecycle_state"] = state
+        suggestion["lifecycle_reason"] = reason
+        suggestion["lifecycle_updated_at"] = updated_at
+        if state in {"dismissed", "completed"} and not include_inactive:
+            continue
+        out.append(suggestion)
+    return out
+
+
+def _assign_suggestion_ids(suggestions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for index, suggestion in enumerate(suggestions, start=1):
+        suggestion["id"] = f"next_action_{index:03d}"
+    return suggestions
 
 
 def _mark_queued_suggestions(
@@ -857,6 +919,8 @@ def build_action_suggestions(
     nodes: dict[str, ResearchNode],
     current: dict[str, Any],
     link_rows: list[dict[str, Any]] | None = None,
+    *,
+    include_inactive: bool = False,
 ) -> list[dict[str, Any]]:
     focus_ids = _focus_related_ids(nodes, current)
     suggestions: list[dict[str, Any]] = []
@@ -956,7 +1020,26 @@ def build_action_suggestions(
             focus_ids=focus_ids,
         ))
 
-    return _mark_queued_suggestions(_finalize_suggestions(suggestions), nodes, current)
+    suggestions = _finalize_suggestions(suggestions)
+    suggestions = _apply_suggestion_lifecycle(suggestions, current, include_inactive=include_inactive)
+    suggestions = _assign_suggestion_ids(suggestions)
+    return _mark_queued_suggestions(suggestions, nodes, current)
+
+
+def build_suggestion_lifecycle_summary(current: dict[str, Any], suggestions: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {"active": 0, "dismissed": 0, "completed": 0, "orphan": 0}
+    suggestion_keys = {str(item.get("key")) for item in suggestions if item.get("key")}
+    for suggestion in suggestions:
+        state = str(suggestion.get("lifecycle_state") or "active")
+        if state in counts:
+            counts[state] += 1
+
+    lifecycle = current.get("suggestion_lifecycle")
+    if isinstance(lifecycle, dict):
+        for key in lifecycle:
+            if str(key) not in suggestion_keys:
+                counts["orphan"] += 1
+    return counts
 
 
 def node_context(node: ResearchNode) -> dict[str, Any]:
