@@ -11,6 +11,10 @@ from typing import Any
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
 ROOT = SKILL_ROOT / "research_cockpit"
+REQUIRED_MODULES = {
+    "networkx": "networkx",
+    "yaml": "PyYAML",
+}
 
 
 def _script_path(script_name: str) -> str:
@@ -54,6 +58,39 @@ def _run_check(name: str, args: list[str]) -> dict[str, Any]:
     }
 
 
+def missing_modules_for_python(python: str, required: dict[str, str] = REQUIRED_MODULES) -> list[str]:
+    missing: list[str] = []
+    for module in required:
+        result = subprocess.run(
+            [python, "-c", f"import {module}"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            missing.append(module)
+    return missing
+
+
+def _dependency_failure_check(python: str, missing: list[str]) -> dict[str, Any]:
+    packages = ", ".join(REQUIRED_MODULES.get(module, module) for module in missing)
+    modules = ", ".join(missing)
+    message = (
+        f"Missing Python modules for {python}: {modules}. "
+        f"From the skill package root, install requirements with `python -m pip install -r requirements.txt` "
+        f"or rerun with an interpreter that already has: {packages}."
+    )
+    return {
+        "name": "runtime_dependencies",
+        "passed": False,
+        "returncode": 1,
+        "command": [python, "-c", "import networkx, yaml"],
+        "summary": {"missing_modules": missing},
+        "stdout": message,
+        "stderr": "",
+    }
+
+
 def skill_smoke_test_payload(
     root: Path = ROOT,
     *,
@@ -61,6 +98,16 @@ def skill_smoke_test_payload(
     python_executable: str | None = None,
 ) -> dict[str, Any]:
     python = python_executable or os.environ.get("RESEARCH_COCKPIT_PYTHON", "").strip() or sys.executable
+    missing = missing_modules_for_python(python)
+    if missing:
+        return {
+            "ok": False,
+            "skill_root": str(SKILL_ROOT),
+            "root": str(root),
+            "python": python,
+            "checks": [_dependency_failure_check(python, missing)],
+        }
+
     root_arg = str(root)
     checks = [
         _run_check("validate_cockpit", [python, _script_path("validate_cockpit.py"), "--root", root_arg]),

@@ -29,6 +29,8 @@ python scripts\agent_bootstrap.py --json --build
 
 If `agent_bootstrap.py` reports missing Python modules, install dependencies with `python -m pip install -r requirements.txt` or set `RESEARCH_COCKPIT_PYTHON` to an interpreter that has the requirements installed.
 
+For scripts that accept `--root`, pass the `research_cockpit` data directory, not the package root. Omit `--root` to use the bundled data.
+
 ## Read Order
 
 1. Bootstrap JSON.

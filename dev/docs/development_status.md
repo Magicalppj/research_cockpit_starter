@@ -1,5 +1,40 @@
 # Research Cockpit 开发状态
 
+## Agent Skill Forward-Test v1 更新（2026-04-28）
+
+本阶段已完成面向 agent skill 使用场景的前向测试与小幅加固。测试目标是验证 `skills/research-cockpit/` 能否作为独立 skill 被后续 agent 发现、启动、读取上下文、执行只读分析，并在隔离副本中完成写入型研究工作流。
+
+已完成：
+
+- 使用多个 subagent 覆盖只读启动、上下文读取、研究检索、行动建议理解、隔离副本写入、decision acceptance checklist 和包外可移植性测试。
+- 只读测试确认 agent 可从 `SKILL.md` 进入，运行 `agent_bootstrap.py --json`、`skill_smoke_test.py --json`、`list_agent_commands.py --json`、`search_knowledge.py --query t5 --json` 和 `suggest_next_actions.py --json`。
+- 隔离写入测试确认 mutating workflow 可在复制出的 skill package 中运行，真实 package 数据未被修改；副本中可完成 `record_finding.py`、`update_decision_evidence.py`、`validate_cockpit.py` 和 `build_dashboard.py`。
+- 可移植性测试确认脚本可从自身路径推导 package root；当 cwd 不可靠时，agent 可以使用脚本绝对路径完成调用。
+- 修复 `skill_smoke_test.py`：默认解释器缺少依赖时，现在输出结构化 JSON 诊断和安装/切换解释器提示，不再暴露 Python traceback。
+- 补充 `README.md` 和 `SKILL.md`：明确支持 `--root` 的脚本应传入 `research_cockpit` 数据目录，而不是 skill package 根目录。
+- 补充测试：覆盖 smoke test 依赖缺失诊断，并调整公开化扫描测试，避免测试 fixture 自身出现本机私有路径关键词。
+
+验证结果：
+
+- `python -m unittest discover -s dev/tests`：114 个测试通过。
+- `python scripts/validate_cockpit.py`：skill package 数据校验通过。
+- `python scripts/skill_smoke_test.py --json`：在依赖完整解释器下通过。
+- 默认 `python` 缺少依赖时，`skill_smoke_test.py --json` 会稳定返回结构化失败 JSON。
+- 私有路径关键词扫描无命中；当前公开文档和 skill package 不再包含真实本机路径或用户名。
+
+当前已知状态：
+
+- `decision_flan_t5_clap` 尚不能通过 acceptance checklist，主要缺少 `alternatives_considered` 和 `next_required_actions`。
+- 当前仍有一个缺失资源 warning：`figures/dataset_pipeline_v2_150.png`。
+- 这些属于研究数据完整性问题，不阻断 skill packaging，但会影响后续 agent 对当前研究状态的质量判断。
+
+下一批候选：
+
+- 将 forward-test checklist 固化为发布前回归流程，必要时增加自动化脚本封装。
+- 继续扩展 dry-run coverage，让更多写入脚本支持安全预览。
+- 增强 decision acceptance UI 修复提示，帮助用户补齐 alternatives、consequences 和 next actions。
+- 规划前端图谱交互升级，为可点击展开节点、编辑节点文本和未来前端迁移保留清晰接口边界。
+
 ## Knowledge Search v1 更新（2026-04-28）
 本批补齐 cockpit 内的轻量全文搜索能力，把 Markdown notes 和节点 YAML 文本字段纳入本地索引。范围保持克制：不引入数据库、搜索服务或新依赖，不反向解析 Markdown 状态，也不索引任意 linked file/config 正文。
 

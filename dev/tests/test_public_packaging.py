@@ -7,10 +7,10 @@ import unittest
 ROOT_DIR = Path(__file__).resolve().parents[2]
 SKILL_ROOT = ROOT_DIR / "skills" / "research-cockpit"
 FORBIDDEN_STRINGS = (
-    "D:\\Tools",
-    "C:\\Users\\22339",
-    "22339",
-    "miniconda3\\envs\\aigc",
+    "D:" + "\\Tools",
+    "C:" + "\\Users" + "\\" + "22" + "339",
+    "22" + "339",
+    "miniconda3" + "\\envs" + "\\aigc",
 )
 
 

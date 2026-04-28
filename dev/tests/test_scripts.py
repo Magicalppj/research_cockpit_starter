@@ -28,7 +28,7 @@ from scripts.list_agent_commands import agent_command_manifest
 from scripts.promote_decision import promote_decision
 from scripts.record_finding import record_finding
 from scripts.set_focus import set_focus
-from scripts.skill_smoke_test import skill_smoke_test_payload
+from scripts.skill_smoke_test import missing_modules_for_python, skill_smoke_test_payload
 from scripts.suggest_next_actions import select_suggestions
 from scripts.update_decision_evidence import update_decision_evidence
 from scripts.update_suggestion_state import update_suggestion_state
@@ -332,6 +332,14 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertEqual(payload["python"], sys.executable)
         self.assertTrue(payload["ok"])
+
+    def test_skill_smoke_test_dependency_check_reports_missing_modules(self) -> None:
+        missing = missing_modules_for_python(
+            sys.executable,
+            {"sys": "stdlib", "definitely_missing_module_for_test": "example-package"},
+        )
+
+        self.assertEqual(missing, ["definitely_missing_module_for_test"])
 
     def test_create_note_generates_note_links_node_and_rebuilds_dashboard(self) -> None:
         note_path = create_note(self.root, node_id="problem_text")

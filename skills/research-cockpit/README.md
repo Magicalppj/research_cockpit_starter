@@ -66,6 +66,8 @@ python scripts\skill_smoke_test.py --json
 
 `skill_smoke_test.py` invokes workflow scripts by absolute path, so it is a good first check when a subagent or sandbox cannot reliably set the working directory.
 
+For scripts that accept `--root`, pass the `research_cockpit` data directory, not the package root. When omitted, scripts use the bundled `research_cockpit/` directory.
+
 Add a node:
 
 ```powershell
