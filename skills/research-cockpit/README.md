@@ -221,7 +221,9 @@ Both context packs also include `suggested_next_actions` for read-only planning 
 
 ## Using as Agent Skill
 
-This directory is the installable skill package. In the development workspace its path is `skills/research-cockpit/`. Agent sessions should start from the skill package root with:
+This directory is the installable skill package. In the development workspace its path is `skills/research-cockpit/`. For another project repo, copy this directory under a project-local skill location such as `.agent/skills/research-cockpit/` or `.codex/skills/research-cockpit/`.
+
+Agent sessions should start from the skill package root with:
 
 ```powershell
 python scripts\agent_bootstrap.py --json

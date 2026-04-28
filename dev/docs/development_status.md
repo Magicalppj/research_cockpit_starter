@@ -640,3 +640,11 @@ Notes:
 
 - This cleans the current working tree content for future packaging. If the repository history itself will be published, use an export archive or history rewrite so old private assets are not recoverable from prior commits.
 - Development docs and tests remain outside the skill package under `dev/`.
+## Skill Entry Documentation v1 (2026-04-28)
+
+This update rewrites the package `SKILL.md` as an agent-facing operating contract for project-local installation under `.agent/skills/research-cockpit/` or `.codex/skills/research-cockpit/`.
+
+Completed:
+
+- Expanded the skill entry with data-root semantics, demo-data caveats, read order, write boundaries, workflow routing, critical decision/option/suggestion rules, subagent validation boundaries, references, and verification commands.
+- Synchronized the package README and `agents/openai.yaml` with the project-local skill installation scenario.

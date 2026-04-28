@@ -1,6 +1,7 @@
 display_name: Research Cockpit
 short_description: Inspect and update a YAML-backed research cockpit with generated agent context packs.
 default_prompt: >
+  Use this skill from a project-local .agent/skills or .codex/skills directory.
   From the skill directory root, start with python scripts\agent_bootstrap.py --json.
   If cwd is unreliable, call scripts by absolute path.
   Read the generated context packs before editing. Use workflow scripts for
