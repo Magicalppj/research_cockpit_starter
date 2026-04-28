@@ -14,6 +14,7 @@ from cockpit.model import (
     build_action_suggestions,
     build_agent_context,
     build_branch_comparison,
+    build_decision_evidence_bundle,
     build_decision_evidence_summary,
     build_decision_trace,
     build_focus_context,
@@ -562,6 +563,52 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(summary["findings_count"], 1)
         self.assertEqual(summary["outcome_counts"]["positive"], 1)
         self.assertEqual(summary["latest_finding"], "T5 improves replace following.")
+
+    def test_decision_evidence_bundle_collects_structured_experiment_evidence(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["result_summary"] = "Improves replace following."
+        experiment["outcome"] = "positive"
+        experiment["findings"] = [
+            {
+                "id": "exp_t5_finding_001",
+                "statement": "T5 improves replace following.",
+                "confidence": "strong",
+                "outcome": "positive",
+            }
+        ]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+
+        bundle = build_decision_evidence_bundle(nodes, "option_t5")
+
+        self.assertEqual(bundle["supporting_experiments"], ["exp_t5"])
+        self.assertEqual(bundle["evidence_strength"], "strong")
+        self.assertEqual(bundle["findings_count"], 1)
+        self.assertEqual(bundle["outcome_counts"]["positive"], 1)
+        self.assertEqual(bundle["latest_finding"], "T5 improves replace following.")
+        self.assertIn("1 experiment", bundle["evidence_summary"])
+
+    def test_decision_evidence_bundle_keeps_manual_planned_experiment_and_none_without_evidence(self) -> None:
+        nodes = load_nodes(self.root)
+
+        automatic = build_decision_evidence_bundle(nodes, "option_t5")
+        manual = build_decision_evidence_bundle(nodes, "option_t5", supporting_experiments=["exp_t5"])
+
+        self.assertEqual(automatic["supporting_experiments"], [])
+        self.assertEqual(automatic["evidence_strength"], "none")
+        self.assertEqual(manual["supporting_experiments"], ["exp_t5"])
+        self.assertEqual(manual["evidence_strength"], "none")
+
+    def test_review_decision_suggestion_uses_evidence_update_command(self) -> None:
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        suggestions = build_action_suggestions(self.root, nodes, current)
+        review = [item for item in suggestions if item["kind"] == "review_decision"][0]
+
+        self.assertIn("scripts\\update_decision_evidence.py", review["suggested_command"])
+        self.assertIn("--id decision_t5", review["suggested_command"])
 
     def test_v2_statuses_and_current_focus_node_pass_validation(self) -> None:
         write_node(

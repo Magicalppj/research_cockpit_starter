@@ -1,5 +1,24 @@
 # Research Cockpit 开发状态
 
+## Decision Evidence Injection v1 更新（2026-04-28）
+
+本批把已有 experiment findings、`result_summary` 和 `outcome` 自动汇总到 decision，减少手工整理证据。范围保持只更新证据字段：不会自动接受 decision，也不会自动关闭 parent option/problem。
+
+已完成：
+
+- 新增 `build_decision_evidence_bundle(nodes, option_id, supporting_experiments=None)`，自动收集 option 下已有结构化证据实验，并保留手动传入的 supporting experiments。
+- Evidence bundle 输出 `supporting_experiments`、`evidence_strength`、`evidence_summary`、`findings_count`、`outcome_counts` 和 `latest_finding`。
+- `scripts/promote_decision.py` 新增 `--auto-evidence`，创建 decision 时可自动填充 supporting evidence；显式传入的非 `none` `--evidence-strength` 会优先保留。
+- 新增 `scripts/update_decision_evidence.py`，用于刷新已有 proposed/accepted decision 的 evidence 字段，并默认重建 dashboard/context。
+- Action Guidance 中 `review_decision` 的 `suggested_command` 已改为调用 `update_decision_evidence.py`，避免对已有 decision 再次生成同名 decision。
+- Decision Trace 会展示自动生成的 evidence summary 文本，并继续展示 supporting experiments、finding 数量、outcome 分布和最新 finding。
+
+下一批候选：
+
+- 增加 suggestion dismiss / completed 状态，避免已处理建议反复出现。
+- 增加 notes / Markdown 全文搜索或轻量索引。
+- 增加 decision acceptance checklist，在接受 decision 前提示证据、替代方案和后续影响是否完整。
+
 ## Action Execution v1 更新（2026-04-27）
 
 本批在 Action Guidance v1 的只读建议基础上，补齐“建议入队”闭环。写回范围刻意保持最小：只把建议文本追加到 `current_state.next_actions` 或来源节点 `next_actions`，不直接执行实验、不自动改状态、不自动生成 decision。
@@ -12,11 +31,7 @@
 - 写回逻辑会去重；已存在的 action 不重复追加。
 - 写回后更新 `updated_at`、运行统一校验，并默认重建 dashboard/context。
 
-下一批候选：
-
-- 增强 `promote_decision.py`，从 findings 自动汇总 supporting evidence。
-- 增加 suggestion dismiss / completed 状态，避免已处理建议反复出现。
-- 增加 notes / Markdown 全文搜索或轻量索引。
+下一批候选已推进到 Decision Evidence Injection v1；剩余重点是 suggestion 生命周期、全文搜索和 decision acceptance checklist。
 
 ## Action Guidance v1 更新（2026-04-27）
 
@@ -83,7 +98,7 @@
 
 ## 当前阶段
 
-当前项目处于 **Action Execution v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环。
+当前项目处于 **Decision Evidence Injection v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
@@ -112,7 +127,8 @@
 - `scripts/set_focus.py`：更新当前主线，包括 stage/problem/option/focus node/focus path；传入 `--focus-node` 时可自动从 parent 链推导 focus path；默认会重建 dashboard/context 文件。
 - `scripts/validate_cockpit.py`：独立运行数据健康检查，支持人类可读输出和 `--json` 输出。
 - `scripts/record_finding.py`：向 experiment 节点追加结构化 finding，并可同步更新 `result_summary`。
-- `scripts/promote_decision.py`：从 option 和 supporting experiments 生成 decision；accepted decision 会同步更新 option/problem 状态。
+- `scripts/promote_decision.py`：从 option 和 supporting experiments 生成 decision；支持 `--auto-evidence` 从已有 findings/result/outcome 自动填充证据；accepted decision 会同步更新 option/problem 状态。
+- `scripts/update_decision_evidence.py`：刷新已有 decision 的 evidence 字段，不改变 decision status，也不关闭 option/problem。
 - `scripts/suggest_next_actions.py`：只读生成下一步行动建议，支持 JSON、kind 过滤、limit 和 focus-only。
 - `scripts/apply_suggestion.py`：将建议写入 `current_state.next_actions` 或来源节点 `next_actions`，不直接执行建议命令。
 - `scripts/build_dashboard.py`：生成前先校验，再输出 dashboard 和 agent context 文件。
@@ -184,6 +200,7 @@ Streamlit 页面现在包含：
 - 独立 `validate_cockpit.py` CLI 成功/失败退出码。
 - `record_finding.py` 写入 experiment findings，并拒绝非法节点和未知 artifact。
 - `promote_decision.py` 创建 proposed decision；accepted decision 同步更新 option/problem。
+- `promote_decision.py --auto-evidence` 和 `update_decision_evidence.py` 的证据汇总、去重、显式强度保留和错误处理。
 - Dashboard 生成文件。
 - 中文节点图谱 HTML 生成。
 - 行动建议生成、CLI 过滤、dashboard 输出和 UI helper。
@@ -337,7 +354,14 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 2. `queued_in_current` / `queued_in_node` 建议状态。
 3. Action Guidance UI 中的写入当前行动队列和来源节点行动队列入口。
 
-下一批建议进入“证据自动注入与建议生命周期”层：`promote_decision.py` 自动汇总 supporting evidence、suggestion dismiss/completed、notes/全文搜索。
+第九批已完成：
+
+1. `build_decision_evidence_bundle(...)` 决策证据汇总。
+2. `promote_decision.py --auto-evidence` 新 decision 证据自动填充。
+3. `update_decision_evidence.py` 已有 decision 证据刷新。
+4. Action Guidance 的 `review_decision` 建议命令切换为证据刷新命令。
+
+下一批建议进入“建议生命周期与检索增强”层：suggestion dismiss/completed、notes/全文搜索、decision acceptance checklist。
 
 ## 后续可优化
 
@@ -349,8 +373,8 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 
 ### 第二优先级：研究工作流
 
-- 增强 `promote_decision.py`，支持从已有 findings 自动汇总 supporting evidence。
 - 增加 suggestion dismiss / completed 状态，减少已处理建议重复出现。
+- 增加 decision acceptance checklist，在接受 decision 前检查 supporting evidence、alternatives 和 consequences。
 - 为 notes 增加推荐写作模板和命名约定，但仍不反向解析 Markdown 正文。
 
 ### 第三优先级：UI 交互

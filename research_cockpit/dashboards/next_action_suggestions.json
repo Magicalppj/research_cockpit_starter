@@ -175,7 +175,7 @@
     "related_node_ids": [
       "option_flan_t5_clap"
     ],
-    "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\promote_decision.py --id decision_flan_t5_clap --option option_flan_t5_clap",
+    "suggested_command": "D:\\Tools\\miniconda3\\envs\\aigc\\python.exe scripts\\update_decision_evidence.py --id decision_flan_t5_clap",
     "is_focus_related": true,
     "id": "next_action_011",
     "queued_in_current": false,

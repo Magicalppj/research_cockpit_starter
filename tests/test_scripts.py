@@ -20,6 +20,7 @@ from scripts.promote_decision import promote_decision
 from scripts.record_finding import record_finding
 from scripts.set_focus import set_focus
 from scripts.suggest_next_actions import select_suggestions
+from scripts.update_decision_evidence import update_decision_evidence
 from scripts.update_status import update_status
 
 
@@ -458,6 +459,110 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(decision["derived_from"], ["option_t5"])
         self.assertEqual(decision["supporting_experiments"], ["exp_t5"])
         self.assertEqual(decision["alternatives_considered"], ["option_alt"])
+
+    def test_promote_decision_auto_evidence_merges_experiments_and_preserves_explicit_strength(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["outcome"] = "positive"
+        experiment["findings"] = [
+            {
+                "id": "exp_t5_finding_001",
+                "statement": "T5 improves replace following.",
+                "confidence": "medium",
+                "outcome": "positive",
+            }
+        ]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+
+        promote_decision(
+            self.root,
+            decision_id="decision_auto_t5",
+            option_id="option_t5",
+            title="Auto evidence T5",
+            summary="T5 is promising.",
+            status="proposed",
+            supporting_experiments=["exp_t5"],
+            evidence_strength="strong",
+            auto_evidence=True,
+            rebuild_dashboard=False,
+        )
+
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_auto_t5.yaml")
+
+        self.assertEqual(decision["supporting_experiments"], ["exp_t5"])
+        self.assertEqual(decision["evidence_strength"], "strong")
+        self.assertIn("T5 improves replace following.", decision["evidence_summary"])
+
+    def test_update_decision_evidence_refreshes_existing_decision_and_rebuilds_dashboard(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+                "supporting_experiments": [],
+                "evidence_strength": "none",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["result_summary"] = "Improves edit following."
+        experiment["outcome"] = "positive"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+
+        result = update_decision_evidence(self.root, decision_id="decision_t5")
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
+
+        self.assertEqual(result["decision_id"], "decision_t5")
+        self.assertEqual(decision["status"], "proposed")
+        self.assertEqual(decision["supporting_experiments"], ["exp_t5"])
+        self.assertEqual(decision["evidence_strength"], "medium")
+        self.assertIn("1 experiment", decision["evidence_summary"])
+        self.assertTrue((self.root / "dashboards" / "next_action_suggestions.json").exists())
+
+    def test_update_decision_evidence_rejects_bad_decision_inputs(self) -> None:
+        with self.assertRaises(ValueError) as missing:
+            update_decision_evidence(self.root, decision_id="missing_decision", rebuild_dashboard=False)
+        self.assertIn("missing_decision", str(missing.exception))
+
+        with self.assertRaises(ValueError) as wrong_type:
+            update_decision_evidence(self.root, decision_id="option_t5", rebuild_dashboard=False)
+        self.assertIn("decision", str(wrong_type.exception))
+
+    def test_update_decision_evidence_cli_reports_success_and_failure(self) -> None:
+        script = ROOT_DIR / "scripts" / "update_decision_evidence.py"
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+            },
+        )
+
+        ok = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--id", "decision_t5", "--no-build"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(ok.returncode, 0)
+        self.assertIn("Updated evidence", ok.stdout)
+
+        failed = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--id", "missing_decision", "--no-build"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(failed.returncode, 1)
+        self.assertIn("missing_decision", failed.stdout)
 
     def test_promote_accepted_decision_updates_option_and_problem(self) -> None:
         promote_decision(

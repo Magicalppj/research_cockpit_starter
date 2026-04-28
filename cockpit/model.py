@@ -933,7 +933,7 @@ def build_action_suggestions(
                 reason=f"{node.id} is proposed and needs acceptance or rejection.",
                 source=node,
                 related_node_ids=[node.parent] if node.parent else [],
-                suggested_command=_workflow_command("promote_decision.py", "--id", node.id, "--option", str(node.parent or "")),
+                suggested_command=_workflow_command("update_decision_evidence.py", "--id", node.id),
                 focus_ids=focus_ids,
             ))
 
@@ -1294,6 +1294,14 @@ def _latest_experiment_result(nodes: dict[str, ResearchNode], experiment_ids: li
     return latest
 
 
+def _has_experiment_evidence(experiment: ResearchNode) -> bool:
+    return bool(
+        experiment.raw.get("findings")
+        or experiment.raw.get("result_summary")
+        or experiment.raw.get("outcome")
+    )
+
+
 def _evidence_experiment_ids(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
     if node_id not in nodes:
         return []
@@ -1310,6 +1318,100 @@ def _evidence_experiment_ids(nodes: dict[str, ResearchNode], node_id: str) -> li
     if option_id:
         experiment_ids = _unique_strings(experiment_ids + _experiment_ids_for_option(nodes, str(option_id)))
     return [experiment_id for experiment_id in experiment_ids if experiment_id in nodes and nodes[experiment_id].type == "experiment"]
+
+
+def _validate_experiment_refs(nodes: dict[str, ResearchNode], experiment_ids: list[str], field_name: str) -> None:
+    for experiment_id in experiment_ids:
+        if experiment_id not in nodes:
+            raise ValueError(f"{field_name} references missing node {experiment_id}")
+        if nodes[experiment_id].type != "experiment":
+            raise ValueError(f"{field_name} reference {experiment_id} must be experiment, got {nodes[experiment_id].type}")
+
+
+def _evidence_strength_for_counts(
+    findings: list[dict[str, Any]],
+    outcome_counts: dict[str, int],
+    has_result_summary: bool,
+) -> str:
+    positive_findings = [
+        finding
+        for finding in findings
+        if finding.get("outcome") == "positive"
+    ]
+    if any(finding.get("confidence") == "strong" for finding in positive_findings):
+        return "strong"
+    if len(positive_findings) >= 2:
+        return "strong"
+    if positive_findings or outcome_counts.get("mixed", 0) > 0 or outcome_counts.get("positive", 0) > 0:
+        return "medium"
+    if findings or has_result_summary:
+        return "weak"
+    return "none"
+
+
+def build_decision_evidence_bundle(
+    nodes: dict[str, ResearchNode],
+    option_id: str,
+    supporting_experiments: list[str] | None = None,
+) -> dict[str, Any]:
+    if option_id not in nodes:
+        raise ValueError(f"Option node does not exist: {option_id}")
+    if nodes[option_id].type != "option":
+        raise ValueError(f"Node {option_id} must be option, got {nodes[option_id].type}")
+
+    manual_ids = _unique_strings(supporting_experiments or [])
+    _validate_experiment_refs(nodes, manual_ids, "supporting_experiments")
+    automatic_ids = [
+        experiment_id
+        for experiment_id in _experiment_ids_for_option(nodes, option_id)
+        if _has_experiment_evidence(nodes[experiment_id])
+    ]
+    experiment_ids = _unique_strings(manual_ids + automatic_ids)
+
+    findings: list[dict[str, Any]] = []
+    outcome_counts: dict[str, int] = {}
+    latest_finding: str | None = None
+    has_result_summary = False
+    for experiment_id in experiment_ids:
+        experiment = nodes[experiment_id]
+        if experiment.raw.get("result_summary"):
+            has_result_summary = True
+        experiment_findings = experiment.raw.get("findings", []) or []
+        counted_finding_outcome = False
+        if isinstance(experiment_findings, list):
+            for finding in experiment_findings:
+                if not isinstance(finding, dict):
+                    continue
+                findings.append(finding)
+                if finding.get("statement"):
+                    latest_finding = str(finding["statement"])
+                if finding.get("outcome"):
+                    outcome = str(finding["outcome"])
+                    outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
+                    counted_finding_outcome = True
+        outcome = experiment.raw.get("outcome")
+        if outcome and not counted_finding_outcome:
+            outcome_counts[str(outcome)] = outcome_counts.get(str(outcome), 0) + 1
+
+    strength = _evidence_strength_for_counts(findings, outcome_counts, has_result_summary)
+    summary_parts = [
+        f"{len(experiment_ids)} experiment(s)",
+        f"{len(findings)} finding(s)",
+    ]
+    if outcome_counts:
+        summary_parts.append(
+            "outcomes: " + ", ".join(f"{key}={value}" for key, value in sorted(outcome_counts.items()))
+        )
+    if latest_finding:
+        summary_parts.append(f"latest finding: {latest_finding}")
+    return {
+        "supporting_experiments": experiment_ids,
+        "evidence_strength": strength,
+        "evidence_summary": "; ".join(summary_parts),
+        "findings_count": len(findings),
+        "outcome_counts": outcome_counts,
+        "latest_finding": latest_finding,
+    }
 
 
 def build_decision_evidence_summary(nodes: dict[str, ResearchNode], node_id: str) -> dict[str, Any]:
@@ -1407,7 +1509,10 @@ def build_decision_trace(nodes: dict[str, ResearchNode], decision_id: str) -> di
         "supporting_experiments": _ordered_node_contexts(nodes, supporting_experiment_ids),
         "alternatives_considered": _ordered_node_contexts(nodes, alternative_ids),
         "consequences": decision.raw.get("consequences", []) or [],
-        "evidence_summary": build_decision_evidence_summary(nodes, decision_id),
+        "evidence_summary": {
+            **build_decision_evidence_summary(nodes, decision_id),
+            "summary_text": decision.raw.get("evidence_summary"),
+        },
     }
 
 

@@ -8,7 +8,14 @@ import sys
 ROOT = Path(__file__).resolve().parents[1] / "research_cockpit"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cockpit.model import ResearchNode, load_nodes, load_yaml, save_yaml, validate_cockpit
+from cockpit.model import (
+    ResearchNode,
+    build_decision_evidence_bundle,
+    load_nodes,
+    load_yaml,
+    save_yaml,
+    validate_cockpit,
+)
 from scripts.build_dashboard import build_dashboard
 from scripts.record_finding import find_node_file
 
@@ -43,6 +50,7 @@ def promote_decision(
     consequences: list[str] | None = None,
     next_required_actions: list[str] | None = None,
     evidence_strength: str = "none",
+    auto_evidence: bool = False,
     rebuild_dashboard: bool = True,
 ) -> Path:
     nodes = load_nodes(root)
@@ -66,6 +74,13 @@ def promote_decision(
     next_required_actions = next_required_actions or []
     _validate_refs(nodes, supporting_experiments, "experiment", "supporting_experiments")
     _validate_refs(nodes, alternatives, "option", "alternatives")
+    evidence_summary = None
+    if auto_evidence:
+        evidence_bundle = build_decision_evidence_bundle(nodes, option_id, supporting_experiments)
+        supporting_experiments = evidence_bundle["supporting_experiments"]
+        if evidence_strength == "none":
+            evidence_strength = evidence_bundle["evidence_strength"]
+        evidence_summary = evidence_bundle["evidence_summary"]
 
     today = str(date.today())
     decision_data = {
@@ -86,6 +101,8 @@ def promote_decision(
         "created_at": today,
         "updated_at": today,
     }
+    if evidence_summary:
+        decision_data["evidence_summary"] = evidence_summary
 
     candidate = dict(nodes)
     candidate[decision_id] = ResearchNode.from_dict(decision_data)
@@ -135,6 +152,7 @@ def main() -> None:
     parser.add_argument("--consequence", action="append", dest="consequences")
     parser.add_argument("--next-required-action", action="append", dest="next_required_actions")
     parser.add_argument("--evidence-strength", default="none", choices=sorted(VALID_EVIDENCE_STRENGTHS))
+    parser.add_argument("--auto-evidence", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -150,6 +168,7 @@ def main() -> None:
         consequences=args.consequences,
         next_required_actions=args.next_required_actions,
         evidence_strength=args.evidence_strength,
+        auto_evidence=args.auto_evidence,
         rebuild_dashboard=not args.no_build,
     )
     print(f"Created {out}")

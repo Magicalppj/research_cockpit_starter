@@ -78,7 +78,18 @@ Promote an option into a decision:
 
 ```powershell
 D:\Tools\miniconda3\envs\aigc\python.exe scripts\promote_decision.py --id decision_flan_t5_clap_v2 --option option_flan_t5_clap --title "Adopt FLAN-T5 + CLAP" --summary "Use FLAN-T5 event tokens with CLAP anchor." --status proposed --supporting-experiment exp_042_flan_t5_clap --evidence-strength medium
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\promote_decision.py --id decision_flan_t5_clap_v3 --option option_flan_t5_clap --title "Adopt FLAN-T5 + CLAP" --summary "Use FLAN-T5 event tokens with CLAP anchor." --status proposed --auto-evidence
 ```
+
+`--auto-evidence` collects structured experiment `findings`, `result_summary`, and `outcome` from the option branch, then fills `supporting_experiments`, `evidence_strength`, and `evidence_summary`. Explicit `--evidence-strength` values other than `none` are preserved.
+
+Refresh evidence for an existing decision:
+
+```powershell
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\update_decision_evidence.py --id decision_flan_t5_clap
+```
+
+`update_decision_evidence.py` only updates evidence-related fields on an existing decision. It does not accept or reject the decision, and it does not close the parent option/problem.
 
 Review read-only action suggestions:
 
@@ -162,6 +173,7 @@ scripts/
   validate_cockpit.py
   record_finding.py
   promote_decision.py
+  update_decision_evidence.py
   create_note.py
   suggest_next_actions.py
   apply_suggestion.py

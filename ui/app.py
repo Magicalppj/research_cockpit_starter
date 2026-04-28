@@ -457,6 +457,7 @@ def filter_action_suggestions(
 def format_evidence_summary(summary: dict) -> dict:
     outcome_counts = summary.get("outcome_counts") or {}
     return {
+        "evidence_summary": summary.get("summary_text") or summary.get("evidence_summary") or "",
         "experiment_count": summary.get("experiment_count", 0),
         "findings_count": summary.get("findings_count", 0),
         "outcome_counts": "; ".join(f"{key}: {value}" for key, value in sorted(outcome_counts.items())),
