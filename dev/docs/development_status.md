@@ -1,4 +1,29 @@
 # Research Cockpit 开发状态
+## Agent Option Workstream v1 更新（2026-04-28）
+本阶段支持“每个 agent follow 一个方案节点”的最小闭环，采用 `problem -> option -> problem -> option -> experiment/decision` 的递归分支结构。目标是让下游 agent 可以认领一个 option，在该 option 子树内继续拆分问题、方案和实验，最后把证据报告回 option，供上游 problem 做方案比较和最终决策。
+
+已完成：
+
+- `option` 节点新增可选 `agent_workstream` 与 `workstream_report` 字段；`agent_workstream.status` 支持 `claimed/in_progress/blocked/reported/released`，`workstream_report.recommendation` 支持 `accept/reject/continue`。
+- 校验层会拒绝非 option 节点使用 workstream 字段，并校验非法 workstream status、非法 recommendation 和 `report_to_problem` 引用。
+- 新增 `build_option_subtree(...)` 和 `build_option_workstream_context(...)`，支持递归解析 `option -> problem -> option -> experiment/decision` 子树。
+- Branch Comparison、decision evidence bundle 和 Decision Trace 的实验证据统计已纳入 option 子树下的递归实验；直接挂在 option 下的旧数据仍兼容。
+- 新增 `claim_option.py`、`option_workstream_context.py` 和 `report_option_workstream.py` 三个工作流脚本。
+- `build_dashboard.py` 新增输出 `option_workstreams.json`；`agent_context_pack.json` 增加 `active_option_workstreams`，`focus_context_pack.json` 在 focus 位于 option 分支时增加 `option_workstream_context`。
+- Streamlit UI 新增“方案工作流 / Option Workstreams”页签；option 节点 Actions 区展示 claim/context/report 命令模板。
+- `list_agent_commands.py`、`skill_smoke_test.py`、`dev/scripts/run_skill_release_check.py` 已纳入 option workstream 只读检查。
+
+验证结果：
+
+- `python -m unittest discover -s dev/tests`：通过。
+- `python scripts/skill_smoke_test.py --json`：纳入 option workstream context 检查。
+- `python dev/scripts/run_skill_release_check.py --json --skip-mutating`：用于发布前只读回归。
+
+下一批候选：
+
+- 为 mutating scripts 扩展 dry-run coverage，特别是 `claim_option.py` 和 `report_option_workstream.py`。
+- 增强 option workstream UI，支持从前端安全触发 claim/report，而不是只展示命令模板。
+- 前端图谱交互升级：点击展开节点、编辑节点文本、以 option workstream 为中心过滤图谱。
 
 ## Agent Skill Release Hardening v1 更新（2026-04-28）
 

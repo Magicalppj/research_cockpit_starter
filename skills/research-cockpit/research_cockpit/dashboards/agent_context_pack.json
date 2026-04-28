@@ -1,9 +1,9 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-04-28T04:57:23.052671Z",
-    "source_git_commit": "f01f433",
-    "worktree_dirty": false,
+    "generated_at": "2026-04-28T07:17:19.296402Z",
+    "source_git_commit": "fb0fdc6",
+    "worktree_dirty": true,
     "current_state_updated_at": "2026-04-27"
   },
   "project_name": "Audio Edit Research Cockpit",
@@ -66,6 +66,8 @@
       "findings": [],
       "implementation_steps": [],
       "success_criteria": [],
+      "agent_workstream": null,
+      "workstream_report": null,
       "agent_context": null,
       "next_actions": [
         "Implement FLAN-T5 timeline features",
@@ -96,6 +98,8 @@
       "findings": [],
       "implementation_steps": [],
       "success_criteria": [],
+      "agent_workstream": null,
+      "workstream_report": null,
       "agent_context": null,
       "next_actions": [
         "Run FLAN-T5-only ablation",
@@ -201,6 +205,7 @@
       ]
     }
   ],
+  "active_option_workstreams": [],
   "suggested_next_actions": [
     {
       "kind": "focus_next_action",

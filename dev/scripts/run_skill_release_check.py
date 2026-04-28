@@ -29,6 +29,9 @@ REQUIRED_PACKAGE_PATHS = (
     "scripts/agent_bootstrap.py",
     "scripts/skill_smoke_test.py",
     "scripts/list_agent_commands.py",
+    "scripts/claim_option.py",
+    "scripts/option_workstream_context.py",
+    "scripts/report_option_workstream.py",
     "ui/app.py",
     "research_cockpit/current_state.yaml",
     "agents/openai.yaml",
@@ -76,6 +79,17 @@ def _script(skill_path: Path, script_name: str) -> str:
 
 def _data_root(skill_path: Path) -> str:
     return str(skill_path / "research_cockpit")
+
+
+def _current_option_id(skill_path: Path) -> str | None:
+    import yaml
+
+    path = skill_path / "research_cockpit" / "current_state.yaml"
+    if not path.exists():
+        return None
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    option_id = data.get("current_option")
+    return str(option_id) if option_id else None
 
 
 def _run_command(args: list[str], *, cwd: Path | None = None, allowed_returncodes: set[int] | None = None) -> dict[str, Any]:
@@ -228,6 +242,7 @@ def read_only_startup_track(skill_path: Path, python: str) -> dict[str, Any]:
         return _track("read_only_startup", False, checks=[dependency], summary=dependency["summary"], stdout=dependency["stdout"])
 
     root = _data_root(skill_path)
+    option_id = _current_option_id(skill_path)
     commands = [
         [python, _script(skill_path, "agent_bootstrap.py"), "--root", root, "--json"],
         [python, _script(skill_path, "skill_smoke_test.py"), "--root", root, "--json"],
@@ -235,6 +250,16 @@ def read_only_startup_track(skill_path: Path, python: str) -> dict[str, Any]:
         [python, _script(skill_path, "search_knowledge.py"), "--root", root, "--query", "t5", "--json", "--limit", "5"],
         [python, _script(skill_path, "suggest_next_actions.py"), "--root", root, "--json"],
     ]
+    if option_id:
+        commands.append([
+            python,
+            _script(skill_path, "option_workstream_context.py"),
+            "--root",
+            root,
+            "--option",
+            option_id,
+            "--json",
+        ])
     checks = [_run_command(command, cwd=skill_path) for command in commands]
     return _track(
         "read_only_startup",

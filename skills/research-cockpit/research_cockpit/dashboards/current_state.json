@@ -59,6 +59,8 @@
       "findings": [],
       "implementation_steps": [],
       "success_criteria": [],
+      "agent_workstream": null,
+      "workstream_report": null,
       "agent_context": null,
       "next_actions": [
         "Implement FLAN-T5 timeline features",
@@ -89,6 +91,8 @@
       "findings": [],
       "implementation_steps": [],
       "success_criteria": [],
+      "agent_workstream": null,
+      "workstream_report": null,
       "agent_context": null,
       "next_actions": [
         "Run FLAN-T5-only ablation",

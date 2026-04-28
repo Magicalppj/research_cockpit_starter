@@ -10,6 +10,7 @@ def ordered_tab_labels(text: dict[str, str]) -> list[str]:
         "branch_comparison",
         "decision_trace",
         "action_guidance",
+        "option_workstreams",
         "search",
         "resources",
         "experiment_matrix",
@@ -87,6 +88,33 @@ def build_create_note_command(node_id: str) -> str:
     return (
         f"{script_command('create_note.py')}"
         f" --node {node_id}"
+    )
+
+
+def build_claim_option_command(option_id: str) -> str:
+    return (
+        f"{script_command('claim_option.py')}"
+        f" --option {option_id}"
+        " --agent <agent_id>"
+        ' --objective "Describe objective"'
+    )
+
+
+def build_option_workstream_context_command(option_id: str) -> str:
+    return (
+        f"{script_command('option_workstream_context.py')}"
+        f" --option {option_id}"
+        " --json"
+    )
+
+
+def build_report_option_workstream_command(option_id: str) -> str:
+    return (
+        f"{script_command('report_option_workstream.py')}"
+        f" --option {option_id}"
+        " --agent <agent_id>"
+        " --recommend continue"
+        ' --summary "Summarize evidence and recommendation"'
     )
 
 
@@ -216,6 +244,16 @@ def format_suggestion_lifecycle_rows(rows: list[dict]) -> list[dict]:
         item["orphan"] = "yes" if item.get("orphan") else ""
         if item.get("age_days") is None:
             item["age_days"] = ""
+        formatted.append(item)
+    return formatted
+
+
+def format_option_workstream_rows(rows: list[dict]) -> list[dict]:
+    formatted = []
+    for row in rows:
+        item = dict(row)
+        for key in ("owner", "workstream_status", "objective", "recommendation", "report_summary", "latest_finding"):
+            item[key] = item.get(key) or ""
         formatted.append(item)
     return formatted
 

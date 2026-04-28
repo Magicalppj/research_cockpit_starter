@@ -24,6 +24,9 @@ from cockpit.model import (
     build_focus_context,
     build_experiment_matrix,
     build_link_rows,
+    build_option_subtree,
+    build_option_workstream_context,
+    build_option_workstream_rows,
     build_search_index,
     build_search_index_summary,
     build_context_metadata,
@@ -782,6 +785,158 @@ class ModelValidationTests(unittest.TestCase):
         self.assertIn("findings[1].outcome", message)
         self.assertIn("missing_artifact", message)
 
+    def test_option_workstream_fields_enter_node_context_and_validate(self) -> None:
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["agent_workstream"] = {
+            "owner": "agent_t5",
+            "status": "in_progress",
+            "objective": "Evaluate T5 branch.",
+            "report_to_problem": "problem_text",
+            "started_at": "2026-04-28",
+            "updated_at": "2026-04-28",
+        }
+        option["workstream_report"] = {
+            "reporting_agent": "agent_t5",
+            "recommendation": "continue",
+            "summary": "Need one more ablation.",
+            "evidence_summary": "No findings yet.",
+            "experiment_count": 1,
+            "finding_count": 0,
+            "reported_at": "2026-04-28",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        nodes = load_nodes(self.root)
+
+        errors = validate_cockpit(self.root, nodes)
+        context = node_context(nodes["option_t5"])
+
+        self.assertEqual(errors, [])
+        self.assertEqual(context["agent_workstream"]["owner"], "agent_t5")
+        self.assertEqual(context["workstream_report"]["recommendation"], "continue")
+
+    def test_workstream_fields_are_only_valid_on_options(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["agent_workstream"] = {"owner": "agent_bad", "status": "claimed"}
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        self.assertIn("agent_workstream is only supported on option nodes", str(ctx.exception))
+
+    def test_workstream_status_and_report_recommendation_validate(self) -> None:
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["agent_workstream"] = {"owner": "agent_t5", "status": "invalid"}
+        option["workstream_report"] = {"reporting_agent": "agent_t5", "recommendation": "maybe"}
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        message = str(ctx.exception)
+        self.assertIn("agent_workstream.status invalid", message)
+        self.assertIn("workstream_report.recommendation invalid", message)
+
+    def test_option_subtree_resolves_nested_problem_option_experiment(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "problem_sub",
+                "type": "problem",
+                "title": "Sub problem",
+                "status": "active",
+                "parent": "option_t5",
+                "children": ["option_sub"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_sub",
+                "type": "option",
+                "title": "Sub option",
+                "status": "open",
+                "parent": "problem_sub",
+                "children": ["exp_sub"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_sub",
+                "type": "experiment",
+                "title": "Sub experiment",
+                "status": "done",
+                "parent": "option_sub",
+                "result_summary": "Sub branch improved.",
+            },
+        )
+        nodes = load_nodes(self.root)
+
+        subtree = build_option_subtree(nodes, "option_t5")
+
+        self.assertEqual(subtree["root_option_id"], "option_t5")
+        self.assertIn("problem_sub", subtree["problem_ids"])
+        self.assertIn("option_sub", subtree["option_ids"])
+        self.assertIn("exp_sub", subtree["experiment_ids"])
+
+    def test_option_workstream_context_summarizes_recursive_evidence(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "problem_sub",
+                "type": "problem",
+                "title": "Sub problem",
+                "status": "active",
+                "parent": "option_t5",
+                "children": ["option_sub"],
+                "next_actions": ["Try sub option"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_sub",
+                "type": "option",
+                "title": "Sub option",
+                "status": "open",
+                "parent": "problem_sub",
+                "children": ["exp_sub"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_sub",
+                "type": "experiment",
+                "title": "Sub experiment",
+                "status": "done",
+                "parent": "option_sub",
+                "findings": [
+                    {
+                        "id": "exp_sub_finding_001",
+                        "statement": "Sub branch helps.",
+                        "confidence": "medium",
+                        "outcome": "positive",
+                    }
+                ],
+            },
+        )
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        context = build_option_workstream_context(self.root, nodes, current, "option_t5")
+        rows = build_option_workstream_rows(nodes)
+
+        self.assertEqual(context["option"]["id"], "option_t5")
+        self.assertEqual(context["upstream_problem"]["id"], "problem_text")
+        self.assertIn("exp_sub", [item["id"] for item in context["experiments"]])
+        self.assertEqual(context["evidence_summary"]["findings_count"], 1)
+        self.assertIn("Try sub option", context["open_next_actions"])
+        self.assertEqual(rows[0]["option_id"], "option_t5")
+
     def test_branch_comparison_summarizes_problem_options(self) -> None:
         option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
         option["pros"] = ["Uses strong text prior"]
@@ -804,6 +959,45 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(rows[0]["experiment_count"], 1)
         self.assertEqual(rows[0]["latest_result"], "Improved edit following.")
         self.assertTrue(rows[0]["is_current_best"])
+
+    def test_branch_comparison_counts_nested_option_experiments(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "problem_sub",
+                "type": "problem",
+                "title": "Sub problem",
+                "status": "active",
+                "parent": "option_t5",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_sub",
+                "type": "option",
+                "title": "Sub option",
+                "status": "open",
+                "parent": "problem_sub",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_sub",
+                "type": "experiment",
+                "title": "Sub experiment",
+                "status": "done",
+                "parent": "option_sub",
+                "result_summary": "Nested evidence.",
+            },
+        )
+        nodes = load_nodes(self.root)
+
+        rows = build_branch_comparison(nodes, current=load_yaml(self.root / "current_state.yaml"))
+
+        self.assertEqual(rows[0]["experiment_count"], 2)
+        self.assertEqual(rows[0]["latest_result"], "Nested evidence.")
 
     def test_decision_trace_resolves_context_and_evidence(self) -> None:
         write_node(
@@ -879,6 +1073,52 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(bundle["outcome_counts"]["positive"], 1)
         self.assertEqual(bundle["latest_finding"], "T5 improves replace following.")
         self.assertIn("1 experiment", bundle["evidence_summary"])
+
+    def test_decision_evidence_bundle_collects_nested_option_evidence(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "problem_sub",
+                "type": "problem",
+                "title": "Sub problem",
+                "status": "active",
+                "parent": "option_t5",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_sub",
+                "type": "option",
+                "title": "Sub option",
+                "status": "open",
+                "parent": "problem_sub",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_sub",
+                "type": "experiment",
+                "title": "Sub experiment",
+                "status": "done",
+                "parent": "option_sub",
+                "findings": [
+                    {
+                        "id": "exp_sub_finding_001",
+                        "statement": "Nested branch helps.",
+                        "confidence": "strong",
+                        "outcome": "positive",
+                    }
+                ],
+            },
+        )
+        nodes = load_nodes(self.root)
+
+        bundle = build_decision_evidence_bundle(nodes, "option_t5")
+
+        self.assertEqual(bundle["supporting_experiments"], ["exp_sub"])
+        self.assertEqual(bundle["evidence_strength"], "strong")
 
     def test_decision_evidence_bundle_keeps_manual_planned_experiment_and_none_without_evidence(self) -> None:
         nodes = load_nodes(self.root)

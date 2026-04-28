@@ -40,6 +40,11 @@ def _summarize_json(name: str, stdout: str) -> dict[str, Any]:
         return {"result_count": len(data) if isinstance(data, list) else 0}
     if name == "suggest_next_actions":
         return {"suggestion_count": len(data) if isinstance(data, list) else 0}
+    if name == "option_workstream_context":
+        return {
+            "option_id": data.get("option", {}).get("id") if isinstance(data, dict) else None,
+            "experiment_count": data.get("evidence_summary", {}).get("experiment_count") if isinstance(data, dict) else None,
+        }
     return {}
 
 
@@ -91,6 +96,17 @@ def _dependency_failure_check(python: str, missing: list[str]) -> dict[str, Any]
     }
 
 
+def _current_option_for_root(root: Path) -> str | None:
+    import yaml
+
+    path = root / "current_state.yaml"
+    if not path.exists():
+        return None
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    option_id = data.get("current_option")
+    return str(option_id) if option_id else None
+
+
 def skill_smoke_test_payload(
     root: Path = ROOT,
     *,
@@ -109,6 +125,7 @@ def skill_smoke_test_payload(
         }
 
     root_arg = str(root)
+    option_id = _current_option_for_root(root)
     checks = [
         _run_check("validate_cockpit", [python, _script_path("validate_cockpit.py"), "--root", root_arg]),
         _run_check("agent_bootstrap", [python, _script_path("agent_bootstrap.py"), "--root", root_arg, "--json"]),
@@ -119,6 +136,11 @@ def skill_smoke_test_payload(
         ),
         _run_check("suggest_next_actions", [python, _script_path("suggest_next_actions.py"), "--root", root_arg, "--json"]),
     ]
+    if option_id:
+        checks.append(_run_check(
+            "option_workstream_context",
+            [python, _script_path("option_workstream_context.py"), "--root", root_arg, "--option", option_id, "--json"],
+        ))
     return {
         "ok": all(check["passed"] for check in checks),
         "skill_root": str(SKILL_ROOT),

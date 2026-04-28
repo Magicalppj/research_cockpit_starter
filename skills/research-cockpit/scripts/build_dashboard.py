@@ -15,6 +15,7 @@ from cockpit.model import (
     build_experiment_matrix,
     build_focus_context,
     build_link_rows,
+    build_option_workstream_rows,
     build_search_index,
     graph_to_json,
     load_explicit_edges,
@@ -39,6 +40,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
     action_suggestions = build_action_suggestions(root, nodes, current, linked_resources)
     search_index = build_search_index(root, nodes, current)
     decision_checklists = build_decision_acceptance_checklists(nodes)
+    option_workstreams = build_option_workstream_rows(nodes)
 
     dash = root / "dashboards"
     dash.mkdir(parents=True, exist_ok=True)
@@ -54,6 +56,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
         dash / "next_action_suggestions.json",
         dash / "search_index.json",
         dash / "decision_acceptance_checklists.json",
+        dash / "option_workstreams.json",
     ]
     outputs[0].write_text(json.dumps(graph_json, indent=2, ensure_ascii=False), encoding="utf-8")
     outputs[1].write_text(json.dumps(context, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -65,6 +68,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
     outputs[7].write_text(json.dumps(action_suggestions, indent=2, ensure_ascii=False), encoding="utf-8")
     outputs[8].write_text(json.dumps(search_index, indent=2, ensure_ascii=False), encoding="utf-8")
     outputs[9].write_text(json.dumps(decision_checklists, indent=2, ensure_ascii=False), encoding="utf-8")
+    outputs[10].write_text(json.dumps(option_workstreams, indent=2, ensure_ascii=False), encoding="utf-8")
     return outputs
 
 

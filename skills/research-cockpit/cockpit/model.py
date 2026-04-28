@@ -37,6 +37,9 @@ ALL_KNOWN_STATUSES = {status for statuses in VALID_STATUSES_BY_TYPE.values() for
 VALID_FINDING_CONFIDENCES = {"weak", "medium", "strong"}
 VALID_FINDING_OUTCOMES = {"positive", "negative", "mixed", "inconclusive"}
 VALID_SUGGESTION_LIFECYCLE_STATES = {"active", "dismissed", "completed"}
+VALID_WORKSTREAM_STATUSES = {"claimed", "in_progress", "blocked", "reported", "released"}
+ACTIVE_WORKSTREAM_STATUSES = {"claimed", "in_progress", "blocked"}
+VALID_WORKSTREAM_RECOMMENDATIONS = {"accept", "reject", "continue"}
 CONTEXT_SCHEMA_VERSION = "agent_context_v1"
 
 SEARCH_NODE_TEXT_FIELDS = (
@@ -47,6 +50,8 @@ SEARCH_NODE_TEXT_FIELDS = (
     "findings",
     "next_actions",
     "blockers",
+    "agent_workstream",
+    "workstream_report",
     "pros",
     "cons",
     "rejection_reason",
@@ -590,6 +595,46 @@ def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
                         f"{nodes[ref_id].type!r}; expected 'artifact'"
                     )
 
+    def validate_option_workstream(node: ResearchNode) -> None:
+        has_workstream = "agent_workstream" in node.raw
+        has_report = "workstream_report" in node.raw
+        if not has_workstream and not has_report:
+            return
+        if node.type != "option":
+            if has_workstream:
+                errors.append(f"{node.id}: agent_workstream is only supported on option nodes")
+            if has_report:
+                errors.append(f"{node.id}: workstream_report is only supported on option nodes")
+            return
+
+        workstream = node.raw.get("agent_workstream")
+        if workstream is not None:
+            if not isinstance(workstream, dict):
+                errors.append(f"{node.id}: agent_workstream must be a mapping")
+            else:
+                status = workstream.get("status")
+                if status not in (None, "") and str(status) not in VALID_WORKSTREAM_STATUSES:
+                    allowed = ", ".join(sorted(VALID_WORKSTREAM_STATUSES))
+                    errors.append(f"{node.id}: agent_workstream.status invalid {status!r}; allowed: {allowed}")
+                validate_single_ref(
+                    node.id,
+                    "agent_workstream.report_to_problem",
+                    workstream.get("report_to_problem"),
+                    "problem",
+                )
+
+        report = node.raw.get("workstream_report")
+        if report is not None:
+            if not isinstance(report, dict):
+                errors.append(f"{node.id}: workstream_report must be a mapping")
+            else:
+                recommendation = report.get("recommendation")
+                if recommendation not in (None, "") and str(recommendation) not in VALID_WORKSTREAM_RECOMMENDATIONS:
+                    allowed = ", ".join(sorted(VALID_WORKSTREAM_RECOMMENDATIONS))
+                    errors.append(
+                        f"{node.id}: workstream_report.recommendation invalid {recommendation!r}; allowed: {allowed}"
+                    )
+
     for node in nodes.values():
         if not node.id:
             errors.append("node has empty id")
@@ -622,6 +667,7 @@ def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
         validate_list_refs(node.id, "alternatives_considered", "option")
         validate_list_refs(node.id, "derived_from")
         validate_findings(node)
+        validate_option_workstream(node)
     return errors
 
 
@@ -1599,6 +1645,8 @@ def node_context(node: ResearchNode) -> dict[str, Any]:
         "findings": node.raw.get("findings", []),
         "implementation_steps": node.raw.get("implementation_steps", []),
         "success_criteria": node.raw.get("success_criteria", []),
+        "agent_workstream": node.raw.get("agent_workstream"),
+        "workstream_report": node.raw.get("workstream_report"),
         "agent_context": node.raw.get("agent_context"),
         "next_actions": node.raw.get("next_actions", []),
         "blockers": node.raw.get("blockers", []),
@@ -1632,6 +1680,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         if n.type == "decision" and n.status in {"accepted", "proposed"}
     ]
     search_index = build_search_index(root, nodes, current)
+    option_workstreams = build_option_workstream_rows(nodes)
 
     return {
         "metadata": build_context_metadata(root, current),
@@ -1683,6 +1732,9 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
                 "consequences": n.raw.get("consequences", []),
             }
             for n in sorted(recent_decisions, key=lambda item: item.id)
+        ],
+        "active_option_workstreams": [
+            row for row in option_workstreams if row.get("workstream_status") in ACTIVE_WORKSTREAM_STATUSES
         ],
         "suggested_next_actions": build_action_suggestions(root, nodes, current),
         "search_index_summary": build_search_index_summary(search_index),
@@ -1831,6 +1883,26 @@ def build_focus_context(
         if suggestion.get("is_focus_related")
     ]
     search_index = build_search_index(root, nodes, current)
+    option_context_id: str | None = None
+    if focus_node:
+        try:
+            option_context_id = _node_id_by_type_in_path(
+                nodes,
+                derive_focus_path(nodes, focus_node.id),
+                "option",
+                nearest=True,
+            )
+        except ValueError:
+            option_context_id = None
+    if not option_context_id:
+        candidate_option_id = str(current_best_option or "")
+        if candidate_option_id in nodes and nodes[candidate_option_id].type == "option":
+            option_context_id = candidate_option_id
+    option_workstream_context = (
+        build_option_workstream_context(root, nodes, current, option_context_id)
+        if option_context_id
+        else None
+    )
 
     return {
         "metadata": build_context_metadata(root, current),
@@ -1866,6 +1938,7 @@ def build_focus_context(
         "knowledge_index": _knowledge_index(nodes, knowledge_node_ids),
         "suggested_next_actions": suggested_next_actions,
         "search_index_summary": build_search_index_summary(search_index),
+        "option_workstream_context": option_workstream_context,
     }
 
 
@@ -1895,17 +1968,51 @@ def build_current_state_payload(root: Path, nodes: dict[str, ResearchNode], curr
     }
 
 
+def build_option_subtree(nodes: dict[str, ResearchNode], option_id: str) -> dict[str, Any]:
+    if option_id not in nodes:
+        raise ValueError(f"Option node does not exist: {option_id}")
+    if nodes[option_id].type != "option":
+        raise ValueError(f"Node {option_id} must be option, got {nodes[option_id].type}")
+
+    node_ids: list[str] = []
+    seen: set[str] = set()
+
+    def visit(node_id: str) -> None:
+        if node_id in seen or node_id not in nodes:
+            return
+        seen.add(node_id)
+        node_ids.append(node_id)
+        for child_id in _child_ids(nodes, nodes[node_id]):
+            visit(child_id)
+
+    visit(option_id)
+    by_type = {
+        "problem": [],
+        "option": [],
+        "experiment": [],
+        "decision": [],
+        "artifact": [],
+    }
+    for node_id in node_ids:
+        node_type = nodes[node_id].type
+        if node_type in by_type:
+            by_type[node_type].append(node_id)
+
+    return {
+        "root_option_id": option_id,
+        "node_ids": node_ids,
+        "problem_ids": by_type["problem"],
+        "option_ids": by_type["option"],
+        "experiment_ids": by_type["experiment"],
+        "decision_ids": by_type["decision"],
+        "artifact_ids": by_type["artifact"],
+    }
+
+
 def _experiment_ids_for_option(nodes: dict[str, ResearchNode], option_id: str) -> list[str]:
-    child_ids = _child_ids(nodes, nodes[option_id]) if option_id in nodes else []
-    experiment_ids = [
-        child_id
-        for child_id in child_ids
-        if child_id in nodes and nodes[child_id].type == "experiment"
-    ]
-    for node in sorted(nodes.values(), key=lambda item: item.id):
-        if node.type == "experiment" and node.parent == option_id and node.id not in experiment_ids:
-            experiment_ids.append(node.id)
-    return experiment_ids
+    if option_id not in nodes or nodes[option_id].type != "option":
+        return []
+    return build_option_subtree(nodes, option_id)["experiment_ids"]
 
 
 def _latest_experiment_result(nodes: dict[str, ResearchNode], experiment_ids: list[str]) -> str | None:
@@ -2253,6 +2360,108 @@ def build_decision_evidence_summary(nodes: dict[str, ResearchNode], node_id: str
         "outcome_counts": outcome_counts,
         "latest_finding": latest_finding,
     }
+
+
+def _upstream_problem_id(nodes: dict[str, ResearchNode], option_id: str) -> str | None:
+    try:
+        path = derive_focus_path(nodes, option_id)
+    except ValueError:
+        return None
+    return _node_id_by_type_in_path(nodes, path, "problem", nearest=True)
+
+
+def build_option_workstream_context(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any],
+    option_id: str,
+) -> dict[str, Any]:
+    subtree = build_option_subtree(nodes, option_id)
+    option = nodes[option_id]
+    problem_id = _upstream_problem_id(nodes, option_id)
+    evidence = build_decision_evidence_bundle(nodes, option_id)
+    next_actions: list[str] = []
+    blockers: list[str] = []
+    for node_id in subtree["node_ids"]:
+        node = nodes[node_id]
+        next_actions.extend(node.raw.get("next_actions", []) or [])
+        blockers.extend(node.raw.get("blockers", []) or [])
+
+    return {
+        "option": node_context(option),
+        "upstream_problem": node_context(nodes[problem_id]) if problem_id else None,
+        "focus_path": _ordered_node_contexts(nodes, derive_focus_path(nodes, option_id)),
+        "subtree": subtree,
+        "subtree_nodes": _ordered_node_contexts(nodes, subtree["node_ids"]),
+        "problems": _ordered_node_contexts(nodes, subtree["problem_ids"]),
+        "options": _ordered_node_contexts(nodes, subtree["option_ids"]),
+        "experiments": _ordered_node_contexts(nodes, subtree["experiment_ids"]),
+        "decisions": _ordered_node_contexts(nodes, subtree["decision_ids"]),
+        "evidence_summary": {
+            **evidence,
+            "experiment_count": len(subtree["experiment_ids"]),
+        },
+        "open_next_actions": _unique_strings(next_actions),
+        "blockers": _unique_strings(blockers),
+        "suggested_commands": {
+            "claim": _workflow_command(
+                "claim_option.py",
+                "--option",
+                option_id,
+                "--agent",
+                "<agent_id>",
+                '--objective "Describe objective"',
+            ),
+            "context": _workflow_command("option_workstream_context.py", "--option", option_id, "--json"),
+            "report": _workflow_command(
+                "report_option_workstream.py",
+                "--option",
+                option_id,
+                "--agent",
+                "<agent_id>",
+                "--recommend",
+                "continue",
+                '--summary "Summarize evidence and recommendation"',
+            ),
+        },
+        "current_focus_related": option_id in set(current.get("current_focus_path", []) or []),
+    }
+
+
+def build_option_workstream_rows(nodes: dict[str, ResearchNode]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    def option_sort_key(node: ResearchNode) -> tuple[int, str]:
+        try:
+            return (len(derive_focus_path(nodes, node.id)), node.id)
+        except ValueError:
+            return (999, node.id)
+
+    for option in sorted((node for node in nodes.values() if node.type == "option"), key=option_sort_key):
+        subtree = build_option_subtree(nodes, option.id)
+        evidence = build_decision_evidence_bundle(nodes, option.id)
+        problem_id = _upstream_problem_id(nodes, option.id)
+        workstream = option.raw.get("agent_workstream") if isinstance(option.raw.get("agent_workstream"), dict) else {}
+        report = option.raw.get("workstream_report") if isinstance(option.raw.get("workstream_report"), dict) else {}
+        rows.append({
+            "option_id": option.id,
+            "option_title": option.title,
+            "option_status": option.status,
+            "upstream_problem_id": problem_id,
+            "upstream_problem_title": node_title(nodes, problem_id),
+            "owner": workstream.get("owner"),
+            "workstream_status": workstream.get("status"),
+            "objective": workstream.get("objective"),
+            "report_to_problem": workstream.get("report_to_problem") or problem_id,
+            "started_at": workstream.get("started_at"),
+            "updated_at": workstream.get("updated_at"),
+            "recommendation": report.get("recommendation"),
+            "report_summary": report.get("summary"),
+            "evidence_summary": report.get("evidence_summary") or evidence.get("evidence_summary"),
+            "experiment_count": len(subtree["experiment_ids"]),
+            "finding_count": evidence.get("findings_count", 0),
+            "latest_finding": evidence.get("latest_finding"),
+        })
+    return rows
 
 
 def build_branch_comparison(

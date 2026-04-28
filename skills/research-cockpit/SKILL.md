@@ -38,6 +38,7 @@ For scripts that accept `--root`, pass the `research_cockpit` data directory, no
 3. `research_cockpit/dashboards/focus_context_pack.json`.
 4. `python scripts\search_knowledge.py --query "..." --json`.
 5. `python scripts\list_agent_commands.py --json`.
+6. For option-branch work, `python scripts\option_workstream_context.py --option <option_id> --json`.
 
 ## Write Boundary
 
@@ -54,9 +55,14 @@ python scripts\build_dashboard.py
 python scripts\skill_smoke_test.py --json
 python scripts\suggest_next_actions.py --json
 python scripts\search_knowledge.py --query "..." --json
+python scripts\claim_option.py --option <option_id> --agent <agent_id>
+python scripts\option_workstream_context.py --option <option_id> --json
+python scripts\report_option_workstream.py --option <option_id> --agent <agent_id> --recommend continue --summary "..."
 python scripts\record_finding.py --experiment <id> --statement "..." --confidence medium
 python scripts\accept_decision.py --id <decision_id>
 ```
+
+For option-following agents: claim one option, work inside its child subtree, record findings on experiments, then report `accept`, `reject`, or `continue` back to the option. The report is evidence for the upstream problem; it does not accept a decision by itself.
 
 Set `RESEARCH_COCKPIT_PYTHON` if command templates should use a custom interpreter.
 

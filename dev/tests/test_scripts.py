@@ -22,11 +22,14 @@ from scripts.agent_bootstrap import agent_bootstrap_payload, format_dependency_e
 from scripts.apply_suggestion import apply_suggestion
 from scripts.build_dashboard import build_dashboard
 from scripts.check_decision_acceptance import decision_acceptance_payload
+from scripts.claim_option import claim_option
 from scripts.cleanup_suggestion_lifecycle import cleanup_suggestion_lifecycle
 from scripts.create_note import create_note
 from scripts.list_agent_commands import agent_command_manifest
+from scripts.option_workstream_context import option_workstream_context_payload
 from scripts.promote_decision import promote_decision
 from scripts.record_finding import record_finding
+from scripts.report_option_workstream import report_option_workstream
 from scripts.set_focus import set_focus
 from scripts.skill_smoke_test import missing_modules_for_python, skill_smoke_test_payload
 from scripts.suggest_next_actions import select_suggestions
@@ -212,6 +215,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "next_action_suggestions.json",
             "search_index.json",
             "decision_acceptance_checklists.json",
+            "option_workstreams.json",
         }
 
         self.assertEqual({path.name for path in paths}, expected)
@@ -222,6 +226,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         suggestions = json.loads((self.root / "dashboards" / "next_action_suggestions.json").read_text(encoding="utf-8"))
         search_index = json.loads((self.root / "dashboards" / "search_index.json").read_text(encoding="utf-8"))
         checklists = json.loads((self.root / "dashboards" / "decision_acceptance_checklists.json").read_text(encoding="utf-8"))
+        option_workstreams = json.loads((self.root / "dashboards" / "option_workstreams.json").read_text(encoding="utf-8"))
         nodes = load_nodes(self.root)
 
         self.assertEqual(context["linked_nodes"][0]["id"], "stage_text")
@@ -237,10 +242,89 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIsInstance(suggestions, list)
         self.assertIsInstance(search_index, list)
         self.assertIsInstance(checklists, list)
+        self.assertIsInstance(option_workstreams, list)
+        self.assertIn("active_option_workstreams", context)
+        self.assertIn("option_workstream_context", focus_context)
         self.assertIn("stage_text", nodes)
         self.assertIn("metadata", context)
         self.assertIn("metadata", focus_context)
         self.assertIsInstance(context["metadata"]["worktree_dirty"], bool)
+
+    def test_claim_option_writes_workstream_and_rebuilds_dashboard(self) -> None:
+        claim_option(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Evaluate T5 path",
+        )
+
+        data = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        workstreams = json.loads((self.root / "dashboards" / "option_workstreams.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(data["agent_workstream"]["owner"], "agent_t5")
+        self.assertEqual(data["agent_workstream"]["status"], "claimed")
+        self.assertEqual(data["agent_workstream"]["objective"], "Evaluate T5 path")
+        self.assertEqual(data["agent_workstream"]["report_to_problem"], "problem_text")
+        self.assertEqual(workstreams[0]["owner"], "agent_t5")
+
+    def test_claim_option_rejects_other_active_owner_and_force_overrides(self) -> None:
+        claim_option(self.root, option_id="option_t5", agent_id="agent_a", rebuild_dashboard=False)
+
+        with self.assertRaises(ValueError) as ctx:
+            claim_option(self.root, option_id="option_t5", agent_id="agent_b", rebuild_dashboard=False)
+
+        self.assertIn("already claimed", str(ctx.exception))
+
+        claim_option(self.root, option_id="option_t5", agent_id="agent_b", force=True, rebuild_dashboard=False)
+        data = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        self.assertEqual(data["agent_workstream"]["owner"], "agent_b")
+
+    def test_option_workstream_context_cli_outputs_json(self) -> None:
+        script = SKILL_ROOT / "scripts" / "option_workstream_context.py"
+
+        result = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--option", "option_t5", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["option"]["id"], "option_t5")
+        self.assertEqual(payload["upstream_problem"]["id"], "problem_text")
+
+    def test_report_option_workstream_writes_report_and_marks_reported(self) -> None:
+        claim_option(self.root, option_id="option_t5", agent_id="agent_t5", rebuild_dashboard=False)
+        record_finding(
+            self.root,
+            experiment_id="exp_t5",
+            statement="T5 improves text alignment.",
+            confidence="medium",
+            outcome="positive",
+            rebuild_dashboard=False,
+        )
+
+        report_option_workstream(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            recommendation="continue",
+            summary="Evidence is promising but incomplete.",
+        )
+
+        data = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        self.assertEqual(data["agent_workstream"]["status"], "reported")
+        self.assertEqual(data["workstream_report"]["reporting_agent"], "agent_t5")
+        self.assertEqual(data["workstream_report"]["recommendation"], "continue")
+        self.assertEqual(data["workstream_report"]["finding_count"], 1)
+
+    def test_option_workstream_context_payload_summarizes_option(self) -> None:
+        payload = option_workstream_context_payload(self.root, option_id="option_t5")
+
+        self.assertEqual(payload["option"]["id"], "option_t5")
+        self.assertEqual(payload["subtree"]["experiment_ids"], ["exp_t5"])
+        self.assertIn("context", payload["suggested_commands"])
 
     def test_agent_bootstrap_payload_reports_context_without_building_by_default(self) -> None:
         payload = agent_bootstrap_payload(self.root, build=False)

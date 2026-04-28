@@ -86,6 +86,16 @@ Record an experiment finding:
 python scripts\record_finding.py --experiment exp_042_flan_t5_clap --statement "FLAN-T5 + CLAP improves replace following." --confidence medium --outcome positive --metric replace_following --summary "Improved edit following."
 ```
 
+Follow an option as an agent workstream:
+
+```powershell
+python scripts\claim_option.py --option option_flan_t5_clap --agent agent_flan_t5 --objective "Evaluate the FLAN-T5 + CLAP branch."
+python scripts\option_workstream_context.py --option option_flan_t5_clap --json
+python scripts\report_option_workstream.py --option option_flan_t5_clap --agent agent_flan_t5 --recommend continue --summary "Promising evidence, but more ablation is needed."
+```
+
+`claim_option.py` enforces a single active owner for an option while its workstream status is `claimed`, `in_progress`, or `blocked`. Use `--force` only when intentionally transferring ownership. Agents can branch under the claimed option by adding child `problem` nodes, then child `option` / `experiment` / `decision` nodes. `report_option_workstream.py` writes a report back to the option but does not accept a decision or close the upstream problem.
+
 Promote an option into a decision:
 
 ```powershell
@@ -207,7 +217,7 @@ Save this as `research_cockpit/graph/edges.yaml` when you need semantic edges be
 - `research_cockpit/dashboards/search_index.json` stores the generated search entries. Context packs only include `search_index_summary`, so agents see counts and nearby entries without loading full note text by default.
 
 Agents should read `agent_context_pack.json` first, then `focus_context_pack.json`. The focus context now includes a `knowledge_index` with nearby linked note/config/file paths so agents can decide which long-form notes or artifacts to open next.
-Both context packs also include `suggested_next_actions` for read-only planning and `search_index_summary` for deciding whether to run `search_knowledge.py`.
+Both context packs also include `suggested_next_actions` for read-only planning and `search_index_summary` for deciding whether to run `search_knowledge.py`. When current focus is inside an option branch, `focus_context_pack.json` also includes `option_workstream_context` so a subagent can inspect the branch it should follow.
 
 ## Using as Agent Skill
 

@@ -23,6 +23,7 @@ from cockpit.model import (
     build_decision_trace,
     build_experiment_matrix,
     build_link_rows,
+    build_option_workstream_rows,
     build_search_index,
     build_search_index_summary,
     build_suggestion_lifecycle_rows,
@@ -37,10 +38,13 @@ from ui.view_helpers import (
     build_apply_suggestion_command,
     build_accept_decision_command,
     build_check_decision_acceptance_command,
+    build_claim_option_command,
     build_cleanup_suggestion_lifecycle_command,
     build_create_note_command,
+    build_option_workstream_context_command,
     build_promote_decision_command,
     build_record_finding_command,
+    build_report_option_workstream_command,
     build_set_focus_command,
     build_update_suggestion_state_command,
     context_rows,
@@ -57,6 +61,7 @@ from ui.view_helpers import (
     format_evidence_summary,
     format_finding_rows,
     format_node_option,
+    format_option_workstream_rows,
     format_resource_index_rows,
     format_resource_rows,
     format_search_result_rows,
@@ -84,6 +89,7 @@ UI_TEXT = {
         "data_health": "数据健康",
         "resources": "资源",
         "action_guidance": "行动建议",
+        "option_workstreams": "方案工作流",
         "valid": "有效",
         "issues": "个问题",
         "dashboard": "总览",
@@ -206,6 +212,7 @@ UI_TEXT = {
         "data_health": "Data Health",
         "resources": "Resources",
         "action_guidance": "Action Guidance",
+        "option_workstreams": "Option Workstreams",
         "valid": "Valid",
         "issues": "issue(s)",
         "dashboard": "Dashboard",
@@ -360,6 +367,10 @@ EXTRA_UI_TEXT = {
         "decision_not_ready": "该 decision 尚未满足接受条件。",
         "check_decision_command": "检查决策接受条件命令",
         "accept_decision_command": "接受决策命令",
+        "claim_option_command": "认领方案工作流命令",
+        "option_context_command": "方案工作流上下文命令",
+        "report_option_command": "回报方案工作流命令",
+        "no_option_workstreams": "暂无方案工作流记录。",
     },
     "en": {
         "suggestion_state": "Suggestion State",
@@ -401,6 +412,10 @@ EXTRA_UI_TEXT = {
         "decision_not_ready": "This decision is not ready for acceptance.",
         "check_decision_command": "Check Decision Acceptance Command",
         "accept_decision_command": "Accept Decision Command",
+        "claim_option_command": "Claim Option Workstream Command",
+        "option_context_command": "Option Workstream Context Command",
+        "report_option_command": "Report Option Workstream Command",
+        "no_option_workstreams": "No option workstreams recorded.",
     },
 }
 
@@ -421,6 +436,7 @@ def load_graph_data():
     context = build_agent_context(RESEARCH_ROOT, nodes)
     link_rows = build_link_rows(RESEARCH_ROOT, nodes)
     search_index = build_search_index(RESEARCH_ROOT, nodes, current)
+    option_workstreams = build_option_workstream_rows(nodes)
     action_suggestions = build_action_suggestions(RESEARCH_ROOT, nodes, current, link_rows)
     all_action_suggestions = build_action_suggestions(
         RESEARCH_ROOT,
@@ -439,6 +455,7 @@ def load_graph_data():
         action_suggestions,
         all_action_suggestions,
         search_index,
+        option_workstreams,
     )
 
 
@@ -631,6 +648,12 @@ def render_node_detail(
         if node.type == "option":
             st.write(text["promote_decision_command"])
             st.code(build_promote_decision_command(node_id), language="powershell")
+            st.write(text["claim_option_command"])
+            st.code(build_claim_option_command(node_id), language="powershell")
+            st.write(text["option_context_command"])
+            st.code(build_option_workstream_context_command(node_id), language="powershell")
+            st.write(text["report_option_command"])
+            st.code(build_report_option_workstream_command(node_id), language="powershell")
         if node.type == "decision":
             st.write(text["check_decision_command"])
             st.code(build_check_decision_acceptance_command(node_id), language="powershell")
@@ -1027,6 +1050,35 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
                 st.error(f"{text['queue_failed']} {exc}")
 
 
+def render_option_workstreams(option_workstreams: list[dict], text: dict[str, str]) -> None:
+    if not option_workstreams:
+        st.info(text["no_option_workstreams"])
+        return
+
+    st.dataframe(
+        pd.DataFrame(format_option_workstream_rows(option_workstreams)),
+        use_container_width=True,
+        hide_index=True,
+    )
+    options = [row for row in option_workstreams if row.get("option_id")]
+    selected = st.selectbox(
+        text["option"],
+        options,
+        format_func=lambda row: f"{row.get('option_title')} | {row.get('option_id')}",
+        key="option_workstream_selected",
+    )
+    if not selected:
+        return
+
+    option_id = selected["option_id"]
+    st.write(text["option_context_command"])
+    st.code(build_option_workstream_context_command(option_id), language="powershell")
+    st.write(text["claim_option_command"])
+    st.code(build_claim_option_command(option_id), language="powershell")
+    st.write(text["report_option_command"])
+    st.code(build_report_option_workstream_command(option_id), language="powershell")
+
+
 def render_search(search_index: list[dict], nodes: dict, text: dict[str, str]) -> None:
     summary = build_search_index_summary(search_index)
     m1, m2, m3, m4 = st.columns(4)
@@ -1271,6 +1323,7 @@ def main() -> None:
         action_suggestions,
         all_action_suggestions,
         search_index,
+        option_workstreams,
     ) = load_graph_data()
 
     with st.sidebar:
@@ -1308,6 +1361,8 @@ def main() -> None:
                 render_decision_trace(nodes, text)
             elif label == text["action_guidance"]:
                 render_action_guidance(all_action_suggestions, text)
+            elif label == text["option_workstreams"]:
+                render_option_workstreams(option_workstreams, text)
             elif label == text["search"]:
                 render_search(search_index, nodes, text)
             elif label == text["resources"]:
