@@ -1,4 +1,28 @@
 # Research Cockpit 开发状态
+## Interaction Log Coverage v1 更新（2026-04-28）
+
+本批补齐关键安全写入脚本的持久化操作记录，让 agent 可以从 `interaction_log.yaml` 和 context pack 的 `recent_interactions` 中理解最近的人类/agent 写入动作。
+
+已完成：
+
+- `claim_option.py` 成功认领 option 后追加 `claim_option` 事件，记录 `option_id`、`agent_id`、`status`、`force` 以及 `agent_workstream` 的 before/after 摘要。
+- `report_option_workstream.py` 成功回报 option workstream 后追加 `report_option` 事件，记录 `option_id`、`agent_id`、`recommendation`、workstream 状态和 report 摘要。
+- `apply_suggestion.py` 对 `current` 和 `node` 两种 target 都追加 `apply_suggestion` 事件；重复入队时也记录事件，并通过 `changed: false` 表示没有新增 action。
+- `accept_decision.py` 成功接受 decision 后追加 `accept_decision` 事件，记录 decision/option/problem 的状态变化；未通过 checklist 且未 `--force-accept` 的失败路径不写日志。
+- `--no-build` 仍只跳过 dashboard rebuild，不跳过 interaction log；写入顺序保持为校验通过、写 YAML、追加 log、按需 rebuild。
+
+验证目标：
+
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s dev\tests`
+- `%RESEARCH_COCKPIT_PYTHON% skills\research-cockpit\scripts\skill_smoke_test.py --json`
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_skill_release_check.py --json --skip-mutating --python %RESEARCH_COCKPIT_PYTHON%`
+
+当前仍可升级：
+
+- decision acceptance UI 修复提示：按 blocking failure 显示对应修复命令或 YAML 字段。
+- React Flow / Cytoscape 双向组件 spike：让图谱节点点击直接驱动右侧 inspector。
+- dry-run coverage 扩展：继续为 mutating scripts 增加预览模式。
+
 ## Graph Saved Views v1 更新（2026-04-28）
 
 本批在 Graph Interaction Workbench P0 的基础上补齐可复用图谱视图预设。目标是让研究者把常用的视图范围和筛选条件保存到 repo-native 数据中，后续由 UI 和 agent 继续读取，而不是只停留在一次性前端状态。
@@ -20,7 +44,6 @@
 
 当前仍可升级：
 
-- 将 claim/report/apply suggestion/accept decision 等更多安全操作接入 `interaction_log.yaml`。
 - 做 React Flow / Cytoscape 双向组件 spike，让图谱节点点击直接驱动右侧 inspector。
 - 继续为 mutating scripts 扩展 dry-run coverage。
 

@@ -12,12 +12,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cockpit.model import (
     ResearchNode,
     ValidationError,
+    append_interaction_log,
     build_decision_acceptance_checklist,
     decision_acceptance_failure_message,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     save_yaml,
+    script_command,
     validate_cockpit,
 )
 from scripts.build_dashboard import build_dashboard
@@ -57,6 +59,14 @@ def accept_decision(
     decision_data = load_yaml(decision_path)
     option_data = load_yaml(option_path)
     problem_data = load_yaml(problem_path)
+    before = {
+        "decision_status": decision_data.get("status"),
+        "option_status": option_data.get("status"),
+        "option_decision_state": option_data.get("decision_state"),
+        "problem_status": problem_data.get("status"),
+        "problem_resolved_by": problem_data.get("resolved_by"),
+        "problem_current_best_option": problem_data.get("current_best_option"),
+    }
 
     decision_data["status"] = "accepted"
     decision_data["decision_status"] = "accepted"
@@ -80,6 +90,31 @@ def accept_decision(
     save_yaml(decision_path, decision_data)
     save_yaml(option_path, option_data)
     save_yaml(problem_path, problem_data)
+    command = f"{script_command('accept_decision.py')} --id {decision_id}"
+    if force_accept:
+        command += " --force-accept"
+    append_interaction_log(
+        root,
+        kind="accept_decision",
+        actor="researcher",
+        node_id=decision_id,
+        command=command,
+        before=before,
+        after={
+            "decision_status": decision_data.get("status"),
+            "option_status": option_data.get("status"),
+            "option_decision_state": option_data.get("decision_state"),
+            "problem_status": problem_data.get("status"),
+            "problem_resolved_by": problem_data.get("resolved_by"),
+            "problem_current_best_option": problem_data.get("current_best_option"),
+        },
+        extra={
+            "decision_id": decision_id,
+            "option_id": str(option_id),
+            "problem_id": str(problem_id),
+            "forced": force_accept,
+        },
+    )
     if rebuild_dashboard:
         build_dashboard(root)
     return {

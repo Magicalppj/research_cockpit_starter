@@ -13,11 +13,13 @@ from cockpit.model import (
     ResearchNode,
     VALID_WORKSTREAM_RECOMMENDATIONS,
     ValidationError,
+    append_interaction_log,
     build_option_workstream_context,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     save_yaml,
+    script_command,
     validate_cockpit,
 )
 from scripts.build_dashboard import build_dashboard
@@ -49,6 +51,8 @@ def report_option_workstream(
     option_path = find_node_file(root, option_id)
     data = load_yaml(option_path)
     workstream = data.get("agent_workstream") if isinstance(data.get("agent_workstream"), dict) else {}
+    before_workstream = dict(workstream) if workstream else None
+    before_report = data.get("workstream_report") if isinstance(data.get("workstream_report"), dict) else None
     existing_owner = str(workstream.get("owner") or "")
     if existing_owner and existing_owner != agent_id:
         raise ValueError(f"{option_id} is owned by {existing_owner}; reporting agent was {agent_id}")
@@ -80,6 +84,29 @@ def report_option_workstream(
     candidate[option_id] = ResearchNode.from_dict(data)
     validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
     save_yaml(option_path, data)
+    append_interaction_log(
+        root,
+        kind="report_option",
+        actor=agent_id,
+        node_id=option_id,
+        command=(
+            f"{script_command('report_option_workstream.py')}"
+            f" --option {option_id} --agent {agent_id} --recommend {recommendation}"
+        ),
+        before={
+            "agent_workstream": before_workstream,
+            "workstream_report": before_report,
+        },
+        after={
+            "agent_workstream": data["agent_workstream"],
+            "workstream_report": data["workstream_report"],
+        },
+        extra={
+            "option_id": option_id,
+            "agent_id": agent_id,
+            "recommendation": recommendation,
+        },
+    )
     if rebuild_dashboard:
         build_dashboard(root)
     return option_path

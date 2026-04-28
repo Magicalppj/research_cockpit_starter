@@ -12,12 +12,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cockpit.model import (
     ResearchNode,
     ValidationError,
+    append_interaction_log,
     build_action_suggestions,
     build_link_rows,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     save_yaml,
+    script_command,
     validate_cockpit,
 )
 from scripts.build_dashboard import build_dashboard
@@ -65,21 +67,42 @@ def apply_suggestion(
     suggestions = build_action_suggestions(root, nodes, current, build_link_rows(root, nodes))
     suggestion = _find_suggestion(suggestions, suggestion_id)
     action = str(suggestion.get("action") or "")
+    source_node_id = str(suggestion.get("source_node_id") or "")
 
     if target == "current":
+        before_actions = list(current.get("next_actions", []) or [])
         changed = _append_action(current, action, "current_state")
         validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
         save_yaml(root / "current_state.yaml", current)
+        after_actions = list(current.get("next_actions", []) or [])
     else:
-        node_id = str(suggestion.get("source_node_id"))
+        node_id = source_node_id
         node_path = find_node_file(root, node_id)
         node_data = load_yaml(node_path)
+        before_actions = list(node_data.get("next_actions", []) or [])
         changed = _append_action(node_data, action, node_id)
         candidate = dict(nodes)
         candidate[node_id] = ResearchNode.from_dict(node_data)
         validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
         save_yaml(node_path, node_data)
+        after_actions = list(node_data.get("next_actions", []) or [])
 
+    append_interaction_log(
+        root,
+        kind="apply_suggestion",
+        actor="researcher",
+        node_id=source_node_id or None,
+        command=f"{script_command('apply_suggestion.py')} --id {suggestion_id} --target {target}",
+        before={"target": target, "next_actions": before_actions},
+        after={"target": target, "next_actions": after_actions},
+        extra={
+            "suggestion_id": suggestion_id,
+            "target": target,
+            "changed": changed,
+            "source_node_id": source_node_id,
+            "action": action,
+        },
+    )
     if rebuild_dashboard:
         build_dashboard(root)
     return {

@@ -13,11 +13,13 @@ from cockpit.model import (
     ACTIVE_WORKSTREAM_STATUSES,
     ResearchNode,
     ValidationError,
+    append_interaction_log,
     derive_focus_path,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     save_yaml,
+    script_command,
     validate_cockpit,
 )
 from scripts.build_dashboard import build_dashboard
@@ -58,6 +60,7 @@ def claim_option(
     option_path = find_node_file(root, option_id)
     data = load_yaml(option_path)
     existing = data.get("agent_workstream") if isinstance(data.get("agent_workstream"), dict) else {}
+    before_workstream = dict(existing) if existing else None
     existing_owner = str(existing.get("owner") or "")
     existing_status = str(existing.get("status") or "")
     if (
@@ -89,6 +92,24 @@ def claim_option(
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
     save_yaml(option_path, data)
+    command = f"{script_command('claim_option.py')} --option {option_id} --agent {agent_id} --status {status}"
+    if force:
+        command += " --force"
+    append_interaction_log(
+        root,
+        kind="claim_option",
+        actor=agent_id,
+        node_id=option_id,
+        command=command,
+        before={"agent_workstream": before_workstream},
+        after={"agent_workstream": data["agent_workstream"]},
+        extra={
+            "option_id": option_id,
+            "agent_id": agent_id,
+            "status": status,
+            "force": force,
+        },
+    )
     if rebuild_dashboard:
         build_dashboard(root)
     return option_path

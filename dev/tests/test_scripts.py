@@ -43,6 +43,10 @@ def write_node(root: Path, data: dict) -> None:
     save_yaml(root / "graph" / "nodes" / f"{data['id']}.yaml", data)
 
 
+def interaction_events(root: Path) -> list[dict]:
+    return load_yaml(root / "graph" / "interaction_log.yaml").get("events", [])
+
+
 class ScriptBehaviorTests(unittest.TestCase):
     def setUp(self) -> None:
         temp_parent = ROOT_DIR / ".test_tmp"
@@ -273,6 +277,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(data["agent_workstream"]["objective"], "Evaluate T5 path")
         self.assertEqual(data["agent_workstream"]["report_to_problem"], "problem_text")
         self.assertEqual(workstreams[0]["owner"], "agent_t5")
+        event = interaction_events(self.root)[-1]
+        self.assertEqual(event["kind"], "claim_option")
+        self.assertEqual(event["actor"], "agent_t5")
+        self.assertEqual(event["node_id"], "option_t5")
+        self.assertEqual(event["option_id"], "option_t5")
+        self.assertEqual(event["agent_id"], "agent_t5")
+        self.assertEqual(event["after"]["agent_workstream"]["status"], "claimed")
+        self.assertIsNone(event["before"]["agent_workstream"])
 
     def test_claim_option_rejects_other_active_owner_and_force_overrides(self) -> None:
         claim_option(self.root, option_id="option_t5", agent_id="agent_a", rebuild_dashboard=False)
@@ -325,6 +337,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(data["workstream_report"]["reporting_agent"], "agent_t5")
         self.assertEqual(data["workstream_report"]["recommendation"], "continue")
         self.assertEqual(data["workstream_report"]["finding_count"], 1)
+        event = interaction_events(self.root)[-1]
+        self.assertEqual(event["kind"], "report_option")
+        self.assertEqual(event["actor"], "agent_t5")
+        self.assertEqual(event["option_id"], "option_t5")
+        self.assertEqual(event["recommendation"], "continue")
+        self.assertEqual(event["after"]["workstream_report"]["summary"], "Evidence is promising but incomplete.")
 
     def test_option_workstream_context_payload_summarizes_option(self) -> None:
         payload = option_workstream_context_payload(self.root, option_id="option_t5")
@@ -710,6 +728,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(result_again["changed"])
         self.assertEqual(first["next_actions"], second["next_actions"])
         self.assertEqual(first["next_actions"].count(result["suggestion"]["action"]), 1)
+        events = interaction_events(self.root)
+        self.assertEqual([event["kind"] for event in events[-2:]], ["apply_suggestion", "apply_suggestion"])
+        self.assertEqual(events[-2]["target"], "current")
+        self.assertTrue(events[-2]["changed"])
+        self.assertFalse(events[-1]["changed"])
 
     def test_apply_suggestion_adds_source_node_action_and_rebuilds_dashboard(self) -> None:
         result = apply_suggestion(self.root, suggestion_id="next_action_001", target="node")
@@ -719,6 +742,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(result["target"], "node")
         self.assertIn(result["suggestion"]["action"], source["next_actions"])
         self.assertTrue((self.root / "dashboards" / "next_action_suggestions.json").exists())
+        event = interaction_events(self.root)[-1]
+        self.assertEqual(event["kind"], "apply_suggestion")
+        self.assertEqual(event["node_id"], source_id)
+        self.assertEqual(event["target"], "node")
+        self.assertTrue(event["changed"])
 
     def test_apply_suggestion_rejects_unknown_id_and_invalid_target(self) -> None:
         with self.assertRaises(ValueError) as missing:
@@ -1364,6 +1392,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(option["decision_state"], "accepted")
         self.assertEqual(problem["status"], "resolved")
         self.assertEqual(problem["resolved_by"], "decision_t5")
+        event = interaction_events(self.root)[-1]
+        self.assertEqual(event["kind"], "accept_decision")
+        self.assertEqual(event["node_id"], "decision_t5")
+        self.assertEqual(event["decision_id"], "decision_t5")
+        self.assertEqual(event["option_id"], "option_t5")
+        self.assertEqual(event["problem_id"], "problem_text")
+        self.assertFalse(event["forced"])
 
     def test_accept_decision_rejects_not_ready_unless_forced(self) -> None:
         write_node(
@@ -1381,10 +1416,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         with self.assertRaises(ValueError) as not_ready:
             accept_decision(self.root, decision_id="decision_t5", rebuild_dashboard=False)
         self.assertIn("not ready", str(not_ready.exception))
+        self.assertEqual(interaction_events(self.root), [])
 
         accept_decision(self.root, decision_id="decision_t5", force_accept=True, rebuild_dashboard=False)
         decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
         self.assertEqual(decision["status"], "accepted")
+        event = interaction_events(self.root)[-1]
+        self.assertEqual(event["kind"], "accept_decision")
+        self.assertTrue(event["forced"])
 
     def test_promote_accepted_decision_updates_option_and_problem(self) -> None:
         write_node(

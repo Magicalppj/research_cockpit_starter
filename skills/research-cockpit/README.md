@@ -20,6 +20,7 @@ Then open the forwarded port in your browser.
 The UI opens on the Research Graph in Focus Mode by default.
 The graph workbench supports Focus Depth, Current Branch, Option Workstream, and Global views, plus filters for node type, status, stage, focus role, workstream, blockers, next actions, and missing evidence. The graph detail panel can set any visible node as the current focus and records that durable operation in `research_cockpit/graph/interaction_log.yaml`. The UI also includes Branch Comparison, Decision Trace, Action Guidance, Search, Resources, and node search views for research review.
 Researchers can save reusable graph filter presets from the graph workbench. Saved presets are stored in `research_cockpit/graph/graph_views.yaml` as dynamic views over the current graph data, not immutable graph snapshots. Saving a view appends a `save_graph_view` event to `interaction_log.yaml` and refreshes dashboard/context outputs so agents can read `saved_graph_views`.
+Key mutating workflow scripts such as claim/report option workstreams, apply suggestion, and accept decision also append concise events to `interaction_log.yaml`.
 
 By default commands use `python`. If your environment needs a specific interpreter, set `RESEARCH_COCKPIT_PYTHON`; generated command templates will use that value.
 If `agent_bootstrap.py` reports missing modules, install this package's dependencies with `python -m pip install -r requirements.txt` or use an interpreter that already has them.
