@@ -8,11 +8,11 @@ from types import SimpleNamespace
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-from ui.app import (
+from ui.app import build_pyvis_html
+from ui.view_helpers import (
     build_apply_suggestion_command,
     build_create_note_command,
     build_promote_decision_command,
-    build_pyvis_html,
     build_record_finding_command,
     build_set_focus_command,
     build_update_suggestion_state_command,
