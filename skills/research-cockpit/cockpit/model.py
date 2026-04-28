@@ -1684,7 +1684,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
 
     return {
         "metadata": build_context_metadata(root, current),
-        "project_name": "Audio Edit Research Cockpit",
+        "project_name": "Research Cockpit Demo",
         "current_stage": current.get("current_stage"),
         "current_stage_title": node_title(nodes, current.get("current_stage")),
         "current_problem": current.get("current_problem"),
@@ -1910,7 +1910,7 @@ def build_focus_context(
         "focus_path": _ordered_node_contexts(nodes, path_ids),
         "focus_path_ids": path_ids,
         "overview": {
-            "project_name": "Audio Edit Research Cockpit",
+            "project_name": "Research Cockpit Demo",
             "current_stage": current.get("current_stage"),
             "current_stage_title": node_title(nodes, current.get("current_stage")),
             "current_problem": current.get("current_problem"),

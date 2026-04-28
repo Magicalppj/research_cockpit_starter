@@ -1,0 +1,12 @@
+id: problem_demo_subtask_scope
+type: problem
+title: Define compact evaluation cases
+status: open
+priority: medium
+parent: option_demo_prompt_refinement
+question: Which small set of cases is enough to judge whether the option branch is improving consistency?
+summary: Nested demo problem showing that an option can branch into smaller problems for subagents.
+children:
+- option_demo_eval_cases
+next_actions:
+- Draft three lightweight evaluation cases.

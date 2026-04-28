@@ -1,0 +1,12 @@
+id: option_demo_retrieval_branch
+type: option
+title: Retrieval augmentation branch
+status: parked
+priority: medium
+parent: problem_demo_quality_gap
+summary: Alternative branch that would add more external context before answering.
+pros:
+- Can improve recall when source material is sparse
+cons:
+- Requires extra indexing and freshness checks
+rejection_reason: Parked until the prompt refinement branch has at least one result.

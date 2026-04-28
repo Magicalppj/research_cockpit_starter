@@ -42,6 +42,18 @@ FORBIDDEN_STRINGS = (
     "C:" + "\\Users" + "\\" + "22" + "339",
     "22" + "339",
     "miniconda3" + "\\envs" + "\\aigc",
+    "Audio Edit",
+    "FLAN",
+    "CLAP",
+    "Gemma",
+    "UMT5",
+    "dataset_v2",
+    "stage_text_encoder",
+    "problem_event_text_weak",
+    "option_flan",
+    "decision_flan",
+    "exp_041",
+    "exp_042",
 )
 
 
@@ -247,7 +259,7 @@ def read_only_startup_track(skill_path: Path, python: str) -> dict[str, Any]:
         [python, _script(skill_path, "agent_bootstrap.py"), "--root", root, "--json"],
         [python, _script(skill_path, "skill_smoke_test.py"), "--root", root, "--json"],
         [python, _script(skill_path, "list_agent_commands.py"), "--json"],
-        [python, _script(skill_path, "search_knowledge.py"), "--root", root, "--query", "t5", "--json", "--limit", "5"],
+        [python, _script(skill_path, "search_knowledge.py"), "--root", root, "--query", "demo", "--json", "--limit", "5"],
         [python, _script(skill_path, "suggest_next_actions.py"), "--root", root, "--json"],
     ]
     if option_id:
@@ -303,7 +315,7 @@ def isolated_mutation_track(skill_path: Path, python: str, destination: Path) ->
             "--root",
             root,
             "--experiment",
-            "exp_042_flan_t5_clap",
+            "experiment_demo_prompt_refinement",
             "--statement",
             "Release check synthetic finding.",
             "--confidence",
@@ -313,7 +325,7 @@ def isolated_mutation_track(skill_path: Path, python: str, destination: Path) ->
             "--summary",
             "Release check synthetic finding recorded in isolated copy.",
         ],
-        [python, _script(copy_path, "update_decision_evidence.py"), "--root", root, "--id", "decision_flan_t5_clap"],
+        [python, _script(copy_path, "update_decision_evidence.py"), "--root", root, "--id", "decision_demo_prompt_refinement"],
         [python, _script(copy_path, "validate_cockpit.py"), "--root", root],
         [python, _script(copy_path, "build_dashboard.py"), "--root", root],
     ]
@@ -346,7 +358,7 @@ def decision_gate_track(skill_path: Path, python: str) -> dict[str, Any]:
         "--root",
         _data_root(skill_path),
         "--id",
-        "decision_flan_t5_clap",
+        "decision_demo_prompt_refinement",
         "--json",
     ]
     check = _run_command(command, cwd=skill_path, allowed_returncodes={0, 1})

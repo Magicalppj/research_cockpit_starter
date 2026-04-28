@@ -1,9 +1,0 @@
-id: stage_model_edit
-type: stage
-title: Edit Model Design
-status: active
-priority: high
-summary: Improve unified edit-program model for remove/replace/local rewriting under
-  overlap.
-children:
-- problem_remove_overlap_weak

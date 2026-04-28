@@ -1,23 +1,23 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-04-28T07:17:19.365049Z",
-    "source_git_commit": "fb0fdc6",
+    "generated_at": "2026-04-28T09:07:18.248607Z",
+    "source_git_commit": "104b5a8",
     "worktree_dirty": true,
-    "current_state_updated_at": "2026-04-27"
+    "current_state_updated_at": "2026-04-28"
   },
   "focus_node": {
-    "id": "problem_event_text_weak",
+    "id": "problem_demo_quality_gap",
     "type": "problem",
-    "title": "Event-level text control is weak",
+    "title": "Demo answer quality is inconsistent",
     "status": "active",
     "priority": "critical",
-    "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
-    "question": "How can the model respond more strongly to fine-grained old/new event text edits?",
+    "summary": "Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.",
+    "question": "How can the demo agent make answers more consistent across repeated runs?",
     "hypothesis": null,
     "evidence_strength": null,
     "evidence_summary": null,
-    "current_best_option": "option_flan_t5_clap",
+    "current_best_option": "option_demo_prompt_refinement",
     "decision_state": null,
     "outcome": null,
     "result_summary": null,
@@ -33,22 +33,20 @@
     "workstream_report": null,
     "agent_context": null,
     "next_actions": [
-      "Run FLAN-T5-only ablation",
-      "Run FLAN-T5 + CLAP ablation"
+      "Run the prompt refinement demo experiment."
     ],
     "blockers": [
-      "Need new feature cache",
-      "Need ablation runs"
+      "Need at least one structured finding before accepting the demo decision."
     ]
   },
   "focus_path": [
     {
-      "id": "stage_text_encoder",
+      "id": "stage_demo_research",
       "type": "stage",
-      "title": "Text Encoder Redesign",
+      "title": "Demo Research Stage",
       "status": "active",
       "priority": "high",
-      "summary": "Improve event-level old/new text understanding for local audio editing.",
+      "summary": "Minimal public demo stage for validating Research Cockpit workflows.",
       "question": null,
       "hypothesis": null,
       "evidence_strength": null,
@@ -69,23 +67,22 @@
       "workstream_report": null,
       "agent_context": null,
       "next_actions": [
-        "Implement FLAN-T5 timeline features",
-        "Add CLAP semantic anchor"
+        "Review the demo problem and compare candidate options."
       ],
       "blockers": []
     },
     {
-      "id": "problem_event_text_weak",
+      "id": "problem_demo_quality_gap",
       "type": "problem",
-      "title": "Event-level text control is weak",
+      "title": "Demo answer quality is inconsistent",
       "status": "active",
       "priority": "critical",
-      "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
-      "question": "How can the model respond more strongly to fine-grained old/new event text edits?",
+      "summary": "Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.",
+      "question": "How can the demo agent make answers more consistent across repeated runs?",
       "hypothesis": null,
       "evidence_strength": null,
       "evidence_summary": null,
-      "current_best_option": "option_flan_t5_clap",
+      "current_best_option": "option_demo_prompt_refinement",
       "decision_state": null,
       "outcome": null,
       "result_summary": null,
@@ -101,34 +98,30 @@
       "workstream_report": null,
       "agent_context": null,
       "next_actions": [
-        "Run FLAN-T5-only ablation",
-        "Run FLAN-T5 + CLAP ablation"
+        "Run the prompt refinement demo experiment."
       ],
       "blockers": [
-        "Need new feature cache",
-        "Need ablation runs"
+        "Need at least one structured finding before accepting the demo decision."
       ]
     }
   ],
   "focus_path_ids": [
-    "stage_text_encoder",
-    "problem_event_text_weak"
+    "stage_demo_research",
+    "problem_demo_quality_gap"
   ],
   "overview": {
-    "project_name": "Audio Edit Research Cockpit",
-    "current_stage": "stage_text_encoder",
-    "current_stage_title": "Text Encoder Redesign",
-    "current_problem": "problem_event_text_weak",
-    "current_problem_title": "Event-level text control is weak",
-    "current_option": "option_flan_t5_clap",
-    "current_option_title": "FLAN-T5-XL tokens + CLAP semantic anchor",
-    "current_focus_node": "problem_event_text_weak",
-    "current_focus_node_title": "Event-level text control is weak",
-    "current_hypothesis": "Event-level old/new text control can be improved by using FLAN-T5-XL token features plus CLAP audio-semantic anchors in the Semantic Ribbon branch.\n",
+    "project_name": "Research Cockpit Demo",
+    "current_stage": "stage_demo_research",
+    "current_stage_title": "Demo Research Stage",
+    "current_problem": "problem_demo_quality_gap",
+    "current_problem_title": "Demo answer quality is inconsistent",
+    "current_option": "option_demo_prompt_refinement",
+    "current_option_title": "Prompt refinement branch",
+    "current_focus_node": "problem_demo_quality_gap",
+    "current_focus_node_title": "Demo answer quality is inconsistent",
+    "current_hypothesis": "A small structured demo can show how agents inspect, branch, test, and report option workstreams.",
     "open_risks": [
-      "Need train/inference parity for FLAN-T5 + CLAP timeline features.",
-      "Need to verify whether CLAP anchor improves remove/replace under overlap.",
-      "Need to avoid mixing legacy timeline inference with edit-program inference."
+      "Demo data is illustrative and should be replaced by the user's own research nodes."
     ],
     "focus_mode": {
       "default_depth": 2,
@@ -145,12 +138,12 @@
   "local_neighbors": {
     "parents": [
       {
-        "id": "stage_text_encoder",
+        "id": "stage_demo_research",
         "type": "stage",
-        "title": "Text Encoder Redesign",
+        "title": "Demo Research Stage",
         "status": "active",
         "priority": "high",
-        "summary": "Improve event-level old/new text understanding for local audio editing.",
+        "summary": "Minimal public demo stage for validating Research Cockpit workflows.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -171,51 +164,21 @@
         "workstream_report": null,
         "agent_context": null,
         "next_actions": [
-          "Implement FLAN-T5 timeline features",
-          "Add CLAP semantic anchor"
+          "Review the demo problem and compare candidate options."
         ],
         "blockers": []
       }
     ],
     "children": [
       {
-        "id": "option_gemma_baseline",
+        "id": "option_demo_prompt_refinement",
         "type": "option",
-        "title": "Keep Gemma-only event features",
-        "status": "rejected",
-        "priority": "low",
-        "summary": "Current baseline; useful for comparison but weak for event-level edit control.",
-        "question": null,
-        "hypothesis": null,
-        "evidence_strength": null,
-        "evidence_summary": null,
-        "current_best_option": null,
-        "decision_state": "rejected",
-        "outcome": null,
-        "result_summary": null,
-        "supporting_experiments": [],
-        "contradicting_experiments": [],
-        "supporting_decisions": [],
-        "linked_artifacts": [],
-        "links": [],
-        "findings": [],
-        "implementation_steps": [],
-        "success_criteria": [],
-        "agent_workstream": null,
-        "workstream_report": null,
-        "agent_context": null,
-        "next_actions": [],
-        "blockers": []
-      },
-      {
-        "id": "option_flan_t5_clap",
-        "type": "option",
-        "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+        "title": "Prompt refinement branch",
         "status": "active",
         "priority": "high",
-        "summary": "Main candidate for event/edit branch text encoding.",
+        "summary": "Candidate branch that improves instructions, examples, and acceptance checks.",
         "question": null,
-        "hypothesis": "FLAN-T5 improves token-level event understanding, while CLAP improves audio-semantic alignment.",
+        "hypothesis": "Clearer task framing and explicit success criteria will make responses more consistent.",
         "evidence_strength": null,
         "evidence_summary": null,
         "current_best_option": null,
@@ -237,44 +200,12 @@
         "blockers": []
       },
       {
-        "id": "option_umt5_clap",
+        "id": "option_demo_retrieval_branch",
         "type": "option",
-        "title": "UMT5 + CLAP multilingual branch",
+        "title": "Retrieval augmentation branch",
         "status": "parked",
         "priority": "medium",
-        "summary": "Potential multilingual alternative if Chinese or mixed-language event text becomes central.",
-        "question": null,
-        "hypothesis": null,
-        "evidence_strength": null,
-        "evidence_summary": null,
-        "current_best_option": null,
-        "decision_state": "open",
-        "outcome": null,
-        "result_summary": null,
-        "supporting_experiments": [],
-        "contradicting_experiments": [],
-        "supporting_decisions": [],
-        "linked_artifacts": [],
-        "links": [],
-        "findings": [],
-        "implementation_steps": [],
-        "success_criteria": [],
-        "agent_workstream": null,
-        "workstream_report": null,
-        "agent_context": null,
-        "next_actions": [],
-        "blockers": []
-      }
-    ],
-    "siblings": [],
-    "experiments": [
-      {
-        "id": "exp_041_flan_t5_only",
-        "type": "experiment",
-        "title": "FLAN-T5-XL event branch only",
-        "status": "planned",
-        "priority": null,
-        "summary": "Ablation to test whether FLAN-T5 improves event-level token understanding.",
+        "summary": "Alternative branch that would add more external context before answering.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -296,14 +227,17 @@
         "agent_context": null,
         "next_actions": [],
         "blockers": []
-      },
+      }
+    ],
+    "siblings": [],
+    "experiments": [
       {
-        "id": "exp_042_flan_t5_clap",
+        "id": "experiment_demo_prompt_refinement",
         "type": "experiment",
-        "title": "FLAN-T5-XL + CLAP anchor",
+        "title": "Prompt refinement smoke run",
         "status": "planned",
         "priority": null,
-        "summary": "Ablation to test whether CLAP anchor improves old/new edit direction and audio-semantic grounding.",
+        "summary": "Small demo experiment for recording a structured finding in an isolated copy.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -329,12 +263,12 @@
     ],
     "decisions": [
       {
-        "id": "decision_flan_t5_clap",
+        "id": "decision_demo_prompt_refinement",
         "type": "decision",
-        "title": "Adopt FLAN-T5-XL + CLAP for event branch",
+        "title": "Adopt prompt refinement branch",
         "status": "proposed",
         "priority": null,
-        "summary": "Keep LTX/Gemma global prompt path, use FLAN-T5-XL for event tokens and CLAP as event semantic anchor.",
+        "summary": "Demo decision used to exercise evidence refresh and acceptance checklist behavior.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -344,8 +278,7 @@
         "outcome": null,
         "result_summary": null,
         "supporting_experiments": [
-          "exp_041_flan_t5_only",
-          "exp_042_flan_t5_clap"
+          "experiment_demo_prompt_refinement"
         ],
         "contradicting_experiments": [],
         "supporting_decisions": [],
@@ -361,97 +294,35 @@
         "blockers": []
       }
     ],
-    "artifacts": [
-      {
-        "id": "dataset_v2_150",
-        "type": "artifact",
-        "title": "Audio Edit Dataset v2_150",
-        "status": "active",
-        "priority": null,
-        "summary": "150 editable classes, 7.2k event atoms, 20k+ edit pairs, 10s scenes.",
-        "question": null,
-        "hypothesis": null,
-        "evidence_strength": null,
-        "evidence_summary": null,
-        "current_best_option": null,
-        "decision_state": null,
-        "outcome": null,
-        "result_summary": null,
-        "supporting_experiments": [],
-        "contradicting_experiments": [],
-        "supporting_decisions": [],
-        "linked_artifacts": [],
-        "links": [
-          {
-            "kind": "link",
-            "label": "figure",
-            "target": "figures/dataset_pipeline_v2_150.png"
-          }
-        ],
-        "findings": [],
-        "implementation_steps": [],
-        "success_criteria": [],
-        "agent_workstream": null,
-        "workstream_report": null,
-        "agent_context": null,
-        "next_actions": [
-          "Run quality filter audit",
-          "Export FLAN-T5 + CLAP feature cache"
-        ],
-        "blockers": []
-      }
-    ],
+    "artifacts": [],
     "blockers": [
-      "Need new feature cache",
-      "Need ablation runs"
+      "Need at least one structured finding before accepting the demo decision."
     ]
   },
-  "current_best_option": "option_flan_t5_clap",
+  "current_best_option": "option_demo_prompt_refinement",
   "blockers": [
-    "Need new feature cache",
-    "Need ablation runs"
+    "Need at least one structured finding before accepting the demo decision."
   ],
   "next_actions": [
-    "Regenerate timeline feature cache with FLAN-T5-XL token features.",
-    "Add CLAP anchor projection to EventStateInitializer.",
-    "Run FLAN-T5-only ablation on Audio Edit Dataset v2_150.",
-    "Run FLAN-T5 + CLAP ablation and compare local edit following.",
-    "Run FLAN-T5-only ablation",
-    "Run FLAN-T5 + CLAP ablation"
+    "Run the prompt refinement demo experiment.",
+    "Record one finding before reviewing the demo decision."
   ],
-  "knowledge_index": [
-    {
-      "node_id": "dataset_v2_150",
-      "node_title": "Audio Edit Dataset v2_150",
-      "node_type": "artifact",
-      "role": null,
-      "key_files": [],
-      "key_questions": [],
-      "next_action_hint": null,
-      "linked_resources": [
-        {
-          "kind": "link",
-          "label": "figure",
-          "target": "figures/dataset_pipeline_v2_150.png"
-        }
-      ]
-    }
-  ],
+  "knowledge_index": [],
   "suggested_next_actions": [
     {
       "kind": "focus_next_action",
       "priority": "critical",
-      "action": "Add CLAP anchor projection to EventStateInitializer.",
+      "action": "Record one finding before reviewing the demo decision.",
       "reason": "Current focus or current_state lists this as a next action.",
-      "source_node_id": "problem_event_text_weak",
+      "source_node_id": "problem_demo_quality_gap",
       "source_node_type": "problem",
       "related_node_ids": [
-        "stage_text_encoder",
-        "problem_event_text_weak"
+        "stage_demo_research",
+        "problem_demo_quality_gap"
       ],
       "suggested_command": "",
       "is_focus_related": true,
-      "key": "sg_1f615e58aa91c883",
+      "key": "sg_1f341281cef782aa",
       "lifecycle_state": "active",
       "lifecycle_reason": "",
       "lifecycle_updated_at": "",
@@ -462,316 +333,164 @@
     {
       "kind": "focus_next_action",
       "priority": "critical",
-      "action": "Regenerate timeline feature cache with FLAN-T5-XL token features.",
+      "action": "Run the prompt refinement demo experiment.",
       "reason": "Current focus or current_state lists this as a next action.",
-      "source_node_id": "problem_event_text_weak",
+      "source_node_id": "problem_demo_quality_gap",
       "source_node_type": "problem",
       "related_node_ids": [
-        "stage_text_encoder",
-        "problem_event_text_weak"
+        "stage_demo_research",
+        "problem_demo_quality_gap"
       ],
       "suggested_command": "",
       "is_focus_related": true,
-      "key": "sg_fedab28e0d23ae45",
+      "key": "sg_42c9a8359a947a82",
       "lifecycle_state": "active",
       "lifecycle_reason": "",
       "lifecycle_updated_at": "",
       "id": "next_action_002",
       "queued_in_current": true,
-      "queued_in_node": false
+      "queued_in_node": true
     },
     {
-      "kind": "focus_next_action",
+      "kind": "resolve_blocker",
       "priority": "critical",
-      "action": "Run FLAN-T5 + CLAP ablation",
-      "reason": "Current focus or current_state lists this as a next action.",
-      "source_node_id": "problem_event_text_weak",
+      "action": "Resolve blocker: Need at least one structured finding before accepting the demo decision.",
+      "reason": "problem_demo_quality_gap is active and has an explicit blocker.",
+      "source_node_id": "problem_demo_quality_gap",
       "source_node_type": "problem",
       "related_node_ids": [
-        "stage_text_encoder",
-        "problem_event_text_weak"
+        "stage_demo_research"
       ],
-      "suggested_command": "",
+      "suggested_command": "python scripts\\update_status.py --id problem_demo_quality_gap --status blocked",
       "is_focus_related": true,
-      "key": "sg_088f725dce525393",
+      "key": "sg_73b2b109ac6225a7",
       "lifecycle_state": "active",
       "lifecycle_reason": "",
       "lifecycle_updated_at": "",
       "id": "next_action_003",
       "queued_in_current": false,
-      "queued_in_node": true
+      "queued_in_node": false
     },
     {
-      "kind": "focus_next_action",
-      "priority": "critical",
-      "action": "Run FLAN-T5 + CLAP ablation and compare local edit following.",
-      "reason": "Current focus or current_state lists this as a next action.",
-      "source_node_id": "problem_event_text_weak",
-      "source_node_type": "problem",
+      "kind": "run_experiment",
+      "priority": "high",
+      "action": "Run planned experiment: Prompt refinement smoke run",
+      "reason": "experiment_demo_prompt_refinement is still planned.",
+      "source_node_id": "experiment_demo_prompt_refinement",
+      "source_node_type": "experiment",
       "related_node_ids": [
-        "stage_text_encoder",
-        "problem_event_text_weak"
+        "option_demo_prompt_refinement"
       ],
-      "suggested_command": "",
+      "suggested_command": "python scripts\\update_status.py --id experiment_demo_prompt_refinement --status running",
       "is_focus_related": true,
-      "key": "sg_505ce185dd4a4020",
+      "key": "sg_f87fe9f5344b1ffb",
       "lifecycle_state": "active",
       "lifecycle_reason": "",
       "lifecycle_updated_at": "",
       "id": "next_action_004",
-      "queued_in_current": true,
-      "queued_in_node": false
-    },
-    {
-      "kind": "focus_next_action",
-      "priority": "critical",
-      "action": "Run FLAN-T5-only ablation",
-      "reason": "Current focus or current_state lists this as a next action.",
-      "source_node_id": "problem_event_text_weak",
-      "source_node_type": "problem",
-      "related_node_ids": [
-        "stage_text_encoder",
-        "problem_event_text_weak"
-      ],
-      "suggested_command": "",
-      "is_focus_related": true,
-      "key": "sg_914fff7464c32c1c",
-      "lifecycle_state": "active",
-      "lifecycle_reason": "",
-      "lifecycle_updated_at": "",
-      "id": "next_action_005",
-      "queued_in_current": false,
-      "queued_in_node": true
-    },
-    {
-      "kind": "focus_next_action",
-      "priority": "critical",
-      "action": "Run FLAN-T5-only ablation on Audio Edit Dataset v2_150.",
-      "reason": "Current focus or current_state lists this as a next action.",
-      "source_node_id": "problem_event_text_weak",
-      "source_node_type": "problem",
-      "related_node_ids": [
-        "stage_text_encoder",
-        "problem_event_text_weak"
-      ],
-      "suggested_command": "",
-      "is_focus_related": true,
-      "key": "sg_c36bbc1a7c8f5ae8",
-      "lifecycle_state": "active",
-      "lifecycle_reason": "",
-      "lifecycle_updated_at": "",
-      "id": "next_action_006",
-      "queued_in_current": true,
-      "queued_in_node": false
-    },
-    {
-      "kind": "resolve_blocker",
-      "priority": "critical",
-      "action": "Resolve blocker: Need ablation runs",
-      "reason": "problem_event_text_weak is active and has an explicit blocker.",
-      "source_node_id": "problem_event_text_weak",
-      "source_node_type": "problem",
-      "related_node_ids": [
-        "stage_text_encoder"
-      ],
-      "suggested_command": "python scripts\\update_status.py --id problem_event_text_weak --status blocked",
-      "is_focus_related": true,
-      "key": "sg_06faae6937c0c44d",
-      "lifecycle_state": "active",
-      "lifecycle_reason": "",
-      "lifecycle_updated_at": "",
-      "id": "next_action_007",
-      "queued_in_current": false,
-      "queued_in_node": false
-    },
-    {
-      "kind": "resolve_blocker",
-      "priority": "critical",
-      "action": "Resolve blocker: Need new feature cache",
-      "reason": "problem_event_text_weak is active and has an explicit blocker.",
-      "source_node_id": "problem_event_text_weak",
-      "source_node_type": "problem",
-      "related_node_ids": [
-        "stage_text_encoder"
-      ],
-      "suggested_command": "python scripts\\update_status.py --id problem_event_text_weak --status blocked",
-      "is_focus_related": true,
-      "key": "sg_fcf7b1cbb32353d4",
-      "lifecycle_state": "active",
-      "lifecycle_reason": "",
-      "lifecycle_updated_at": "",
-      "id": "next_action_008",
-      "queued_in_current": false,
-      "queued_in_node": false
-    },
-    {
-      "kind": "run_experiment",
-      "priority": "high",
-      "action": "Run planned experiment: FLAN-T5-XL event branch only",
-      "reason": "exp_041_flan_t5_only is still planned.",
-      "source_node_id": "exp_041_flan_t5_only",
-      "source_node_type": "experiment",
-      "related_node_ids": [
-        "option_flan_t5_clap"
-      ],
-      "suggested_command": "python scripts\\update_status.py --id exp_041_flan_t5_only --status running",
-      "is_focus_related": true,
-      "key": "sg_edbf4e9688e94be9",
-      "lifecycle_state": "active",
-      "lifecycle_reason": "",
-      "lifecycle_updated_at": "",
-      "id": "next_action_009",
-      "queued_in_current": false,
-      "queued_in_node": false
-    },
-    {
-      "kind": "run_experiment",
-      "priority": "high",
-      "action": "Run planned experiment: FLAN-T5-XL + CLAP anchor",
-      "reason": "exp_042_flan_t5_clap is still planned.",
-      "source_node_id": "exp_042_flan_t5_clap",
-      "source_node_type": "experiment",
-      "related_node_ids": [
-        "option_flan_t5_clap"
-      ],
-      "suggested_command": "python scripts\\update_status.py --id exp_042_flan_t5_clap --status running",
-      "is_focus_related": true,
-      "key": "sg_74ba5dfb1155457c",
-      "lifecycle_state": "active",
-      "lifecycle_reason": "",
-      "lifecycle_updated_at": "",
-      "id": "next_action_010",
       "queued_in_current": false,
       "queued_in_node": false
     },
     {
       "kind": "review_decision",
       "priority": "high",
-      "action": "Review proposed decision: Adopt FLAN-T5-XL + CLAP for event branch",
-      "reason": "decision_flan_t5_clap is proposed and needs acceptance or rejection.",
-      "source_node_id": "decision_flan_t5_clap",
+      "action": "Review proposed decision: Adopt prompt refinement branch",
+      "reason": "decision_demo_prompt_refinement is proposed and needs acceptance or rejection.",
+      "source_node_id": "decision_demo_prompt_refinement",
       "source_node_type": "decision",
       "related_node_ids": [
-        "option_flan_t5_clap"
+        "option_demo_prompt_refinement"
       ],
-      "suggested_command": "python scripts\\update_decision_evidence.py --id decision_flan_t5_clap",
+      "suggested_command": "python scripts\\update_decision_evidence.py --id decision_demo_prompt_refinement",
       "is_focus_related": true,
-      "key": "sg_782b4b88cbb686c4",
+      "key": "sg_d9a47b09035c9e9d",
       "lifecycle_state": "active",
       "lifecycle_reason": "",
       "lifecycle_updated_at": "",
-      "id": "next_action_011",
-      "queued_in_current": false,
-      "queued_in_node": false
-    },
-    {
-      "kind": "record_finding",
-      "priority": "low",
-      "action": "Record findings for completed experiment: Demo-200 Gemma baseline",
-      "reason": "exp_001_demo200_gemma is done but has no structured findings.",
-      "source_node_id": "exp_001_demo200_gemma",
-      "source_node_type": "experiment",
-      "related_node_ids": [
-        "option_gemma_baseline"
-      ],
-      "suggested_command": "python scripts\\record_finding.py --experiment exp_001_demo200_gemma --statement \"Describe the finding\" --confidence medium",
-      "is_focus_related": true,
-      "key": "sg_1b6a38e73eb8d4a1",
-      "lifecycle_state": "active",
-      "lifecycle_reason": "",
-      "lifecycle_updated_at": "",
-      "id": "next_action_012",
+      "id": "next_action_005",
       "queued_in_current": false,
       "queued_in_node": false
     }
   ],
   "search_index_summary": {
-    "entry_count": 19,
+    "entry_count": 9,
     "note_count": 0,
-    "node_count": 18,
+    "node_count": 9,
     "resource_count": 0,
     "resource_truncated_count": 0,
-    "resource_skipped_count": 1,
+    "resource_skipped_count": 0,
     "focus_resource_count": 0,
     "unlinked_note_count": 0,
-    "focus_entry_count": 8,
+    "focus_entry_count": 7,
     "focus_entries": [
       {
-        "entry_id": "node:decision_flan_t5_clap",
+        "entry_id": "node:decision_demo_prompt_refinement",
         "source": "node",
-        "node_id": "decision_flan_t5_clap",
+        "node_id": "decision_demo_prompt_refinement",
         "node_type": "decision",
-        "title": "Adopt FLAN-T5-XL + CLAP for event branch",
-        "path": "graph/nodes/decision_flan_t5_clap.yaml"
+        "title": "Adopt prompt refinement branch",
+        "path": "graph/nodes/decision_demo_prompt_refinement.yaml"
       },
       {
-        "entry_id": "node:exp_041_flan_t5_only",
+        "entry_id": "node:experiment_demo_prompt_refinement",
         "source": "node",
-        "node_id": "exp_041_flan_t5_only",
+        "node_id": "experiment_demo_prompt_refinement",
         "node_type": "experiment",
-        "title": "FLAN-T5-XL event branch only",
-        "path": "graph/nodes/exp_041_flan_t5_only.yaml"
+        "title": "Prompt refinement smoke run",
+        "path": "graph/nodes/experiment_demo_prompt_refinement.yaml"
       },
       {
-        "entry_id": "node:exp_042_flan_t5_clap",
+        "entry_id": "node:option_demo_prompt_refinement",
         "source": "node",
-        "node_id": "exp_042_flan_t5_clap",
-        "node_type": "experiment",
-        "title": "FLAN-T5-XL + CLAP anchor",
-        "path": "graph/nodes/exp_042_flan_t5_clap.yaml"
-      },
-      {
-        "entry_id": "node:option_flan_t5_clap",
-        "source": "node",
-        "node_id": "option_flan_t5_clap",
+        "node_id": "option_demo_prompt_refinement",
         "node_type": "option",
-        "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
-        "path": "graph/nodes/option_flan_t5_clap.yaml"
+        "title": "Prompt refinement branch",
+        "path": "graph/nodes/option_demo_prompt_refinement.yaml"
       },
       {
-        "entry_id": "node:option_gemma_baseline",
+        "entry_id": "node:option_demo_retrieval_branch",
         "source": "node",
-        "node_id": "option_gemma_baseline",
+        "node_id": "option_demo_retrieval_branch",
         "node_type": "option",
-        "title": "Keep Gemma-only event features",
-        "path": "graph/nodes/option_gemma_baseline.yaml"
+        "title": "Retrieval augmentation branch",
+        "path": "graph/nodes/option_demo_retrieval_branch.yaml"
       },
       {
-        "entry_id": "node:option_umt5_clap",
+        "entry_id": "node:problem_demo_quality_gap",
         "source": "node",
-        "node_id": "option_umt5_clap",
-        "node_type": "option",
-        "title": "UMT5 + CLAP multilingual branch",
-        "path": "graph/nodes/option_umt5_clap.yaml"
-      },
-      {
-        "entry_id": "node:problem_event_text_weak",
-        "source": "node",
-        "node_id": "problem_event_text_weak",
+        "node_id": "problem_demo_quality_gap",
         "node_type": "problem",
-        "title": "Event-level text control is weak",
-        "path": "graph/nodes/problem_event_text_weak.yaml"
+        "title": "Demo answer quality is inconsistent",
+        "path": "graph/nodes/problem_demo_quality_gap.yaml"
       },
       {
-        "entry_id": "node:stage_text_encoder",
+        "entry_id": "node:problem_demo_subtask_scope",
         "source": "node",
-        "node_id": "stage_text_encoder",
+        "node_id": "problem_demo_subtask_scope",
+        "node_type": "problem",
+        "title": "Define compact evaluation cases",
+        "path": "graph/nodes/problem_demo_subtask_scope.yaml"
+      },
+      {
+        "entry_id": "node:stage_demo_research",
+        "source": "node",
+        "node_id": "stage_demo_research",
         "node_type": "stage",
-        "title": "Text Encoder Redesign",
-        "path": "graph/nodes/stage_text_encoder.yaml"
+        "title": "Demo Research Stage",
+        "path": "graph/nodes/stage_demo_research.yaml"
       }
     ]
   },
   "option_workstream_context": {
     "option": {
-      "id": "option_flan_t5_clap",
+      "id": "option_demo_prompt_refinement",
       "type": "option",
-      "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+      "title": "Prompt refinement branch",
       "status": "active",
       "priority": "high",
-      "summary": "Main candidate for event/edit branch text encoding.",
+      "summary": "Candidate branch that improves instructions, examples, and acceptance checks.",
       "question": null,
-      "hypothesis": "FLAN-T5 improves token-level event understanding, while CLAP improves audio-semantic alignment.",
+      "hypothesis": "Clearer task framing and explicit success criteria will make responses more consistent.",
       "evidence_strength": null,
       "evidence_summary": null,
       "current_best_option": null,
@@ -793,17 +512,17 @@
       "blockers": []
     },
     "upstream_problem": {
-      "id": "problem_event_text_weak",
+      "id": "problem_demo_quality_gap",
       "type": "problem",
-      "title": "Event-level text control is weak",
+      "title": "Demo answer quality is inconsistent",
       "status": "active",
       "priority": "critical",
-      "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
-      "question": "How can the model respond more strongly to fine-grained old/new event text edits?",
+      "summary": "Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.",
+      "question": "How can the demo agent make answers more consistent across repeated runs?",
       "hypothesis": null,
       "evidence_strength": null,
       "evidence_summary": null,
-      "current_best_option": "option_flan_t5_clap",
+      "current_best_option": "option_demo_prompt_refinement",
       "decision_state": null,
       "outcome": null,
       "result_summary": null,
@@ -819,22 +538,20 @@
       "workstream_report": null,
       "agent_context": null,
       "next_actions": [
-        "Run FLAN-T5-only ablation",
-        "Run FLAN-T5 + CLAP ablation"
+        "Run the prompt refinement demo experiment."
       ],
       "blockers": [
-        "Need new feature cache",
-        "Need ablation runs"
+        "Need at least one structured finding before accepting the demo decision."
       ]
     },
     "focus_path": [
       {
-        "id": "stage_text_encoder",
+        "id": "stage_demo_research",
         "type": "stage",
-        "title": "Text Encoder Redesign",
+        "title": "Demo Research Stage",
         "status": "active",
         "priority": "high",
-        "summary": "Improve event-level old/new text understanding for local audio editing.",
+        "summary": "Minimal public demo stage for validating Research Cockpit workflows.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -855,23 +572,22 @@
         "workstream_report": null,
         "agent_context": null,
         "next_actions": [
-          "Implement FLAN-T5 timeline features",
-          "Add CLAP semantic anchor"
+          "Review the demo problem and compare candidate options."
         ],
         "blockers": []
       },
       {
-        "id": "problem_event_text_weak",
+        "id": "problem_demo_quality_gap",
         "type": "problem",
-        "title": "Event-level text control is weak",
+        "title": "Demo answer quality is inconsistent",
         "status": "active",
         "priority": "critical",
-        "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
-        "question": "How can the model respond more strongly to fine-grained old/new event text edits?",
+        "summary": "Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.",
+        "question": "How can the demo agent make answers more consistent across repeated runs?",
         "hypothesis": null,
         "evidence_strength": null,
         "evidence_summary": null,
-        "current_best_option": "option_flan_t5_clap",
+        "current_best_option": "option_demo_prompt_refinement",
         "decision_state": null,
         "outcome": null,
         "result_summary": null,
@@ -887,23 +603,21 @@
         "workstream_report": null,
         "agent_context": null,
         "next_actions": [
-          "Run FLAN-T5-only ablation",
-          "Run FLAN-T5 + CLAP ablation"
+          "Run the prompt refinement demo experiment."
         ],
         "blockers": [
-          "Need new feature cache",
-          "Need ablation runs"
+          "Need at least one structured finding before accepting the demo decision."
         ]
       },
       {
-        "id": "option_flan_t5_clap",
+        "id": "option_demo_prompt_refinement",
         "type": "option",
-        "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+        "title": "Prompt refinement branch",
         "status": "active",
         "priority": "high",
-        "summary": "Main candidate for event/edit branch text encoding.",
+        "summary": "Candidate branch that improves instructions, examples, and acceptance checks.",
         "question": null,
-        "hypothesis": "FLAN-T5 improves token-level event understanding, while CLAP improves audio-semantic alignment.",
+        "hypothesis": "Clearer task framing and explicit success criteria will make responses more consistent.",
         "evidence_strength": null,
         "evidence_summary": null,
         "current_best_option": null,
@@ -926,36 +640,41 @@
       }
     ],
     "subtree": {
-      "root_option_id": "option_flan_t5_clap",
+      "root_option_id": "option_demo_prompt_refinement",
       "node_ids": [
-        "option_flan_t5_clap",
-        "exp_041_flan_t5_only",
-        "exp_042_flan_t5_clap",
-        "decision_flan_t5_clap"
+        "option_demo_prompt_refinement",
+        "problem_demo_subtask_scope",
+        "option_demo_eval_cases",
+        "experiment_demo_eval_cases",
+        "experiment_demo_prompt_refinement",
+        "decision_demo_prompt_refinement"
       ],
-      "problem_ids": [],
+      "problem_ids": [
+        "problem_demo_subtask_scope"
+      ],
       "option_ids": [
-        "option_flan_t5_clap"
+        "option_demo_prompt_refinement",
+        "option_demo_eval_cases"
       ],
       "experiment_ids": [
-        "exp_041_flan_t5_only",
-        "exp_042_flan_t5_clap"
+        "experiment_demo_eval_cases",
+        "experiment_demo_prompt_refinement"
       ],
       "decision_ids": [
-        "decision_flan_t5_clap"
+        "decision_demo_prompt_refinement"
       ],
       "artifact_ids": []
     },
     "subtree_nodes": [
       {
-        "id": "option_flan_t5_clap",
+        "id": "option_demo_prompt_refinement",
         "type": "option",
-        "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+        "title": "Prompt refinement branch",
         "status": "active",
         "priority": "high",
-        "summary": "Main candidate for event/edit branch text encoding.",
+        "summary": "Candidate branch that improves instructions, examples, and acceptance checks.",
         "question": null,
-        "hypothesis": "FLAN-T5 improves token-level event understanding, while CLAP improves audio-semantic alignment.",
+        "hypothesis": "Clearer task framing and explicit success criteria will make responses more consistent.",
         "evidence_strength": null,
         "evidence_summary": null,
         "current_best_option": null,
@@ -977,12 +696,43 @@
         "blockers": []
       },
       {
-        "id": "exp_041_flan_t5_only",
-        "type": "experiment",
-        "title": "FLAN-T5-XL event branch only",
-        "status": "planned",
-        "priority": null,
-        "summary": "Ablation to test whether FLAN-T5 improves event-level token understanding.",
+        "id": "problem_demo_subtask_scope",
+        "type": "problem",
+        "title": "Define compact evaluation cases",
+        "status": "open",
+        "priority": "medium",
+        "summary": "Nested demo problem showing that an option can branch into smaller problems for subagents.",
+        "question": "Which small set of cases is enough to judge whether the option branch is improving consistency?",
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_workstream": null,
+        "workstream_report": null,
+        "agent_context": null,
+        "next_actions": [
+          "Draft three lightweight evaluation cases."
+        ],
+        "blockers": []
+      },
+      {
+        "id": "option_demo_eval_cases",
+        "type": "option",
+        "title": "Three-case evaluation slice",
+        "status": "open",
+        "priority": "medium",
+        "summary": "Nested option that keeps the demo branch small enough for a subagent to execute.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -1006,12 +756,12 @@
         "blockers": []
       },
       {
-        "id": "exp_042_flan_t5_clap",
+        "id": "experiment_demo_eval_cases",
         "type": "experiment",
-        "title": "FLAN-T5-XL + CLAP anchor",
+        "title": "Evaluate three repeated-answer cases",
         "status": "planned",
         "priority": null,
-        "summary": "Ablation to test whether CLAP anchor improves old/new edit direction and audio-semantic grounding.",
+        "summary": "Planned nested experiment for checking whether the branch improves repeated-answer consistency.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -1035,12 +785,41 @@
         "blockers": []
       },
       {
-        "id": "decision_flan_t5_clap",
+        "id": "experiment_demo_prompt_refinement",
+        "type": "experiment",
+        "title": "Prompt refinement smoke run",
+        "status": "planned",
+        "priority": null,
+        "summary": "Small demo experiment for recording a structured finding in an isolated copy.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_workstream": null,
+        "workstream_report": null,
+        "agent_context": null,
+        "next_actions": [],
+        "blockers": []
+      },
+      {
+        "id": "decision_demo_prompt_refinement",
         "type": "decision",
-        "title": "Adopt FLAN-T5-XL + CLAP for event branch",
+        "title": "Adopt prompt refinement branch",
         "status": "proposed",
         "priority": null,
-        "summary": "Keep LTX/Gemma global prompt path, use FLAN-T5-XL for event tokens and CLAP as event semantic anchor.",
+        "summary": "Demo decision used to exercise evidence refresh and acceptance checklist behavior.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -1050,8 +829,7 @@
         "outcome": null,
         "result_summary": null,
         "supporting_experiments": [
-          "exp_041_flan_t5_only",
-          "exp_042_flan_t5_clap"
+          "experiment_demo_prompt_refinement"
         ],
         "contradicting_experiments": [],
         "supporting_decisions": [],
@@ -1067,21 +845,82 @@
         "blockers": []
       }
     ],
-    "problems": [],
+    "problems": [
+      {
+        "id": "problem_demo_subtask_scope",
+        "type": "problem",
+        "title": "Define compact evaluation cases",
+        "status": "open",
+        "priority": "medium",
+        "summary": "Nested demo problem showing that an option can branch into smaller problems for subagents.",
+        "question": "Which small set of cases is enough to judge whether the option branch is improving consistency?",
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_workstream": null,
+        "workstream_report": null,
+        "agent_context": null,
+        "next_actions": [
+          "Draft three lightweight evaluation cases."
+        ],
+        "blockers": []
+      }
+    ],
     "options": [
       {
-        "id": "option_flan_t5_clap",
+        "id": "option_demo_prompt_refinement",
         "type": "option",
-        "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+        "title": "Prompt refinement branch",
         "status": "active",
         "priority": "high",
-        "summary": "Main candidate for event/edit branch text encoding.",
+        "summary": "Candidate branch that improves instructions, examples, and acceptance checks.",
         "question": null,
-        "hypothesis": "FLAN-T5 improves token-level event understanding, while CLAP improves audio-semantic alignment.",
+        "hypothesis": "Clearer task framing and explicit success criteria will make responses more consistent.",
         "evidence_strength": null,
         "evidence_summary": null,
         "current_best_option": null,
         "decision_state": "promising",
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_workstream": null,
+        "workstream_report": null,
+        "agent_context": null,
+        "next_actions": [],
+        "blockers": []
+      },
+      {
+        "id": "option_demo_eval_cases",
+        "type": "option",
+        "title": "Three-case evaluation slice",
+        "status": "open",
+        "priority": "medium",
+        "summary": "Nested option that keeps the demo branch small enough for a subagent to execute.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
         "outcome": null,
         "result_summary": null,
         "supporting_experiments": [],
@@ -1101,12 +940,12 @@
     ],
     "experiments": [
       {
-        "id": "exp_041_flan_t5_only",
+        "id": "experiment_demo_eval_cases",
         "type": "experiment",
-        "title": "FLAN-T5-XL event branch only",
+        "title": "Evaluate three repeated-answer cases",
         "status": "planned",
         "priority": null,
-        "summary": "Ablation to test whether FLAN-T5 improves event-level token understanding.",
+        "summary": "Planned nested experiment for checking whether the branch improves repeated-answer consistency.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -1130,12 +969,12 @@
         "blockers": []
       },
       {
-        "id": "exp_042_flan_t5_clap",
+        "id": "experiment_demo_prompt_refinement",
         "type": "experiment",
-        "title": "FLAN-T5-XL + CLAP anchor",
+        "title": "Prompt refinement smoke run",
         "status": "planned",
         "priority": null,
-        "summary": "Ablation to test whether CLAP anchor improves old/new edit direction and audio-semantic grounding.",
+        "summary": "Small demo experiment for recording a structured finding in an isolated copy.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -1161,12 +1000,12 @@
     ],
     "decisions": [
       {
-        "id": "decision_flan_t5_clap",
+        "id": "decision_demo_prompt_refinement",
         "type": "decision",
-        "title": "Adopt FLAN-T5-XL + CLAP for event branch",
+        "title": "Adopt prompt refinement branch",
         "status": "proposed",
         "priority": null,
-        "summary": "Keep LTX/Gemma global prompt path, use FLAN-T5-XL for event tokens and CLAP as event semantic anchor.",
+        "summary": "Demo decision used to exercise evidence refresh and acceptance checklist behavior.",
         "question": null,
         "hypothesis": null,
         "evidence_strength": null,
@@ -1176,8 +1015,7 @@
         "outcome": null,
         "result_summary": null,
         "supporting_experiments": [
-          "exp_041_flan_t5_only",
-          "exp_042_flan_t5_clap"
+          "experiment_demo_prompt_refinement"
         ],
         "contradicting_experiments": [],
         "supporting_decisions": [],
@@ -1202,12 +1040,14 @@
       "latest_finding": null,
       "experiment_count": 2
     },
-    "open_next_actions": [],
+    "open_next_actions": [
+      "Draft three lightweight evaluation cases."
+    ],
     "blockers": [],
     "suggested_commands": {
-      "claim": "python scripts\\claim_option.py --option option_flan_t5_clap --agent <agent_id> --objective \"Describe objective\"",
-      "context": "python scripts\\option_workstream_context.py --option option_flan_t5_clap --json",
-      "report": "python scripts\\report_option_workstream.py --option option_flan_t5_clap --agent <agent_id> --recommend continue --summary \"Summarize evidence and recommendation\""
+      "claim": "python scripts\\claim_option.py --option option_demo_prompt_refinement --agent <agent_id> --objective \"Describe objective\"",
+      "context": "python scripts\\option_workstream_context.py --option option_demo_prompt_refinement --json",
+      "report": "python scripts\\report_option_workstream.py --option option_demo_prompt_refinement --agent <agent_id> --recommend continue --summary \"Summarize evidence and recommendation\""
     },
     "current_focus_related": false
   }

@@ -1,0 +1,18 @@
+id: option_demo_prompt_refinement
+type: option
+title: Prompt refinement branch
+status: active
+priority: high
+parent: problem_demo_quality_gap
+summary: Candidate branch that improves instructions, examples, and acceptance checks.
+hypothesis: Clearer task framing and explicit success criteria will make responses more consistent.
+children:
+- problem_demo_subtask_scope
+- experiment_demo_prompt_refinement
+- decision_demo_prompt_refinement
+pros:
+- Low implementation cost
+- Easy to review in git
+cons:
+- May not solve retrieval gaps
+decision_state: promising

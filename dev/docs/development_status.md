@@ -625,3 +625,18 @@ v2 P0 阶段完成后，应满足：
 - dry-run coverage 扩展：让更多写入脚本支持预览变更。
 - decision acceptance UI 修复提示：在 checklist 缺项时给出对应脚本或 YAML 字段建议。
 - 前端图谱交互升级：为可点击展开节点、编辑节点文本和更换前端框架继续收拢数据接口。
+## Open Skill Demo Data Split v1 (2026-04-28)
+
+This update separates publishable skill runtime assets from private research assets. The `skills/research-cockpit/research_cockpit/` bundle now contains only a small generic demo graph that exercises the core workflow without exposing personal research content.
+
+Completed:
+
+- Replaced bundled private research nodes with public demo nodes: `stage_demo_research`, `problem_demo_quality_gap`, `option_demo_prompt_refinement`, `option_demo_retrieval_branch`, nested demo problem/option nodes, demo experiments, and a demo decision.
+- Regenerated dashboard/context outputs from the demo graph so exported context packs no longer include private project terms.
+- Updated skill README examples to use generic demo IDs and generic search queries.
+- Extended the release public scan to reject known private research terms in the publishable skill package.
+
+Notes:
+
+- This cleans the current working tree content for future packaging. If the repository history itself will be published, use an export archive or history rewrite so old private assets are not recoverable from prior commits.
+- Development docs and tests remain outside the skill package under `dev/`.

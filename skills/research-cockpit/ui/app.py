@@ -73,13 +73,13 @@ from scripts.apply_suggestion import apply_suggestion as queue_suggestion
 from scripts.update_suggestion_state import update_suggestion_state as set_suggestion_state
 
 
-st.set_page_config(page_title="Audio Edit Research Cockpit", layout="wide")
+st.set_page_config(page_title="Research Cockpit", layout="wide")
 
 
 UI_TEXT = {
     "zh": {
         "language": "界面语言",
-        "page_title": "Audio Edit 研究驾驶舱",
+        "page_title": "Research Cockpit 研究驾驶舱",
         "page_caption": "以仓库为中心的研究图谱状态：阶段、问题、方案、实验和决策。",
         "current_focus": "当前焦点",
         "stage": "阶段",
@@ -202,7 +202,7 @@ UI_TEXT = {
     },
     "en": {
         "language": "Language",
-        "page_title": "Audio Edit Research Cockpit",
+        "page_title": "Research Cockpit",
         "page_caption": "Repo-native graph state for research stages, problems, options, experiments, and decisions.",
         "current_focus": "Current Focus",
         "stage": "Stage",

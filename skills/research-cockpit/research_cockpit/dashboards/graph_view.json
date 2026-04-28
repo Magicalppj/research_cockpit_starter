@@ -1,52 +1,16 @@
 {
   "nodes": [
     {
-      "id": "dataset_v2_150",
-      "label": "Audio Edit Dataset v2_150",
-      "title": "150 editable classes, 7.2k event atoms, 20k+ edit pairs, 10s scenes.",
-      "type": "artifact",
-      "status": "active",
-      "priority": null,
-      "color": "#FFE9A8",
-      "shape": "database",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "child",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": 2,
-      "is_focus_visible": true,
-      "is_hidden_by_focus": false,
-      "raw": {
-        "id": "dataset_v2_150",
-        "type": "artifact",
-        "artifact_type": "dataset",
-        "title": "Audio Edit Dataset v2_150",
-        "status": "active",
-        "parent": "stage_dataset",
-        "summary": "150 editable classes, 7.2k event atoms, 20k+ edit pairs, 10s scenes.",
-        "links": {
-          "figure": "figures/dataset_pipeline_v2_150.png"
-        },
-        "next_actions": [
-          "Run quality filter audit",
-          "Export FLAN-T5 + CLAP feature cache"
-        ]
-      }
-    },
-    {
-      "id": "decision_flan_t5_clap",
-      "label": "Adopt FLAN-T5-XL + CLAP for event branch",
-      "title": "Keep LTX/Gemma global prompt path, use FLAN-T5-XL for event tokens and CLAP as event semantic anchor.",
+      "id": "decision_demo_prompt_refinement",
+      "label": "Adopt prompt refinement branch",
+      "title": "Demo decision used to exercise evidence refresh and acceptance checklist behavior.",
       "type": "decision",
       "status": "proposed",
       "priority": null,
       "color": "#E7D8F6",
       "shape": "hexagon",
       "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
+      "current_focus_node": "problem_demo_quality_gap",
       "in_focus_path": false,
       "is_current_focus": false,
       "focus_role": "child",
@@ -56,130 +20,63 @@
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
       "raw": {
-        "id": "decision_flan_t5_clap",
+        "id": "decision_demo_prompt_refinement",
         "type": "decision",
-        "title": "Adopt FLAN-T5-XL + CLAP for event branch",
+        "title": "Adopt prompt refinement branch",
         "status": "proposed",
-        "parent": "option_flan_t5_clap",
-        "summary": "Keep LTX/Gemma global prompt path, use FLAN-T5-XL for event tokens and CLAP as event semantic anchor.",
+        "parent": "option_demo_prompt_refinement",
+        "summary": "Demo decision used to exercise evidence refresh and acceptance checklist behavior.",
         "supporting_experiments": [
-          "exp_041_flan_t5_only",
-          "exp_042_flan_t5_clap"
+          "experiment_demo_prompt_refinement"
         ],
         "consequences": [
-          "Regenerate timeline cache",
-          "Modify Semantic Ribbon initializer",
-          "Update inference context builder"
+          "If accepted, use the refined prompt as the default demo workflow."
         ]
       }
     },
     {
-      "id": "decision_tts_boundary",
-      "label": "Do not make TTS add a main neural editing task",
-      "title": "TTS add can be handled by TTS + traditional mixing; the neural editor focuses on remove/replace/local rewriting.",
-      "type": "decision",
-      "status": "accepted",
-      "priority": null,
-      "color": "#CFEAD6",
-      "shape": "hexagon",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "unrelated",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": null,
-      "is_focus_visible": false,
-      "is_hidden_by_focus": true,
-      "raw": {
-        "id": "decision_tts_boundary",
-        "type": "decision",
-        "title": "Do not make TTS add a main neural editing task",
-        "status": "accepted",
-        "parent": "stage_task_formulation",
-        "summary": "TTS add can be handled by TTS + traditional mixing; the neural editor focuses on remove/replace/local rewriting.",
-        "consequences": [
-          "TTS event can be a normal event for remove/replace",
-          "Add-only TTS is a DSP baseline"
-        ]
-      }
-    },
-    {
-      "id": "decision_unified_edit_program",
-      "label": "Use unified edit-program formulation",
-      "title": "Treat text-to-audio generation as add edits from silence, and reference editing as local semantic rewriting.",
-      "type": "decision",
-      "status": "accepted",
-      "priority": null,
-      "color": "#CFEAD6",
-      "shape": "hexagon",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "unrelated",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": null,
-      "is_focus_visible": false,
-      "is_hidden_by_focus": true,
-      "raw": {
-        "id": "decision_unified_edit_program",
-        "type": "decision",
-        "title": "Use unified edit-program formulation",
-        "status": "accepted",
-        "parent": "stage_task_formulation",
-        "summary": "Treat text-to-audio generation as add edits from silence, and reference editing as local semantic rewriting.",
-        "consequences": [
-          "Use base_audio + edits as the user-level schema",
-          "Train add/remove/replace/identity in one strategy"
-        ]
-      }
-    },
-    {
-      "id": "exp_001_demo200_gemma",
-      "label": "Demo-200 Gemma baseline",
-      "title": "Overfits reconstruction but generalizes poorly to counterfactual text edits.",
-      "type": "experiment",
-      "status": "done",
-      "priority": null,
-      "color": "#CFEAD6",
-      "shape": "ellipse",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "unrelated",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": null,
-      "is_focus_visible": false,
-      "is_hidden_by_focus": true,
-      "raw": {
-        "id": "exp_001_demo200_gemma",
-        "type": "experiment",
-        "title": "Demo-200 Gemma baseline",
-        "status": "done",
-        "parent": "option_gemma_baseline",
-        "dataset": "dataset_demo_200",
-        "backbone": "ltx23_audio_branch",
-        "summary": "Overfits reconstruction but generalizes poorly to counterfactual text edits.",
-        "result_summary": "The model tends to memorize sample texture rather than learn editable event-text mapping.",
-        "outcome": "negative"
-      }
-    },
-    {
-      "id": "exp_041_flan_t5_only",
-      "label": "FLAN-T5-XL event branch only",
-      "title": "Ablation to test whether FLAN-T5 improves event-level token understanding.",
+      "id": "experiment_demo_eval_cases",
+      "label": "Evaluate three repeated-answer cases",
+      "title": "Planned nested experiment for checking whether the branch improves repeated-answer consistency.",
       "type": "experiment",
       "status": "planned",
       "priority": null,
       "color": "#D9E8FF",
       "shape": "ellipse",
       "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
+      "current_focus_node": "problem_demo_quality_gap",
+      "in_focus_path": false,
+      "is_current_focus": false,
+      "focus_role": "unrelated",
+      "focus_priority": null,
+      "show_in_focus": "auto",
+      "focus_visible_depth": null,
+      "is_focus_visible": false,
+      "is_hidden_by_focus": true,
+      "raw": {
+        "id": "experiment_demo_eval_cases",
+        "type": "experiment",
+        "title": "Evaluate three repeated-answer cases",
+        "status": "planned",
+        "parent": "option_demo_eval_cases",
+        "summary": "Planned nested experiment for checking whether the branch improves repeated-answer consistency.",
+        "metrics": [
+          "consistency_score",
+          "reviewer_notes"
+        ]
+      }
+    },
+    {
+      "id": "experiment_demo_prompt_refinement",
+      "label": "Prompt refinement smoke run",
+      "title": "Small demo experiment for recording a structured finding in an isolated copy.",
+      "type": "experiment",
+      "status": "planned",
+      "priority": null,
+      "color": "#D9E8FF",
+      "shape": "ellipse",
+      "is_focus": false,
+      "current_focus_node": "problem_demo_quality_gap",
       "in_focus_path": false,
       "is_current_focus": false,
       "focus_role": "child",
@@ -189,68 +86,61 @@
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
       "raw": {
-        "id": "exp_041_flan_t5_only",
+        "id": "experiment_demo_prompt_refinement",
         "type": "experiment",
-        "title": "FLAN-T5-XL event branch only",
+        "title": "Prompt refinement smoke run",
         "status": "planned",
-        "parent": "option_flan_t5_clap",
-        "dataset": "dataset_v2_150",
-        "backbone": "ltx23_audio_branch",
+        "parent": "option_demo_prompt_refinement",
+        "summary": "Small demo experiment for recording a structured finding in an isolated copy.",
         "metrics": [
-          "replace_following",
-          "remove_success",
-          "preserve_score"
-        ],
-        "summary": "Ablation to test whether FLAN-T5 improves event-level token understanding."
+          "consistency_score",
+          "failure_count"
+        ]
       }
     },
     {
-      "id": "exp_042_flan_t5_clap",
-      "label": "FLAN-T5-XL + CLAP anchor",
-      "title": "Ablation to test whether CLAP anchor improves old/new edit direction and audio-semantic grounding.",
-      "type": "experiment",
-      "status": "planned",
-      "priority": null,
+      "id": "option_demo_eval_cases",
+      "label": "Three-case evaluation slice",
+      "title": "Nested option that keeps the demo branch small enough for a subagent to execute.",
+      "type": "option",
+      "status": "open",
+      "priority": "medium",
       "color": "#D9E8FF",
-      "shape": "ellipse",
+      "shape": "box",
       "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
+      "current_focus_node": "problem_demo_quality_gap",
       "in_focus_path": false,
       "is_current_focus": false,
-      "focus_role": "child",
+      "focus_role": "unrelated",
       "focus_priority": null,
       "show_in_focus": "auto",
-      "focus_visible_depth": 2,
-      "is_focus_visible": true,
-      "is_hidden_by_focus": false,
+      "focus_visible_depth": null,
+      "is_focus_visible": false,
+      "is_hidden_by_focus": true,
       "raw": {
-        "id": "exp_042_flan_t5_clap",
-        "type": "experiment",
-        "title": "FLAN-T5-XL + CLAP anchor",
-        "status": "planned",
-        "parent": "option_flan_t5_clap",
-        "dataset": "dataset_v2_150",
-        "backbone": "ltx23_audio_branch",
-        "metrics": [
-          "local_semantic_contrast",
-          "replace_following",
-          "remove_success",
-          "overlap_preserve"
-        ],
-        "summary": "Ablation to test whether CLAP anchor improves old/new edit direction and audio-semantic grounding."
+        "id": "option_demo_eval_cases",
+        "type": "option",
+        "title": "Three-case evaluation slice",
+        "status": "open",
+        "priority": "medium",
+        "parent": "problem_demo_subtask_scope",
+        "summary": "Nested option that keeps the demo branch small enough for a subagent to execute.",
+        "children": [
+          "experiment_demo_eval_cases"
+        ]
       }
     },
     {
-      "id": "option_flan_t5_clap",
-      "label": "FLAN-T5-XL tokens + CLAP semantic anchor",
-      "title": "Main candidate for event/edit branch text encoding.",
+      "id": "option_demo_prompt_refinement",
+      "label": "Prompt refinement branch",
+      "title": "Candidate branch that improves instructions, examples, and acceptance checks.",
       "type": "option",
       "status": "active",
       "priority": "high",
       "color": "#FFE9A8",
       "shape": "box",
       "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
+      "current_focus_node": "problem_demo_quality_gap",
       "in_focus_path": false,
       "is_current_focus": false,
       "focus_role": "child",
@@ -260,133 +150,40 @@
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
       "raw": {
-        "id": "option_flan_t5_clap",
+        "id": "option_demo_prompt_refinement",
         "type": "option",
-        "title": "FLAN-T5-XL tokens + CLAP semantic anchor",
+        "title": "Prompt refinement branch",
         "status": "active",
         "priority": "high",
-        "parent": "problem_event_text_weak",
-        "hypothesis": "FLAN-T5 improves token-level event understanding, while CLAP improves audio-semantic alignment.",
-        "summary": "Main candidate for event/edit branch text encoding.",
+        "parent": "problem_demo_quality_gap",
+        "summary": "Candidate branch that improves instructions, examples, and acceptance checks.",
+        "hypothesis": "Clearer task framing and explicit success criteria will make responses more consistent.",
         "children": [
-          "exp_041_flan_t5_only",
-          "exp_042_flan_t5_clap",
-          "decision_flan_t5_clap"
+          "problem_demo_subtask_scope",
+          "experiment_demo_prompt_refinement",
+          "decision_demo_prompt_refinement"
         ],
-        "decision_state": "promising",
         "pros": [
-          "Strong token-level text features",
-          "Audio-aligned CLAP event anchor"
+          "Low implementation cost",
+          "Easy to review in git"
         ],
         "cons": [
-          "Requires new feature cache",
-          "More training/inference complexity"
-        ]
-      }
-    },
-    {
-      "id": "option_gemma_baseline",
-      "label": "Keep Gemma-only event features",
-      "title": "Current baseline; useful for comparison but weak for event-level edit control.",
-      "type": "option",
-      "status": "rejected",
-      "priority": "low",
-      "color": "#F3D0D0",
-      "shape": "box",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "child",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": 1,
-      "is_focus_visible": true,
-      "is_hidden_by_focus": false,
-      "raw": {
-        "id": "option_gemma_baseline",
-        "type": "option",
-        "title": "Keep Gemma-only event features",
-        "status": "rejected",
-        "priority": "low",
-        "parent": "problem_event_text_weak",
-        "summary": "Current baseline; useful for comparison but weak for event-level edit control.",
-        "children": [
-          "exp_001_demo200_gemma"
+          "May not solve retrieval gaps"
         ],
-        "decision_state": "rejected",
-        "current_conclusion": "Good reconstruction, weak edit generalization."
+        "decision_state": "promising"
       }
     },
     {
-      "id": "option_remove_suppression_head",
-      "label": "Remove-specific suppression branch",
-      "title": "Add a remove-specific branch to make remove more than old_text + op embedding.",
-      "type": "option",
-      "status": "open",
-      "priority": null,
-      "color": "#D9E8FF",
-      "shape": "box",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "unrelated",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": null,
-      "is_focus_visible": false,
-      "is_hidden_by_focus": true,
-      "raw": {
-        "id": "option_remove_suppression_head",
-        "type": "option",
-        "title": "Remove-specific suppression branch",
-        "status": "open",
-        "parent": "problem_remove_overlap_weak",
-        "summary": "Add a remove-specific branch to make remove more than old_text + op embedding.",
-        "decision_state": "open"
-      }
-    },
-    {
-      "id": "option_stem_preserve_loss",
-      "label": "Stem-aware preserve and targeted-change loss",
-      "title": "Use synthetic stem supervision to preserve non-target overlap components and enforce target change.",
-      "type": "option",
-      "status": "open",
-      "priority": null,
-      "color": "#D9E8FF",
-      "shape": "box",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "unrelated",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": null,
-      "is_focus_visible": false,
-      "is_hidden_by_focus": true,
-      "raw": {
-        "id": "option_stem_preserve_loss",
-        "type": "option",
-        "title": "Stem-aware preserve and targeted-change loss",
-        "status": "open",
-        "parent": "problem_remove_overlap_weak",
-        "summary": "Use synthetic stem supervision to preserve non-target overlap components and enforce target change.",
-        "decision_state": "open"
-      }
-    },
-    {
-      "id": "option_umt5_clap",
-      "label": "UMT5 + CLAP multilingual branch",
-      "title": "Potential multilingual alternative if Chinese or mixed-language event text becomes central.",
+      "id": "option_demo_retrieval_branch",
+      "label": "Retrieval augmentation branch",
+      "title": "Alternative branch that would add more external context before answering.",
       "type": "option",
       "status": "parked",
       "priority": "medium",
       "color": "#E5E5E5",
       "shape": "box",
       "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
+      "current_focus_node": "problem_demo_quality_gap",
       "in_focus_path": false,
       "is_current_focus": false,
       "focus_role": "child",
@@ -396,27 +193,33 @@
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
       "raw": {
-        "id": "option_umt5_clap",
+        "id": "option_demo_retrieval_branch",
         "type": "option",
-        "title": "UMT5 + CLAP multilingual branch",
+        "title": "Retrieval augmentation branch",
         "status": "parked",
         "priority": "medium",
-        "parent": "problem_event_text_weak",
-        "summary": "Potential multilingual alternative if Chinese or mixed-language event text becomes central.",
-        "decision_state": "open"
+        "parent": "problem_demo_quality_gap",
+        "summary": "Alternative branch that would add more external context before answering.",
+        "pros": [
+          "Can improve recall when source material is sparse"
+        ],
+        "cons": [
+          "Requires extra indexing and freshness checks"
+        ],
+        "rejection_reason": "Parked until the prompt refinement branch has at least one result."
       }
     },
     {
-      "id": "problem_event_text_weak",
-      "label": "Event-level text control is weak",
-      "title": "Gemma-based event features are likely insufficient for precise old/new edit control.",
+      "id": "problem_demo_quality_gap",
+      "label": "Demo answer quality is inconsistent",
+      "title": "Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.",
       "type": "problem",
       "status": "active",
       "priority": "critical",
       "color": "#FFE9A8",
       "shape": "diamond",
       "is_focus": true,
-      "current_focus_node": "problem_event_text_weak",
+      "current_focus_node": "problem_demo_quality_gap",
       "in_focus_path": true,
       "is_current_focus": true,
       "focus_role": "current",
@@ -426,41 +229,38 @@
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
       "raw": {
-        "id": "problem_event_text_weak",
+        "id": "problem_demo_quality_gap",
         "type": "problem",
-        "title": "Event-level text control is weak",
+        "title": "Demo answer quality is inconsistent",
         "status": "active",
         "priority": "critical",
-        "parent": "stage_text_encoder",
-        "question": "How can the model respond more strongly to fine-grained old/new event text edits?",
-        "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
+        "parent": "stage_demo_research",
+        "question": "How can the demo agent make answers more consistent across repeated runs?",
+        "summary": "Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.",
         "children": [
-          "option_gemma_baseline",
-          "option_flan_t5_clap",
-          "option_umt5_clap"
+          "option_demo_prompt_refinement",
+          "option_demo_retrieval_branch"
         ],
-        "current_best_option": "option_flan_t5_clap",
-        "blockers": [
-          "Need new feature cache",
-          "Need ablation runs"
-        ],
+        "current_best_option": "option_demo_prompt_refinement",
         "next_actions": [
-          "Run FLAN-T5-only ablation",
-          "Run FLAN-T5 + CLAP ablation"
+          "Run the prompt refinement demo experiment."
+        ],
+        "blockers": [
+          "Need at least one structured finding before accepting the demo decision."
         ]
       }
     },
     {
-      "id": "problem_remove_overlap_weak",
-      "label": "Remove and replace under overlap remain hard",
-      "title": "Without explicit source decomposition, the model must learn local semantic suppression and preserve non-target components.",
+      "id": "problem_demo_subtask_scope",
+      "label": "Define compact evaluation cases",
+      "title": "Nested demo problem showing that an option can branch into smaller problems for subagents.",
       "type": "problem",
-      "status": "active",
-      "priority": "high",
-      "color": "#FFE9A8",
+      "status": "open",
+      "priority": "medium",
+      "color": "#D9E8FF",
       "shape": "diamond",
       "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
+      "current_focus_node": "problem_demo_quality_gap",
       "in_focus_path": false,
       "is_current_focus": false,
       "focus_role": "unrelated",
@@ -470,128 +270,33 @@
       "is_focus_visible": false,
       "is_hidden_by_focus": true,
       "raw": {
-        "id": "problem_remove_overlap_weak",
+        "id": "problem_demo_subtask_scope",
         "type": "problem",
-        "title": "Remove and replace under overlap remain hard",
-        "status": "active",
-        "priority": "high",
-        "parent": "stage_model_edit",
-        "summary": "Without explicit source decomposition, the model must learn local semantic suppression and preserve non-target components.",
+        "title": "Define compact evaluation cases",
+        "status": "open",
+        "priority": "medium",
+        "parent": "option_demo_prompt_refinement",
+        "question": "Which small set of cases is enough to judge whether the option branch is improving consistency?",
+        "summary": "Nested demo problem showing that an option can branch into smaller problems for subagents.",
         "children": [
-          "option_remove_suppression_head",
-          "option_stem_preserve_loss"
+          "option_demo_eval_cases"
         ],
         "next_actions": [
-          "Design targeted-change loss",
-          "Use stem_edit_mask in compute_loss"
+          "Draft three lightweight evaluation cases."
         ]
       }
     },
     {
-      "id": "stage_dataset",
-      "label": "Dataset Construction",
-      "title": "Build Audio Edit Dataset v2_150 with event atoms, captions, edit pairs, and training manifests.",
-      "type": "stage",
-      "status": "active",
-      "priority": "high",
-      "color": "#FFE9A8",
-      "shape": "box",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "unrelated",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": null,
-      "is_focus_visible": false,
-      "is_hidden_by_focus": true,
-      "raw": {
-        "id": "stage_dataset",
-        "type": "stage",
-        "title": "Dataset Construction",
-        "status": "active",
-        "priority": "high",
-        "summary": "Build Audio Edit Dataset v2_150 with event atoms, captions, edit pairs, and training manifests.",
-        "children": [
-          "dataset_v2_150"
-        ]
-      }
-    },
-    {
-      "id": "stage_model_edit",
-      "label": "Edit Model Design",
-      "title": "Improve unified edit-program model for remove/replace/local rewriting under overlap.",
-      "type": "stage",
-      "status": "active",
-      "priority": "high",
-      "color": "#FFE9A8",
-      "shape": "box",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "unrelated",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": null,
-      "is_focus_visible": false,
-      "is_hidden_by_focus": true,
-      "raw": {
-        "id": "stage_model_edit",
-        "type": "stage",
-        "title": "Edit Model Design",
-        "status": "active",
-        "priority": "high",
-        "summary": "Improve unified edit-program model for remove/replace/local rewriting under overlap.",
-        "children": [
-          "problem_remove_overlap_weak"
-        ]
-      }
-    },
-    {
-      "id": "stage_task_formulation",
-      "label": "Task Formulation",
-      "title": "Unify generation and editing as base-audio plus edit-program local rewriting.",
-      "type": "stage",
-      "status": "done",
-      "priority": "high",
-      "color": "#CFEAD6",
-      "shape": "box",
-      "is_focus": false,
-      "current_focus_node": "problem_event_text_weak",
-      "in_focus_path": false,
-      "is_current_focus": false,
-      "focus_role": "unrelated",
-      "focus_priority": null,
-      "show_in_focus": "auto",
-      "focus_visible_depth": null,
-      "is_focus_visible": false,
-      "is_hidden_by_focus": true,
-      "raw": {
-        "id": "stage_task_formulation",
-        "type": "stage",
-        "title": "Task Formulation",
-        "status": "done",
-        "priority": "high",
-        "summary": "Unify generation and editing as base-audio plus edit-program local rewriting.",
-        "children": [
-          "decision_unified_edit_program",
-          "decision_tts_boundary"
-        ]
-      }
-    },
-    {
-      "id": "stage_text_encoder",
-      "label": "Text Encoder Redesign",
-      "title": "Improve event-level old/new text understanding for local audio editing.",
+      "id": "stage_demo_research",
+      "label": "Demo Research Stage",
+      "title": "Minimal public demo stage for validating Research Cockpit workflows.",
       "type": "stage",
       "status": "active",
       "priority": "high",
       "color": "#FFE9A8",
       "shape": "box",
       "is_focus": true,
-      "current_focus_node": "problem_event_text_weak",
+      "current_focus_node": "problem_demo_quality_gap",
       "in_focus_path": true,
       "is_current_focus": false,
       "focus_role": "parent",
@@ -601,117 +306,80 @@
       "is_focus_visible": true,
       "is_hidden_by_focus": false,
       "raw": {
-        "id": "stage_text_encoder",
+        "id": "stage_demo_research",
         "type": "stage",
-        "title": "Text Encoder Redesign",
+        "title": "Demo Research Stage",
         "status": "active",
         "priority": "high",
-        "summary": "Improve event-level old/new text understanding for local audio editing.",
+        "summary": "Minimal public demo stage for validating Research Cockpit workflows.",
         "children": [
-          "problem_event_text_weak"
+          "problem_demo_quality_gap"
         ],
         "tags": [
-          "text-encoder",
-          "semantic-control"
+          "demo",
+          "getting-started"
         ],
         "next_actions": [
-          "Implement FLAN-T5 timeline features",
-          "Add CLAP semantic anchor"
+          "Review the demo problem and compare candidate options."
         ]
       }
     }
   ],
   "edges": [
     {
-      "from": "stage_dataset",
-      "to": "dataset_v2_150",
+      "from": "option_demo_prompt_refinement",
+      "to": "decision_demo_prompt_refinement",
       "relation": "parent",
       "type": "contains"
     },
     {
-      "from": "option_flan_t5_clap",
-      "to": "decision_flan_t5_clap",
+      "from": "option_demo_eval_cases",
+      "to": "experiment_demo_eval_cases",
       "relation": "parent",
       "type": "contains"
     },
     {
-      "from": "stage_task_formulation",
-      "to": "decision_tts_boundary",
+      "from": "option_demo_prompt_refinement",
+      "to": "experiment_demo_prompt_refinement",
       "relation": "parent",
       "type": "contains"
     },
     {
-      "from": "stage_task_formulation",
-      "to": "decision_unified_edit_program",
+      "from": "problem_demo_subtask_scope",
+      "to": "option_demo_eval_cases",
       "relation": "parent",
       "type": "contains"
     },
     {
-      "from": "option_gemma_baseline",
-      "to": "exp_001_demo200_gemma",
+      "from": "problem_demo_quality_gap",
+      "to": "option_demo_prompt_refinement",
       "relation": "parent",
       "type": "contains"
     },
     {
-      "from": "option_flan_t5_clap",
-      "to": "exp_041_flan_t5_only",
+      "from": "option_demo_prompt_refinement",
+      "to": "problem_demo_subtask_scope",
+      "relation": "child",
+      "type": "contains"
+    },
+    {
+      "from": "problem_demo_quality_gap",
+      "to": "option_demo_retrieval_branch",
       "relation": "parent",
       "type": "contains"
     },
     {
-      "from": "option_flan_t5_clap",
-      "to": "exp_042_flan_t5_clap",
-      "relation": "parent",
-      "type": "contains"
-    },
-    {
-      "from": "problem_event_text_weak",
-      "to": "option_flan_t5_clap",
-      "relation": "parent",
-      "type": "contains"
-    },
-    {
-      "from": "problem_event_text_weak",
-      "to": "option_gemma_baseline",
-      "relation": "parent",
-      "type": "contains"
-    },
-    {
-      "from": "problem_remove_overlap_weak",
-      "to": "option_remove_suppression_head",
-      "relation": "parent",
-      "type": "contains"
-    },
-    {
-      "from": "problem_remove_overlap_weak",
-      "to": "option_stem_preserve_loss",
-      "relation": "parent",
-      "type": "contains"
-    },
-    {
-      "from": "problem_event_text_weak",
-      "to": "option_umt5_clap",
-      "relation": "parent",
-      "type": "contains"
-    },
-    {
-      "from": "stage_text_encoder",
-      "to": "problem_event_text_weak",
-      "relation": "parent",
-      "type": "contains"
-    },
-    {
-      "from": "stage_model_edit",
-      "to": "problem_remove_overlap_weak",
+      "from": "stage_demo_research",
+      "to": "problem_demo_quality_gap",
       "relation": "parent",
       "type": "contains"
     }
   ],
   "current_focus_path": [
-    "stage_text_encoder",
-    "problem_event_text_weak"
+    "stage_demo_research",
+    "problem_demo_quality_gap"
   ],
-  "current_focus_node": "problem_event_text_weak",
+  "current_focus_node": "problem_demo_quality_gap",
   "focus_mode": {
     "default_depth": 2,
     "hide_statuses": [

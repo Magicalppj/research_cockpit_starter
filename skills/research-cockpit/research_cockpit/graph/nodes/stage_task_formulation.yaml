@@ -1,9 +1,0 @@
-id: stage_task_formulation
-type: stage
-title: Task Formulation
-status: done
-priority: high
-summary: Unify generation and editing as base-audio plus edit-program local rewriting.
-children:
-- decision_unified_edit_program
-- decision_tts_boundary

@@ -1,0 +1,10 @@
+id: decision_demo_prompt_refinement
+type: decision
+title: Adopt prompt refinement branch
+status: proposed
+parent: option_demo_prompt_refinement
+summary: Demo decision used to exercise evidence refresh and acceptance checklist behavior.
+supporting_experiments:
+- experiment_demo_prompt_refinement
+consequences:
+- If accepted, use the refined prompt as the default demo workflow.

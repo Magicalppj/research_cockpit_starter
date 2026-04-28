@@ -1,21 +1,14 @@
-current_stage: stage_text_encoder
-current_problem: problem_event_text_weak
-current_option: option_flan_t5_clap
+current_stage: stage_demo_research
+current_problem: problem_demo_quality_gap
+current_option: option_demo_prompt_refinement
 current_focus_path:
-- stage_text_encoder
-- problem_event_text_weak
-current_hypothesis: 'Event-level old/new text control can be improved by using FLAN-T5-XL
-  token features plus CLAP audio-semantic anchors in the Semantic Ribbon branch.
-
-  '
+- stage_demo_research
+- problem_demo_quality_gap
+current_hypothesis: A small structured demo can show how agents inspect, branch, test, and report option workstreams.
 open_risks:
-- Need train/inference parity for FLAN-T5 + CLAP timeline features.
-- Need to verify whether CLAP anchor improves remove/replace under overlap.
-- Need to avoid mixing legacy timeline inference with edit-program inference.
+- Demo data is illustrative and should be replaced by the user's own research nodes.
 next_actions:
-- Regenerate timeline feature cache with FLAN-T5-XL token features.
-- Add CLAP anchor projection to EventStateInitializer.
-- Run FLAN-T5-only ablation on Audio Edit Dataset v2_150.
-- Run FLAN-T5 + CLAP ablation and compare local edit following.
-updated_at: '2026-04-27'
-current_focus_node: problem_event_text_weak
+- Run the prompt refinement demo experiment.
+- Record one finding before reviewing the demo decision.
+updated_at: '2026-04-28'
+current_focus_node: problem_demo_quality_gap

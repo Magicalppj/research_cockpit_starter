@@ -1,12 +1,12 @@
 {
-  "current_stage": "stage_text_encoder",
-  "current_stage_title": "Text Encoder Redesign",
-  "current_problem": "problem_event_text_weak",
-  "current_problem_title": "Event-level text control is weak",
-  "current_option": "option_flan_t5_clap",
-  "current_option_title": "FLAN-T5-XL tokens + CLAP semantic anchor",
-  "current_focus_node": "problem_event_text_weak",
-  "current_focus_node_title": "Event-level text control is weak",
+  "current_stage": "stage_demo_research",
+  "current_stage_title": "Demo Research Stage",
+  "current_problem": "problem_demo_quality_gap",
+  "current_problem_title": "Demo answer quality is inconsistent",
+  "current_option": "option_demo_prompt_refinement",
+  "current_option_title": "Prompt refinement branch",
+  "current_focus_node": "problem_demo_quality_gap",
+  "current_focus_node_title": "Demo answer quality is inconsistent",
   "focus_mode": {
     "default_depth": 2,
     "hide_statuses": [
@@ -19,30 +19,26 @@
     "show_parked": false
   },
   "current_focus_path": [
-    "stage_text_encoder",
-    "problem_event_text_weak"
+    "stage_demo_research",
+    "problem_demo_quality_gap"
   ],
-  "current_hypothesis": "Event-level old/new text control can be improved by using FLAN-T5-XL token features plus CLAP audio-semantic anchors in the Semantic Ribbon branch.\n",
+  "current_hypothesis": "A small structured demo can show how agents inspect, branch, test, and report option workstreams.",
   "open_risks": [
-    "Need train/inference parity for FLAN-T5 + CLAP timeline features.",
-    "Need to verify whether CLAP anchor improves remove/replace under overlap.",
-    "Need to avoid mixing legacy timeline inference with edit-program inference."
+    "Demo data is illustrative and should be replaced by the user's own research nodes."
   ],
   "next_actions": [
-    "Regenerate timeline feature cache with FLAN-T5-XL token features.",
-    "Add CLAP anchor projection to EventStateInitializer.",
-    "Run FLAN-T5-only ablation on Audio Edit Dataset v2_150.",
-    "Run FLAN-T5 + CLAP ablation and compare local edit following."
+    "Run the prompt refinement demo experiment.",
+    "Record one finding before reviewing the demo decision."
   ],
-  "updated_at": "2026-04-27",
+  "updated_at": "2026-04-28",
   "linked_nodes": [
     {
-      "id": "stage_text_encoder",
+      "id": "stage_demo_research",
       "type": "stage",
-      "title": "Text Encoder Redesign",
+      "title": "Demo Research Stage",
       "status": "active",
       "priority": "high",
-      "summary": "Improve event-level old/new text understanding for local audio editing.",
+      "summary": "Minimal public demo stage for validating Research Cockpit workflows.",
       "question": null,
       "hypothesis": null,
       "evidence_strength": null,
@@ -63,23 +59,22 @@
       "workstream_report": null,
       "agent_context": null,
       "next_actions": [
-        "Implement FLAN-T5 timeline features",
-        "Add CLAP semantic anchor"
+        "Review the demo problem and compare candidate options."
       ],
       "blockers": []
     },
     {
-      "id": "problem_event_text_weak",
+      "id": "problem_demo_quality_gap",
       "type": "problem",
-      "title": "Event-level text control is weak",
+      "title": "Demo answer quality is inconsistent",
       "status": "active",
       "priority": "critical",
-      "summary": "Gemma-based event features are likely insufficient for precise old/new edit control.",
-      "question": "How can the model respond more strongly to fine-grained old/new event text edits?",
+      "summary": "Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.",
+      "question": "How can the demo agent make answers more consistent across repeated runs?",
       "hypothesis": null,
       "evidence_strength": null,
       "evidence_summary": null,
-      "current_best_option": "option_flan_t5_clap",
+      "current_best_option": "option_demo_prompt_refinement",
       "decision_state": null,
       "outcome": null,
       "result_summary": null,
@@ -95,12 +90,10 @@
       "workstream_report": null,
       "agent_context": null,
       "next_actions": [
-        "Run FLAN-T5-only ablation",
-        "Run FLAN-T5 + CLAP ablation"
+        "Run the prompt refinement demo experiment."
       ],
       "blockers": [
-        "Need new feature cache",
-        "Need ablation runs"
+        "Need at least one structured finding before accepting the demo decision."
       ]
     }
   ]

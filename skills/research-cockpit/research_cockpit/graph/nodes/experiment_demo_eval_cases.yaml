@@ -1,0 +1,9 @@
+id: experiment_demo_eval_cases
+type: experiment
+title: Evaluate three repeated-answer cases
+status: planned
+parent: option_demo_eval_cases
+summary: Planned nested experiment for checking whether the branch improves repeated-answer consistency.
+metrics:
+- consistency_score
+- reviewer_notes

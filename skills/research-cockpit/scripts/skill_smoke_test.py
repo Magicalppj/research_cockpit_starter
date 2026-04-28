@@ -110,7 +110,7 @@ def _current_option_for_root(root: Path) -> str | None:
 def skill_smoke_test_payload(
     root: Path = ROOT,
     *,
-    query: str = "t5",
+    query: str = "demo",
     python_executable: str | None = None,
 ) -> dict[str, Any]:
     python = python_executable or os.environ.get("RESEARCH_COCKPIT_PYTHON", "").strip() or sys.executable
@@ -169,7 +169,7 @@ def _print_text(payload: dict[str, Any]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--query", default="t5")
+    parser.add_argument("--query", default="demo")
     parser.add_argument("--python", dest="python_executable", default=None)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

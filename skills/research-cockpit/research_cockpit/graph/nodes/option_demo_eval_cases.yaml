@@ -1,0 +1,9 @@
+id: option_demo_eval_cases
+type: option
+title: Three-case evaluation slice
+status: open
+priority: medium
+parent: problem_demo_subtask_scope
+summary: Nested option that keeps the demo branch small enough for a subagent to execute.
+children:
+- experiment_demo_eval_cases

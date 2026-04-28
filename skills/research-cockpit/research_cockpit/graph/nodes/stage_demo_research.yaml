@@ -1,0 +1,13 @@
+id: stage_demo_research
+type: stage
+title: Demo Research Stage
+status: active
+priority: high
+summary: Minimal public demo stage for validating Research Cockpit workflows.
+children:
+- problem_demo_quality_gap
+tags:
+- demo
+- getting-started
+next_actions:
+- Review the demo problem and compare candidate options.

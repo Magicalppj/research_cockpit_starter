@@ -1,0 +1,9 @@
+id: experiment_demo_prompt_refinement
+type: experiment
+title: Prompt refinement smoke run
+status: planned
+parent: option_demo_prompt_refinement
+summary: Small demo experiment for recording a structured finding in an isolated copy.
+metrics:
+- consistency_score
+- failure_count

@@ -71,27 +71,27 @@ For scripts that accept `--root`, pass the `research_cockpit` data directory, no
 Add a node:
 
 ```powershell
-python scripts\add_node.py --id exp_new --type experiment --title "New Experiment" --parent option_flan_t5_clap
+python scripts\add_node.py --id experiment_new --type experiment --title "New Experiment" --parent option_demo_prompt_refinement
 ```
 
 Update status:
 
 ```powershell
-python scripts\update_status.py --id exp_041_flan_t5_only --status running
+python scripts\update_status.py --id experiment_demo_prompt_refinement --status running
 ```
 
 Record an experiment finding:
 
 ```powershell
-python scripts\record_finding.py --experiment exp_042_flan_t5_clap --statement "FLAN-T5 + CLAP improves replace following." --confidence medium --outcome positive --metric replace_following --summary "Improved edit following."
+python scripts\record_finding.py --experiment experiment_demo_prompt_refinement --statement "The refined prompt improves consistency on the demo cases." --confidence medium --outcome positive --metric consistency_score --summary "Improved answer consistency."
 ```
 
 Follow an option as an agent workstream:
 
 ```powershell
-python scripts\claim_option.py --option option_flan_t5_clap --agent agent_flan_t5 --objective "Evaluate the FLAN-T5 + CLAP branch."
-python scripts\option_workstream_context.py --option option_flan_t5_clap --json
-python scripts\report_option_workstream.py --option option_flan_t5_clap --agent agent_flan_t5 --recommend continue --summary "Promising evidence, but more ablation is needed."
+python scripts\claim_option.py --option option_demo_prompt_refinement --agent agent_demo --objective "Evaluate the prompt refinement branch."
+python scripts\option_workstream_context.py --option option_demo_prompt_refinement --json
+python scripts\report_option_workstream.py --option option_demo_prompt_refinement --agent agent_demo --recommend continue --summary "Promising evidence, but more evaluation is needed."
 ```
 
 `claim_option.py` enforces a single active owner for an option while its workstream status is `claimed`, `in_progress`, or `blocked`. Use `--force` only when intentionally transferring ownership. Agents can branch under the claimed option by adding child `problem` nodes, then child `option` / `experiment` / `decision` nodes. `report_option_workstream.py` writes a report back to the option but does not accept a decision or close the upstream problem.
@@ -99,8 +99,8 @@ python scripts\report_option_workstream.py --option option_flan_t5_clap --agent 
 Promote an option into a decision:
 
 ```powershell
-python scripts\promote_decision.py --id decision_flan_t5_clap_v2 --option option_flan_t5_clap --title "Adopt FLAN-T5 + CLAP" --summary "Use FLAN-T5 event tokens with CLAP anchor." --status proposed --supporting-experiment exp_042_flan_t5_clap --evidence-strength medium
-python scripts\promote_decision.py --id decision_flan_t5_clap_v3 --option option_flan_t5_clap --title "Adopt FLAN-T5 + CLAP" --summary "Use FLAN-T5 event tokens with CLAP anchor." --status proposed --auto-evidence
+python scripts\promote_decision.py --id decision_demo_prompt_refinement_v2 --option option_demo_prompt_refinement --title "Adopt prompt refinement branch" --summary "Use the refined prompt as the default demo workflow." --status proposed --supporting-experiment experiment_demo_prompt_refinement --evidence-strength medium
+python scripts\promote_decision.py --id decision_demo_prompt_refinement_v3 --option option_demo_prompt_refinement --title "Adopt prompt refinement branch" --summary "Use the refined prompt as the default demo workflow." --status proposed --auto-evidence
 ```
 
 `--auto-evidence` collects structured experiment `findings`, `result_summary`, and `outcome` from the option branch, then fills `supporting_experiments`, `evidence_strength`, and `evidence_summary`. Explicit `--evidence-strength` values other than `none` are preserved.
@@ -108,7 +108,7 @@ python scripts\promote_decision.py --id decision_flan_t5_clap_v3 --option option
 Refresh evidence for an existing decision:
 
 ```powershell
-python scripts\update_decision_evidence.py --id decision_flan_t5_clap
+python scripts\update_decision_evidence.py --id decision_demo_prompt_refinement
 ```
 
 `update_decision_evidence.py` only updates evidence-related fields on an existing decision. It does not accept or reject the decision, and it does not close the parent option/problem.
@@ -116,14 +116,14 @@ python scripts\update_decision_evidence.py --id decision_flan_t5_clap
 Check whether a decision is ready to accept:
 
 ```powershell
-python scripts\check_decision_acceptance.py --id decision_flan_t5_clap
-python scripts\check_decision_acceptance.py --id decision_flan_t5_clap --json
+python scripts\check_decision_acceptance.py --id decision_demo_prompt_refinement
+python scripts\check_decision_acceptance.py --id decision_demo_prompt_refinement --json
 ```
 
 Accept an existing decision:
 
 ```powershell
-python scripts\accept_decision.py --id decision_flan_t5_clap
+python scripts\accept_decision.py --id decision_demo_prompt_refinement
 ```
 
 Acceptance is guarded by the decision checklist. A decision needs valid supporting experiments, evidence content, non-`none` evidence strength, an evidence summary, alternatives, consequences, and next required actions. `promote_decision.py --status accepted` uses the same gate. Use `--force-accept` only for reviewed migration/import exceptions.
@@ -168,8 +168,8 @@ python scripts\cleanup_suggestion_lifecycle.py --state completed --older-than-da
 Search notes, YAML node fields, and indexed local resources:
 
 ```powershell
-python scripts\search_knowledge.py --query t5
-python scripts\search_knowledge.py --query "event text" --json --focus-only
+python scripts\search_knowledge.py --query demo
+python scripts\search_knowledge.py --query "answer quality" --json --focus-only
 python scripts\search_knowledge.py --query cache --source note --limit 5
 python scripts\search_knowledge.py --query cache --source resource --json
 ```
@@ -179,7 +179,7 @@ python scripts\search_knowledge.py --query cache --source resource --json
 Create a linked Markdown note:
 
 ```powershell
-python scripts\create_note.py --node problem_event_text_weak
+python scripts\create_note.py --node problem_demo_quality_gap
 ```
 
 `create_note.py` supports `problem`, `option`, `experiment`, and `decision` nodes. It writes a template under `research_cockpit/notes/<type>/<node_id>.md`, links it back through `links.notes`, and rebuilds dashboard/context files by default. Existing notes are not overwritten unless you pass `--overwrite`.
@@ -187,7 +187,7 @@ python scripts\create_note.py --node problem_event_text_weak
 Set current focus:
 
 ```powershell
-python scripts\set_focus.py --focus-node problem_event_text_weak
+python scripts\set_focus.py --focus-node problem_demo_quality_gap
 ```
 
 `set_focus.py` derives `current_focus_path` from parent links when `--focus-node` is supplied. You can still pass `--stage`, `--problem`, `--option`, or `--path` to override the derived values. The script rebuilds dashboard/context files by default; add `--no-build` only when you intentionally want to update `current_state.yaml` without regenerating outputs.
@@ -196,8 +196,8 @@ Optional explicit graph edges:
 
 ```yaml
 edges:
-  - source: problem_event_text_weak
-    target: option_flan_t5_clap
+  - source: problem_demo_quality_gap
+    target: option_demo_prompt_refinement
     type: supports
     label: supports
     strength: 0.8

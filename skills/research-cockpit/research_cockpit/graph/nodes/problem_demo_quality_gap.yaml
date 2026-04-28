@@ -1,0 +1,16 @@
+id: problem_demo_quality_gap
+type: problem
+title: Demo answer quality is inconsistent
+status: active
+priority: critical
+parent: stage_demo_research
+question: How can the demo agent make answers more consistent across repeated runs?
+summary: Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.
+children:
+- option_demo_prompt_refinement
+- option_demo_retrieval_branch
+current_best_option: option_demo_prompt_refinement
+next_actions:
+- Run the prompt refinement demo experiment.
+blockers:
+- Need at least one structured finding before accepting the demo decision.

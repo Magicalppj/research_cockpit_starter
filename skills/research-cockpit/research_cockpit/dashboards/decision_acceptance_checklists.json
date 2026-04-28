@@ -1,7 +1,7 @@
 [
   {
-    "decision_id": "decision_flan_t5_clap",
-    "decision_title": "Adopt FLAN-T5-XL + CLAP for event branch",
+    "decision_id": "decision_demo_prompt_refinement",
+    "decision_title": "Adopt prompt refinement branch",
     "status": "proposed",
     "ready": false,
     "checks": [
@@ -12,7 +12,7 @@
         "reason": "Decision parent resolves to an option node.",
         "blocking": true,
         "related_node_ids": [
-          "option_flan_t5_clap"
+          "option_demo_prompt_refinement"
         ]
       },
       {
@@ -22,7 +22,7 @@
         "reason": "Option parent resolves to a problem node.",
         "blocking": true,
         "related_node_ids": [
-          "problem_event_text_weak"
+          "problem_demo_quality_gap"
         ]
       },
       {
@@ -32,8 +32,7 @@
         "reason": "Supporting experiments are present and valid.",
         "blocking": true,
         "related_node_ids": [
-          "exp_041_flan_t5_only",
-          "exp_042_flan_t5_clap"
+          "experiment_demo_prompt_refinement"
         ]
       },
       {
@@ -43,8 +42,7 @@
         "reason": "At least one supporting experiment must contain findings, result_summary, or outcome.",
         "blocking": true,
         "related_node_ids": [
-          "exp_041_flan_t5_only",
-          "exp_042_flan_t5_clap"
+          "experiment_demo_prompt_refinement"
         ]
       },
       {
@@ -54,7 +52,7 @@
         "reason": "Evidence strength must be weak, medium, or strong.",
         "blocking": true,
         "related_node_ids": [
-          "decision_flan_t5_clap"
+          "decision_demo_prompt_refinement"
         ]
       },
       {
@@ -64,7 +62,7 @@
         "reason": "evidence_summary must be non-empty.",
         "blocking": true,
         "related_node_ids": [
-          "decision_flan_t5_clap"
+          "decision_demo_prompt_refinement"
         ]
       },
       {
@@ -74,7 +72,7 @@
         "reason": "alternatives_considered must be non-empty.",
         "blocking": true,
         "related_node_ids": [
-          "decision_flan_t5_clap"
+          "decision_demo_prompt_refinement"
         ]
       },
       {
@@ -84,7 +82,7 @@
         "reason": "consequences is present.",
         "blocking": true,
         "related_node_ids": [
-          "decision_flan_t5_clap"
+          "decision_demo_prompt_refinement"
         ]
       },
       {
@@ -94,7 +92,7 @@
         "reason": "next_required_actions must be non-empty.",
         "blocking": true,
         "related_node_ids": [
-          "decision_flan_t5_clap"
+          "decision_demo_prompt_refinement"
         ]
       }
     ],
@@ -106,8 +104,7 @@
         "reason": "At least one supporting experiment must contain findings, result_summary, or outcome.",
         "blocking": true,
         "related_node_ids": [
-          "exp_041_flan_t5_only",
-          "exp_042_flan_t5_clap"
+          "experiment_demo_prompt_refinement"
         ]
       },
       {
@@ -117,7 +114,7 @@
         "reason": "Evidence strength must be weak, medium, or strong.",
         "blocking": true,
         "related_node_ids": [
-          "decision_flan_t5_clap"
+          "decision_demo_prompt_refinement"
         ]
       },
       {
@@ -127,7 +124,7 @@
         "reason": "evidence_summary must be non-empty.",
         "blocking": true,
         "related_node_ids": [
-          "decision_flan_t5_clap"
+          "decision_demo_prompt_refinement"
         ]
       },
       {
@@ -137,7 +134,7 @@
         "reason": "alternatives_considered must be non-empty.",
         "blocking": true,
         "related_node_ids": [
-          "decision_flan_t5_clap"
+          "decision_demo_prompt_refinement"
         ]
       },
       {
@@ -147,345 +144,7 @@
         "reason": "next_required_actions must be non-empty.",
         "blocking": true,
         "related_node_ids": [
-          "decision_flan_t5_clap"
-        ]
-      }
-    ],
-    "warnings": []
-  },
-  {
-    "decision_id": "decision_tts_boundary",
-    "decision_title": "Do not make TTS add a main neural editing task",
-    "status": "accepted",
-    "ready": false,
-    "checks": [
-      {
-        "id": "decision_parent",
-        "label": "Decision parent is an option",
-        "state": "fail",
-        "reason": "Decision parent must be an option node.",
-        "blocking": true,
-        "related_node_ids": [
-          "stage_task_formulation"
-        ]
-      },
-      {
-        "id": "problem_parent",
-        "label": "Option parent is a problem",
-        "state": "fail",
-        "reason": "Accepted decisions must resolve back to a problem node.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "supporting_experiments",
-        "label": "Supporting experiments are present",
-        "state": "fail",
-        "reason": "At least one supporting experiment is required.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "supporting_evidence",
-        "label": "Supporting experiments contain evidence",
-        "state": "fail",
-        "reason": "At least one supporting experiment must contain findings, result_summary, or outcome.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "evidence_strength",
-        "label": "Evidence strength is set",
-        "state": "fail",
-        "reason": "Evidence strength must be weak, medium, or strong.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_tts_boundary"
-        ]
-      },
-      {
-        "id": "evidence_summary",
-        "label": "Evidence summary is present",
-        "state": "fail",
-        "reason": "evidence_summary must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_tts_boundary"
-        ]
-      },
-      {
-        "id": "alternatives_considered",
-        "label": "Alternatives were considered",
-        "state": "fail",
-        "reason": "alternatives_considered must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_tts_boundary"
-        ]
-      },
-      {
-        "id": "consequences",
-        "label": "Consequences are recorded",
-        "state": "pass",
-        "reason": "consequences is present.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_tts_boundary"
-        ]
-      },
-      {
-        "id": "next_required_actions",
-        "label": "Next required actions are recorded",
-        "state": "fail",
-        "reason": "next_required_actions must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_tts_boundary"
-        ]
-      }
-    ],
-    "blocking_failures": [
-      {
-        "id": "decision_parent",
-        "label": "Decision parent is an option",
-        "state": "fail",
-        "reason": "Decision parent must be an option node.",
-        "blocking": true,
-        "related_node_ids": [
-          "stage_task_formulation"
-        ]
-      },
-      {
-        "id": "problem_parent",
-        "label": "Option parent is a problem",
-        "state": "fail",
-        "reason": "Accepted decisions must resolve back to a problem node.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "supporting_experiments",
-        "label": "Supporting experiments are present",
-        "state": "fail",
-        "reason": "At least one supporting experiment is required.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "supporting_evidence",
-        "label": "Supporting experiments contain evidence",
-        "state": "fail",
-        "reason": "At least one supporting experiment must contain findings, result_summary, or outcome.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "evidence_strength",
-        "label": "Evidence strength is set",
-        "state": "fail",
-        "reason": "Evidence strength must be weak, medium, or strong.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_tts_boundary"
-        ]
-      },
-      {
-        "id": "evidence_summary",
-        "label": "Evidence summary is present",
-        "state": "fail",
-        "reason": "evidence_summary must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_tts_boundary"
-        ]
-      },
-      {
-        "id": "alternatives_considered",
-        "label": "Alternatives were considered",
-        "state": "fail",
-        "reason": "alternatives_considered must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_tts_boundary"
-        ]
-      },
-      {
-        "id": "next_required_actions",
-        "label": "Next required actions are recorded",
-        "state": "fail",
-        "reason": "next_required_actions must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_tts_boundary"
-        ]
-      }
-    ],
-    "warnings": []
-  },
-  {
-    "decision_id": "decision_unified_edit_program",
-    "decision_title": "Use unified edit-program formulation",
-    "status": "accepted",
-    "ready": false,
-    "checks": [
-      {
-        "id": "decision_parent",
-        "label": "Decision parent is an option",
-        "state": "fail",
-        "reason": "Decision parent must be an option node.",
-        "blocking": true,
-        "related_node_ids": [
-          "stage_task_formulation"
-        ]
-      },
-      {
-        "id": "problem_parent",
-        "label": "Option parent is a problem",
-        "state": "fail",
-        "reason": "Accepted decisions must resolve back to a problem node.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "supporting_experiments",
-        "label": "Supporting experiments are present",
-        "state": "fail",
-        "reason": "At least one supporting experiment is required.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "supporting_evidence",
-        "label": "Supporting experiments contain evidence",
-        "state": "fail",
-        "reason": "At least one supporting experiment must contain findings, result_summary, or outcome.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "evidence_strength",
-        "label": "Evidence strength is set",
-        "state": "fail",
-        "reason": "Evidence strength must be weak, medium, or strong.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_unified_edit_program"
-        ]
-      },
-      {
-        "id": "evidence_summary",
-        "label": "Evidence summary is present",
-        "state": "fail",
-        "reason": "evidence_summary must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_unified_edit_program"
-        ]
-      },
-      {
-        "id": "alternatives_considered",
-        "label": "Alternatives were considered",
-        "state": "fail",
-        "reason": "alternatives_considered must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_unified_edit_program"
-        ]
-      },
-      {
-        "id": "consequences",
-        "label": "Consequences are recorded",
-        "state": "pass",
-        "reason": "consequences is present.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_unified_edit_program"
-        ]
-      },
-      {
-        "id": "next_required_actions",
-        "label": "Next required actions are recorded",
-        "state": "fail",
-        "reason": "next_required_actions must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_unified_edit_program"
-        ]
-      }
-    ],
-    "blocking_failures": [
-      {
-        "id": "decision_parent",
-        "label": "Decision parent is an option",
-        "state": "fail",
-        "reason": "Decision parent must be an option node.",
-        "blocking": true,
-        "related_node_ids": [
-          "stage_task_formulation"
-        ]
-      },
-      {
-        "id": "problem_parent",
-        "label": "Option parent is a problem",
-        "state": "fail",
-        "reason": "Accepted decisions must resolve back to a problem node.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "supporting_experiments",
-        "label": "Supporting experiments are present",
-        "state": "fail",
-        "reason": "At least one supporting experiment is required.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "supporting_evidence",
-        "label": "Supporting experiments contain evidence",
-        "state": "fail",
-        "reason": "At least one supporting experiment must contain findings, result_summary, or outcome.",
-        "blocking": true,
-        "related_node_ids": []
-      },
-      {
-        "id": "evidence_strength",
-        "label": "Evidence strength is set",
-        "state": "fail",
-        "reason": "Evidence strength must be weak, medium, or strong.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_unified_edit_program"
-        ]
-      },
-      {
-        "id": "evidence_summary",
-        "label": "Evidence summary is present",
-        "state": "fail",
-        "reason": "evidence_summary must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_unified_edit_program"
-        ]
-      },
-      {
-        "id": "alternatives_considered",
-        "label": "Alternatives were considered",
-        "state": "fail",
-        "reason": "alternatives_considered must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_unified_edit_program"
-        ]
-      },
-      {
-        "id": "next_required_actions",
-        "label": "Next required actions are recorded",
-        "state": "fail",
-        "reason": "next_required_actions must be non-empty.",
-        "blocking": true,
-        "related_node_ids": [
-          "decision_unified_edit_program"
+          "decision_demo_prompt_refinement"
         ]
       }
     ],
