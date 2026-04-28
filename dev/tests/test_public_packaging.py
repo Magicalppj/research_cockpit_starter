@@ -62,6 +62,7 @@ class PublicPackagingTests(unittest.TestCase):
         self.assertTrue((ROOT_DIR / "dev" / "docs" / "research_cockpit_design.md").exists())
         self.assertTrue((ROOT_DIR / "dev" / "docs" / "requirements_zh.md").exists())
         self.assertTrue((ROOT_DIR / "dev" / "specs" / "research_cockpit_v2_specs").exists())
+        self.assertTrue((ROOT_DIR / "dev" / "scripts" / "run_skill_release_check.py").exists())
         self.assertTrue((ROOT_DIR / "dev" / "tests").exists())
         self.assertFalse((ROOT_DIR / "docs_development_status.md").exists())
         self.assertFalse((ROOT_DIR / "research_cockpit_v2_specs").exists())

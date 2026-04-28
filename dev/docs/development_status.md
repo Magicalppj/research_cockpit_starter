@@ -1,5 +1,31 @@
 # Research Cockpit 开发状态
 
+## Agent Skill Release Hardening v1 更新（2026-04-28）
+
+本阶段把人工 subagent forward-test 固化为可重复的发布前检查流程，目标是在开源或复制 `skills/research-cockpit/` 前，自动验证 package 结构、公开化扫描、只读 agent 启动、包外可移植性、隔离写入 workflow 和 decision quality gate。
+
+已完成：
+
+- 新增 `dev/scripts/run_skill_release_check.py`，作为开发侧 release harness；默认检查 `skills/research-cockpit/`，支持 `--skill-path`、`--python`、`--json`、`--keep-temp` 和 `--skip-mutating`。
+- Release check 输出 `package_shape`、`public_scan`、`read_only_startup`、`portable_copy`、`isolated_mutation` 和 `decision_gate` tracks；失败时返回退出码 `1`，JSON 中保留命令、返回码、stdout/stderr 摘要。
+- 只读启动段覆盖 `agent_bootstrap.py`、`skill_smoke_test.py`、`list_agent_commands.py`、`search_knowledge.py --query t5` 和 `suggest_next_actions.py`。
+- 包外复制段会把 skill package 复制到 `.test_tmp/`，再从脚本绝对路径运行 `skill_smoke_test.py --json`，验证脚本能从自身位置推导 package root。
+- 隔离写入段只在临时副本里运行 `record_finding.py`、`update_decision_evidence.py`、`validate_cockpit.py` 和 `build_dashboard.py`，并确认原始 package 没有被修改。
+- Decision gate 段运行 `check_decision_acceptance.py --id decision_flan_t5_clap --json`，用于确认 checklist 能结构化报告 ready/not-ready 状态，不自动 accept，也不使用 `--force-accept`。
+- `dev/README.md` 已补充 release check 用法；skill package README 继续只保留 runtime/self-test 说明，避免把开发侧 harness 打进可发布 skill 语义。
+
+验证结果：
+
+- 新增 release checker 测试覆盖 package shape、public scan、依赖缺失结构化输出、skip-mutating 报告和隔离写入只改临时副本。
+- `python dev/scripts/run_skill_release_check.py --json` 可作为发布前完整检查入口。
+- `python dev/scripts/run_skill_release_check.py --json --skip-mutating` 可作为较快的只读检查入口。
+
+下一批候选：
+
+- 扩展 dry-run coverage，让更多 mutating scripts 可预览写入结果。
+- 增强 decision acceptance UI 修复提示，帮助用户补齐 alternatives、consequences 和 next actions。
+- 规划前端图谱交互升级，为可点击展开节点、编辑节点文本和未来前端迁移保留接口边界。
+
 ## Agent Skill Forward-Test v1 更新（2026-04-28）
 
 本阶段已完成面向 agent skill 使用场景的前向测试与小幅加固。测试目标是验证 `skills/research-cockpit/` 能否作为独立 skill 被后续 agent 发现、启动、读取上下文、执行只读分析，并在隔离副本中完成写入型研究工作流。
