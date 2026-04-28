@@ -15,7 +15,7 @@
 
 下一批候选：
 
-- 增加 decision acceptance checklist，在接受 decision 前检查 evidence、alternatives、consequences 和 next actions 是否完整。
+- decision acceptance checklist 已完成；后续可增加 UI 缺失项修复提示或 acceptance 历史记录。
 - 增加 linked resource text indexing，但需要先明确哪些文件类型可安全读取、如何控制上下文体积。
 - 增加 suggestion lifecycle cleanup，用于清理长期 orphan 的历史记录。
 
@@ -133,7 +133,7 @@
 
 ## 当前阶段
 
-当前项目处于 **Knowledge Search v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索。
+当前项目处于 **Decision Acceptance Checklist v1 完成后的稳定化阶段**。第一批已完成 v2 schema 兼容层和 `focus_context_pack.json` 生成；第二批已完成 Focus Graph 数据增强和前端 Focus Mode 默认入口；第三批已完成 `set_focus.py --focus-node` 闭环；第四批已补齐前端一键设焦点、方案比较、决策追踪和可选显式边；第五批已补齐校验命令、实验 finding 记录和 decision 生成工作流；第六批已完成 note 模板创建、linked resources 索引、资源页和节点搜索；第七批已完成只读行动建议和决策证据摘要；第八批已完成建议写回行动队列的最小闭环；第九批已完成 decision evidence 自动注入和已有 decision 证据刷新；第十批已完成建议忽略/完成/恢复的生命周期闭环；第十一批已完成 notes + YAML 轻量全文搜索；第十二批已完成 decision 接受质量门。
 
 已经从最初的 starter 原型推进到一个可运行、可验证的 repo-native 研究驾驶舱：
 
@@ -412,7 +412,7 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 4. Action Guidance UI 生命周期过滤和写回入口。
 5. Data Health suggestion lifecycle 摘要。
 
-下一批建议进入“决策质量门与索引扩展”层：decision acceptance checklist、linked resource text indexing、suggestion lifecycle 历史清理。
+下一批建议进入“索引扩展与历史维护”层：linked resource text indexing、suggestion lifecycle 历史清理、decision acceptance checklist 后续增强。
 
 ## 后续可优化
 
@@ -424,7 +424,7 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\build_dashboard.py
 
 ### 第二优先级：研究工作流
 
-- 增加 decision acceptance checklist，在接受 decision 前检查 supporting evidence、alternatives 和 consequences。
+- 增强 decision acceptance checklist，例如 UI 缺失项修复提示、acceptance 历史记录或更细的检查等级。
 - 增加 suggestion lifecycle 清理脚本，删除长期 orphan 历史记录。
 - 为 notes 增加推荐写作模板和命名约定，但仍不反向解析 Markdown 正文。
 
@@ -458,3 +458,24 @@ v2 P0 阶段完成后，应满足：
 更长期的目标仍然是 **Research Workflow v1**：
 
 > 让研究者完成一次完整闭环：发现问题 -> 建立方案 -> 运行实验 -> 记录结果 -> 形成决策 -> 更新当前主线。
+
+## Decision Acceptance Checklist v1 更新（2026-04-28）
+
+本批补齐 decision 接受前的硬质量门：默认只有证据、替代方案、后续影响和下一步行动都完整时，脚本才允许接受 decision。质量门只约束脚本工作流，不能阻止手工直接编辑 YAML。
+
+已完成：
+
+- 新增 `build_decision_acceptance_checklist(nodes, decision_id)` 和 `build_decision_acceptance_checklists(nodes)`，输出 `ready`、`checks`、`blocking_failures` 和 `warnings`。
+- 新增 `scripts/check_decision_acceptance.py`，支持人类可读输出和 `--json`；存在 blocking failure 时退出码为 `1`。
+- 新增 `scripts/accept_decision.py`，用于接受已有 proposed decision，并同步更新 parent option/problem；默认必须通过 checklist，`--force-accept` 仅作为人工确认的例外入口。
+- `scripts/promote_decision.py --status accepted` 已接入同一套硬质量门，并新增 `--force-accept`。
+- `scripts/update_status.py` 会拒绝直接把 decision 改为 `accepted`，避免绕过 option/problem 同步逻辑。
+- `scripts/build_dashboard.py` 新增输出 `research_cockpit/dashboards/decision_acceptance_checklists.json`。
+- Decision Trace 和 decision 节点详情会展示 acceptance checklist；decision 节点 Actions 区展示 `check_decision_acceptance.py` 和 `accept_decision.py` 命令模板。
+- README 已补充检查和接受 decision 的维护流程说明。
+
+下一批候选：
+
+- linked resource text indexing：把受控类型的本地 linked files/config 纳入搜索索引。
+- suggestion lifecycle cleanup：清理长期 orphan 的 suggestion lifecycle 历史记录。
+- decision acceptance checklist 后续增强：增加 UI 中的缺失项修复提示或 acceptance 历史记录。

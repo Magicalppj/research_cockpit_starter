@@ -69,6 +69,20 @@ def build_promote_decision_command(option_id: str) -> str:
     )
 
 
+def build_check_decision_acceptance_command(decision_id: str) -> str:
+    return (
+        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\check_decision_acceptance.py"
+        f" --id {decision_id}"
+    )
+
+
+def build_accept_decision_command(decision_id: str) -> str:
+    return (
+        r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\accept_decision.py"
+        f" --id {decision_id}"
+    )
+
+
 def build_create_note_command(node_id: str) -> str:
     return (
         r"D:\Tools\miniconda3\envs\aigc\python.exe scripts\create_note.py"
@@ -216,6 +230,21 @@ def format_evidence_summary(summary: dict) -> dict:
         "outcome_counts": "; ".join(f"{key}: {value}" for key, value in sorted(outcome_counts.items())),
         "latest_finding": summary.get("latest_finding") or "",
     }
+
+
+def format_decision_checklist(checklist: dict) -> list[dict]:
+    rows = []
+    for item in checklist.get("checks", []) or []:
+        related = item.get("related_node_ids") or []
+        rows.append({
+            "id": item.get("id"),
+            "state": item.get("state"),
+            "blocking": "yes" if item.get("blocking") else "",
+            "label": item.get("label"),
+            "reason": item.get("reason"),
+            "related_node_ids": "; ".join(str(node_id) for node_id in related),
+        })
+    return rows
 
 
 def filter_node_ids(nodes: dict, query: str) -> list[str]:

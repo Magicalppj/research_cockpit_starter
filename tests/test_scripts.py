@@ -12,9 +12,11 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 from cockpit.model import load_nodes, load_yaml, save_yaml
+from scripts.accept_decision import accept_decision
 from scripts.add_node import add_node
 from scripts.apply_suggestion import apply_suggestion
 from scripts.build_dashboard import build_dashboard
+from scripts.check_decision_acceptance import decision_acceptance_payload
 from scripts.create_note import create_note
 from scripts.promote_decision import promote_decision
 from scripts.record_finding import record_finding
@@ -201,6 +203,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "linked_resources.json",
             "next_action_suggestions.json",
             "search_index.json",
+            "decision_acceptance_checklists.json",
         }
 
         self.assertEqual({path.name for path in paths}, expected)
@@ -210,6 +213,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         links = json.loads((self.root / "dashboards" / "linked_resources.json").read_text(encoding="utf-8"))
         suggestions = json.loads((self.root / "dashboards" / "next_action_suggestions.json").read_text(encoding="utf-8"))
         search_index = json.loads((self.root / "dashboards" / "search_index.json").read_text(encoding="utf-8"))
+        checklists = json.loads((self.root / "dashboards" / "decision_acceptance_checklists.json").read_text(encoding="utf-8"))
         nodes = load_nodes(self.root)
 
         self.assertEqual(context["linked_nodes"][0]["id"], "stage_text")
@@ -222,6 +226,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIsInstance(links, list)
         self.assertIsInstance(suggestions, list)
         self.assertIsInstance(search_index, list)
+        self.assertIsInstance(checklists, list)
         self.assertIn("stage_text", nodes)
 
     def test_create_note_generates_note_links_node_and_rebuilds_dashboard(self) -> None:
@@ -783,7 +788,115 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(failed.returncode, 1)
         self.assertIn("missing_decision", failed.stdout)
 
+    def test_check_decision_acceptance_cli_json_reports_ready_and_failures(self) -> None:
+        script = ROOT_DIR / "scripts" / "check_decision_acceptance.py"
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+            },
+        )
+
+        payload = decision_acceptance_payload(self.root, "decision_t5")
+        failed = subprocess.run(
+            [sys.executable, str(script), "--root", str(self.root), "--id", "decision_t5", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertFalse(payload["ready"])
+        self.assertEqual(failed.returncode, 1)
+        self.assertFalse(json.loads(failed.stdout)["ready"])
+
+    def test_accept_decision_updates_existing_decision_option_and_problem(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["result_summary"] = "Improves edit following."
+        experiment["outcome"] = "positive"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+                "supporting_experiments": ["exp_t5"],
+                "evidence_strength": "medium",
+                "evidence_summary": "1 experiment; outcome positive",
+                "alternatives_considered": ["option_alt"],
+                "consequences": ["Update focus."],
+                "next_required_actions": ["Run CLAP ablation."],
+            },
+        )
+
+        accept_decision(self.root, decision_id="decision_t5", rebuild_dashboard=False)
+
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        self.assertEqual(decision["status"], "accepted")
+        self.assertEqual(decision["decision_status"], "accepted")
+        self.assertEqual(option["status"], "accepted")
+        self.assertEqual(option["decision_state"], "accepted")
+        self.assertEqual(problem["status"], "resolved")
+        self.assertEqual(problem["resolved_by"], "decision_t5")
+
+    def test_accept_decision_rejects_not_ready_unless_forced(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+            },
+        )
+
+        with self.assertRaises(ValueError) as not_ready:
+            accept_decision(self.root, decision_id="decision_t5", rebuild_dashboard=False)
+        self.assertIn("not ready", str(not_ready.exception))
+
+        accept_decision(self.root, decision_id="decision_t5", force_accept=True, rebuild_dashboard=False)
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
+        self.assertEqual(decision["status"], "accepted")
+
     def test_promote_accepted_decision_updates_option_and_problem(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["result_summary"] = "Improves edit following."
+        experiment["outcome"] = "positive"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
         promote_decision(
             self.root,
             decision_id="decision_accept_t5",
@@ -792,7 +905,10 @@ class ScriptBehaviorTests(unittest.TestCase):
             summary="Accept T5 as current branch.",
             status="accepted",
             supporting_experiments=["exp_t5"],
+            alternatives=["option_alt"],
             consequences=["Update focus."],
+            next_required_actions=["Run CLAP ablation."],
+            auto_evidence=True,
         )
 
         decision = load_yaml(self.root / "graph" / "nodes" / "decision_accept_t5.yaml")
@@ -804,6 +920,35 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(option["decision_state"], "accepted")
         self.assertEqual(problem["status"], "resolved")
         self.assertEqual(problem["resolved_by"], "decision_accept_t5")
+
+    def test_promote_accepted_decision_requires_quality_gate(self) -> None:
+        with self.assertRaises(ValueError) as not_ready:
+            promote_decision(
+                self.root,
+                decision_id="decision_accept_bad",
+                option_id="option_t5",
+                title="Accept T5",
+                summary="Accept without evidence.",
+                status="accepted",
+            )
+        self.assertIn("not ready", str(not_ready.exception))
+
+    def test_update_status_rejects_direct_decision_acceptance(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+            },
+        )
+
+        with self.assertRaises(ValueError) as direct_accept:
+            update_status(self.root, node_id="decision_t5", status="accepted")
+        self.assertIn("accept_decision.py", str(direct_accept.exception))
 
     def test_promote_decision_rejects_bad_references(self) -> None:
         with self.assertRaises(ValueError) as unknown_option:

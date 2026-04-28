@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from cockpit.model import (
     ResearchNode,
     build_decision_evidence_bundle,
+    build_decision_acceptance_checklist,
+    decision_acceptance_failure_message,
     load_nodes,
     load_yaml,
     save_yaml,
@@ -51,6 +53,7 @@ def promote_decision(
     next_required_actions: list[str] | None = None,
     evidence_strength: str = "none",
     auto_evidence: bool = False,
+    force_accept: bool = False,
     rebuild_dashboard: bool = True,
 ) -> Path:
     nodes = load_nodes(root)
@@ -110,6 +113,10 @@ def promote_decision(
     problem_data = None
     problem_id = option.parent
     if status == "accepted":
+        checklist = build_decision_acceptance_checklist(candidate, decision_id)
+        if not force_accept and not checklist["ready"]:
+            raise ValueError(decision_acceptance_failure_message(checklist))
+
         option_path = find_node_file(root, option_id)
         option_data = load_yaml(option_path)
         option_data["status"] = "accepted"
@@ -153,6 +160,7 @@ def main() -> None:
     parser.add_argument("--next-required-action", action="append", dest="next_required_actions")
     parser.add_argument("--evidence-strength", default="none", choices=sorted(VALID_EVIDENCE_STRENGTHS))
     parser.add_argument("--auto-evidence", action="store_true")
+    parser.add_argument("--force-accept", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -169,6 +177,7 @@ def main() -> None:
         next_required_actions=args.next_required_actions,
         evidence_strength=args.evidence_strength,
         auto_evidence=args.auto_evidence,
+        force_accept=args.force_accept,
         rebuild_dashboard=not args.no_build,
     )
     print(f"Created {out}")

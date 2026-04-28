@@ -40,6 +40,8 @@ def update_status(
 
     node = nodes[node_id]
     validate_status(node.type, status)
+    if node.type == "decision" and status == "accepted":
+        raise ValueError("Use scripts\\accept_decision.py to accept a decision so option/problem state stays synchronized.")
     if result_summary is not None and node.type != "experiment":
         raise ValueError("--result-summary can only be used with experiment nodes")
 

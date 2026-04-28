@@ -10,7 +10,9 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from ui.app import build_pyvis_html
 from ui.view_helpers import (
+    build_accept_decision_command,
     build_apply_suggestion_command,
+    build_check_decision_acceptance_command,
     build_create_note_command,
     build_promote_decision_command,
     build_record_finding_command,
@@ -20,6 +22,7 @@ from ui.view_helpers import (
     default_selected_statuses,
     edge_style_for_type,
     format_comparison_rows,
+    format_decision_checklist,
     format_finding_rows,
     format_resource_rows,
     format_action_suggestion_rows,
@@ -248,6 +251,8 @@ class UiRenderingTests(unittest.TestCase):
     def test_workflow_command_templates_are_copyable(self) -> None:
         finding_command = build_record_finding_command("exp_t5")
         decision_command = build_promote_decision_command("option_t5")
+        check_command = build_check_decision_acceptance_command("decision_t5")
+        accept_command = build_accept_decision_command("decision_t5")
         note_command = build_create_note_command("problem_text")
 
         self.assertIn("scripts\\record_finding.py", finding_command)
@@ -256,6 +261,10 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("scripts\\promote_decision.py", decision_command)
         self.assertIn("--option option_t5", decision_command)
         self.assertIn("--status proposed", decision_command)
+        self.assertIn("scripts\\check_decision_acceptance.py", check_command)
+        self.assertIn("--id decision_t5", check_command)
+        self.assertIn("scripts\\accept_decision.py", accept_command)
+        self.assertIn("--id decision_t5", accept_command)
         self.assertIn("scripts\\create_note.py", note_command)
         self.assertIn("--node problem_text", note_command)
 
@@ -410,6 +419,33 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(summary["experiment_count"], 1)
         self.assertEqual(summary["findings_count"], 0)
         self.assertEqual(summary["latest_finding"], "")
+
+    def test_format_decision_checklist_rows_are_readable(self) -> None:
+        rows = format_decision_checklist({
+            "checks": [
+                {
+                    "id": "supporting_experiments",
+                    "state": "fail",
+                    "blocking": True,
+                    "label": "Supporting experiments are present",
+                    "reason": "At least one supporting experiment is required.",
+                    "related_node_ids": ["exp_t5", "exp_clap"],
+                },
+                {
+                    "id": "weak_evidence",
+                    "state": "warning",
+                    "blocking": False,
+                    "label": "Evidence is weak",
+                    "reason": "Review before acceptance.",
+                    "related_node_ids": [],
+                },
+            ],
+        })
+
+        self.assertEqual(rows[0]["blocking"], "yes")
+        self.assertEqual(rows[0]["related_node_ids"], "exp_t5; exp_clap")
+        self.assertEqual(rows[1]["blocking"], "")
+        self.assertEqual(rows[1]["state"], "warning")
 
 
 if __name__ == "__main__":

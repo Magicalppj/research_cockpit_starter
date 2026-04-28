@@ -91,6 +91,21 @@ D:\Tools\miniconda3\envs\aigc\python.exe scripts\update_decision_evidence.py --i
 
 `update_decision_evidence.py` only updates evidence-related fields on an existing decision. It does not accept or reject the decision, and it does not close the parent option/problem.
 
+Check whether a decision is ready to accept:
+
+```powershell
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\check_decision_acceptance.py --id decision_flan_t5_clap
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\check_decision_acceptance.py --id decision_flan_t5_clap --json
+```
+
+Accept an existing decision:
+
+```powershell
+D:\Tools\miniconda3\envs\aigc\python.exe scripts\accept_decision.py --id decision_flan_t5_clap
+```
+
+Acceptance is guarded by the decision checklist. A decision needs valid supporting experiments, evidence content, non-`none` evidence strength, an evidence summary, alternatives, consequences, and next required actions. `promote_decision.py --status accepted` uses the same gate. Use `--force-accept` only for reviewed migration/import exceptions.
+
 Review read-only action suggestions:
 
 ```powershell
@@ -196,6 +211,8 @@ scripts/
   record_finding.py
   promote_decision.py
   update_decision_evidence.py
+  check_decision_acceptance.py
+  accept_decision.py
   create_note.py
   suggest_next_actions.py
   apply_suggestion.py

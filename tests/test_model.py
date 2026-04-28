@@ -14,6 +14,7 @@ from cockpit.model import (
     build_action_suggestions,
     build_agent_context,
     build_branch_comparison,
+    build_decision_acceptance_checklist,
     build_decision_evidence_bundle,
     build_decision_evidence_summary,
     build_decision_trace,
@@ -728,6 +729,99 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(automatic["evidence_strength"], "none")
         self.assertEqual(manual["supporting_experiments"], ["exp_t5"])
         self.assertEqual(manual["evidence_strength"], "none")
+
+    def test_decision_acceptance_checklist_ready_for_complete_decision(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative option",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["result_summary"] = "Improves replace following."
+        experiment["outcome"] = "positive"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
+        decision.update({
+            "supporting_experiments": ["exp_t5"],
+            "evidence_strength": "medium",
+            "evidence_summary": "1 experiment; outcome positive",
+            "alternatives_considered": ["option_alt"],
+            "consequences": ["Prioritize T5 branch."],
+            "next_required_actions": ["Run CLAP ablation."],
+        })
+        save_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml", decision)
+        nodes = load_nodes(self.root)
+
+        checklist = build_decision_acceptance_checklist(nodes, "decision_t5")
+
+        self.assertTrue(checklist["ready"])
+        self.assertEqual(checklist["blocking_failures"], [])
+        self.assertEqual(checklist["warnings"], [])
+
+    def test_decision_acceptance_checklist_reports_missing_required_fields(self) -> None:
+        nodes = load_nodes(self.root)
+
+        checklist = build_decision_acceptance_checklist(nodes, "decision_t5")
+
+        failed_ids = {item["id"] for item in checklist["blocking_failures"]}
+        self.assertFalse(checklist["ready"])
+        self.assertIn("supporting_experiments", failed_ids)
+        self.assertIn("supporting_evidence", failed_ids)
+        self.assertIn("evidence_strength", failed_ids)
+        self.assertIn("evidence_summary", failed_ids)
+        self.assertIn("alternatives_considered", failed_ids)
+        self.assertIn("consequences", failed_ids)
+        self.assertIn("next_required_actions", failed_ids)
+
+    def test_decision_acceptance_checklist_warns_for_weak_evidence(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative option",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["result_summary"] = "Directional improvement only."
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
+        decision.update({
+            "supporting_experiments": ["exp_t5"],
+            "evidence_strength": "weak",
+            "evidence_summary": "Weak directional evidence.",
+            "alternatives_considered": ["option_alt"],
+            "consequences": ["Proceed cautiously."],
+            "next_required_actions": ["Run confirmation experiment."],
+        })
+        save_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml", decision)
+        nodes = load_nodes(self.root)
+
+        checklist = build_decision_acceptance_checklist(nodes, "decision_t5")
+
+        self.assertTrue(checklist["ready"])
+        self.assertEqual([item["id"] for item in checklist["warnings"]], ["weak_evidence"])
+
+    def test_decision_acceptance_checklist_reports_bad_parent_and_refs(self) -> None:
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
+        decision["parent"] = "problem_text"
+        decision["supporting_experiments"] = ["missing_exp"]
+        save_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml", decision)
+        nodes = load_nodes(self.root)
+
+        checklist = build_decision_acceptance_checklist(nodes, "decision_t5")
+
+        failed_ids = {item["id"] for item in checklist["blocking_failures"]}
+        self.assertIn("decision_parent", failed_ids)
+        self.assertIn("supporting_experiments", failed_ids)
 
     def test_review_decision_suggestion_uses_evidence_update_command(self) -> None:
         nodes = load_nodes(self.root)

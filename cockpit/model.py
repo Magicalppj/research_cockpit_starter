@@ -1713,6 +1713,195 @@ def _validate_experiment_refs(nodes: dict[str, ResearchNode], experiment_ids: li
             raise ValueError(f"{field_name} reference {experiment_id} must be experiment, got {nodes[experiment_id].type}")
 
 
+def _has_list_items(value: Any) -> bool:
+    return isinstance(value, list) and any(str(item).strip() for item in value)
+
+
+def _acceptance_check(
+    check_id: str,
+    label: str,
+    passed: bool,
+    reason: str,
+    *,
+    blocking: bool = True,
+    related_node_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": check_id,
+        "label": label,
+        "state": "pass" if passed else "fail",
+        "reason": reason,
+        "blocking": blocking,
+        "related_node_ids": related_node_ids or [],
+    }
+
+
+def _acceptance_warning(
+    check_id: str,
+    label: str,
+    reason: str,
+    *,
+    related_node_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "id": check_id,
+        "label": label,
+        "state": "warning",
+        "reason": reason,
+        "blocking": False,
+        "related_node_ids": related_node_ids or [],
+    }
+
+
+def build_decision_acceptance_checklist(nodes: dict[str, ResearchNode], decision_id: str) -> dict[str, Any]:
+    if decision_id not in nodes:
+        raise ValueError(f"Decision node does not exist: {decision_id}")
+    decision = nodes[decision_id]
+    if decision.type != "decision":
+        raise ValueError(f"Node {decision_id} must be decision, got {decision.type}")
+
+    checks: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    related_ids = [decision_id]
+
+    option_id = decision.parent
+    option = nodes.get(str(option_id)) if option_id else None
+    has_option_parent = bool(option and option.type == "option")
+    checks.append(_acceptance_check(
+        "decision_parent",
+        "Decision parent is an option",
+        has_option_parent,
+        "Decision parent resolves to an option node." if has_option_parent else "Decision parent must be an option node.",
+        related_node_ids=[str(option_id)] if option_id else [],
+    ))
+
+    problem_id = option.parent if has_option_parent and option else None
+    problem = nodes.get(str(problem_id)) if problem_id else None
+    has_problem_parent = bool(problem and problem.type == "problem")
+    checks.append(_acceptance_check(
+        "problem_parent",
+        "Option parent is a problem",
+        has_problem_parent,
+        "Option parent resolves to a problem node." if has_problem_parent else "Accepted decisions must resolve back to a problem node.",
+        related_node_ids=[str(problem_id)] if problem_id else [],
+    ))
+
+    supporting_experiments = _unique_strings(decision.raw.get("supporting_experiments", []) or [])
+    invalid_experiments = [
+        experiment_id
+        for experiment_id in supporting_experiments
+        if experiment_id not in nodes or nodes[experiment_id].type != "experiment"
+    ]
+    experiments_ok = bool(supporting_experiments) and not invalid_experiments
+    checks.append(_acceptance_check(
+        "supporting_experiments",
+        "Supporting experiments are present",
+        experiments_ok,
+        "Supporting experiments are present and valid." if experiments_ok else (
+            f"Invalid supporting experiment reference(s): {', '.join(invalid_experiments)}"
+            if invalid_experiments else "At least one supporting experiment is required."
+        ),
+        related_node_ids=supporting_experiments,
+    ))
+
+    valid_experiment_ids = [
+        experiment_id
+        for experiment_id in supporting_experiments
+        if experiment_id in nodes and nodes[experiment_id].type == "experiment"
+    ]
+    evidence_ok = any(_has_experiment_evidence(nodes[experiment_id]) for experiment_id in valid_experiment_ids)
+    checks.append(_acceptance_check(
+        "supporting_evidence",
+        "Supporting experiments contain evidence",
+        evidence_ok,
+        "At least one supporting experiment has findings, result_summary, or outcome."
+        if evidence_ok else "At least one supporting experiment must contain findings, result_summary, or outcome.",
+        related_node_ids=valid_experiment_ids,
+    ))
+
+    strength = str(decision.raw.get("evidence_strength") or "none")
+    strength_ok = strength in VALID_FINDING_CONFIDENCES and strength != "none"
+    checks.append(_acceptance_check(
+        "evidence_strength",
+        "Evidence strength is set",
+        strength_ok,
+        f"Evidence strength is {strength}." if strength_ok else "Evidence strength must be weak, medium, or strong.",
+        related_node_ids=related_ids,
+    ))
+    if strength == "weak":
+        warning = _acceptance_warning(
+            "weak_evidence",
+            "Evidence is weak",
+            "Weak evidence is acceptable but should be reviewed before acceptance.",
+            related_node_ids=related_ids,
+        )
+        checks.append(warning)
+        warnings.append(warning)
+
+    for check_id, label, field_name in (
+        ("evidence_summary", "Evidence summary is present", "evidence_summary"),
+        ("alternatives_considered", "Alternatives were considered", "alternatives_considered"),
+        ("consequences", "Consequences are recorded", "consequences"),
+        ("next_required_actions", "Next required actions are recorded", "next_required_actions"),
+    ):
+        value = decision.raw.get(field_name)
+        if field_name == "evidence_summary":
+            passed = bool(str(value or "").strip())
+        else:
+            passed = _has_list_items(value)
+        checks.append(_acceptance_check(
+            check_id,
+            label,
+            passed,
+            f"{field_name} is present." if passed else f"{field_name} must be non-empty.",
+            related_node_ids=related_ids,
+        ))
+
+    alternative_ids = _unique_strings(decision.raw.get("alternatives_considered", []) or [])
+    invalid_alternatives = [
+        option_id
+        for option_id in alternative_ids
+        if option_id not in nodes or nodes[option_id].type != "option"
+    ]
+    if invalid_alternatives:
+        checks.append(_acceptance_check(
+            "alternative_refs",
+            "Alternative references are valid",
+            False,
+            f"Invalid alternative option reference(s): {', '.join(invalid_alternatives)}",
+            related_node_ids=invalid_alternatives,
+        ))
+
+    blocking_failures = [
+        check
+        for check in checks
+        if check["blocking"] and check["state"] == "fail"
+    ]
+    return {
+        "decision_id": decision.id,
+        "decision_title": decision.title,
+        "status": decision.status,
+        "ready": not blocking_failures,
+        "checks": checks,
+        "blocking_failures": blocking_failures,
+        "warnings": warnings,
+    }
+
+
+def build_decision_acceptance_checklists(nodes: dict[str, ResearchNode]) -> list[dict[str, Any]]:
+    return [
+        build_decision_acceptance_checklist(nodes, node.id)
+        for node in sorted(nodes.values(), key=lambda item: item.id)
+        if node.type == "decision"
+    ]
+
+
+def decision_acceptance_failure_message(checklist: dict[str, Any]) -> str:
+    failures = checklist.get("blocking_failures", []) or []
+    reasons = "; ".join(str(item.get("reason", "")) for item in failures if item.get("reason"))
+    return f"Decision {checklist.get('decision_id')} is not ready for acceptance: {reasons}"
+
+
 def _evidence_strength_for_counts(
     findings: list[dict[str, Any]],
     outcome_counts: dict[str, int],

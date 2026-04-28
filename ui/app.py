@@ -17,6 +17,7 @@ from cockpit.model import (
     build_action_suggestions,
     build_agent_context,
     build_branch_comparison,
+    build_decision_acceptance_checklist,
     build_decision_rows,
     build_decision_evidence_summary,
     build_decision_trace,
@@ -33,6 +34,8 @@ from cockpit.model import (
 )
 from ui.view_helpers import (
     build_apply_suggestion_command,
+    build_accept_decision_command,
+    build_check_decision_acceptance_command,
     build_create_note_command,
     build_promote_decision_command,
     build_record_finding_command,
@@ -48,6 +51,7 @@ from ui.view_helpers import (
     filter_search_results,
     format_action_suggestion_rows,
     format_comparison_rows,
+    format_decision_checklist,
     format_evidence_summary,
     format_finding_rows,
     format_node_option,
@@ -340,6 +344,11 @@ EXTRA_UI_TEXT = {
         "node_entries": "Node 条目",
         "unlinked_notes": "未关联笔记",
         "related_node": "关联节点",
+        "decision_acceptance_checklist": "决策接受质量门",
+        "decision_ready": "该 decision 已满足接受条件。",
+        "decision_not_ready": "该 decision 尚未满足接受条件。",
+        "check_decision_command": "检查决策接受条件命令",
+        "accept_decision_command": "接受决策命令",
     },
     "en": {
         "suggestion_state": "Suggestion State",
@@ -369,6 +378,11 @@ EXTRA_UI_TEXT = {
         "node_entries": "Node Entries",
         "unlinked_notes": "Unlinked Notes",
         "related_node": "Related Node",
+        "decision_acceptance_checklist": "Decision Acceptance Checklist",
+        "decision_ready": "This decision is ready for acceptance.",
+        "decision_not_ready": "This decision is not ready for acceptance.",
+        "check_decision_command": "Check Decision Acceptance Command",
+        "accept_decision_command": "Accept Decision Command",
     },
 }
 
@@ -568,6 +582,18 @@ def render_node_detail(
         if findings:
             st.write(text["findings"])
             st.dataframe(pd.DataFrame(format_finding_rows(findings)), use_container_width=True, hide_index=True)
+        if node.type == "decision":
+            checklist = build_decision_acceptance_checklist(nodes, node_id)
+            st.write(text["decision_acceptance_checklist"])
+            if checklist["ready"]:
+                st.success(text["decision_ready"])
+            else:
+                st.warning(text["decision_not_ready"])
+            st.dataframe(
+                pd.DataFrame(format_decision_checklist(checklist)),
+                use_container_width=True,
+                hide_index=True,
+            )
 
     with actions_tab:
         if current:
@@ -587,6 +613,11 @@ def render_node_detail(
         if node.type == "option":
             st.write(text["promote_decision_command"])
             st.code(build_promote_decision_command(node_id), language="powershell")
+        if node.type == "decision":
+            st.write(text["check_decision_command"])
+            st.code(build_check_decision_acceptance_command(node_id), language="powershell")
+            st.write(text["accept_decision_command"])
+            st.code(build_accept_decision_command(node_id), language="powershell")
         if node.type in {"problem", "option", "experiment", "decision"}:
             st.write(text["create_note_command"])
             st.code(build_create_note_command(node_id), language="powershell")
@@ -815,6 +846,13 @@ def render_decision_trace(nodes: dict, text: dict[str, str]) -> None:
         use_container_width=True,
         hide_index=True,
     )
+    checklist = build_decision_acceptance_checklist(nodes, decision_id)
+    st.subheader(text["decision_acceptance_checklist"])
+    if checklist["ready"]:
+        st.success(text["decision_ready"])
+    else:
+        st.warning(text["decision_not_ready"])
+    st.dataframe(pd.DataFrame(format_decision_checklist(checklist)), use_container_width=True, hide_index=True)
 
 
 def render_action_guidance(action_suggestions: list[dict], text: dict[str, str]) -> None:
