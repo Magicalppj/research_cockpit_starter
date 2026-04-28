@@ -244,6 +244,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["validation"]["ok"])
         self.assertEqual(payload["focus"]["current_focus_node"], "problem_text")
         self.assertFalse(payload["context_paths"]["agent_context_pack"]["exists"])
+        self.assertEqual(payload["skill"]["path"], "skills/research-cockpit")
+        self.assertTrue(payload["skill"]["exists"])
         self.assertIn("top_suggestions", payload)
         self.assertIn("search_summary", payload)
         self.assertIsInstance(payload["git"]["worktree_dirty"], bool)

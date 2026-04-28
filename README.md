@@ -45,7 +45,7 @@ ssh -L 8501:localhost:8501 user@remote-gpu-server
 
 ## Project Status
 
-See `docs_development_status.md` for the current development phase, completed MVP capabilities, known limitations, and recommended next features.
+See `dev/docs/development_status.md` for the current development phase, completed MVP capabilities, known limitations, and recommended next features. Development-only specs and logs live under `dev/`; the latest layout note is `dev/docs/skill_layout_reorganization.md`.
 
 ## Maintenance Commands
 
@@ -199,7 +199,7 @@ Both context packs also include `suggested_next_actions` for read-only planning 
 
 ## Using as Agent Skill
 
-This repository can be used as a Codex skill source. Agent sessions should start with:
+The installable skill package lives under `skills/research-cockpit/`. Agent sessions should start from the repository root with:
 
 ```powershell
 python scripts\agent_bootstrap.py --json
@@ -215,6 +215,8 @@ Recommended agent read order:
 5. Run `validate_cockpit.py` and `build_dashboard.py` after mutating data.
 
 Context packs include `metadata.schema_version`, `metadata.generated_at`, `metadata.source_git_commit`, `metadata.worktree_dirty`, and `metadata.current_state_updated_at` so agents can judge whether generated context is fresh.
+
+For subagent validation, pass the skill folder path `skills/research-cockpit` and a concrete cockpit task. The bootstrap payload also exposes this path under `skill.path`.
 
 ## Directory Layout
 
@@ -253,4 +255,18 @@ scripts/
   list_agent_commands.py
 ui/
   app.py
+skills/
+  research-cockpit/
+    SKILL.md
+    agents/openai.yaml
+    references/
+dev/
+  README.md
+  docs/
+    development_status.md
+    research_cockpit_design.md
+    requirements_zh.md
+    skill_layout_reorganization.md
+  specs/
+    research_cockpit_v2_specs/
 ```

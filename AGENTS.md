@@ -6,6 +6,13 @@
 - Treat `research_cockpit/dashboards/*` as generated context. Regenerate it with `python scripts\build_dashboard.py` after YAML changes.
 - Do not infer state from Markdown notes. Notes are long-form supporting records.
 
+## Package Boundaries
+
+- The reusable Codex skill package lives in `skills/research-cockpit/`.
+- Development logs, design notes, historical requirements, and v2 planning specs live in `dev/`.
+- Runtime code remains at the repository root in `cockpit/`, `scripts/`, `ui/`, and `research_cockpit/`.
+- When preparing a pure skill export, start from `skills/research-cockpit/` and include only the referenced runtime files intentionally.
+
 ## Read Order
 
 1. Run `python scripts\agent_bootstrap.py --json`.
@@ -13,6 +20,8 @@
 3. Read `research_cockpit/dashboards/focus_context_pack.json` for local focus.
 4. Use `python scripts\search_knowledge.py --query "..." --json` when more context is needed.
 5. Use `python scripts\list_agent_commands.py --json` to choose safe workflow scripts.
+
+For subagent validation, pass `skills/research-cockpit/` as the skill path and run the task from repository root.
 
 ## Write Rules
 

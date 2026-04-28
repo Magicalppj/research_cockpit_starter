@@ -276,10 +276,10 @@ python scripts\build_dashboard.py
 
 规划来源：
 
-- `research_cockpit_v2_specs/README.md`
-- `research_cockpit_v2_specs/docs/A_node_schema_v2.md`
-- `research_cockpit_v2_specs/docs/B_ui_interaction_spec.md`
-- `research_cockpit_v2_specs/schemas/node_v2.schema.yaml`
+- `dev/specs/research_cockpit_v2_specs/README.md`
+- `dev/specs/research_cockpit_v2_specs/docs/A_node_schema_v2.md`
+- `dev/specs/research_cockpit_v2_specs/docs/B_ui_interaction_spec.md`
+- `dev/specs/research_cockpit_v2_specs/schemas/node_v2.schema.yaml`
 
 本阶段目标不是一次性完成完整 v2，而是在现有 Streamlit + PyVis + YAML + Python scripts 架构上补齐最关键的研究导航闭环：
 

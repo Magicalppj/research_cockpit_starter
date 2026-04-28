@@ -7,6 +7,8 @@ description: Use this skill to inspect, maintain, and update a YAML-backed resea
 
 Use this repository as a local research cockpit skill when a task depends on the current research graph, focus state, experiment findings, decisions, notes, or action suggestions.
 
+Run commands from the repository root. This skill package is stored at `skills/research-cockpit/`; repository layout and packaging boundaries are summarized in `references/repo-layout.md`.
+
 ## Start
 
 ```powershell
@@ -46,3 +48,7 @@ python scripts\accept_decision.py --id <decision_id>
 ```
 
 Set `RESEARCH_COCKPIT_PYTHON` if command templates should use a custom interpreter.
+
+## Subagent Validation
+
+When asking another agent to test this skill, pass the folder path `skills/research-cockpit/` plus a concrete cockpit task, then let it run `agent_bootstrap.py` before choosing commands.

@@ -9,6 +9,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 ROOT = REPO_ROOT / "research_cockpit"
+SKILL_ROOT = REPO_ROOT / "skills" / "research-cockpit"
 sys.path.insert(0, str(REPO_ROOT))
 
 from cockpit.model import (
@@ -79,6 +80,10 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
             "current_focus_path": current.get("current_focus_path", []) or [],
         },
         "context_paths": _context_paths(root),
+        "skill": {
+            "path": _display_path(SKILL_ROOT),
+            "exists": SKILL_ROOT.exists(),
+        },
         "top_suggestions": suggestions[:3],
         "search_summary": build_search_index_summary(search_index),
         "git": {
