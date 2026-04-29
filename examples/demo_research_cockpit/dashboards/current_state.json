@@ -5,8 +5,8 @@
   "current_problem_title": "Demo answer quality is inconsistent",
   "current_option": "option_demo_prompt_refinement",
   "current_option_title": "Prompt refinement branch",
-  "current_focus_node": "problem_demo_quality_gap",
-  "current_focus_node_title": "Demo answer quality is inconsistent",
+  "current_focus_node": "experiment_demo_prompt_refinement",
+  "current_focus_node_title": "Prompt refinement smoke run",
   "focus_mode": {
     "default_depth": 2,
     "hide_statuses": [
@@ -20,7 +20,9 @@
   },
   "current_focus_path": [
     "stage_demo_research",
-    "problem_demo_quality_gap"
+    "problem_demo_quality_gap",
+    "option_demo_prompt_refinement",
+    "experiment_demo_prompt_refinement"
   ],
   "current_hypothesis": "A small structured demo can show how agents inspect, branch, test, and report option workstreams.",
   "open_risks": [
@@ -30,9 +32,172 @@
     "Run the prompt refinement demo experiment.",
     "Record one finding before reviewing the demo decision."
   ],
-  "updated_at": "2026-04-28",
+  "updated_at": "2026-04-29",
   "saved_graph_views": [],
-  "recent_interactions": [],
+  "recent_interactions": [
+    {
+      "id": "2026-04-29T11_19_13Z_set_focus_experiment_demo_prompt_refinement",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T11:19:13Z",
+      "node_id": "experiment_demo_prompt_refinement",
+      "command": "research-cockpit set-focus --focus-node experiment_demo_prompt_refinement",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "option_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "experiment_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "experiment_demo_prompt_refinement"
+        ]
+      }
+    },
+    {
+      "id": "2026-04-29T11_07_31Z_set_focus_option_demo_prompt_refinement",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T11:07:31Z",
+      "node_id": "option_demo_prompt_refinement",
+      "command": "research-cockpit set-focus --focus-node option_demo_prompt_refinement",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_subtask_scope",
+        "current_option": "option_demo_eval_cases",
+        "current_focus_node": "experiment_demo_eval_cases",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "problem_demo_subtask_scope",
+          "option_demo_eval_cases",
+          "experiment_demo_eval_cases"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "option_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement"
+        ]
+      }
+    },
+    {
+      "id": "2026-04-29T11_01_22Z_set_focus_experiment_demo_eval_cases",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T11:01:22Z",
+      "node_id": "experiment_demo_eval_cases",
+      "command": "research-cockpit set-focus --focus-node experiment_demo_eval_cases",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "decision_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "decision_demo_prompt_refinement"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_subtask_scope",
+        "current_option": "option_demo_eval_cases",
+        "current_focus_node": "experiment_demo_eval_cases",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "problem_demo_subtask_scope",
+          "option_demo_eval_cases",
+          "experiment_demo_eval_cases"
+        ]
+      }
+    },
+    {
+      "id": "2026-04-29T11_00_46Z_set_focus_decision_demo_prompt_refinement",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T11:00:46Z",
+      "node_id": "decision_demo_prompt_refinement",
+      "command": "research-cockpit set-focus --focus-node decision_demo_prompt_refinement",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "option_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "decision_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "decision_demo_prompt_refinement"
+        ]
+      }
+    },
+    {
+      "id": "2026-04-29T10_59_52Z_set_focus_option_demo_prompt_refinement",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T10:59:52Z",
+      "node_id": "option_demo_prompt_refinement",
+      "command": "research-cockpit set-focus --focus-node option_demo_prompt_refinement",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_subtask_scope",
+        "current_option": "option_demo_eval_cases",
+        "current_focus_node": "experiment_demo_eval_cases",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "problem_demo_subtask_scope",
+          "option_demo_eval_cases",
+          "experiment_demo_eval_cases"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "option_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement"
+        ]
+      }
+    }
+  ],
   "linked_nodes": [
     {
       "id": "stage_demo_research",
@@ -97,6 +262,64 @@
       "blockers": [
         "Need at least one structured finding before accepting the demo decision."
       ]
+    },
+    {
+      "id": "option_demo_prompt_refinement",
+      "type": "option",
+      "title": "Prompt refinement branch",
+      "status": "active",
+      "priority": "high",
+      "summary": "Candidate branch that improves instructions, examples, and acceptance checks.",
+      "question": null,
+      "hypothesis": "Clearer task framing and explicit success criteria will make responses more consistent.",
+      "evidence_strength": null,
+      "evidence_summary": null,
+      "current_best_option": null,
+      "decision_state": "promising",
+      "outcome": null,
+      "result_summary": null,
+      "supporting_experiments": [],
+      "contradicting_experiments": [],
+      "supporting_decisions": [],
+      "linked_artifacts": [],
+      "links": [],
+      "findings": [],
+      "implementation_steps": [],
+      "success_criteria": [],
+      "agent_workstream": null,
+      "workstream_report": null,
+      "agent_context": null,
+      "next_actions": [],
+      "blockers": []
+    },
+    {
+      "id": "experiment_demo_prompt_refinement",
+      "type": "experiment",
+      "title": "Prompt refinement smoke run",
+      "status": "planned",
+      "priority": null,
+      "summary": "Small demo experiment for recording a structured finding in an isolated copy.",
+      "question": null,
+      "hypothesis": null,
+      "evidence_strength": null,
+      "evidence_summary": null,
+      "current_best_option": null,
+      "decision_state": null,
+      "outcome": null,
+      "result_summary": null,
+      "supporting_experiments": [],
+      "contradicting_experiments": [],
+      "supporting_decisions": [],
+      "linked_artifacts": [],
+      "links": [],
+      "findings": [],
+      "implementation_steps": [],
+      "success_criteria": [],
+      "agent_workstream": null,
+      "workstream_report": null,
+      "agent_context": null,
+      "next_actions": [],
+      "blockers": []
     }
   ]
 }

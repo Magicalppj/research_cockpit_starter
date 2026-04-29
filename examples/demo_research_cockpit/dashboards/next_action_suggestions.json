@@ -1,47 +1,5 @@
 [
   {
-    "kind": "focus_next_action",
-    "priority": "critical",
-    "action": "Record one finding before reviewing the demo decision.",
-    "reason": "Current focus or current_state lists this as a next action.",
-    "source_node_id": "problem_demo_quality_gap",
-    "source_node_type": "problem",
-    "related_node_ids": [
-      "stage_demo_research",
-      "problem_demo_quality_gap"
-    ],
-    "suggested_command": "",
-    "is_focus_related": true,
-    "key": "sg_1f341281cef782aa",
-    "lifecycle_state": "active",
-    "lifecycle_reason": "",
-    "lifecycle_updated_at": "",
-    "id": "next_action_001",
-    "queued_in_current": true,
-    "queued_in_node": false
-  },
-  {
-    "kind": "focus_next_action",
-    "priority": "critical",
-    "action": "Run the prompt refinement demo experiment.",
-    "reason": "Current focus or current_state lists this as a next action.",
-    "source_node_id": "problem_demo_quality_gap",
-    "source_node_type": "problem",
-    "related_node_ids": [
-      "stage_demo_research",
-      "problem_demo_quality_gap"
-    ],
-    "suggested_command": "",
-    "is_focus_related": true,
-    "key": "sg_42c9a8359a947a82",
-    "lifecycle_state": "active",
-    "lifecycle_reason": "",
-    "lifecycle_updated_at": "",
-    "id": "next_action_002",
-    "queued_in_current": true,
-    "queued_in_node": true
-  },
-  {
     "kind": "resolve_blocker",
     "priority": "critical",
     "action": "Resolve blocker: Need at least one structured finding before accepting the demo decision.",
@@ -57,8 +15,54 @@
     "lifecycle_state": "active",
     "lifecycle_reason": "",
     "lifecycle_updated_at": "",
-    "id": "next_action_003",
+    "id": "next_action_001",
     "queued_in_current": false,
+    "queued_in_node": false
+  },
+  {
+    "kind": "focus_next_action",
+    "priority": "high",
+    "action": "Record one finding before reviewing the demo decision.",
+    "reason": "Current focus or current_state lists this as a next action.",
+    "source_node_id": "experiment_demo_prompt_refinement",
+    "source_node_type": "experiment",
+    "related_node_ids": [
+      "stage_demo_research",
+      "problem_demo_quality_gap",
+      "option_demo_prompt_refinement",
+      "experiment_demo_prompt_refinement"
+    ],
+    "suggested_command": "",
+    "is_focus_related": true,
+    "key": "sg_a1ca1747de1fdfec",
+    "lifecycle_state": "active",
+    "lifecycle_reason": "",
+    "lifecycle_updated_at": "",
+    "id": "next_action_002",
+    "queued_in_current": true,
+    "queued_in_node": false
+  },
+  {
+    "kind": "focus_next_action",
+    "priority": "high",
+    "action": "Run the prompt refinement demo experiment.",
+    "reason": "Current focus or current_state lists this as a next action.",
+    "source_node_id": "experiment_demo_prompt_refinement",
+    "source_node_type": "experiment",
+    "related_node_ids": [
+      "stage_demo_research",
+      "problem_demo_quality_gap",
+      "option_demo_prompt_refinement",
+      "experiment_demo_prompt_refinement"
+    ],
+    "suggested_command": "",
+    "is_focus_related": true,
+    "key": "sg_7388d78cd7ada404",
+    "lifecycle_state": "active",
+    "lifecycle_reason": "",
+    "lifecycle_updated_at": "",
+    "id": "next_action_003",
+    "queued_in_current": true,
     "queued_in_node": false
   },
   {

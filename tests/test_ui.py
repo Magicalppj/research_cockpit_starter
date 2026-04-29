@@ -43,9 +43,11 @@ from research_cockpit.ui.view_helpers import (
     format_resource_index_rows,
     format_search_result_rows,
     build_graph_component_payload,
+    graph_component_event_id,
     graph_component_selected_node_id,
     ordered_tab_keys,
     ordered_tab_labels,
+    reset_global_graph_filter_state,
 )
 from research_cockpit.ui.graph_component import graph_component_build_available
 
@@ -102,6 +104,109 @@ class UiRenderingTests(unittest.TestCase):
         self.assertNotEqual(controls_index, -1)
         self.assertLess(graph_index, controls_index)
 
+    def test_set_focus_resets_stale_graph_filters(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+        set_focus_index = source.find("save_current_focus(RESEARCH_ROOT, focus_node=node_id)")
+        rerun_index = source.find("st.rerun()", set_focus_index)
+
+        self.assertNotEqual(set_focus_index, -1)
+        self.assertNotEqual(rerun_index, -1)
+        focus_block = source[set_focus_index:rerun_index]
+        self.assertIn('st.session_state["graph_view_mode"] = text["focus_depth_2"]', focus_block)
+        self.assertIn('st.session_state["graph_detail_node"] = node_id', focus_block)
+        self.assertIn('st.session_state["graph_pending_detail_select"] = node_id', focus_block)
+        self.assertIn('st.session_state["graph_pending_node_search"] = ""', focus_block)
+        self.assertNotIn('st.session_state["graph_detail_select"] = node_id', focus_block)
+        self.assertNotIn('st.session_state["graph_node_search"] = ""', focus_block)
+        self.assertIn('st.session_state["graph_workstreams"] = []', focus_block)
+        self.assertIn('st.session_state.pop("graph_focus_roles", None)', focus_block)
+
+    def test_pending_detail_state_is_applied_before_widgets(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+        pending_index = source.find('st.session_state.pop("graph_pending_detail_select", None)')
+        search_widget_index = source.find('key="graph_node_search"')
+        select_key_index = source.find('select_key = "graph_detail_select"')
+
+        self.assertNotEqual(pending_index, -1)
+        self.assertNotEqual(search_widget_index, -1)
+        self.assertNotEqual(select_key_index, -1)
+        self.assertLess(pending_index, search_widget_index)
+        self.assertLess(pending_index, select_key_index)
+
+    def test_global_graph_transition_resets_stale_scope_filters(self) -> None:
+        state = {
+            "graph_previous_view_mode": "focus_depth_2",
+            "graph_node_types": ["stage", "problem", "option"],
+            "graph_statuses": ["active"],
+            "graph_stages": ["stage_demo"],
+            "graph_focus_roles": ["parent", "current", "unrelated"],
+            "graph_workstreams": ["option_demo"],
+            "graph_only_blocking": True,
+            "graph_only_next_actions": True,
+            "graph_only_missing_evidence": True,
+        }
+
+        changed = reset_global_graph_filter_state(
+            state,
+            "global",
+            all_types=["decision", "experiment", "option", "problem", "stage"],
+            all_statuses=["active", "open", "parked", "planned", "proposed"],
+            all_stages=["stage_demo"],
+            all_focus_roles=["child", "current", "parent", "sibling", "unrelated"],
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(state["graph_previous_view_mode"], "global")
+        self.assertEqual(state["graph_statuses"], ["active", "open", "parked", "planned", "proposed"])
+        self.assertEqual(state["graph_focus_roles"], ["child", "current", "parent", "sibling", "unrelated"])
+        self.assertEqual(state["graph_workstreams"], [])
+        self.assertFalse(state["graph_only_blocking"])
+        self.assertFalse(state["graph_only_next_actions"])
+        self.assertFalse(state["graph_only_missing_evidence"])
+
+    def test_global_graph_preserves_manual_filters_after_transition(self) -> None:
+        state = {
+            "graph_previous_view_mode": "global",
+            "graph_statuses": ["active"],
+            "graph_focus_roles": ["current"],
+        }
+
+        changed = reset_global_graph_filter_state(
+            state,
+            "global",
+            all_types=["option"],
+            all_statuses=["active", "planned"],
+            all_stages=["stage_demo"],
+            all_focus_roles=["current", "child"],
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(state["graph_statuses"], ["active"])
+        self.assertEqual(state["graph_focus_roles"], ["current"])
+
+    def test_saved_global_view_can_keep_saved_filters(self) -> None:
+        state = {
+            "graph_previous_view_mode": "focus_depth_2",
+            "graph_skip_global_filter_reset": True,
+            "graph_statuses": ["active"],
+            "graph_focus_roles": ["current"],
+        }
+
+        changed = reset_global_graph_filter_state(
+            state,
+            "global",
+            all_types=["option"],
+            all_statuses=["active", "planned"],
+            all_stages=["stage_demo"],
+            all_focus_roles=["current", "child"],
+        )
+
+        self.assertFalse(changed)
+        self.assertEqual(state["graph_previous_view_mode"], "global")
+        self.assertNotIn("graph_skip_global_filter_reset", state)
+        self.assertEqual(state["graph_statuses"], ["active"])
+        self.assertEqual(state["graph_focus_roles"], ["current"])
+
     def test_react_flow_component_uses_dagre_dragging_and_smooth_edges(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "graph_component" / "frontend" / "src" / "GraphComponent.tsx").read_text(
             encoding="utf-8"
@@ -112,6 +217,13 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("nodesDraggable", source)
         self.assertIn('type: "smoothstep"', source)
         self.assertIn("key={graphKey}", source)
+        self.assertIn("event_id", source)
+        self.assertIn("visualSelectedNodeId", source)
+        self.assertIn("setVisualSelectedNodeId(node.id)", source)
+        self.assertIn("toReactFlowNodes(payload, visualSelectedNodeId)", source)
+        self.assertIn("pendingSelectedNodeId", source)
+        self.assertIn("pendingSelectedNodeId.current = node.id", source)
+        self.assertIn("selectedNodeId === pending", source)
 
     def test_pyvis_html_generation_supports_chinese_without_file_encoding(self) -> None:
         graph = {
@@ -280,10 +392,19 @@ class UiRenderingTests(unittest.TestCase):
             {"active", "open", "planned"},
             selected_workstreams={"option_t5"},
         )
+        empty_workstream = filter_graph_for_view(
+            graph,
+            "option_workstream",
+            {"stage", "problem", "option", "experiment"},
+            {"active", "open", "planned"},
+            selected_workstreams=set(),
+        )
         options = graph_filter_options(graph)
 
         self.assertEqual({node["id"] for node in branch["nodes"]}, {"problem_text", "option_t5"})
         self.assertEqual({node["id"] for node in workstream["nodes"]}, {"problem_text", "option_t5", "exp_t5"})
+        self.assertEqual(empty_workstream["nodes"], [])
+        self.assertEqual(empty_workstream["edges"], [])
         self.assertEqual(options["stages"], ["stage_other", "stage_text"])
         self.assertIn("option_t5", options["workstreams"])
 
@@ -408,6 +529,30 @@ class UiRenderingTests(unittest.TestCase):
 
         self.assertEqual(selected, "option_t5")
         self.assertIsNone(missing)
+        self.assertEqual(
+            graph_component_event_id({"selected_node_id": "option_t5", "event_type": "node_click", "event_id": "evt-1"}),
+            "evt-1",
+        )
+
+    def test_graph_click_and_detail_select_use_separate_state_keys(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn("graph_component_processed_event_id", source)
+        self.assertIn("new_component_click", source)
+        self.assertIn('key="research_graph_component"', source)
+        self.assertIn('select_key = "graph_detail_select"', source)
+        self.assertIn('st.session_state["graph_detail_node"] = clicked_node_id', source)
+        self.assertIn("selection_changed = True", source)
+        click_index = source.find("new_component_click")
+        saved_view_index = source.find("saved_view_by_id")
+        controls_index = source.find("Graph Controls")
+        selection_rerun_index = source.find("if selection_changed:")
+        self.assertNotEqual(click_index, -1)
+        self.assertNotEqual(saved_view_index, -1)
+        self.assertNotEqual(controls_index, -1)
+        self.assertNotEqual(selection_rerun_index, -1)
+        self.assertNotIn("st.rerun()", source[click_index:saved_view_index])
+        self.assertGreater(selection_rerun_index, controls_index)
 
     def test_graph_component_build_availability_detects_missing_assets(self) -> None:
         temp_root = ROOT_DIR / ".test_tmp" / "ui"

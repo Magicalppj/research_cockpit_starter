@@ -4,11 +4,14 @@ current_option: option_demo_prompt_refinement
 current_focus_path:
 - stage_demo_research
 - problem_demo_quality_gap
-current_hypothesis: A small structured demo can show how agents inspect, branch, test, and report option workstreams.
+- option_demo_prompt_refinement
+- experiment_demo_prompt_refinement
+current_hypothesis: A small structured demo can show how agents inspect, branch, test,
+  and report option workstreams.
 open_risks:
 - Demo data is illustrative and should be replaced by the user's own research nodes.
 next_actions:
 - Run the prompt refinement demo experiment.
 - Record one finding before reviewing the demo decision.
-updated_at: '2026-04-28'
-current_focus_node: problem_demo_quality_gap
+updated_at: '2026-04-29'
+current_focus_node: experiment_demo_prompt_refinement

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from typing import Any
 
 from research_cockpit.model import script_command, search_knowledge
@@ -250,6 +251,18 @@ def graph_component_selected_node_id(value: object, visible_node_ids: list[str] 
         return None
     node_id = str(selected)
     return node_id if node_id in set(visible_node_ids) else None
+
+
+def graph_component_event_id(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, dict):
+        event_id = value.get("event_id")
+    else:
+        event_id = getattr(value, "event_id", None)
+    if event_id in (None, ""):
+        return None
+    return str(event_id)
 
 
 def format_comparison_rows(rows: list[dict]) -> list[dict]:
@@ -676,6 +689,32 @@ def graph_view_state_from_saved_view(
     }
 
 
+def reset_global_graph_filter_state(
+    session_state: MutableMapping[str, Any],
+    view_mode: str,
+    *,
+    all_types: list[str],
+    all_statuses: list[str],
+    all_stages: list[str],
+    all_focus_roles: list[str],
+) -> bool:
+    skip_reset = bool(session_state.pop("graph_skip_global_filter_reset", False))
+    previous_view_mode = session_state.get("graph_previous_view_mode")
+    session_state["graph_previous_view_mode"] = view_mode
+    if view_mode != "global" or previous_view_mode == "global" or skip_reset:
+        return False
+
+    session_state["graph_node_types"] = list(all_types)
+    session_state["graph_statuses"] = list(all_statuses)
+    session_state["graph_stages"] = list(all_stages)
+    session_state["graph_focus_roles"] = list(all_focus_roles)
+    session_state["graph_workstreams"] = []
+    session_state["graph_only_blocking"] = False
+    session_state["graph_only_next_actions"] = False
+    session_state["graph_only_missing_evidence"] = False
+    return True
+
+
 def filter_graph_for_view(
     graph: dict,
     view_mode: str,
@@ -695,6 +734,12 @@ def filter_graph_for_view(
     selected_stages = selected_stages or set()
     selected_focus_roles = selected_focus_roles or set()
     selected_workstreams = selected_workstreams or set()
+    if view_mode == "option_workstream" and not selected_workstreams:
+        return {
+            **graph,
+            "nodes": [],
+            "edges": [],
+        }
     upstream_problem_ids = {
         str(node.get("option_workstream_upstream_problem_id"))
         for node in graph.get("nodes", [])

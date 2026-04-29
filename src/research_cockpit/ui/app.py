@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 import sys
 
 import pandas as pd
 import streamlit as st
-from pyvis.network import Network
-import streamlit.components.v1 as components
 
 try:
     from research_cockpit.paths import default_data_root
@@ -41,6 +38,8 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.ui.graph_component import graph_component_build_available, render_research_graph_component
+from research_cockpit.ui.pyvis_renderer import build_pyvis_html, render_pyvis_graph
+from research_cockpit.ui.text import get_text
 from research_cockpit.ui.view_helpers import (
     build_apply_suggestion_command,
     build_accept_decision_command,
@@ -59,11 +58,11 @@ from research_cockpit.ui.view_helpers import (
     build_graph_component_payload,
     default_detail_node_id,
     default_selected_statuses,
-    edge_style_for_type,
     filter_action_suggestions,
     filter_graph_for_view,
     filter_node_ids,
     filter_search_results,
+    graph_component_event_id,
     graph_component_selected_node_id,
     graph_view_state_from_saved_view,
     graph_filter_options,
@@ -80,6 +79,7 @@ from research_cockpit.ui.view_helpers import (
     format_search_result_rows,
     format_suggestion_lifecycle_rows,
     ordered_tab_keys,
+    reset_global_graph_filter_state,
 )
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.set_focus import set_focus as save_current_focus
@@ -88,405 +88,6 @@ from research_cockpit.commands.update_suggestion_state import update_suggestion_
 
 
 st.set_page_config(page_title="Research Cockpit", layout="wide")
-
-
-UI_TEXT = {
-    "zh": {
-        "language": "界面语言",
-        "page_title": "Research Cockpit 研究驾驶舱",
-        "page_caption": "以仓库为中心的研究图谱状态：阶段、问题、方案、实验和决策。",
-        "current_focus": "当前焦点",
-        "stage": "阶段",
-        "problem": "问题",
-        "option": "方案",
-        "focus_node": "焦点节点",
-        "data_health": "数据健康",
-        "resources": "资源",
-        "action_guidance": "行动建议",
-        "option_workstreams": "方案工作流",
-        "valid": "有效",
-        "issues": "个问题",
-        "dashboard": "总览",
-        "research_graph": "研究图谱",
-        "experiment_matrix": "实验矩阵",
-        "decisions": "决策",
-        "branch_comparison": "方案比较",
-        "decision_trace": "决策追踪",
-        "agent_context": "Agent 上下文",
-        "active_problems": "活跃问题",
-        "active_options": "活跃方案",
-        "next_actions": "下一步行动",
-        "level": "层级",
-        "title": "标题",
-        "current_hypothesis": "当前假设",
-        "no_hypothesis": "尚未记录当前假设。",
-        "open_risks": "开放风险",
-        "no_open_risks": "尚未记录开放风险。",
-        "no_next_actions": "尚未记录下一步行动。",
-        "data_health_warning": "数据健康存在 {count} 个问题。请打开“数据健康”页查看详情。",
-        "select_node_hint": "选择一个节点以查看结构化 YAML 字段。",
-        "type": "类型",
-        "status": "状态",
-        "priority": "优先级",
-        "summary": "摘要",
-        "tags": "标签",
-        "none": "无",
-        "no_summary": "暂无摘要。",
-        "links": "链接",
-        "parent": "父节点",
-        "children": "子节点",
-        "create_note_command": "创建笔记命令",
-        "search_nodes": "搜索节点",
-        "resource_type": "资源类型",
-        "resource_exists": "存在状态",
-        "no_resources": "未找到关联资源。",
-        "suggestion_kind": "建议类型",
-        "suggestion_priority": "建议优先级",
-        "focus_related": "当前焦点相关",
-        "top_suggestions": "优先行动建议",
-        "no_action_suggestions": "暂无行动建议。",
-        "queue_suggestion": "选择建议",
-        "queue_current": "写入当前行动队列",
-        "queue_node": "写入来源节点行动队列",
-        "queued_current": "已在当前行动队列中。",
-        "queued_node": "已在来源节点行动队列中。",
-        "queue_updated": "行动队列已更新。",
-        "queue_failed": "写入行动队列失败。",
-        "blockers": "阻塞项",
-        "raw_yaml": "原始 YAML 字段",
-        "view_mode": "视图范围",
-        "focus_depth_1": "Focus 深度 1",
-        "focus_depth_2": "Focus 深度 2",
-        "current_branch": "当前分支",
-        "option_workstream_view": "方案工作流",
-        "global_graph": "全局图谱",
-        "stages": "阶段",
-        "focus_roles": "Focus 关系",
-        "workstreams_filter": "方案工作流",
-        "only_blocking": "仅阻塞节点",
-        "only_next_actions": "仅含下一步节点",
-        "only_missing_evidence": "仅缺证据节点",
-        "legend": "图例",
-        "legend_current": "当前焦点：红色粗边框",
-        "legend_path": "当前路径：橙色边框",
-        "legend_depth_1": "Depth 1：父节点、子节点、兄弟节点",
-        "legend_depth_2": "Depth 2：实验、决策、产物",
-        "summary_tab": "摘要",
-        "evidence_tab": "证据",
-        "resources_tab": "资源",
-        "actions_tab": "行动",
-        "agent_tab": "Agent 上下文",
-        "set_focus_command": "设为当前焦点命令",
-        "set_focus_command_hint": "运行后会更新 current_state.yaml，并重建 dashboard/context。",
-        "record_finding_command": "记录实验观察命令",
-        "promote_decision_command": "生成决策命令",
-        "findings": "实验观察",
-        "set_as_focus": "设为当前焦点",
-        "focus_updated": "当前焦点已更新。",
-        "focus_update_failed": "更新当前焦点失败。",
-        "focus_role": "Focus 关系",
-        "evidence_strength": "证据强度",
-        "evidence_summary": "证据摘要",
-        "supporting_experiments": "支持实验",
-        "contradicting_experiments": "反向实验",
-        "supporting_decisions": "支持决策",
-        "linked_artifacts": "关联产物",
-        "result_summary": "结果摘要",
-        "outcome": "结果方向",
-        "implementation_steps": "实施步骤",
-        "success_criteria": "成功标准",
-        "agent_key_files": "关键文件",
-        "agent_key_questions": "关键问题",
-        "next_action_hint": "下一步提示",
-        "node_types": "节点类型",
-        "statuses": "状态",
-        "inspect_node": "查看节点",
-        "no_experiments": "未找到实验节点。",
-        "no_decisions": "未找到决策节点。",
-        "inspect_decision": "查看决策",
-        "select_problem": "选择问题",
-        "no_options": "未找到可比较的方案。",
-        "current_best": "当前最佳",
-        "latest_result": "最新结果",
-        "experiment_count": "实验数量",
-        "rejection_reason": "拒绝原因",
-        "trace_chain": "决策链路",
-        "supporting_evidence": "支持证据",
-        "evidence_summary": "证据摘要",
-        "findings_count": "观察数量",
-        "outcome_counts": "结果分布",
-        "alternatives_considered": "备选方案",
-        "consequences": "后续影响",
-        "agent_context_pack": "Agent 上下文包",
-        "validation_failed": "校验失败。",
-        "all_valid": "所有节点引用、状态和当前焦点链接均有效。",
-        "node_inventory": "节点清单",
-        "graph_summary": "图谱摘要",
-        "nodes": "节点",
-        "edges": "边",
-    },
-    "en": {
-        "language": "Language",
-        "page_title": "Research Cockpit",
-        "page_caption": "Repo-native graph state for research stages, problems, options, experiments, and decisions.",
-        "current_focus": "Current Focus",
-        "stage": "Stage",
-        "problem": "Problem",
-        "option": "Option",
-        "focus_node": "Focus Node",
-        "data_health": "Data Health",
-        "resources": "Resources",
-        "action_guidance": "Action Guidance",
-        "option_workstreams": "Option Workstreams",
-        "valid": "Valid",
-        "issues": "issue(s)",
-        "dashboard": "Dashboard",
-        "research_graph": "Research Graph",
-        "experiment_matrix": "Experiment Matrix",
-        "decisions": "Decisions",
-        "branch_comparison": "Branch Comparison",
-        "decision_trace": "Decision Trace",
-        "agent_context": "Agent Context",
-        "active_problems": "Active Problems",
-        "active_options": "Active Options",
-        "next_actions": "Next Actions",
-        "level": "Level",
-        "title": "Title",
-        "current_hypothesis": "Current Hypothesis",
-        "no_hypothesis": "No current hypothesis recorded.",
-        "open_risks": "Open Risks",
-        "no_open_risks": "No open risks recorded.",
-        "no_next_actions": "No next actions recorded.",
-        "data_health_warning": "Data health has {count} issue(s). Open the Data Health tab for details.",
-        "select_node_hint": "Select a node to inspect its structured YAML fields.",
-        "type": "Type",
-        "status": "Status",
-        "priority": "Priority",
-        "summary": "Summary",
-        "tags": "Tags",
-        "none": "None",
-        "no_summary": "No summary.",
-        "links": "Links",
-        "parent": "Parent",
-        "children": "Children",
-        "create_note_command": "Create Note Command",
-        "search_nodes": "Search nodes",
-        "resource_type": "Resource Type",
-        "resource_exists": "Exists",
-        "no_resources": "No linked resources found.",
-        "suggestion_kind": "Suggestion Type",
-        "suggestion_priority": "Suggestion Priority",
-        "focus_related": "Focus Related",
-        "top_suggestions": "Top Action Suggestions",
-        "no_action_suggestions": "No action suggestions.",
-        "queue_suggestion": "Select suggestion",
-        "queue_current": "Queue in current actions",
-        "queue_node": "Queue in source node actions",
-        "queued_current": "Already queued in current actions.",
-        "queued_node": "Already queued in source node actions.",
-        "queue_updated": "Action queue updated.",
-        "queue_failed": "Failed to update action queue.",
-        "blockers": "Blockers",
-        "raw_yaml": "Raw YAML fields",
-        "view_mode": "View Mode",
-        "focus_depth_1": "Focus Depth 1",
-        "focus_depth_2": "Focus Depth 2",
-        "current_branch": "Current Branch",
-        "option_workstream_view": "Option Workstream",
-        "global_graph": "Global Graph",
-        "stages": "Stages",
-        "focus_roles": "Focus Relations",
-        "workstreams_filter": "Option Workstreams",
-        "only_blocking": "Only blockers",
-        "only_next_actions": "Only next actions",
-        "only_missing_evidence": "Only missing evidence",
-        "legend": "Legend",
-        "legend_current": "Current focus: red border",
-        "legend_path": "Focus path: orange border",
-        "legend_depth_1": "Depth 1: parents, children, siblings",
-        "legend_depth_2": "Depth 2: experiments, decisions, artifacts",
-        "summary_tab": "Summary",
-        "evidence_tab": "Evidence",
-        "resources_tab": "Resources",
-        "actions_tab": "Actions",
-        "agent_tab": "Agent Context",
-        "set_focus_command": "Set Current Focus Command",
-        "set_focus_command_hint": "Running this updates current_state.yaml and rebuilds dashboard/context files.",
-        "record_finding_command": "Record Finding Command",
-        "promote_decision_command": "Promote Decision Command",
-        "findings": "Findings",
-        "set_as_focus": "Set as current focus",
-        "focus_updated": "Current focus updated.",
-        "focus_update_failed": "Failed to update current focus.",
-        "focus_role": "Focus Relation",
-        "evidence_strength": "Evidence Strength",
-        "evidence_summary": "Evidence Summary",
-        "supporting_experiments": "Supporting Experiments",
-        "contradicting_experiments": "Contradicting Experiments",
-        "supporting_decisions": "Supporting Decisions",
-        "linked_artifacts": "Linked Artifacts",
-        "result_summary": "Result Summary",
-        "outcome": "Outcome",
-        "implementation_steps": "Implementation Steps",
-        "success_criteria": "Success Criteria",
-        "agent_key_files": "Key Files",
-        "agent_key_questions": "Key Questions",
-        "next_action_hint": "Next Action Hint",
-        "node_types": "Node types",
-        "statuses": "Statuses",
-        "inspect_node": "Inspect node",
-        "no_experiments": "No experiment nodes found.",
-        "no_decisions": "No decision nodes found.",
-        "inspect_decision": "Inspect decision",
-        "select_problem": "Select problem",
-        "no_options": "No comparable options found.",
-        "current_best": "Current Best",
-        "latest_result": "Latest Result",
-        "experiment_count": "Experiment Count",
-        "rejection_reason": "Rejection Reason",
-        "trace_chain": "Decision Chain",
-        "supporting_evidence": "Supporting Evidence",
-        "evidence_summary": "Evidence Summary",
-        "findings_count": "Findings Count",
-        "outcome_counts": "Outcome Counts",
-        "alternatives_considered": "Alternatives Considered",
-        "consequences": "Consequences",
-        "agent_context_pack": "Agent Context Pack",
-        "validation_failed": "Validation failed.",
-        "all_valid": "All node references, statuses, and current focus links are valid.",
-        "node_inventory": "Node Inventory",
-        "graph_summary": "Graph Summary",
-        "nodes": "Nodes",
-        "edges": "Edges",
-    },
-}
-
-
-EXTRA_UI_TEXT = {
-    "zh": {
-        "suggestion_state": "建议状态",
-        "lifecycle_state": "生命周期状态",
-        "suggestion_reason": "原因",
-        "dismiss_suggestion": "忽略建议",
-        "complete_suggestion": "标记完成",
-        "restore_suggestion": "恢复活跃",
-        "suggestion_state_updated": "建议状态已更新。",
-        "suggestion_state_failed": "更新建议状态失败：",
-        "inactive_queue_disabled": "已忽略或已完成的建议不能写入行动队列。",
-        "suggestion_lifecycle": "建议生命周期",
-        "orphan_suggestions": "孤立记录",
-        "orphan_details": "孤立建议记录明细",
-        "cleanup_lifecycle_dry_run": "清理前预览命令",
-        "cleanup_lifecycle_apply": "清理孤立记录命令",
-        "active": "活跃",
-        "dismissed": "已忽略",
-        "completed": "已完成",
-        "search": "搜索",
-        "search_query": "搜索内容",
-        "search_source": "来源",
-        "search_node_type": "节点类型",
-        "search_limit": "结果数量",
-        "search_results": "搜索结果",
-        "search_preview": "内容预览",
-        "no_search_results": "未找到搜索结果。",
-        "search_index": "搜索索引",
-        "note_entries": "Note 条目",
-        "node_entries": "Node 条目",
-        "unlinked_notes": "未关联笔记",
-        "related_node": "关联节点",
-        "resource_entries": "资源正文条目",
-        "resource_truncated": "截断资源",
-        "resource_skipped": "跳过资源",
-        "focus_resources": "Focus 资源",
-        "decision_acceptance_checklist": "决策接受质量门",
-        "decision_ready": "该 decision 已满足接受条件。",
-        "decision_not_ready": "该 decision 尚未满足接受条件。",
-        "check_decision_command": "检查决策接受条件命令",
-        "accept_decision_command": "接受决策命令",
-        "update_decision_checklist_command": "更新决策检查清单命令",
-        "decision_repair_hints": "修复建议",
-        "decision_repair_commands": "可复制修复命令",
-        "claim_option_command": "认领方案工作流命令",
-        "option_context_command": "方案工作流上下文命令",
-        "report_option_command": "回报方案工作流命令",
-        "no_option_workstreams": "暂无方案工作流记录。",
-        "saved_graph_views": "已保存图谱视图",
-        "no_saved_graph_views": "尚未保存图谱视图。",
-        "load_saved_view": "加载视图",
-        "save_current_view": "保存当前视图",
-        "graph_view_title": "视图标题",
-        "graph_view_title_placeholder": "例如：当前分支阻塞项",
-        "graph_view_saved": "图谱视图已保存。",
-        "graph_view_save_failed": "保存图谱视图失败：",
-        "graph_view_loaded": "图谱视图已加载。",
-        "graph_view_title_required": "请先填写视图标题。",
-    },
-    "en": {
-        "suggestion_state": "Suggestion State",
-        "lifecycle_state": "Lifecycle State",
-        "suggestion_reason": "Reason",
-        "dismiss_suggestion": "Dismiss suggestion",
-        "complete_suggestion": "Mark completed",
-        "restore_suggestion": "Restore active",
-        "suggestion_state_updated": "Suggestion state updated.",
-        "suggestion_state_failed": "Failed to update suggestion state:",
-        "inactive_queue_disabled": "Dismissed or completed suggestions cannot be queued.",
-        "suggestion_lifecycle": "Suggestion Lifecycle",
-        "orphan_suggestions": "Orphan Records",
-        "orphan_details": "Orphan Suggestion Records",
-        "cleanup_lifecycle_dry_run": "Cleanup dry-run command",
-        "cleanup_lifecycle_apply": "Cleanup orphan records command",
-        "active": "Active",
-        "dismissed": "Dismissed",
-        "completed": "Completed",
-        "search": "Search",
-        "search_query": "Search Query",
-        "search_source": "Source",
-        "search_node_type": "Node Type",
-        "search_limit": "Result Limit",
-        "search_results": "Search Results",
-        "search_preview": "Preview",
-        "no_search_results": "No search results.",
-        "search_index": "Search Index",
-        "note_entries": "Note Entries",
-        "node_entries": "Node Entries",
-        "unlinked_notes": "Unlinked Notes",
-        "related_node": "Related Node",
-        "resource_entries": "Resource Entries",
-        "resource_truncated": "Truncated Resources",
-        "resource_skipped": "Skipped Resources",
-        "focus_resources": "Focus Resources",
-        "decision_acceptance_checklist": "Decision Acceptance Checklist",
-        "decision_ready": "This decision is ready for acceptance.",
-        "decision_not_ready": "This decision is not ready for acceptance.",
-        "check_decision_command": "Check Decision Acceptance Command",
-        "accept_decision_command": "Accept Decision Command",
-        "update_decision_checklist_command": "Update Decision Checklist Command",
-        "decision_repair_hints": "Repair Hints",
-        "decision_repair_commands": "Copyable Repair Commands",
-        "claim_option_command": "Claim Option Workstream Command",
-        "option_context_command": "Option Workstream Context Command",
-        "report_option_command": "Report Option Workstream Command",
-        "no_option_workstreams": "No option workstreams recorded.",
-        "saved_graph_views": "Saved Graph Views",
-        "no_saved_graph_views": "No saved graph views yet.",
-        "load_saved_view": "Load View",
-        "save_current_view": "Save Current View",
-        "graph_view_title": "View Title",
-        "graph_view_title_placeholder": "Example: Current branch blockers",
-        "graph_view_saved": "Graph view saved.",
-        "graph_view_save_failed": "Failed to save graph view:",
-        "graph_view_loaded": "Graph view loaded.",
-        "graph_view_title_required": "Enter a view title first.",
-    },
-}
-
-
-def get_text(language: str) -> dict[str, str]:
-    locale = "zh" if language == "中文" else "en"
-    text = dict(UI_TEXT[locale])
-    text.update(EXTRA_UI_TEXT[locale])
-    return text
 
 
 def load_graph_data():
@@ -521,100 +122,6 @@ def load_graph_data():
         option_workstreams,
         saved_graph_views,
     )
-
-
-def build_pyvis_html(
-    graph: dict,
-    selected_types: set[str],
-    selected_statuses: set[str],
-    focus_node_id: str | None = None,
-) -> str:
-    net = Network(
-        height="680px",
-        width="100%",
-        bgcolor="#FFFFFF",
-        font_color="#111111",
-        directed=True,
-        cdn_resources="in_line",
-    )
-    net.toggle_physics(True)
-    net.barnes_hut(gravity=-7000, central_gravity=0.18, spring_length=180, spring_strength=0.04)
-
-    included = set()
-    for node in graph["nodes"]:
-        if selected_types and node["type"] not in selected_types:
-            continue
-        if selected_statuses and node["status"] not in selected_statuses:
-            continue
-
-        is_current_focus = node.get("is_current_focus")
-        border_width = 8 if is_current_focus else 5 if node.get("is_focus") else 1
-        border_color = "#D93025" if is_current_focus else "#F59E0B" if node.get("is_focus") else "#6B7280"
-        node_color = {
-            "background": node.get("color", "#EEEEEE"),
-            "border": border_color,
-            "highlight": {"background": node.get("color", "#EEEEEE"), "border": "#D93025"},
-        }
-        net.add_node(
-            node["id"],
-            label=node["label"],
-            title=f"{node['type']} | {node['status']}<br>{node.get('title', '')}",
-            color=node_color,
-            shape=node.get("shape", "box"),
-            borderWidth=border_width,
-            borderWidthSelected=8,
-            size=34 if is_current_focus else 24 if node.get("is_focus") else 18,
-            font={"size": 16 if is_current_focus else 15},
-        )
-        included.add(node["id"])
-
-    for edge in graph["edges"]:
-        if edge["from"] in included and edge["to"] in included:
-            style = edge_style_for_type(edge.get("type") or edge.get("relation"))
-            strength = edge.get("strength")
-            try:
-                width = 1 + min(4, max(0, float(strength) * 4)) if strength is not None else 1
-            except (TypeError, ValueError):
-                width = 1
-            net.add_edge(
-                edge["from"],
-                edge["to"],
-                color=style["color"],
-                dashes=style["dashes"],
-                arrows="to",
-                label=edge.get("label"),
-                width=width,
-            )
-
-    html = net.generate_html(notebook=False)
-    focus_target = focus_node_id or graph.get("current_focus_node")
-    if focus_target in included:
-        focus_json = json.dumps(focus_target)
-        focus_script = f"""
-<script>
-setTimeout(function () {{
-  if (typeof network !== "undefined") {{
-    network.selectNodes([{focus_json}]);
-    network.focus({focus_json}, {{
-      scale: 1.25,
-      animation: {{ duration: 700, easingFunction: "easeInOutQuad" }}
-    }});
-  }}
-}}, 900);
-</script>
-"""
-        html = html.replace("</body>", focus_script + "</body>")
-    return html
-
-
-def render_pyvis_graph(
-    graph: dict,
-    selected_types: set[str],
-    selected_statuses: set[str],
-    focus_node_id: str | None = None,
-) -> None:
-    html = build_pyvis_html(graph, selected_types, selected_statuses, focus_node_id)
-    components.html(html, height=720, scrolling=True)
 
 
 def render_decision_repair_hints(checklist: dict, text: dict[str, str]) -> None:
@@ -725,6 +232,13 @@ def render_node_detail(
             if st.button(text["set_as_focus"], key=f"set_focus_{node_id}"):
                 try:
                     save_current_focus(RESEARCH_ROOT, focus_node=node_id)
+                    st.session_state["graph_view_mode"] = text["focus_depth_2"]
+                    st.session_state["graph_detail_node"] = node_id
+                    st.session_state["graph_pending_detail_select"] = node_id
+                    st.session_state["graph_pending_node_search"] = ""
+                    st.session_state["graph_workstreams"] = []
+                    st.session_state.pop("graph_focus_roles", None)
+                    st.session_state.pop("graph_component_processed_event_id", None)
                     st.success(text["focus_updated"])
                     st.rerun()
                 except Exception as exc:
@@ -889,6 +403,14 @@ def render_graph_tab(
     if view_label not in mode_label_to_value:
         view_label = text["focus_depth_2"]
     view_mode = mode_label_to_value.get(view_label, "focus_depth_2")
+    reset_global_graph_filter_state(
+        st.session_state,
+        view_mode,
+        all_types=all_types,
+        all_statuses=all_statuses,
+        all_stages=all_stages,
+        all_focus_roles=all_focus_roles,
+    )
     selected_types = set(selected_values("graph_node_types", all_types, all_types))
     selected_statuses = set(selected_values(
         "graph_statuses",
@@ -909,6 +431,9 @@ def render_graph_tab(
         all_workstreams,
         default_workstreams if view_mode == "option_workstream" else [],
     ))
+    if view_mode == "option_workstream" and not selected_workstreams and default_workstreams:
+        selected_workstreams = set(default_workstreams)
+        st.session_state["graph_workstreams"] = list(default_workstreams)
     only_blocking = bool(st.session_state.get("graph_only_blocking", False))
     only_next_actions = bool(st.session_state.get("graph_only_next_actions", False))
     only_missing_evidence = bool(st.session_state.get("graph_only_missing_evidence", False))
@@ -934,7 +459,17 @@ def render_graph_tab(
         current_detail_node = default_detail_node_id(graph, visible_node_ids)
         if current_detail_node:
             st.session_state["graph_detail_node"] = current_detail_node
+            st.session_state["graph_detail_select"] = current_detail_node
+    pending_detail_select = st.session_state.pop("graph_pending_detail_select", None)
+    pending_node_search = st.session_state.pop("graph_pending_node_search", None)
+    if pending_detail_select in visible_node_ids:
+        current_detail_node = pending_detail_select
+        st.session_state["graph_detail_node"] = pending_detail_select
+        st.session_state["graph_detail_select"] = pending_detail_select
+    if pending_node_search is not None:
+        st.session_state["graph_node_search"] = str(pending_node_search)
 
+    selection_changed = False
     graph_area, detail = st.columns([2, 1])
     with graph_area:
         use_react_flow = renderer_label == "React Flow" and graph_component_build_available()
@@ -946,9 +481,20 @@ def render_graph_tab(
                 key="research_graph_component",
             )
             clicked_node_id = graph_component_selected_node_id(component_value, visible_node_ids)
-            if clicked_node_id and clicked_node_id != st.session_state.get("graph_detail_node"):
+            clicked_event_id = graph_component_event_id(component_value)
+            processed_event_id = st.session_state.get("graph_component_processed_event_id")
+            new_component_click = (
+                bool(clicked_event_id) and clicked_event_id != processed_event_id
+            ) or (
+                clicked_event_id is None and clicked_node_id != st.session_state.get("graph_detail_node")
+            )
+            if clicked_node_id and new_component_click:
+                if clicked_event_id:
+                    st.session_state["graph_component_processed_event_id"] = clicked_event_id
                 st.session_state["graph_detail_node"] = clicked_node_id
+                st.session_state["graph_detail_select"] = clicked_node_id
                 st.session_state["graph_node_search"] = ""
+                selection_changed = True
         else:
             if renderer_label == "React Flow":
                 st.caption("React Flow build missing; using PyVis fallback.")
@@ -964,13 +510,19 @@ def render_graph_tab(
             st.info(text["select_node_hint"])
             return
         default_index = detail_options.index(default_id) if default_id in detail_options else 0
+        select_key = "graph_detail_select"
+        if st.session_state.get(select_key) not in detail_options:
+            st.session_state[select_key] = detail_options[default_index]
         node_id = st.selectbox(
             text["inspect_node"],
             detail_options,
             index=default_index,
             format_func=lambda value: format_node_option(nodes, value),
-            key="graph_detail_node",
+            key=select_key,
         )
+        if node_id != st.session_state.get("graph_detail_node"):
+            st.session_state["graph_detail_node"] = node_id
+            selection_changed = True
         render_node_detail(nodes, node_id, text, current, link_rows)
 
     saved_view_by_id = {str(view.get("id")): view for view in saved_graph_views if view.get("id")}
@@ -997,6 +549,7 @@ def render_graph_tab(
             )
             for key, value in state.items():
                 st.session_state[key] = value
+            st.session_state["graph_skip_global_filter_reset"] = True
             st.session_state["graph_view_message"] = text["graph_view_loaded"]
             st.rerun()
     else:
@@ -1105,6 +658,9 @@ def render_graph_tab(
         legend_left.write(text["legend_path"])
         legend_right.write(text["legend_depth_1"])
         legend_right.write(text["legend_depth_2"])
+
+    if selection_changed:
+        st.rerun()
 
 
 def render_branch_comparison(nodes: dict, current: dict, text: dict[str, str]) -> None:

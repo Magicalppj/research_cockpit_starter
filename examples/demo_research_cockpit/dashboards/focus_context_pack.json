@@ -1,23 +1,23 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-04-29T03:26:29.650796Z",
-    "source_git_commit": "a48df34",
+    "generated_at": "2026-04-29T11:19:13.623406Z",
+    "source_git_commit": "ad68285",
     "worktree_dirty": true,
-    "current_state_updated_at": "2026-04-28"
+    "current_state_updated_at": "2026-04-29"
   },
   "focus_node": {
-    "id": "problem_demo_quality_gap",
-    "type": "problem",
-    "title": "Demo answer quality is inconsistent",
-    "status": "active",
-    "priority": "critical",
-    "summary": "Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.",
-    "question": "How can the demo agent make answers more consistent across repeated runs?",
+    "id": "experiment_demo_prompt_refinement",
+    "type": "experiment",
+    "title": "Prompt refinement smoke run",
+    "status": "planned",
+    "priority": null,
+    "summary": "Small demo experiment for recording a structured finding in an isolated copy.",
+    "question": null,
     "hypothesis": null,
     "evidence_strength": null,
     "evidence_summary": null,
-    "current_best_option": "option_demo_prompt_refinement",
+    "current_best_option": null,
     "decision_state": null,
     "outcome": null,
     "result_summary": null,
@@ -32,12 +32,8 @@
     "agent_workstream": null,
     "workstream_report": null,
     "agent_context": null,
-    "next_actions": [
-      "Run the prompt refinement demo experiment."
-    ],
-    "blockers": [
-      "Need at least one structured finding before accepting the demo decision."
-    ]
+    "next_actions": [],
+    "blockers": []
   },
   "focus_path": [
     {
@@ -103,11 +99,71 @@
       "blockers": [
         "Need at least one structured finding before accepting the demo decision."
       ]
+    },
+    {
+      "id": "option_demo_prompt_refinement",
+      "type": "option",
+      "title": "Prompt refinement branch",
+      "status": "active",
+      "priority": "high",
+      "summary": "Candidate branch that improves instructions, examples, and acceptance checks.",
+      "question": null,
+      "hypothesis": "Clearer task framing and explicit success criteria will make responses more consistent.",
+      "evidence_strength": null,
+      "evidence_summary": null,
+      "current_best_option": null,
+      "decision_state": "promising",
+      "outcome": null,
+      "result_summary": null,
+      "supporting_experiments": [],
+      "contradicting_experiments": [],
+      "supporting_decisions": [],
+      "linked_artifacts": [],
+      "links": [],
+      "findings": [],
+      "implementation_steps": [],
+      "success_criteria": [],
+      "agent_workstream": null,
+      "workstream_report": null,
+      "agent_context": null,
+      "next_actions": [],
+      "blockers": []
+    },
+    {
+      "id": "experiment_demo_prompt_refinement",
+      "type": "experiment",
+      "title": "Prompt refinement smoke run",
+      "status": "planned",
+      "priority": null,
+      "summary": "Small demo experiment for recording a structured finding in an isolated copy.",
+      "question": null,
+      "hypothesis": null,
+      "evidence_strength": null,
+      "evidence_summary": null,
+      "current_best_option": null,
+      "decision_state": null,
+      "outcome": null,
+      "result_summary": null,
+      "supporting_experiments": [],
+      "contradicting_experiments": [],
+      "supporting_decisions": [],
+      "linked_artifacts": [],
+      "links": [],
+      "findings": [],
+      "implementation_steps": [],
+      "success_criteria": [],
+      "agent_workstream": null,
+      "workstream_report": null,
+      "agent_context": null,
+      "next_actions": [],
+      "blockers": []
     }
   ],
   "focus_path_ids": [
     "stage_demo_research",
-    "problem_demo_quality_gap"
+    "problem_demo_quality_gap",
+    "option_demo_prompt_refinement",
+    "experiment_demo_prompt_refinement"
   ],
   "overview": {
     "project_name": "Research Cockpit Demo",
@@ -117,8 +173,8 @@
     "current_problem_title": "Demo answer quality is inconsistent",
     "current_option": "option_demo_prompt_refinement",
     "current_option_title": "Prompt refinement branch",
-    "current_focus_node": "problem_demo_quality_gap",
-    "current_focus_node_title": "Demo answer quality is inconsistent",
+    "current_focus_node": "experiment_demo_prompt_refinement",
+    "current_focus_node_title": "Prompt refinement smoke run",
     "current_hypothesis": "A small structured demo can show how agents inspect, branch, test, and report option workstreams.",
     "open_risks": [
       "Demo data is illustrative and should be replaced by the user's own research nodes."
@@ -137,39 +193,6 @@
   },
   "local_neighbors": {
     "parents": [
-      {
-        "id": "stage_demo_research",
-        "type": "stage",
-        "title": "Demo Research Stage",
-        "status": "active",
-        "priority": "high",
-        "summary": "Minimal public demo stage for validating Research Cockpit workflows.",
-        "question": null,
-        "hypothesis": null,
-        "evidence_strength": null,
-        "evidence_summary": null,
-        "current_best_option": null,
-        "decision_state": null,
-        "outcome": null,
-        "result_summary": null,
-        "supporting_experiments": [],
-        "contradicting_experiments": [],
-        "supporting_decisions": [],
-        "linked_artifacts": [],
-        "links": [],
-        "findings": [],
-        "implementation_steps": [],
-        "success_criteria": [],
-        "agent_workstream": null,
-        "workstream_report": null,
-        "agent_context": null,
-        "next_actions": [
-          "Review the demo problem and compare candidate options."
-        ],
-        "blockers": []
-      }
-    ],
-    "children": [
       {
         "id": "option_demo_prompt_refinement",
         "type": "option",
@@ -198,15 +221,18 @@
         "agent_context": null,
         "next_actions": [],
         "blockers": []
-      },
+      }
+    ],
+    "children": [],
+    "siblings": [
       {
-        "id": "option_demo_retrieval_branch",
-        "type": "option",
-        "title": "Retrieval augmentation branch",
-        "status": "parked",
+        "id": "problem_demo_subtask_scope",
+        "type": "problem",
+        "title": "Define compact evaluation cases",
+        "status": "open",
         "priority": "medium",
-        "summary": "Alternative branch that would add more external context before answering.",
-        "question": null,
+        "summary": "Nested demo problem showing that an option can branch into smaller problems for subagents.",
+        "question": "Which small set of cases is enough to judge whether the option branch is improving consistency?",
         "hypothesis": null,
         "evidence_strength": null,
         "evidence_summary": null,
@@ -225,11 +251,43 @@
         "agent_workstream": null,
         "workstream_report": null,
         "agent_context": null,
+        "next_actions": [
+          "Draft three lightweight evaluation cases."
+        ],
+        "blockers": []
+      },
+      {
+        "id": "decision_demo_prompt_refinement",
+        "type": "decision",
+        "title": "Adopt prompt refinement branch",
+        "status": "proposed",
+        "priority": null,
+        "summary": "Demo decision used to exercise evidence refresh and acceptance checklist behavior.",
+        "question": null,
+        "hypothesis": null,
+        "evidence_strength": null,
+        "evidence_summary": null,
+        "current_best_option": null,
+        "decision_state": null,
+        "outcome": null,
+        "result_summary": null,
+        "supporting_experiments": [
+          "experiment_demo_prompt_refinement"
+        ],
+        "contradicting_experiments": [],
+        "supporting_decisions": [],
+        "linked_artifacts": [],
+        "links": [],
+        "findings": [],
+        "implementation_steps": [],
+        "success_criteria": [],
+        "agent_workstream": null,
+        "workstream_report": null,
+        "agent_context": null,
         "next_actions": [],
         "blockers": []
       }
     ],
-    "siblings": [],
     "experiments": [
       {
         "id": "experiment_demo_prompt_refinement",
@@ -295,62 +353,16 @@
       }
     ],
     "artifacts": [],
-    "blockers": [
-      "Need at least one structured finding before accepting the demo decision."
-    ]
+    "blockers": []
   },
   "current_best_option": "option_demo_prompt_refinement",
-  "blockers": [
-    "Need at least one structured finding before accepting the demo decision."
-  ],
+  "blockers": [],
   "next_actions": [
     "Run the prompt refinement demo experiment.",
     "Record one finding before reviewing the demo decision."
   ],
   "knowledge_index": [],
   "suggested_next_actions": [
-    {
-      "kind": "focus_next_action",
-      "priority": "critical",
-      "action": "Record one finding before reviewing the demo decision.",
-      "reason": "Current focus or current_state lists this as a next action.",
-      "source_node_id": "problem_demo_quality_gap",
-      "source_node_type": "problem",
-      "related_node_ids": [
-        "stage_demo_research",
-        "problem_demo_quality_gap"
-      ],
-      "suggested_command": "",
-      "is_focus_related": true,
-      "key": "sg_1f341281cef782aa",
-      "lifecycle_state": "active",
-      "lifecycle_reason": "",
-      "lifecycle_updated_at": "",
-      "id": "next_action_001",
-      "queued_in_current": true,
-      "queued_in_node": false
-    },
-    {
-      "kind": "focus_next_action",
-      "priority": "critical",
-      "action": "Run the prompt refinement demo experiment.",
-      "reason": "Current focus or current_state lists this as a next action.",
-      "source_node_id": "problem_demo_quality_gap",
-      "source_node_type": "problem",
-      "related_node_ids": [
-        "stage_demo_research",
-        "problem_demo_quality_gap"
-      ],
-      "suggested_command": "",
-      "is_focus_related": true,
-      "key": "sg_42c9a8359a947a82",
-      "lifecycle_state": "active",
-      "lifecycle_reason": "",
-      "lifecycle_updated_at": "",
-      "id": "next_action_002",
-      "queued_in_current": true,
-      "queued_in_node": true
-    },
     {
       "kind": "resolve_blocker",
       "priority": "critical",
@@ -367,8 +379,54 @@
       "lifecycle_state": "active",
       "lifecycle_reason": "",
       "lifecycle_updated_at": "",
-      "id": "next_action_003",
+      "id": "next_action_001",
       "queued_in_current": false,
+      "queued_in_node": false
+    },
+    {
+      "kind": "focus_next_action",
+      "priority": "high",
+      "action": "Record one finding before reviewing the demo decision.",
+      "reason": "Current focus or current_state lists this as a next action.",
+      "source_node_id": "experiment_demo_prompt_refinement",
+      "source_node_type": "experiment",
+      "related_node_ids": [
+        "stage_demo_research",
+        "problem_demo_quality_gap",
+        "option_demo_prompt_refinement",
+        "experiment_demo_prompt_refinement"
+      ],
+      "suggested_command": "",
+      "is_focus_related": true,
+      "key": "sg_a1ca1747de1fdfec",
+      "lifecycle_state": "active",
+      "lifecycle_reason": "",
+      "lifecycle_updated_at": "",
+      "id": "next_action_002",
+      "queued_in_current": true,
+      "queued_in_node": false
+    },
+    {
+      "kind": "focus_next_action",
+      "priority": "high",
+      "action": "Run the prompt refinement demo experiment.",
+      "reason": "Current focus or current_state lists this as a next action.",
+      "source_node_id": "experiment_demo_prompt_refinement",
+      "source_node_type": "experiment",
+      "related_node_ids": [
+        "stage_demo_research",
+        "problem_demo_quality_gap",
+        "option_demo_prompt_refinement",
+        "experiment_demo_prompt_refinement"
+      ],
+      "suggested_command": "",
+      "is_focus_related": true,
+      "key": "sg_7388d78cd7ada404",
+      "lifecycle_state": "active",
+      "lifecycle_reason": "",
+      "lifecycle_updated_at": "",
+      "id": "next_action_003",
+      "queued_in_current": true,
       "queued_in_node": false
     },
     {
@@ -1049,8 +1107,171 @@
       "context": "research-cockpit option-workstream-context --option option_demo_prompt_refinement --json",
       "report": "research-cockpit report-option-workstream --option option_demo_prompt_refinement --agent <agent_id> --recommend continue --summary \"Summarize evidence and recommendation\""
     },
-    "current_focus_related": false
+    "current_focus_related": true
   },
   "saved_graph_views": [],
-  "recent_interactions": []
+  "recent_interactions": [
+    {
+      "id": "2026-04-29T11_19_13Z_set_focus_experiment_demo_prompt_refinement",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T11:19:13Z",
+      "node_id": "experiment_demo_prompt_refinement",
+      "command": "research-cockpit set-focus --focus-node experiment_demo_prompt_refinement",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "option_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "experiment_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "experiment_demo_prompt_refinement"
+        ]
+      }
+    },
+    {
+      "id": "2026-04-29T11_07_31Z_set_focus_option_demo_prompt_refinement",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T11:07:31Z",
+      "node_id": "option_demo_prompt_refinement",
+      "command": "research-cockpit set-focus --focus-node option_demo_prompt_refinement",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_subtask_scope",
+        "current_option": "option_demo_eval_cases",
+        "current_focus_node": "experiment_demo_eval_cases",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "problem_demo_subtask_scope",
+          "option_demo_eval_cases",
+          "experiment_demo_eval_cases"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "option_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement"
+        ]
+      }
+    },
+    {
+      "id": "2026-04-29T11_01_22Z_set_focus_experiment_demo_eval_cases",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T11:01:22Z",
+      "node_id": "experiment_demo_eval_cases",
+      "command": "research-cockpit set-focus --focus-node experiment_demo_eval_cases",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "decision_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "decision_demo_prompt_refinement"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_subtask_scope",
+        "current_option": "option_demo_eval_cases",
+        "current_focus_node": "experiment_demo_eval_cases",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "problem_demo_subtask_scope",
+          "option_demo_eval_cases",
+          "experiment_demo_eval_cases"
+        ]
+      }
+    },
+    {
+      "id": "2026-04-29T11_00_46Z_set_focus_decision_demo_prompt_refinement",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T11:00:46Z",
+      "node_id": "decision_demo_prompt_refinement",
+      "command": "research-cockpit set-focus --focus-node decision_demo_prompt_refinement",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "option_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "decision_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "decision_demo_prompt_refinement"
+        ]
+      }
+    },
+    {
+      "id": "2026-04-29T10_59_52Z_set_focus_option_demo_prompt_refinement",
+      "kind": "set_focus",
+      "actor": "researcher",
+      "created_at": "2026-04-29T10:59:52Z",
+      "node_id": "option_demo_prompt_refinement",
+      "command": "research-cockpit set-focus --focus-node option_demo_prompt_refinement",
+      "before": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_subtask_scope",
+        "current_option": "option_demo_eval_cases",
+        "current_focus_node": "experiment_demo_eval_cases",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement",
+          "problem_demo_subtask_scope",
+          "option_demo_eval_cases",
+          "experiment_demo_eval_cases"
+        ]
+      },
+      "after": {
+        "current_stage": "stage_demo_research",
+        "current_problem": "problem_demo_quality_gap",
+        "current_option": "option_demo_prompt_refinement",
+        "current_focus_node": "option_demo_prompt_refinement",
+        "current_focus_path": [
+          "stage_demo_research",
+          "problem_demo_quality_gap",
+          "option_demo_prompt_refinement"
+        ]
+      }
+    }
+  ]
 }

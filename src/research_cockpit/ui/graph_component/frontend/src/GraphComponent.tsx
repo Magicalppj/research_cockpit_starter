@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dagre from "dagre";
 import {
   Background,
@@ -201,20 +201,35 @@ function toReactFlowEdges(payload: GraphPayload): Edge[] {
 function ResearchGraph({ args }: ComponentProps) {
   const payload = (args.payload || {}) as GraphPayload;
   const selectedNodeId = (args.selected_node_id || payload.selected_node_id || null) as string | null;
+  const [visualSelectedNodeId, setVisualSelectedNodeId] = useState<string | null>(selectedNodeId);
   const graphKey = useMemo(() => graphSignature(payload), [payload]);
   const baseEdges = useMemo(() => toReactFlowEdges(payload), [payload]);
   const baseNodes = useMemo(() => {
-    const flowNodes = toReactFlowNodes(payload, selectedNodeId);
+    const flowNodes = toReactFlowNodes(payload, visualSelectedNodeId);
     return layoutNodes(flowNodes, payload.edges || []);
-  }, [payload, selectedNodeId]);
+  }, [payload, visualSelectedNodeId]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(baseNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(baseEdges);
   const previousGraphKey = useRef<string>("");
+  const pendingSelectedNodeId = useRef<string | null>(null);
+  const clickSequence = useRef<number>(0);
 
   useEffect(() => {
     setEdges(baseEdges);
   }, [baseEdges, setEdges]);
+
+  useEffect(() => {
+    const pending = pendingSelectedNodeId.current;
+    if (pending) {
+      if (selectedNodeId === pending) {
+        pendingSelectedNodeId.current = null;
+        setVisualSelectedNodeId(selectedNodeId);
+      }
+      return;
+    }
+    setVisualSelectedNodeId(selectedNodeId);
+  }, [selectedNodeId]);
 
   useEffect(() => {
     if (previousGraphKey.current !== graphKey) {
@@ -237,9 +252,13 @@ function ResearchGraph({ args }: ComponentProps) {
   }, [nodes.length, edges.length]);
 
   const onNodeClick = useCallback<NodeMouseHandler>((_event, node) => {
+    clickSequence.current += 1;
+    pendingSelectedNodeId.current = node.id;
+    setVisualSelectedNodeId(node.id);
     Streamlit.setComponentValue({
       selected_node_id: node.id,
-      event_type: "node_click"
+      event_type: "node_click",
+      event_id: `${Date.now()}-${clickSequence.current}-${node.id}`
     });
   }, []);
 

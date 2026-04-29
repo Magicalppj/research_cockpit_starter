@@ -1,0 +1,1061 @@
+events:
+- id: 2026-04-29T06_01_35Z_set_focus_decision_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T06:01:35Z'
+  node_id: decision_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node decision_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: problem_demo_quality_gap
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: decision_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - decision_demo_prompt_refinement
+- id: 2026-04-29T06_02_56Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T06:02:56Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: decision_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - decision_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T06_03_25Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T06:03:25Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T06_03_37Z_set_focus_experiment_demo_eval_cases
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T06:03:37Z'
+  node_id: experiment_demo_eval_cases
+  command: research-cockpit set-focus --focus-node experiment_demo_eval_cases
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+- id: 2026-04-29T06_03_56Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T06:03:56Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T06_04_07Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T06:04:07Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T06_04_36Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T06:04:36Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T06_04_57Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T06:04:57Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_13_06Z_set_focus_problem_demo_subtask_scope
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:13:06Z'
+  node_id: problem_demo_subtask_scope
+  command: research-cockpit set-focus --focus-node problem_demo_subtask_scope
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_prompt_refinement
+    current_focus_node: problem_demo_subtask_scope
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+- id: 2026-04-29T07_13_15Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:13:15Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_prompt_refinement
+    current_focus_node: problem_demo_subtask_scope
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_13_44Z_set_focus_problem_demo_quality_gap
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:13:44Z'
+  node_id: problem_demo_quality_gap
+  command: research-cockpit set-focus --focus-node problem_demo_quality_gap
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: problem_demo_quality_gap
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+- id: 2026-04-29T07_13_57Z_set_focus_experiment_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:13:57Z'
+  node_id: experiment_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node experiment_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: problem_demo_quality_gap
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: experiment_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - experiment_demo_prompt_refinement
+- id: 2026-04-29T07_17_44Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:17:44Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: experiment_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - experiment_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_18_43Z_set_focus_experiment_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:18:43Z'
+  node_id: experiment_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node experiment_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: experiment_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - experiment_demo_prompt_refinement
+- id: 2026-04-29T07_19_44Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:19:44Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: experiment_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - experiment_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_20_58Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:20:58Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_21_36Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:21:36Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_33_32Z_set_focus_experiment_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:33:32Z'
+  node_id: experiment_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node experiment_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: experiment_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - experiment_demo_prompt_refinement
+- id: 2026-04-29T07_33_42Z_set_focus_decision_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:33:42Z'
+  node_id: decision_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node decision_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: experiment_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - experiment_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: decision_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - decision_demo_prompt_refinement
+- id: 2026-04-29T07_55_37Z_set_focus_option_demo_eval_cases
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:55:37Z'
+  node_id: option_demo_eval_cases
+  command: research-cockpit set-focus --focus-node option_demo_eval_cases
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: decision_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - decision_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: option_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+- id: 2026-04-29T07_55_52Z_set_focus_problem_demo_subtask_scope
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:55:52Z'
+  node_id: problem_demo_subtask_scope
+  command: research-cockpit set-focus --focus-node problem_demo_subtask_scope
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: option_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_prompt_refinement
+    current_focus_node: problem_demo_subtask_scope
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+- id: 2026-04-29T07_56_03Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:56:03Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_prompt_refinement
+    current_focus_node: problem_demo_subtask_scope
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_56_12Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:56:12Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_56_26Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:56:26Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_56_33Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:56:33Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T07_58_16Z_set_focus_experiment_demo_eval_cases
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T07:58:16Z'
+  node_id: experiment_demo_eval_cases
+  command: research-cockpit set-focus --focus-node experiment_demo_eval_cases
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+- id: 2026-04-29T10_39_45Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:39:45Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T10_40_02Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:40:02Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T10_40_13Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:40:13Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T10_48_40Z_set_focus_experiment_demo_eval_cases
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:48:40Z'
+  node_id: experiment_demo_eval_cases
+  command: research-cockpit set-focus --focus-node experiment_demo_eval_cases
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+- id: 2026-04-29T10_48_49Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:48:49Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T10_49_50Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:49:50Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T10_50_04Z_set_focus_problem_demo_quality_gap
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:50:04Z'
+  node_id: problem_demo_quality_gap
+  command: research-cockpit set-focus --focus-node problem_demo_quality_gap
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: problem_demo_quality_gap
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+- id: 2026-04-29T10_50_46Z_set_focus_experiment_demo_eval_cases
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:50:46Z'
+  node_id: experiment_demo_eval_cases
+  command: research-cockpit set-focus --focus-node experiment_demo_eval_cases
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: problem_demo_quality_gap
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+- id: 2026-04-29T10_51_04Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:51:04Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T10_54_30Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:54:30Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T10_57_20Z_set_focus_experiment_demo_eval_cases
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:57:20Z'
+  node_id: experiment_demo_eval_cases
+  command: research-cockpit set-focus --focus-node experiment_demo_eval_cases
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+- id: 2026-04-29T10_59_52Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T10:59:52Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T11_00_46Z_set_focus_decision_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T11:00:46Z'
+  node_id: decision_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node decision_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: decision_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - decision_demo_prompt_refinement
+- id: 2026-04-29T11_01_22Z_set_focus_experiment_demo_eval_cases
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T11:01:22Z'
+  node_id: experiment_demo_eval_cases
+  command: research-cockpit set-focus --focus-node experiment_demo_eval_cases
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: decision_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - decision_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+- id: 2026-04-29T11_07_31Z_set_focus_option_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T11:07:31Z'
+  node_id: option_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node option_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_subtask_scope
+    current_option: option_demo_eval_cases
+    current_focus_node: experiment_demo_eval_cases
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - problem_demo_subtask_scope
+    - option_demo_eval_cases
+    - experiment_demo_eval_cases
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+- id: 2026-04-29T11_19_13Z_set_focus_experiment_demo_prompt_refinement
+  kind: set_focus
+  actor: researcher
+  created_at: '2026-04-29T11:19:13Z'
+  node_id: experiment_demo_prompt_refinement
+  command: research-cockpit set-focus --focus-node experiment_demo_prompt_refinement
+  before:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: option_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+  after:
+    current_stage: stage_demo_research
+    current_problem: problem_demo_quality_gap
+    current_option: option_demo_prompt_refinement
+    current_focus_node: experiment_demo_prompt_refinement
+    current_focus_path:
+    - stage_demo_research
+    - problem_demo_quality_gap
+    - option_demo_prompt_refinement
+    - experiment_demo_prompt_refinement
