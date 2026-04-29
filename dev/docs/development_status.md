@@ -1,4 +1,21 @@
 # Research Cockpit 开发状态
+## Subagent CLI Findings Repair v1（2026-04-29）
+
+本批修复真实 subagent CLI 实战测试中暴露的小缺口，目标是让已安装插件在受限 agent shell 中更容易被正确调用，并补齐关键写入事件的可追踪性。
+
+已完成：
+
+- `record-finding` 成功写入 experiment finding 后追加 `record_finding` interaction log 事件，记录 experiment、finding、confidence、outcome、before/after finding count 和 summary 摘要。
+- `commands --json` manifest 补充顶层 `init` 与 `ui` 入口，agent 不需要从顶层 help 之外另行猜测初始化和前端启动命令。
+- `validate --json` 保留 `valid`，同时增加 `ok`，与 bootstrap 的 `validation.ok` 语义对齐。
+- `update-status --help` 明确 `--result-summary` 只适用于 experiment；`update-decision-checklist --help` 明确 `--alternative` 必须是已有 option node id。
+- 更新 `SKILL.md`、README 和 capabilities：推荐在受限 shell 中使用绝对 `--root`，当 console script 不在 `PATH` 时使用 `python -m research_cockpit.cli`，并记录安全归档代替物理删除、decision gate JSON 失败退出码和 Windows terminal UTF-8 显示提示。
+
+当前仍可继续观察：
+
+- 是否需要为 `record-finding` 增加 `--dry-run --json`，以和 option workstream / decision 写入脚本保持一致。
+- 是否需要把 `check-decision-acceptance --json` 的非 ready 退出码改为可配置；当前保持 `1`，并在文档中作为 gate failure 说明。
+
 ## CLI Surface Consolidation v1（2026-04-29）
 
 本批把 `research-cockpit` package CLI 收敛为唯一公共调用入口，移除根目录 `scripts/` wrapper。用户和 agent 安装插件后统一通过 `research-cockpit <subcommand>` 读取、校验、写入和启动 UI。

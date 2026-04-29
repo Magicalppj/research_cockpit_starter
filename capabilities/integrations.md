@@ -35,3 +35,11 @@ research-cockpit ui --root research_cockpit
 ```
 
 Agents should use the installed `research-cockpit` CLI from the research repo root. Do not call files inside the plugin package directly.
+
+If the console script is not on `PATH`, use the same installed Python interpreter as a deterministic fallback:
+
+```sh
+python -m research_cockpit.cli bootstrap --root /absolute/path/to/research_cockpit --json
+```
+
+When running from a constrained agent shell, prefer an explicit absolute `--root`. Relative roots depend on the shell's current directory and can fail if directory switching is restricted.

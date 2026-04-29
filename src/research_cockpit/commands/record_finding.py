@@ -10,12 +10,14 @@ from typing import Any
 ROOT = default_data_root()
 
 from research_cockpit.model import (
+    append_interaction_log,
     ResearchNode,
     VALID_FINDING_CONFIDENCES,
     VALID_FINDING_OUTCOMES,
     load_nodes,
     load_yaml,
     save_yaml,
+    script_command,
     validate_cockpit,
 )
 from research_cockpit.commands.build_dashboard import build_dashboard
@@ -76,6 +78,10 @@ def record_finding(
     findings = data.get("findings", []) or []
     if not isinstance(findings, list):
         raise ValueError(f"{experiment_id}: findings must be a list")
+    before_summary = {
+        "finding_count": len(findings),
+        "result_summary": data.get("result_summary"),
+    }
 
     finding = {
         "id": _next_finding_id(experiment_id, findings),
@@ -98,6 +104,27 @@ def record_finding(
     validate_cockpit(root, candidate, load_yaml(root / "current_state.yaml"), raise_on_error=True)
 
     save_yaml(path, data)
+    append_interaction_log(
+        root,
+        kind="record_finding",
+        actor="researcher",
+        node_id=experiment_id,
+        command=f"{script_command('record_finding.py')} --experiment {experiment_id} --confidence {confidence}",
+        before=before_summary,
+        after={
+            "finding_count": len(findings),
+            "result_summary": data.get("result_summary"),
+            "latest_finding_id": finding["id"],
+        },
+        extra={
+            "experiment_id": experiment_id,
+            "finding_id": finding["id"],
+            "confidence": confidence,
+            "outcome": outcome,
+            "metric_count": len(metrics or []),
+            "linked_artifacts": artifacts,
+        },
+    )
     if rebuild_dashboard:
         build_dashboard(root)
     return path

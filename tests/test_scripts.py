@@ -649,6 +649,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(by_name["validate"]["mutating"])
         self.assertFalse(by_name["search"]["mutating"])
         self.assertFalse(by_name["smoke"]["mutating"])
+        self.assertTrue(by_name["init"]["mutating"])
+        self.assertFalse(by_name["ui"]["mutating"])
+        self.assertEqual(by_name["init"]["capability_file"], "capabilities/integrations.md")
+        self.assertEqual(by_name["ui"]["capability_file"], "capabilities/ui-dashboard.md")
         self.assertTrue(by_name["record-finding"]["mutating"])
         self.assertTrue(by_name["record-finding"]["supports_no_build"])
         self.assertTrue(by_name["claim-option"]["supports_json"])
@@ -681,6 +685,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0)
         payload = json.loads(out.stdout)
         self.assertIn("commands", payload)
+        self.assertIn("init", {item["name"] for item in payload["commands"]})
+        self.assertIn("ui", {item["name"] for item in payload["commands"]})
         self.assertIn("record-finding", {item["name"] for item in payload["commands"]})
 
     def test_skill_smoke_test_payload_runs_read_only_workflow(self) -> None:
@@ -751,6 +757,16 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         self.assertEqual(ok.returncode, 0)
         self.assertIn("OK", ok.stdout)
+        ok_json = subprocess.run(
+            [*cli_command(command), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(ok_json.returncode, 0)
+        ok_payload = json.loads(ok_json.stdout)
+        self.assertTrue(ok_payload["valid"])
+        self.assertTrue(ok_payload["ok"])
 
         bad = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
         bad["status"] = "done"
@@ -763,6 +779,25 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         self.assertEqual(failed.returncode, 1)
         self.assertIn("invalid status", failed.stdout)
+
+    def test_cli_help_documents_status_and_decision_checklist_constraints(self) -> None:
+        status_help = subprocess.run(
+            [*cli_command("update-status"), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        checklist_help = subprocess.run(
+            [*cli_command("update-decision-checklist"), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(status_help.returncode, 0)
+        self.assertEqual(checklist_help.returncode, 0)
+        self.assertIn("Experiment nodes only", status_help.stdout)
+        self.assertIn("Existing option node id", checklist_help.stdout)
 
     def test_suggest_next_actions_cli_outputs_text_json_and_filters(self) -> None:
         command = "suggest-next-actions"
@@ -1294,6 +1329,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(data["findings"][0]["evidence"], ["exp_t5"])
         self.assertEqual(data["findings"][0]["linked_artifacts"], ["artifact_cache"])
         self.assertEqual(context["local_neighbors"]["experiments"][0]["findings"][0]["statement"], "T5 improves replace following.")
+        events = interaction_events(self.root)
+        self.assertEqual(events[-1]["kind"], "record_finding")
+        self.assertEqual(events[-1]["node_id"], "exp_t5")
+        self.assertEqual(events[-1]["experiment_id"], "exp_t5")
+        self.assertEqual(events[-1]["finding_id"], "exp_t5_finding_001")
+        self.assertEqual(events[-1]["before"]["finding_count"], 0)
+        self.assertEqual(events[-1]["after"]["finding_count"], 1)
 
     def test_record_finding_rejects_non_experiment_and_unknown_artifact(self) -> None:
         with self.assertRaises(ValueError) as non_experiment:

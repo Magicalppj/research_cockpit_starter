@@ -12,6 +12,10 @@ research-cockpit accept-decision --root research_cockpit --id decision_x --dry-r
 research-cockpit accept-decision --root research_cockpit --id decision_x
 ```
 
+`check-decision-acceptance --json` returns a non-zero exit code when the gate is not ready, but stdout is still a valid JSON checklist report. Treat that as an expected gate failure, not as a command crash.
+
+`--alternative` must be an existing `option` node id. To repair invalid alternatives, replace them with valid option ids before accepting the decision.
+
 ## Repair Hints
 
 The UI maps blocking checklist failures to CLI or YAML-field hints. Structural failures such as invalid parents should be repaired in YAML only after validating the intended graph relationship. After any structural YAML repair, run `research-cockpit validate` and `research-cockpit build`.

@@ -11,6 +11,7 @@ Research Cockpit 是一个项目本地研究状态插件。插件代码位于本
 
 1. Resolve the data root:
    - Prefer an explicit `--root <path-to-research_cockpit>`.
+   - Use an absolute `--root` when the agent shell may not preserve the expected current working directory.
    - If omitted, commands search from the current working directory upward for `research_cockpit/`.
    - In this plugin repo only, commands fall back to `examples/demo_research_cockpit/`.
 2. Run bootstrap before making decisions:
@@ -20,6 +21,8 @@ research-cockpit bootstrap --root research_cockpit --build --json
 ```
 
 If the current working directory is already the plugin root, use `research-cockpit bootstrap --root <path> --build --json` instead.
+
+If the `research-cockpit` console script is unavailable but the package is installed, use `python -m research_cockpit.cli <command>` with the same Python environment.
 
 3. Read generated context before editing:
    - `research_cockpit/dashboards/agent_context_pack.json`

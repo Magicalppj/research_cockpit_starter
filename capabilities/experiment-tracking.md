@@ -32,6 +32,8 @@ Record experiment findings through `research-cockpit record-finding`:
 research-cockpit record-finding --root research_cockpit --experiment experiment_x --statement "..." --confidence medium --outcome positive --summary "..."
 ```
 
+Successful finding writes append a compact `record_finding` event to `graph/interaction_log.yaml`.
+
 After findings change, rebuild decision evidence when a decision depends on them:
 
 ```sh

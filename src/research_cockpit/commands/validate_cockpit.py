@@ -14,9 +14,11 @@ from research_cockpit.model import load_nodes, validate_cockpit
 def validation_payload(root: Path) -> dict:
     nodes = load_nodes(root)
     errors = validate_cockpit(root, nodes)
+    ok = not errors
     return {
         "root": str(root),
-        "valid": not errors,
+        "valid": ok,
+        "ok": ok,
         "node_count": len(nodes),
         "errors": errors,
     }

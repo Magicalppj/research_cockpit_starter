@@ -18,6 +18,18 @@ research-cockpit update-status --root research_cockpit --id option_x --status ac
 
 Use only statuses accepted by validation for that node type.
 
+## Safe Archive Instead of Delete
+
+There is no public `delete-node` command. If a user asks to delete, close, or archive a node, use a safe status transition such as `parked`, `rejected`, `resolved`, or `archived` when that status is valid for the node type:
+
+```sh
+research-cockpit update-status --root research_cockpit --id option_x --status parked
+```
+
+Do not physically remove YAML files unless a human explicitly requests a structural data repair and you can validate the resulting graph.
+
+`--result-summary` is only accepted for `experiment` nodes.
+
 ## Suggestions
 
 Read suggestions:

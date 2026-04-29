@@ -7,6 +7,8 @@ from research_cockpit.command_registry import subcommand_for_script
 
 
 CAPABILITY_BY_COMMAND = {
+    "init": "capabilities/integrations.md",
+    "ui": "capabilities/ui-dashboard.md",
     "agent_bootstrap.py": "capabilities/focus-context.md",
     "validate_cockpit.py": "capabilities/troubleshooting.md",
     "build_dashboard.py": "capabilities/graph-state.md",
@@ -35,6 +37,24 @@ CAPABILITY_BY_COMMAND = {
 
 
 COMMANDS: list[dict[str, object]] = [
+    {
+        "name": "init",
+        "purpose": "Initialize a project-local research_cockpit state directory from a template.",
+        "mutating": True,
+        "supports_json": False,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "recommended_when": "Start a new research repo before recording project-specific state.",
+    },
+    {
+        "name": "ui",
+        "purpose": "Launch the Streamlit researcher dashboard for a data root.",
+        "mutating": False,
+        "supports_json": False,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "recommended_when": "Inspect graph state, saved views, decisions, search, and data health interactively.",
+    },
     {
         "name": "agent_bootstrap.py",
         "purpose": "Inspect validation status, focus, context paths, suggestions, search summary, and git state.",
@@ -243,12 +263,12 @@ COMMANDS: list[dict[str, object]] = [
 def agent_command_manifest() -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for command in COMMANDS:
-        script_name = str(command["name"])
-        subcommand = subcommand_for_script(script_name)
+        command_name = str(command["name"])
+        subcommand = subcommand_for_script(command_name) if command_name.endswith(".py") else command_name
         row = {
             **command,
             "name": subcommand,
-            "capability_file": CAPABILITY_BY_COMMAND[script_name],
+            "capability_file": CAPABILITY_BY_COMMAND[command_name],
             "command": f"research-cockpit {subcommand}",
             "cwd": "research_repo_root",
         }

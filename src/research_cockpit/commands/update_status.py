@@ -68,7 +68,7 @@ def main() -> None:
     parser.add_argument("--id", required=True)
     parser.add_argument("--status", required=True)
     parser.add_argument("--summary")
-    parser.add_argument("--result-summary")
+    parser.add_argument("--result-summary", help="Experiment nodes only; rejected for other node types.")
     args = parser.parse_args()
 
     path = update_status(

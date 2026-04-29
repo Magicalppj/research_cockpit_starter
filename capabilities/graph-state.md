@@ -25,4 +25,4 @@ The Streamlit UI writes saved views through model helpers. Agents should treat `
 
 ## Interaction Log
 
-Key mutating commands append compact events to `interaction_log.yaml`, including focus changes, option claims/reports, suggestion application, decision acceptance, and saved graph views. Do not treat the log as the source of truth; use graph nodes and current state for current facts.
+Key mutating commands append compact events to `interaction_log.yaml`, including focus changes, experiment findings, option claims/reports, suggestion application, decision acceptance, and saved graph views. Do not treat the log as the source of truth; use graph nodes and current state for current facts.

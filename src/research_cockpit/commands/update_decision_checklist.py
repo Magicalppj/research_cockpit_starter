@@ -108,7 +108,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--id", required=True, dest="decision_id")
-    parser.add_argument("--alternative", action="append", dest="alternatives")
+    parser.add_argument("--alternative", action="append", dest="alternatives", help="Existing option node id; repeat for multiple alternatives.")
     parser.add_argument("--consequence", action="append", dest="consequences")
     parser.add_argument("--next-required-action", action="append", dest="next_required_actions")
     parser.add_argument("--evidence-summary")

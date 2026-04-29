@@ -12,6 +12,12 @@ python -m pip install -e .
 
 Or activate a Python environment that already has the package and its dependencies installed.
 
+If `research-cockpit` is not visible on `PATH` but the package imports successfully, run the module entry point with the same interpreter:
+
+```sh
+python -m research_cockpit.cli validate --root /absolute/path/to/research_cockpit --json
+```
+
 ## Validation
 
 Run:
@@ -39,3 +45,11 @@ git diff --check
 ```
 
 If a mutating script is being tested, use a copied data root or `.test_tmp/`; do not mutate a user's real `research_cockpit/` during verification.
+
+## Terminal Encoding
+
+The Markdown files are UTF-8. If Chinese text appears garbled in legacy Windows PowerShell output, switch the terminal to UTF-8 or use a modern shell before judging the file contents:
+
+```sh
+chcp 65001
+```

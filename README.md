@@ -46,6 +46,14 @@ cd research-cockpit
 python -m pip install -e .
 ```
 
+安装后推荐使用 `research-cockpit <command>`。如果当前 shell 找不到 console script，但同一个 Python 环境可以 `import research_cockpit`，可以使用等价的 module 入口：
+
+```sh
+python -m research_cockpit.cli bootstrap --root /absolute/path/to/research_cockpit --json
+```
+
+在受限 agent shell 中，优先传入绝对 `--root`，避免当前工作目录不可控导致读写到错误位置。
+
 如果需要隔离环境，可以先创建并激活任意 Python virtual environment 或 conda environment，再执行同一条 `python -m pip install -e .`。
 
 主要 Python 依赖：
