@@ -6,11 +6,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 import hashlib
-import os
 import re
 import subprocess
 import yaml
 import networkx as nx
+
+from research_cockpit.command_registry import cli_command_for_script
 
 
 VALID_NODE_TYPES = {"stage", "problem", "option", "experiment", "decision", "artifact"}
@@ -1147,14 +1148,8 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
     return rows
 
 
-def python_command() -> str:
-    return os.environ.get("RESEARCH_COCKPIT_PYTHON", "").strip() or "python"
-
-
 def script_command(script_name: str, *parts: str) -> str:
-    command = [python_command(), fr"scripts\{script_name}"]
-    command.extend(parts)
-    return " ".join(str(part) for part in command if part not in ("", None))
+    return cli_command_for_script(script_name, *parts)
 
 
 def _workflow_command(script_name: str, *parts: str) -> str:

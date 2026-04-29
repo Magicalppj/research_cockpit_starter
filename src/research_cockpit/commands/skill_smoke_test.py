@@ -18,8 +18,8 @@ REQUIRED_MODULES = {
 }
 
 
-def _script_path(script_name: str) -> str:
-    return str(PLUGIN_ROOT / "scripts" / script_name)
+def _cli_args(python: str, command: str, *args: str) -> list[str]:
+    return [python, "-m", "research_cockpit.cli", command, *args]
 
 
 def _summarize_json(name: str, stdout: str) -> dict[str, Any]:
@@ -83,7 +83,7 @@ def _dependency_failure_check(python: str, missing: list[str]) -> dict[str, Any]
     modules = ", ".join(missing)
     message = (
         f"Missing Python modules for {python}: {modules}. "
-        f"From the Research Cockpit plugin root, install requirements with `python -m pip install -r requirements.txt` "
+        f"From the Research Cockpit plugin root, install the package with `python -m pip install -e .` "
         f"or rerun with an interpreter that already has: {packages}."
     )
     return {
@@ -129,19 +129,19 @@ def skill_smoke_test_payload(
     root_arg = str(root)
     option_id = _current_option_for_root(root)
     checks = [
-        _run_check("validate_cockpit", [python, _script_path("validate_cockpit.py"), "--root", root_arg]),
-        _run_check("agent_bootstrap", [python, _script_path("agent_bootstrap.py"), "--root", root_arg, "--json"]),
-        _run_check("list_agent_commands", [python, _script_path("list_agent_commands.py"), "--json"]),
+        _run_check("validate_cockpit", _cli_args(python, "validate", "--root", root_arg)),
+        _run_check("agent_bootstrap", _cli_args(python, "bootstrap", "--root", root_arg, "--json")),
+        _run_check("list_agent_commands", _cli_args(python, "commands", "--json")),
         _run_check(
             "search_knowledge",
-            [python, _script_path("search_knowledge.py"), "--root", root_arg, "--query", query, "--json", "--limit", "5"],
+            _cli_args(python, "search", "--root", root_arg, "--query", query, "--json", "--limit", "5"),
         ),
-        _run_check("suggest_next_actions", [python, _script_path("suggest_next_actions.py"), "--root", root_arg, "--json"]),
+        _run_check("suggest_next_actions", _cli_args(python, "suggest-next-actions", "--root", root_arg, "--json")),
     ]
     if option_id:
         checks.append(_run_check(
             "option_workstream_context",
-            [python, _script_path("option_workstream_context.py"), "--root", root_arg, "--option", option_id, "--json"],
+            _cli_args(python, "option-workstream-context", "--root", root_arg, "--option", option_id, "--json"),
         ))
     return {
         "ok": all(check["passed"] for check in checks),

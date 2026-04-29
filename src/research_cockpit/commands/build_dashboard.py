@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from research_cockpit.paths import default_data_root
@@ -73,8 +74,12 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
 
 
 def main() -> None:
-    nodes = load_nodes(ROOT)
-    outputs = build_dashboard(ROOT)
+    parser = argparse.ArgumentParser(prog="research-cockpit build")
+    parser.add_argument("--root", type=Path, default=ROOT)
+    args = parser.parse_args()
+
+    nodes = load_nodes(args.root)
+    outputs = build_dashboard(args.root)
     print(f"Built dashboard for {len(nodes)} nodes.")
     for output in outputs:
         print(f"Wrote: {output}")

@@ -18,7 +18,6 @@ Research Cockpit 是一个 repo-native 的研究记录与 agent 协作插件。�
 ```text
 research-cockpit/
   src/research_cockpit/       # Python runtime、model、Streamlit UI、React Flow component wrapper
-  scripts/                    # 薄 wrapper，供 agent 和人类直接调用
   capabilities/               # 面向 agent 的分能力说明
   templates/                  # 新研究仓库初始化模板
   examples/demo_research_cockpit/
@@ -41,19 +40,13 @@ audio-edit-research/
 
 建议使用 Python 3.10+。
 
-```powershell
+```sh
 git clone <this-repo-url> research-cockpit
 cd research-cockpit
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
 python -m pip install -e .
 ```
 
-也可以只安装依赖后使用 wrapper scripts：
-
-```powershell
-python -m pip install -r requirements.txt
-```
+如果需要隔离环境，可以先创建并激活任意 Python virtual environment 或 conda environment，再执行同一条 `python -m pip install -e .`。
 
 主要 Python 依赖：
 
@@ -70,10 +63,10 @@ Research Graph 默认使用 React Flow + Dagre。普通用户启动 Streamlit �
 
 只有修改前端组件源码时才需要重新构建：
 
-```powershell
-cd src\research_cockpit\ui\graph_component\frontend
-npm.cmd install
-npm.cmd run build
+```sh
+cd src/research_cockpit/ui/graph_component/frontend
+npm install
+npm run build
 ```
 
 主要前端依赖：
@@ -83,13 +76,13 @@ npm.cmd run build
 - `streamlit-component-lib`：Streamlit custom component 通信。
 - `vite` / `typescript`：构建工具链。
 
-图谱数据变化不需要重新 build。后台 agent 通过 `scripts/` 修改 truth-source YAML 后，在前端点击 `刷新图谱 / Refresh` 即可让 Streamlit 重新读取当前 `research_cockpit/`。
+图谱数据变化不需要重新 build。后台 agent 通过 `research-cockpit` CLI 修改 truth-source YAML 后，在前端点击 `刷新图谱 / Refresh` 即可让 Streamlit 重新读取当前 `research_cockpit/`。
 
 ## 初始化研究状态
 
 在研究仓库根目录运行：
 
-```powershell
+```sh
 research-cockpit init
 ```
 
@@ -107,15 +100,15 @@ research_cockpit/
 
 如果只在插件仓库内试用，可以直接使用 demo 数据：
 
-```powershell
-python scripts\skill_smoke_test.py --root examples\demo_research_cockpit --json
+```sh
+research-cockpit smoke --root examples/demo_research_cockpit --json
 ```
 
 ## 启动前端
 
 在研究仓库根目录运行：
 
-```powershell
+```sh
 research-cockpit build --root research_cockpit
 research-cockpit ui --root research_cockpit --server.port 8501
 ```
@@ -143,25 +136,25 @@ your-research-repo/
 然后告诉 agent：
 
 ```text
-使用 research-cockpit skill。先运行 agent_bootstrap.py --json，
-读取 agent_context_pack 和 focus_context_pack，再通过 scripts 写入研究状态。
+使用 research-cockpit skill。先运行 `research-cockpit bootstrap --json`，
+读取 agent_context_pack 和 focus_context_pack，再通过 `research-cockpit` CLI 写入研究状态。
 ```
 
 推荐启动命令：
 
-```powershell
-python .agent\skills\research-cockpit\scripts\agent_bootstrap.py --root research_cockpit --json
-python .agent\skills\research-cockpit\scripts\validate_cockpit.py --root research_cockpit
+```sh
+research-cockpit bootstrap --root research_cockpit --json
+research-cockpit validate --root research_cockpit
 ```
 
-所有关键写入都应走 `scripts/`，不要让 agent 直接手写 YAML，除非对应 capability 明确允许并说明字段边界。
+所有关键写入都应走 `research-cockpit` CLI，不要让 agent 直接手写 YAML，除非对应 capability 明确允许并说明字段边界。
 
 ## 开发验证
 
-```powershell
+```sh
 python -m unittest discover -s tests
-python scripts\skill_smoke_test.py --root examples\demo_research_cockpit --json
-python dev\scripts\run_skill_release_check.py --json --skip-mutating
-python dev\scripts\run_agent_usability_check.py --json
+research-cockpit smoke --root examples/demo_research_cockpit --json
+python dev/scripts/run_skill_release_check.py --json --skip-mutating
+python dev/scripts/run_agent_usability_check.py --json
 git diff --check
 ```

@@ -13,7 +13,10 @@ from unittest.mock import patch
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT_DIR
-sys.path.insert(0, str(ROOT_DIR / "src"))
+SRC_DIR = ROOT_DIR / "src"
+sys.path.insert(0, str(SRC_DIR))
+existing_pythonpath = os.environ.get("PYTHONPATH", "")
+os.environ["PYTHONPATH"] = str(SRC_DIR) if not existing_pythonpath else str(SRC_DIR) + os.pathsep + existing_pythonpath
 
 from research_cockpit.model import load_nodes, load_yaml, save_yaml
 from research_cockpit.commands.accept_decision import accept_decision
@@ -45,6 +48,10 @@ def write_node(root: Path, data: dict) -> None:
 
 def interaction_events(root: Path) -> list[dict]:
     return load_yaml(root / "graph" / "interaction_log.yaml").get("events", [])
+
+
+def cli_command(command: str, *args: str) -> list[str]:
+    return [sys.executable, "-m", "research_cockpit.cli", command, *args]
 
 
 class ScriptBehaviorTests(unittest.TestCase):
@@ -138,6 +145,49 @@ class ScriptBehaviorTests(unittest.TestCase):
             )
 
         self.assertIn("missing_problem", str(ctx.exception))
+
+    def test_cli_validation_errors_are_clean_without_traceback(self) -> None:
+        add_failed = subprocess.run(
+            cli_command(
+                "add-node",
+                "--root",
+                str(self.root),
+                "--id",
+                "option_bad",
+                "--type",
+                "option",
+                "--title",
+                "Bad",
+                "--parent",
+                "missing_problem",
+            ),
+            capture_output=True,
+            text=True,
+        )
+        add_output = add_failed.stdout + add_failed.stderr
+
+        self.assertEqual(add_failed.returncode, 1)
+        self.assertIn("Parent node does not exist: missing_problem", add_output)
+        self.assertNotIn("Traceback", add_output)
+
+        status_failed = subprocess.run(
+            cli_command(
+                "update-status",
+                "--root",
+                str(self.root),
+                "--id",
+                "option_t5",
+                "--status",
+                "not_a_status",
+            ),
+            capture_output=True,
+            text=True,
+        )
+        status_output = status_failed.stdout + status_failed.stderr
+
+        self.assertEqual(status_failed.returncode, 1)
+        self.assertIn("Invalid status 'not_a_status'", status_output)
+        self.assertNotIn("Traceback", status_output)
 
     def test_update_status_updates_experiment_result(self) -> None:
         update_status(
@@ -261,6 +311,37 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("metadata", focus_context)
         self.assertIsInstance(context["metadata"]["worktree_dirty"], bool)
 
+    def test_build_cli_respects_root_argument_over_environment(self) -> None:
+        env_root = self.tmp_root / "env_research_cockpit"
+        shutil.copytree(self.root, env_root)
+        env = os.environ.copy()
+        env["RESEARCH_COCKPIT_ROOT"] = str(env_root)
+
+        out = subprocess.run(
+            [*cli_command("build"), "--root", str(self.root)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        self.assertTrue((self.root / "dashboards" / "agent_context_pack.json").exists())
+        self.assertFalse((env_root / "dashboards").exists())
+
+    def test_cli_delegates_subcommand_help(self) -> None:
+        out = subprocess.run(
+            [*cli_command("claim-option"), "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        self.assertIn("research-cockpit claim-option", out.stdout)
+        self.assertIn("--option", out.stdout)
+        self.assertIn("--agent", out.stdout)
+
     def test_claim_option_writes_workstream_and_rebuilds_dashboard(self) -> None:
         claim_option(
             self.root,
@@ -299,14 +380,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(data["agent_workstream"]["owner"], "agent_b")
 
     def test_claim_option_cli_dry_run_json_previews_without_writing(self) -> None:
-        script = SKILL_ROOT / "scripts" / "claim_option.py"
+        command = "claim-option"
         option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
         before = option_path.read_text(encoding="utf-8")
 
         out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--option",
@@ -337,7 +417,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse((self.root / "dashboards").exists())
 
     def test_claim_option_cli_dry_run_conflict_does_not_write(self) -> None:
-        script = SKILL_ROOT / "scripts" / "claim_option.py"
+        command = "claim-option"
         option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
         claim_option(self.root, option_id="option_t5", agent_id="agent_a", rebuild_dashboard=False)
         before = option_path.read_text(encoding="utf-8")
@@ -345,8 +425,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--option",
@@ -367,10 +446,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(len(interaction_events(self.root)), before_event_count)
 
     def test_option_workstream_context_cli_outputs_json(self) -> None:
-        script = SKILL_ROOT / "scripts" / "option_workstream_context.py"
+        command = "option-workstream-context"
 
         result = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--option", "option_t5", "--json"],
+            [*cli_command(command), "--root", str(self.root), "--option", "option_t5", "--json"],
             capture_output=True,
             text=True,
             check=False,
@@ -413,7 +492,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(event["after"]["workstream_report"]["summary"], "Evidence is promising but incomplete.")
 
     def test_report_option_workstream_cli_dry_run_json_previews_without_writing(self) -> None:
-        script = SKILL_ROOT / "scripts" / "report_option_workstream.py"
+        command = "report-option-workstream"
         option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
         claim_option(self.root, option_id="option_t5", agent_id="agent_t5", rebuild_dashboard=False)
         record_finding(
@@ -429,8 +508,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--option",
@@ -465,7 +543,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse((self.root / "dashboards").exists())
 
     def test_report_option_workstream_cli_dry_run_owner_mismatch_does_not_write(self) -> None:
-        script = SKILL_ROOT / "scripts" / "report_option_workstream.py"
+        command = "report-option-workstream"
         option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
         claim_option(self.root, option_id="option_t5", agent_id="agent_a", rebuild_dashboard=False)
         before = option_path.read_text(encoding="utf-8")
@@ -473,8 +551,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--option",
@@ -511,23 +588,23 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["validation"]["ok"])
         self.assertEqual(payload["focus"]["current_focus_node"], "problem_text")
         self.assertFalse(payload["context_paths"]["agent_context_pack"]["exists"])
-        self.assertEqual(payload["skill"]["path"], ".")
+        self.assertTrue(payload["skill"]["path"])
         self.assertTrue(payload["skill"]["exists"])
         self.assertIn("top_suggestions", payload)
         self.assertIn("search_summary", payload)
         self.assertIsInstance(payload["git"]["worktree_dirty"], bool)
 
     def test_agent_bootstrap_cli_json_builds_when_requested(self) -> None:
-        script = SKILL_ROOT / "scripts" / "agent_bootstrap.py"
+        command = "bootstrap"
 
         default_out = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--json"],
+            [*cli_command(command), "--root", str(self.root), "--json"],
             capture_output=True,
             text=True,
             check=False,
         )
         build_out = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--json", "--build"],
+            [*cli_command(command), "--root", str(self.root), "--json", "--build"],
             capture_output=True,
             text=True,
             check=False,
@@ -541,43 +618,61 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(build_payload["context_paths"]["agent_context_pack"]["exists"])
         self.assertTrue((self.root / "dashboards" / "agent_context_pack.json").exists())
 
+    def test_agent_bootstrap_cli_reports_plugin_path_from_cwd(self) -> None:
+        research_repo = self.tmp_root / "research_repo"
+        research_repo.mkdir()
+        out = subprocess.run(
+            [*cli_command("bootstrap"), "--root", str(self.root), "--json"],
+            cwd=research_repo,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertTrue(payload["plugin"]["exists"])
+        self.assertNotEqual(payload["plugin"]["path"], ".")
+
     def test_agent_bootstrap_dependency_error_is_clear(self) -> None:
         missing = missing_runtime_dependencies({"definitely_missing_module_for_test": "example-package"})
 
         self.assertEqual(missing, ["definitely_missing_module_for_test"])
         message = format_dependency_error(missing)
         self.assertIn("definitely_missing_module_for_test", message)
-        self.assertIn("pip install -r requirements.txt", message)
+        self.assertIn("pip install -e .", message)
 
-    def test_list_agent_commands_manifest_marks_mutating_scripts(self) -> None:
+    def test_list_agent_commands_manifest_marks_mutating_commands(self) -> None:
         manifest = agent_command_manifest()
         by_name = {item["name"]: item for item in manifest}
 
-        self.assertFalse(by_name["validate_cockpit.py"]["mutating"])
-        self.assertFalse(by_name["search_knowledge.py"]["mutating"])
-        self.assertFalse(by_name["skill_smoke_test.py"]["mutating"])
-        self.assertTrue(by_name["record_finding.py"]["mutating"])
-        self.assertTrue(by_name["record_finding.py"]["supports_no_build"])
-        self.assertTrue(by_name["claim_option.py"]["supports_json"])
-        self.assertTrue(by_name["claim_option.py"]["supports_dry_run"])
-        self.assertTrue(by_name["report_option_workstream.py"]["supports_json"])
-        self.assertTrue(by_name["report_option_workstream.py"]["supports_dry_run"])
-        self.assertTrue(by_name["promote_decision.py"]["supports_json"])
-        self.assertTrue(by_name["promote_decision.py"]["supports_dry_run"])
-        self.assertTrue(by_name["accept_decision.py"]["supports_json"])
-        self.assertTrue(by_name["accept_decision.py"]["supports_dry_run"])
-        self.assertTrue(by_name["apply_suggestion.py"]["supports_json"])
-        self.assertTrue(by_name["apply_suggestion.py"]["supports_dry_run"])
-        self.assertTrue(by_name["update_decision_checklist.py"]["mutating"])
-        self.assertTrue(by_name["update_decision_checklist.py"]["supports_no_build"])
-        self.assertTrue(by_name["cleanup_suggestion_lifecycle.py"]["supports_dry_run"])
-        self.assertTrue(by_name["build_dashboard.py"]["writes_generated_files"])
+        self.assertFalse(by_name["validate"]["mutating"])
+        self.assertFalse(by_name["search"]["mutating"])
+        self.assertFalse(by_name["smoke"]["mutating"])
+        self.assertTrue(by_name["record-finding"]["mutating"])
+        self.assertTrue(by_name["record-finding"]["supports_no_build"])
+        self.assertTrue(by_name["claim-option"]["supports_json"])
+        self.assertTrue(by_name["claim-option"]["supports_dry_run"])
+        self.assertTrue(by_name["report-option-workstream"]["supports_json"])
+        self.assertTrue(by_name["report-option-workstream"]["supports_dry_run"])
+        self.assertTrue(by_name["promote-decision"]["supports_json"])
+        self.assertTrue(by_name["promote-decision"]["supports_dry_run"])
+        self.assertTrue(by_name["accept-decision"]["supports_json"])
+        self.assertTrue(by_name["accept-decision"]["supports_dry_run"])
+        self.assertTrue(by_name["apply-suggestion"]["supports_json"])
+        self.assertTrue(by_name["apply-suggestion"]["supports_dry_run"])
+        self.assertTrue(by_name["update-decision-checklist"]["mutating"])
+        self.assertTrue(by_name["update-decision-checklist"]["supports_no_build"])
+        self.assertTrue(by_name["cleanup-suggestion-lifecycle"]["supports_dry_run"])
+        self.assertTrue(by_name["build"]["writes_generated_files"])
+        self.assertTrue(all(item["command"].startswith("research-cockpit ") for item in manifest))
+        self.assertTrue(all("plugin_command" not in item for item in manifest))
 
     def test_list_agent_commands_cli_outputs_json(self) -> None:
-        script = SKILL_ROOT / "scripts" / "list_agent_commands.py"
+        command = "commands"
 
         out = subprocess.run(
-            [sys.executable, str(script), "--json"],
+            [*cli_command(command), "--json"],
             capture_output=True,
             text=True,
             check=False,
@@ -586,7 +681,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0)
         payload = json.loads(out.stdout)
         self.assertIn("commands", payload)
-        self.assertIn("record_finding.py", {item["name"] for item in payload["commands"]})
+        self.assertIn("record-finding", {item["name"] for item in payload["commands"]})
 
     def test_skill_smoke_test_payload_runs_read_only_workflow(self) -> None:
         payload = skill_smoke_test_payload(root=self.root, query="t5", python_executable=sys.executable)
@@ -646,10 +741,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("stage", str(ctx.exception))
 
     def test_validate_cockpit_cli_reports_success_and_failure(self) -> None:
-        script = SKILL_ROOT / "scripts" / "validate_cockpit.py"
+        command = "validate"
 
         ok = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root)],
+            [*cli_command(command), "--root", str(self.root)],
             capture_output=True,
             text=True,
             check=False,
@@ -661,7 +756,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         bad["status"] = "done"
         save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", bad)
         failed = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root)],
+            [*cli_command(command), "--root", str(self.root)],
             capture_output=True,
             text=True,
             check=False,
@@ -670,10 +765,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("invalid status", failed.stdout)
 
     def test_suggest_next_actions_cli_outputs_text_json_and_filters(self) -> None:
-        script = SKILL_ROOT / "scripts" / "suggest_next_actions.py"
+        command = "suggest-next-actions"
 
         text = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--limit", "2"],
+            [*cli_command(command), "--root", str(self.root), "--limit", "2"],
             capture_output=True,
             text=True,
             check=False,
@@ -683,8 +778,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         json_out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--json",
@@ -705,7 +799,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(len(selected), 1)
 
     def test_suggest_next_actions_cli_filters_lifecycle_state(self) -> None:
-        script = SKILL_ROOT / "scripts" / "suggest_next_actions.py"
+        command = "suggest-next-actions"
         update_suggestion_state(
             self.root,
             suggestion_id="next_action_001",
@@ -715,15 +809,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
 
         default_out = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--json"],
+            [*cli_command(command), "--root", str(self.root), "--json"],
             capture_output=True,
             text=True,
             check=False,
         )
         inactive_out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--include-inactive",
@@ -744,13 +837,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual({item["lifecycle_state"] for item in inactive_suggestions}, {"dismissed"})
 
     def test_suggest_next_actions_cli_fails_on_invalid_cockpit(self) -> None:
-        script = SKILL_ROOT / "scripts" / "suggest_next_actions.py"
+        command = "suggest-next-actions"
         bad = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
         bad["status"] = "done"
         save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", bad)
 
         failed = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root)],
+            [*cli_command(command), "--root", str(self.root)],
             capture_output=True,
             text=True,
             check=False,
@@ -760,7 +853,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("invalid status", failed.stdout)
 
     def test_search_knowledge_cli_outputs_json_and_filters(self) -> None:
-        script = SKILL_ROOT / "scripts" / "search_knowledge.py"
+        command = "search"
         note_path = self.root / "notes" / "problems" / "problem_text.md"
         note_path.parent.mkdir(parents=True, exist_ok=True)
         note_path.write_text("# Search Note\nNeedle note for T5 branch.\n", encoding="utf-8")
@@ -776,7 +869,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
 
         json_out = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--query", "needle", "--json"],
+            [*cli_command(command), "--root", str(self.root), "--query", "needle", "--json"],
             capture_output=True,
             text=True,
             check=False,
@@ -787,15 +880,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("snippet", results[0])
 
         note_only = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--query", "needle", "--source", "note", "--json"],
+            [*cli_command(command), "--root", str(self.root), "--query", "needle", "--source", "note", "--json"],
             capture_output=True,
             text=True,
             check=False,
         )
         resource_only = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--query",
@@ -810,8 +902,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         node_problem = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--query",
@@ -830,8 +921,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         focus_only = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--query",
@@ -844,7 +934,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             check=False,
         )
         empty = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--query", "missing-needle", "--json"],
+            [*cli_command(command), "--root", str(self.root), "--query", "missing-needle", "--json"],
             capture_output=True,
             text=True,
             check=False,
@@ -866,13 +956,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(json.loads(empty.stdout), [])
 
     def test_search_knowledge_cli_fails_on_invalid_cockpit(self) -> None:
-        script = SKILL_ROOT / "scripts" / "search_knowledge.py"
+        command = "search"
         bad = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
         bad["status"] = "done"
         save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", bad)
 
         failed = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--query", "t5"],
+            [*cli_command(command), "--root", str(self.root), "--query", "t5"],
             capture_output=True,
             text=True,
             check=False,
@@ -922,10 +1012,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("target", str(bad_target.exception))
 
     def test_apply_suggestion_cli_reports_errors(self) -> None:
-        script = SKILL_ROOT / "scripts" / "apply_suggestion.py"
+        command = "apply-suggestion"
 
         ok = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--id", "next_action_001", "--no-build"],
+            [*cli_command(command), "--root", str(self.root), "--id", "next_action_001", "--no-build"],
             capture_output=True,
             text=True,
             check=False,
@@ -934,7 +1024,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("Queued", ok.stdout)
 
         failed = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--id", "missing_suggestion", "--no-build"],
+            [*cli_command(command), "--root", str(self.root), "--id", "missing_suggestion", "--no-build"],
             capture_output=True,
             text=True,
             check=False,
@@ -943,14 +1033,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("missing_suggestion", failed.stdout)
 
     def test_apply_suggestion_cli_dry_run_json_previews_without_writing(self) -> None:
-        script = SKILL_ROOT / "scripts" / "apply_suggestion.py"
+        command = "apply-suggestion"
         current_path = self.root / "current_state.yaml"
         before = current_path.read_text(encoding="utf-8")
 
         out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--id",
@@ -1013,12 +1102,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn(key, current.get("suggestion_lifecycle", {}))
 
     def test_update_suggestion_state_rebuilds_dashboard_and_cli_reports_errors(self) -> None:
-        script = SKILL_ROOT / "scripts" / "update_suggestion_state.py"
+        command = "update-suggestion-state"
 
         ok = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--id",
@@ -1038,8 +1126,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         failed = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--id",
@@ -1110,7 +1197,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(after_clean["updated_at"], str(date.today()))
 
     def test_cleanup_suggestion_lifecycle_cli_json_and_noop(self) -> None:
-        script = SKILL_ROOT / "scripts" / "cleanup_suggestion_lifecycle.py"
+        command = "cleanup-suggestion-lifecycle"
         current = load_yaml(self.root / "current_state.yaml")
         current["suggestion_lifecycle"] = {
             "old_completed": {
@@ -1133,15 +1220,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         save_yaml(self.root / "current_state.yaml", current)
 
         dry_run = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--dry-run", "--json"],
+            [*cli_command(command), "--root", str(self.root), "--dry-run", "--json"],
             capture_output=True,
             text=True,
             check=False,
         )
         cleaned = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--state",
@@ -1154,8 +1240,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         noop = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--state",
@@ -1267,7 +1352,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(decision["alternatives_considered"], ["option_alt"])
 
     def test_promote_decision_cli_dry_run_json_previews_without_writing(self) -> None:
-        script = SKILL_ROOT / "scripts" / "promote_decision.py"
+        command = "promote-decision"
         write_node(
             self.root,
             {
@@ -1281,8 +1366,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--id",
@@ -1324,12 +1408,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse((self.root / "dashboards").exists())
 
     def test_promote_decision_cli_dry_run_gate_failure_does_not_write(self) -> None:
-        script = SKILL_ROOT / "scripts" / "promote_decision.py"
+        command = "promote-decision"
 
         out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--id",
@@ -1427,7 +1510,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("decision", str(wrong_type.exception))
 
     def test_update_decision_evidence_cli_reports_success_and_failure(self) -> None:
-        script = SKILL_ROOT / "scripts" / "update_decision_evidence.py"
+        command = "update-decision-evidence"
         write_node(
             self.root,
             {
@@ -1441,7 +1524,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
 
         ok = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--id", "decision_t5", "--no-build"],
+            [*cli_command(command), "--root", str(self.root), "--id", "decision_t5", "--no-build"],
             capture_output=True,
             text=True,
             check=False,
@@ -1450,7 +1533,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("Updated evidence", ok.stdout)
 
         failed = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--id", "missing_decision", "--no-build"],
+            [*cli_command(command), "--root", str(self.root), "--id", "missing_decision", "--no-build"],
             capture_output=True,
             text=True,
             check=False,
@@ -1542,7 +1625,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("option", str(wrong_alt_type.exception))
 
     def test_update_decision_checklist_cli_reports_success_and_failure(self) -> None:
-        script = SKILL_ROOT / "scripts" / "update_decision_checklist.py"
+        command = "update-decision-checklist"
         write_node(
             self.root,
             {
@@ -1567,8 +1650,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         ok = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--id",
@@ -1587,8 +1669,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         failed = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--id",
@@ -1609,7 +1690,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("missing_option", failed.stdout)
 
     def test_check_decision_acceptance_cli_json_reports_ready_and_failures(self) -> None:
-        script = SKILL_ROOT / "scripts" / "check_decision_acceptance.py"
+        command = "check-decision-acceptance"
         write_node(
             self.root,
             {
@@ -1624,7 +1705,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         payload = decision_acceptance_payload(self.root, "decision_t5")
         failed = subprocess.run(
-            [sys.executable, str(script), "--root", str(self.root), "--id", "decision_t5", "--json"],
+            [*cli_command(command), "--root", str(self.root), "--id", "decision_t5", "--json"],
             capture_output=True,
             text=True,
             check=False,
@@ -1688,7 +1769,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(event["forced"])
 
     def test_accept_decision_cli_dry_run_json_previews_without_writing(self) -> None:
-        script = SKILL_ROOT / "scripts" / "accept_decision.py"
+        command = "accept-decision"
         write_node(
             self.root,
             {
@@ -1732,8 +1813,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--id",
@@ -1764,7 +1844,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse((self.root / "dashboards").exists())
 
     def test_accept_decision_cli_dry_run_not_ready_does_not_write(self) -> None:
-        script = SKILL_ROOT / "scripts" / "accept_decision.py"
+        command = "accept-decision"
         write_node(
             self.root,
             {
@@ -1781,8 +1861,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         out = subprocess.run(
             [
-                sys.executable,
-                str(script),
+                *cli_command(command),
                 "--root",
                 str(self.root),
                 "--id",
@@ -1893,7 +1972,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         with self.assertRaises(ValueError) as direct_accept:
             update_status(self.root, node_id="decision_t5", status="accepted")
-        self.assertIn("accept_decision.py", str(direct_accept.exception))
+        self.assertIn("research-cockpit accept-decision", str(direct_accept.exception))
 
     def test_promote_decision_rejects_bad_references(self) -> None:
         with self.assertRaises(ValueError) as unknown_option:

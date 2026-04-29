@@ -13,11 +13,12 @@ from run_skill_release_check import (
     DEFAULT_SKILL_PATH,
     DEFAULT_TEMP_PARENT,
     _changed_files,
+    _cli,
     _copy_skill_package,
     _data_root,
     _file_manifest,
+    _package_env,
     _run_command,
-    _script,
     _skipped_track,
     _track,
     package_shape_track,
@@ -39,10 +40,16 @@ def _copy_track_source(skill_path: Path, destination: Path) -> Path:
     return copy_path
 
 
-def _run_all(commands: list[list[str]], cwd: Path, *, allowed_returncodes: list[set[int]] | None = None) -> list[dict[str, Any]]:
+def _run_all(
+    commands: list[list[str]],
+    cwd: Path,
+    *,
+    allowed_returncodes: list[set[int]] | None = None,
+    env: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     allowed_returncodes = allowed_returncodes or [{0} for _ in commands]
     return [
-        _run_command(command, cwd=cwd, allowed_returncodes=allowed)
+        _run_command(command, cwd=cwd, allowed_returncodes=allowed, env=env)
         for command, allowed in zip(commands, allowed_returncodes)
     ]
 
@@ -54,12 +61,12 @@ def read_only_agent_track(skill_path: Path, python: str, cwd: Path) -> dict[str,
 
     root = _data_root(skill_path)
     commands = [
-        [python, _script(skill_path, "agent_bootstrap.py"), "--root", root, "--json"],
-        [python, _script(skill_path, "search_knowledge.py"), "--root", root, "--query", "demo", "--json"],
-        [python, _script(skill_path, "suggest_next_actions.py"), "--root", root, "--json"],
-        [python, _script(skill_path, "check_decision_acceptance.py"), "--root", root, "--id", DECISION_ID, "--json"],
+        _cli(python, "bootstrap", "--root", root, "--json"),
+        _cli(python, "search", "--root", root, "--query", "demo", "--json"),
+        _cli(python, "suggest-next-actions", "--root", root, "--json"),
+        _cli(python, "check-decision-acceptance", "--root", root, "--id", DECISION_ID, "--json"),
     ]
-    checks = _run_all(commands, cwd, allowed_returncodes=[{0}, {0}, {0}, {0, 1}])
+    checks = _run_all(commands, cwd, allowed_returncodes=[{0}, {0}, {0}, {0, 1}], env=_package_env(skill_path))
     checklist = checks[-1].get("json") if isinstance(checks[-1].get("json"), dict) else {}
     return _track(
         "track_a_read_only_agent",
@@ -82,10 +89,11 @@ def prompt_refinement_workstream_track(skill_path: Path, python: str, destinatio
     copy_path = _copy_track_source(skill_path, destination)
     copy_before = _file_manifest(copy_path)
     root = _data_root(copy_path)
+    env = _package_env(copy_path)
     commands = [
-        [
+        _cli(
             python,
-            _script(copy_path, "claim_option.py"),
+            "claim-option",
             "--root",
             root,
             "--option",
@@ -95,10 +103,10 @@ def prompt_refinement_workstream_track(skill_path: Path, python: str, destinatio
             "--objective",
             "Evaluate prompt refinement branch in isolated forward check.",
             "--no-build",
-        ],
-        [
+        ),
+        _cli(
             python,
-            _script(copy_path, "update_status.py"),
+            "update-status",
             "--root",
             root,
             "--id",
@@ -107,10 +115,10 @@ def prompt_refinement_workstream_track(skill_path: Path, python: str, destinatio
             "done",
             "--result-summary",
             "Prompt refinement isolated run completed.",
-        ],
-        [
+        ),
+        _cli(
             python,
-            _script(copy_path, "record_finding.py"),
+            "record-finding",
             "--root",
             root,
             "--experiment",
@@ -126,11 +134,11 @@ def prompt_refinement_workstream_track(skill_path: Path, python: str, destinatio
             "--summary",
             "Prompt refinement improved consistency in the isolated forward check.",
             "--no-build",
-        ],
-        [python, _script(copy_path, "update_decision_evidence.py"), "--root", root, "--id", DECISION_ID, "--no-build"],
-        [
+        ),
+        _cli(python, "update-decision-evidence", "--root", root, "--id", DECISION_ID, "--no-build"),
+        _cli(
             python,
-            _script(copy_path, "report_option_workstream.py"),
+            "report-option-workstream",
             "--root",
             root,
             "--option",
@@ -142,11 +150,11 @@ def prompt_refinement_workstream_track(skill_path: Path, python: str, destinatio
             "--summary",
             "Continue after the isolated prompt refinement evidence update.",
             "--no-build",
-        ],
-        [python, _script(copy_path, "validate_cockpit.py"), "--root", root],
-        [python, _script(copy_path, "build_dashboard.py"), "--root", root],
+        ),
+        _cli(python, "validate", "--root", root),
+        _cli(python, "build", "--root", root),
     ]
-    checks = _run_all(commands, destination)
+    checks = _run_all(commands, destination, env=env)
     source_changed = source_before != _file_manifest(skill_path)
     copy_changed = _changed_files(copy_before, _file_manifest(copy_path))
     return _track(
@@ -171,13 +179,14 @@ def retrieval_branch_track(skill_path: Path, python: str, destination: Path) -> 
     copy_path = _copy_track_source(skill_path, destination)
     copy_before = _file_manifest(copy_path)
     root = _data_root(copy_path)
+    env = _package_env(copy_path)
     new_problem = "problem_demo_retrieval_scope"
     new_option = "option_demo_retrieval_minimal_index"
     new_experiment = "experiment_demo_retrieval_index_smoke"
     commands = [
-        [
+        _cli(
             python,
-            _script(copy_path, "claim_option.py"),
+            "claim-option",
             "--root",
             root,
             "--option",
@@ -187,10 +196,10 @@ def retrieval_branch_track(skill_path: Path, python: str, destination: Path) -> 
             "--status",
             "in_progress",
             "--no-build",
-        ],
-        [
+        ),
+        _cli(
             python,
-            _script(copy_path, "add_node.py"),
+            "add-node",
             "--root",
             root,
             "--id",
@@ -205,10 +214,10 @@ def retrieval_branch_track(skill_path: Path, python: str, destination: Path) -> 
             "active",
             "--summary",
             "Scope a minimal retrieval branch for the demo cockpit.",
-        ],
-        [
+        ),
+        _cli(
             python,
-            _script(copy_path, "add_node.py"),
+            "add-node",
             "--root",
             root,
             "--id",
@@ -223,10 +232,10 @@ def retrieval_branch_track(skill_path: Path, python: str, destination: Path) -> 
             "active",
             "--summary",
             "Try a minimal local index before expanding retrieval.",
-        ],
-        [
+        ),
+        _cli(
             python,
-            _script(copy_path, "add_node.py"),
+            "add-node",
             "--root",
             root,
             "--id",
@@ -241,10 +250,10 @@ def retrieval_branch_track(skill_path: Path, python: str, destination: Path) -> 
             "planned",
             "--summary",
             "Check whether a minimal index improves demo lookup.",
-        ],
-        [
+        ),
+        _cli(
             python,
-            _script(copy_path, "report_option_workstream.py"),
+            "report-option-workstream",
             "--root",
             root,
             "--option",
@@ -256,12 +265,12 @@ def retrieval_branch_track(skill_path: Path, python: str, destination: Path) -> 
             "--summary",
             "Retrieval branch now has a scoped child problem, option, and planned experiment.",
             "--no-build",
-        ],
-        [python, _script(copy_path, "option_workstream_context.py"), "--root", root, "--option", RETRIEVAL_OPTION_ID, "--json"],
-        [python, _script(copy_path, "validate_cockpit.py"), "--root", root],
-        [python, _script(copy_path, "build_dashboard.py"), "--root", root],
+        ),
+        _cli(python, "option-workstream-context", "--root", root, "--option", RETRIEVAL_OPTION_ID, "--json"),
+        _cli(python, "validate", "--root", root),
+        _cli(python, "build", "--root", root),
     ]
-    checks = _run_all(commands, destination)
+    checks = _run_all(commands, destination, env=env)
     context = checks[5].get("json") if isinstance(checks[5].get("json"), dict) else {}
     subtree = context.get("subtree", {}) if isinstance(context, dict) else {}
     recursive_ok = new_experiment in set(subtree.get("experiment_ids", []))
@@ -291,11 +300,12 @@ def decision_gate_workflow_track(skill_path: Path, python: str, destination: Pat
     copy_path = _copy_track_source(skill_path, destination)
     copy_before = _file_manifest(copy_path)
     root = _data_root(copy_path)
+    env = _package_env(copy_path)
     commands = [
-        [python, _script(copy_path, "check_decision_acceptance.py"), "--root", root, "--id", DECISION_ID, "--json"],
-        [
+        _cli(python, "check-decision-acceptance", "--root", root, "--id", DECISION_ID, "--json"),
+        _cli(
             python,
-            _script(copy_path, "record_finding.py"),
+            "record-finding",
             "--root",
             root,
             "--experiment",
@@ -309,11 +319,11 @@ def decision_gate_workflow_track(skill_path: Path, python: str, destination: Pat
             "--summary",
             "Decision gate forward check evidence supports continuing prompt refinement.",
             "--no-build",
-        ],
-        [python, _script(copy_path, "update_decision_evidence.py"), "--root", root, "--id", DECISION_ID, "--no-build"],
-        [
+        ),
+        _cli(python, "update-decision-evidence", "--root", root, "--id", DECISION_ID, "--no-build"),
+        _cli(
             python,
-            _script(copy_path, "update_decision_checklist.py"),
+            "update-decision-checklist",
             "--root",
             root,
             "--id",
@@ -325,13 +335,13 @@ def decision_gate_workflow_track(skill_path: Path, python: str, destination: Pat
             "--next-required-action",
             "Run a follow-up smoke test after accepting the decision.",
             "--no-build",
-        ],
-        [python, _script(copy_path, "check_decision_acceptance.py"), "--root", root, "--id", DECISION_ID, "--json"],
-        [python, _script(copy_path, "accept_decision.py"), "--root", root, "--id", DECISION_ID, "--no-build"],
-        [python, _script(copy_path, "validate_cockpit.py"), "--root", root],
-        [python, _script(copy_path, "build_dashboard.py"), "--root", root],
+        ),
+        _cli(python, "check-decision-acceptance", "--root", root, "--id", DECISION_ID, "--json"),
+        _cli(python, "accept-decision", "--root", root, "--id", DECISION_ID, "--no-build"),
+        _cli(python, "validate", "--root", root),
+        _cli(python, "build", "--root", root),
     ]
-    checks = _run_all(commands, destination, allowed_returncodes=[{0, 1}, {0}, {0}, {0}, {0}, {0}, {0}, {0}])
+    checks = _run_all(commands, destination, allowed_returncodes=[{0, 1}, {0}, {0}, {0}, {0}, {0}, {0}, {0}], env=env)
     before = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
     after = checks[4].get("json") if isinstance(checks[4].get("json"), dict) else {}
     source_changed = source_before != _file_manifest(skill_path)
@@ -363,11 +373,11 @@ def portable_skill_track(skill_path: Path, python: str, destination: Path) -> di
     _copy_skill_package(skill_path, copy_path)
     root = _data_root(copy_path)
     commands = [
-        [python, _script(copy_path, "skill_smoke_test.py"), "--root", root, "--json"],
-        [python, _script(copy_path, "agent_bootstrap.py"), "--root", root, "--json"],
-        [python, _script(copy_path, "list_agent_commands.py"), "--json"],
+        _cli(python, "smoke", "--root", root, "--json"),
+        _cli(python, "bootstrap", "--root", root, "--json"),
+        _cli(python, "commands", "--json"),
     ]
-    checks = _run_all(commands, destination)
+    checks = _run_all(commands, destination, env=_package_env(copy_path))
     public_scan = public_scan_track(copy_path)
     return _track(
         "track_e_portable_skill_agent",

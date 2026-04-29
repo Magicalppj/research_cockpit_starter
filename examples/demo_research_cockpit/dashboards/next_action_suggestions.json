@@ -51,7 +51,7 @@
     "related_node_ids": [
       "stage_demo_research"
     ],
-    "suggested_command": "python scripts\\update_status.py --id problem_demo_quality_gap --status blocked",
+    "suggested_command": "research-cockpit update-status --id problem_demo_quality_gap --status blocked",
     "is_focus_related": true,
     "key": "sg_73b2b109ac6225a7",
     "lifecycle_state": "active",
@@ -71,7 +71,7 @@
     "related_node_ids": [
       "option_demo_prompt_refinement"
     ],
-    "suggested_command": "python scripts\\update_status.py --id experiment_demo_prompt_refinement --status running",
+    "suggested_command": "research-cockpit update-status --id experiment_demo_prompt_refinement --status running",
     "is_focus_related": true,
     "key": "sg_f87fe9f5344b1ffb",
     "lifecycle_state": "active",
@@ -91,7 +91,7 @@
     "related_node_ids": [
       "option_demo_prompt_refinement"
     ],
-    "suggested_command": "python scripts\\update_decision_evidence.py --id decision_demo_prompt_refinement",
+    "suggested_command": "research-cockpit update-decision-evidence --id decision_demo_prompt_refinement",
     "is_focus_related": true,
     "key": "sg_d9a47b09035c9e9d",
     "lifecycle_state": "active",
@@ -111,7 +111,7 @@
     "related_node_ids": [
       "option_demo_eval_cases"
     ],
-    "suggested_command": "python scripts\\update_status.py --id experiment_demo_eval_cases --status running",
+    "suggested_command": "research-cockpit update-status --id experiment_demo_eval_cases --status running",
     "is_focus_related": false,
     "key": "sg_0ea8d0f5a173e6e0",
     "lifecycle_state": "active",

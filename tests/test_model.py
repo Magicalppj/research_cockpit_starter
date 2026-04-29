@@ -42,7 +42,6 @@ from research_cockpit.model import (
     load_yaml,
     load_nodes,
     node_context,
-    python_command,
     save_yaml,
     search_knowledge,
     upsert_graph_view,
@@ -382,7 +381,7 @@ class ModelValidationTests(unittest.TestCase):
             kind="set_focus",
             actor="researcher",
             node_id="problem_text",
-            command="python scripts\\set_focus.py --focus-node problem_text",
+            command="research-cockpit \set_focus.py --focus-node problem_text",
             before={"current_focus_node": "option_t5"},
             after={"current_focus_node": "problem_text"},
         )
@@ -728,7 +727,7 @@ class ModelValidationTests(unittest.TestCase):
         self.assertIn("review_decision", by_kind)
         self.assertIn("fix_resource", by_kind)
         self.assertEqual(by_kind["record_finding"]["source_node_id"], "exp_t5")
-        self.assertIn("scripts\\record_finding.py", by_kind["record_finding"]["suggested_command"])
+        self.assertIn("research-cockpit record-finding", by_kind["record_finding"]["suggested_command"])
         self.assertEqual(by_kind["fix_resource"]["source_node_id"], "problem_text")
         self.assertNotIn("https://example.com/problem", by_kind["fix_resource"]["action"])
 
@@ -777,24 +776,12 @@ class ModelValidationTests(unittest.TestCase):
             suggestions = build_action_suggestions(self.root, nodes, current)
             commands = [item["suggested_command"] for item in suggestions if item.get("suggested_command")]
 
-            self.assertEqual(python_command(), "python")
             self.assertTrue(commands)
-            self.assertTrue(all(command.startswith("python scripts\\") for command in commands))
+            self.assertTrue(all(command.startswith("research-cockpit ") for command in commands))
             self.assertFalse(any("D:\\Tools" in command for command in commands))
             self.assertFalse(any("miniconda" in command.lower() for command in commands))
         finally:
             if previous is not None:
-                os.environ["RESEARCH_COCKPIT_PYTHON"] = previous
-
-    def test_python_command_allows_environment_override(self) -> None:
-        previous = os.environ.get("RESEARCH_COCKPIT_PYTHON")
-        os.environ["RESEARCH_COCKPIT_PYTHON"] = "uv run python"
-        try:
-            self.assertEqual(python_command(), "uv run python")
-        finally:
-            if previous is None:
-                os.environ.pop("RESEARCH_COCKPIT_PYTHON", None)
-            else:
                 os.environ["RESEARCH_COCKPIT_PYTHON"] = previous
 
     def test_context_metadata_contains_freshness_fields(self) -> None:
@@ -1387,7 +1374,7 @@ class ModelValidationTests(unittest.TestCase):
         suggestions = build_action_suggestions(self.root, nodes, current)
         review = [item for item in suggestions if item["kind"] == "review_decision"][0]
 
-        self.assertIn("scripts\\update_decision_evidence.py", review["suggested_command"])
+        self.assertIn("research-cockpit update-decision-evidence", review["suggested_command"])
         self.assertIn("--id decision_t5", review["suggested_command"])
 
     def test_v2_statuses_and_current_focus_node_pass_validation(self) -> None:

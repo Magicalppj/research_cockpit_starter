@@ -8,24 +8,22 @@ import shutil
 import subprocess
 import sys
 
+from research_cockpit.command_registry import COMMAND_MODULES
 from research_cockpit.paths import default_data_root, plugin_root
 
-
-COMMAND_MAP = {
-    "bootstrap": "agent_bootstrap",
-    "validate": "validate_cockpit",
-    "build": "build_dashboard",
-    "commands": "list_agent_commands",
-    "smoke": "skill_smoke_test",
-}
+COMMAND_CHOICES = [*COMMAND_MODULES.keys(), "init", "ui"]
 
 
-def _run_module(module_name: str, argv: list[str]) -> None:
+def _run_module(command_name: str, argv: list[str]) -> None:
+    module_name = COMMAND_MODULES[command_name]
     module = import_module(f"research_cockpit.commands.{module_name}")
     old_argv = sys.argv
-    sys.argv = [f"{module_name}.py", *argv]
+    sys.argv = [f"research-cockpit {command_name}", *argv]
     try:
         module.main()
+    except (ValueError, FileNotFoundError, FileExistsError) as exc:
+        print(str(exc))
+        raise SystemExit(1) from None
     finally:
         sys.argv = old_argv
 
@@ -86,18 +84,34 @@ def ui_command(argv: list[str]) -> None:
     raise SystemExit(subprocess.call(command, env=env))
 
 
-def main() -> None:
+def _top_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="research-cockpit")
-    parser.add_argument("command", choices=[*COMMAND_MAP.keys(), "init", "ui"])
-    args, rest = parser.parse_known_args()
+    parser.add_argument("command", nargs="?", choices=COMMAND_CHOICES)
+    return parser
 
-    if args.command == "init":
+
+def main(argv: list[str] | None = None) -> None:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = _top_parser()
+    if not argv or argv[0] in ("-h", "--help"):
+        parser.print_help()
+        return
+
+    command = argv[0]
+    rest = argv[1:]
+    if command not in COMMAND_CHOICES:
+        parser.error(
+            f"argument command: invalid choice: {command!r} "
+            f"(choose from {', '.join(repr(item) for item in COMMAND_CHOICES)})"
+        )
+
+    if command == "init":
         init_command(rest)
         return
-    if args.command == "ui":
+    if command == "ui":
         ui_command(rest)
         return
-    _run_module(COMMAND_MAP[args.command], rest)
+    _run_module(command, rest)
 
 
 if __name__ == "__main__":

@@ -13,10 +13,11 @@ from run_skill_release_check import (
     DEFAULT_SKILL_PATH,
     DEFAULT_TEMP_PARENT,
     _changed_files,
+    _cli,
     _copy_skill_package,
     _file_manifest,
+    _package_env,
     _run_command,
-    _script,
     runtime_dependency_track,
 )
 
@@ -91,12 +92,6 @@ def _new_research_repo(skill_path: Path, parent: Path, name: str) -> tuple[Path,
     return research_repo, plugin_path
 
 
-def _venv_python(research_repo: Path) -> Path:
-    if os.name == "nt":
-        return research_repo / ".venv" / "Scripts" / "python.exe"
-    return research_repo / ".venv" / "bin" / "python"
-
-
 def _unexpected_writes(changed: list[str]) -> list[str]:
     return [path for path in changed if not path.startswith("research_cockpit/")]
 
@@ -130,14 +125,10 @@ def _readability_findings(skill_path: Path) -> list[str]:
     findings: list[str] = []
     for path in _surface_doc_paths(skill_path):
         text = path.read_text(encoding="utf-8", errors="ignore")
-        normalized = (
-            text.replace(".agent/skills/research-cockpit", "")
-            .replace(".agent\\skills\\research-cockpit", "")
-            .replace(".codex/skills/research-cockpit", "")
-            .replace(".codex\\skills\\research-cockpit", "")
-        )
-        if "skills/research-cockpit" in normalized or "skills\\research-cockpit" in normalized:
-            findings.append(f"{path.relative_to(skill_path).as_posix()} contains a bare old skill path")
+        if ".agent\\skills\\research-cockpit\\scripts" in text or ".agent/skills/research-cockpit/scripts" in text:
+            findings.append(f"{path.relative_to(skill_path).as_posix()} contains old vendored script command")
+        if "python scripts\\" in text or "python scripts/" in text:
+            findings.append(f"{path.relative_to(skill_path).as_posix()} contains old plugin script command")
 
     skill_text = (skill_path / "SKILL.md").read_text(encoding="utf-8", errors="ignore")
     for capability in CAPABILITY_FILES:
@@ -147,15 +138,15 @@ def _readability_findings(skill_path: Path) -> list[str]:
             findings.append(f"capabilities/{capability} is missing")
 
     decision_text = (skill_path / "capabilities" / "decision-adr.md").read_text(encoding="utf-8", errors="ignore")
-    if "YAML" in decision_text and ("validate_cockpit.py" not in decision_text or "build_dashboard.py" not in decision_text):
+    if "YAML" in decision_text and ("research-cockpit validate" not in decision_text or "research-cockpit build" not in decision_text):
         findings.append("decision-adr.md mentions YAML repair without validate/build follow-up")
     if any(flag in decision_text for flag in ("--alternatives-considered", "--consequences", "--next-required-actions")):
         findings.append("decision-adr.md uses outdated update_decision_checklist flags")
-    if "promote_decision.py --root research_cockpit --option" in decision_text:
-        findings.append("decision-adr.md promote_decision example omits required --id/--title/--summary")
+    if "promote-decision --root research_cockpit --option" in decision_text:
+        findings.append("decision-adr.md promote-decision example omits required --id/--title/--summary")
 
     focus_text = (skill_path / "capabilities" / "focus-context.md").read_text(encoding="utf-8", errors="ignore")
-    if "set_focus.py" in focus_text and "--node " in focus_text:
+    if "set-focus" in focus_text and "--node " in focus_text:
         findings.append("focus-context.md uses outdated set_focus --node flag")
 
     node_text = (skill_path / "capabilities" / "node-management.md").read_text(encoding="utf-8", errors="ignore")
@@ -168,7 +159,7 @@ def _manifest_findings(manifest: dict[str, Any], plugin_path: Path) -> list[str]
     findings: list[str] = []
     commands = manifest.get("commands", [])
     if not isinstance(commands, list) or not commands:
-        return ["list_agent_commands.py did not return a non-empty commands list"]
+        return ["research-cockpit commands did not return a non-empty commands list"]
     for command in commands:
         if not isinstance(command, dict):
             findings.append("manifest contains a non-object command")
@@ -178,50 +169,33 @@ def _manifest_findings(manifest: dict[str, Any], plugin_path: Path) -> list[str]
         research_command = str(command.get("command") or "")
         if not capability or not (plugin_path / capability).exists():
             findings.append(f"{name} has missing capability_file")
-        if "scripts\\" in research_command and ".agent\\skills\\research-cockpit" not in research_command:
-            findings.append(f"{name} command is not runnable from research repo root")
+        if not research_command.startswith("research-cockpit "):
+            findings.append(f"{name} command does not use the package CLI")
+        if command.get("plugin_command"):
+            findings.append(f"{name} still exposes plugin_command")
     return findings
 
 
 def agent_a_cold_start_install(skill_path: Path, python: str, parent: Path) -> dict[str, Any]:
     research_repo, plugin_path = _new_research_repo(skill_path, parent, "a")
-    venv_python = _venv_python(research_repo)
-    checks = [
-        _run_command([python, "-m", "venv", "--system-site-packages", str(research_repo / ".venv")], cwd=research_repo),
-    ]
-    command_python = str(venv_python)
-    command_env: dict[str, str] | None = None
-    install_mode = "venv_editable"
-    if checks[-1]["passed"]:
-        checks.append(_run_command([str(venv_python), "-m", "pip", "install", "--no-deps", "-e", str(plugin_path)], cwd=research_repo))
-        install_ok = checks[-1]["passed"]
-    else:
-        metadata_check = (
-            "import pathlib; "
-            f"text=pathlib.Path({str(plugin_path / 'pyproject.toml')!r}).read_text(encoding='utf-8'); "
-            "assert 'research-cockpit = \"research_cockpit.cli:main\"' in text"
-        )
-        checks.append(_run_command([python, "-c", metadata_check], cwd=research_repo))
-        command_python = python
-        command_env = os.environ.copy()
-        command_env["PYTHONPATH"] = str(plugin_path / "src")
-        install_mode = "metadata_check_with_pythonpath"
-        install_ok = checks[-1]["passed"]
+    metadata_check = (
+        "import pathlib; "
+        f"text=pathlib.Path({str(plugin_path / 'pyproject.toml')!r}).read_text(encoding='utf-8'); "
+        "assert 'research-cockpit = \"research_cockpit.cli:main\"' in text"
+    )
+    checks = [_run_command([python, "-c", metadata_check], cwd=research_repo)]
+    command_python = python
+    command_env = _package_env(plugin_path)
+    install_mode = "metadata_check_with_pythonpath"
+    install_ok = checks[-1]["passed"]
 
     plugin_after_install = _file_manifest(plugin_path)
     repo_before = _file_manifest(research_repo)
     if install_ok:
         checks.extend([
-            _run_command([command_python, "-m", "research_cockpit.cli", "init", "--root", "research_cockpit"], cwd=research_repo, env=command_env),
-            _run_command([
-                command_python,
-                _script(plugin_path, "agent_bootstrap.py"),
-                "--root",
-                "research_cockpit",
-                "--build",
-                "--json",
-            ], cwd=research_repo, env=command_env),
-            _run_command([command_python, _script(plugin_path, "validate_cockpit.py"), "--root", "research_cockpit", "--json"], cwd=research_repo, env=command_env),
+            _run_command(_cli(command_python, "init", "--root", "research_cockpit"), cwd=research_repo, env=command_env),
+            _run_command(_cli(command_python, "bootstrap", "--root", "research_cockpit", "--build", "--json"), cwd=research_repo, env=command_env),
+            _run_command(_cli(command_python, "validate", "--root", "research_cockpit", "--json"), cwd=research_repo, env=command_env),
         ])
 
     repo_after = _file_manifest(research_repo)
@@ -234,13 +208,13 @@ def agent_a_cold_start_install(skill_path: Path, python: str, parent: Path) -> d
         "data_root": "research_cockpit",
         "plugin_root": ".agent/skills/research-cockpit",
         "init_command": "research-cockpit init --root research_cockpit",
-        "bootstrap_read_order": ["agent_bootstrap", "agent_context_pack", "focus_context_pack"],
+        "bootstrap_read_order": ["research-cockpit bootstrap", "agent_context_pack", "focus_context_pack"],
         "context_paths_exist": all(item.get("exists") for item in context_paths.values()) if context_paths else False,
         "plugin_changed_after_install": plugin_changed_after_install,
         "install_mode": install_mode,
     }
     findings = _readability_findings(plugin_path)
-    command_checks = checks[2:] if install_mode == "metadata_check_with_pythonpath" else checks
+    command_checks = checks
     passed = install_ok and all(check["passed"] for check in command_checks) and not unexpected and not plugin_changed_after_install and not findings
     return _case(
         "agent_a_cold_start_install",
@@ -257,11 +231,12 @@ def agent_b_read_only_context(skill_path: Path, python: str, parent: Path) -> di
     research_repo, plugin_path = _new_research_repo(skill_path, parent, "b")
     root = _copy_demo_state(plugin_path, research_repo)
     repo_before = _file_manifest(research_repo)
+    env = _package_env(plugin_path)
     checks = [
-        _run_command([python, _script(plugin_path, "list_agent_commands.py"), "--json"], cwd=research_repo),
-        _run_command([python, _script(plugin_path, "agent_bootstrap.py"), "--root", str(root), "--json"], cwd=research_repo),
-        _run_command([python, _script(plugin_path, "search_knowledge.py"), "--root", str(root), "--query", "demo", "--json"], cwd=research_repo),
-        _run_command([python, _script(plugin_path, "suggest_next_actions.py"), "--root", str(root), "--json"], cwd=research_repo),
+        _run_command(_cli(python, "commands", "--json"), cwd=research_repo, env=env),
+        _run_command(_cli(python, "bootstrap", "--root", str(root), "--json"), cwd=research_repo, env=env),
+        _run_command(_cli(python, "search", "--root", str(root), "--query", "demo", "--json"), cwd=research_repo, env=env),
+        _run_command(_cli(python, "suggest-next-actions", "--root", str(root), "--json"), cwd=research_repo, env=env),
     ]
     files_changed = _changed_files(repo_before, _file_manifest(research_repo))
     agent_context = _read_json(root / "dashboards" / "agent_context_pack.json")
@@ -301,11 +276,12 @@ def agent_c_safe_option_workstream(skill_path: Path, python: str, parent: Path) 
     root = _copy_demo_state(plugin_path, research_repo)
     repo_before = _file_manifest(research_repo)
     checks: list[dict[str, Any]] = []
+    env = _package_env(plugin_path)
 
     before_claim_dry_run = _file_manifest(research_repo)
-    checks.append(_run_command([
+    checks.append(_run_command(_cli(
         python,
-        _script(plugin_path, "claim_option.py"),
+        "claim-option",
         "--root",
         str(root),
         "--option",
@@ -316,12 +292,12 @@ def agent_c_safe_option_workstream(skill_path: Path, python: str, parent: Path) 
         "Exercise option workstream usability in an isolated research repo.",
         "--dry-run",
         "--json",
-    ], cwd=research_repo))
+    ), cwd=research_repo, env=env))
     claim_dry_run_changed = _changed_files(before_claim_dry_run, _file_manifest(research_repo))
 
-    checks.append(_run_command([
+    checks.append(_run_command(_cli(
         python,
-        _script(plugin_path, "claim_option.py"),
+        "claim-option",
         "--root",
         str(root),
         "--option",
@@ -330,13 +306,13 @@ def agent_c_safe_option_workstream(skill_path: Path, python: str, parent: Path) 
         "agent_usability_option",
         "--objective",
         "Exercise option workstream usability in an isolated research repo.",
-    ], cwd=research_repo))
-    checks.append(_run_command([python, _script(plugin_path, "option_workstream_context.py"), "--root", str(root), "--option", DEMO_OPTION_ID, "--json"], cwd=research_repo))
+    ), cwd=research_repo, env=env))
+    checks.append(_run_command(_cli(python, "option-workstream-context", "--root", str(root), "--option", DEMO_OPTION_ID, "--json"), cwd=research_repo, env=env))
 
     before_report_dry_run = _file_manifest(research_repo)
-    checks.append(_run_command([
+    checks.append(_run_command(_cli(
         python,
-        _script(plugin_path, "report_option_workstream.py"),
+        "report-option-workstream",
         "--root",
         str(root),
         "--option",
@@ -349,12 +325,12 @@ def agent_c_safe_option_workstream(skill_path: Path, python: str, parent: Path) 
         "Usability check completed the isolated option workstream preview.",
         "--dry-run",
         "--json",
-    ], cwd=research_repo))
+    ), cwd=research_repo, env=env))
     report_dry_run_changed = _changed_files(before_report_dry_run, _file_manifest(research_repo))
 
-    checks.append(_run_command([
+    checks.append(_run_command(_cli(
         python,
-        _script(plugin_path, "report_option_workstream.py"),
+        "report-option-workstream",
         "--root",
         str(root),
         "--option",
@@ -365,8 +341,8 @@ def agent_c_safe_option_workstream(skill_path: Path, python: str, parent: Path) 
         "continue",
         "--summary",
         "Usability check completed the isolated option workstream.",
-    ], cwd=research_repo))
-    checks.append(_run_command([python, _script(plugin_path, "validate_cockpit.py"), "--root", str(root), "--json"], cwd=research_repo))
+    ), cwd=research_repo, env=env))
+    checks.append(_run_command(_cli(python, "validate", "--root", str(root), "--json"), cwd=research_repo, env=env))
 
     files_changed = _changed_files(repo_before, _file_manifest(research_repo))
     log = _read_yaml(root / "graph" / "interaction_log.yaml")
@@ -397,11 +373,12 @@ def agent_d_decision_suggestion_dry_run(skill_path: Path, python: str, parent: P
     research_repo, plugin_path = _new_research_repo(skill_path, parent, "d")
     root = _copy_demo_state(plugin_path, research_repo)
     repo_before = _file_manifest(research_repo)
+    env = _package_env(plugin_path)
     checks = [
-        _run_command([python, _script(plugin_path, "apply_suggestion.py"), "--root", str(root), "--id", "next_action_003", "--target", "current", "--dry-run", "--json"], cwd=research_repo),
-        _run_command([
+        _run_command(_cli(python, "apply-suggestion", "--root", str(root), "--id", "next_action_003", "--target", "current", "--dry-run", "--json"), cwd=research_repo, env=env),
+        _run_command(_cli(
             python,
-            _script(plugin_path, "promote_decision.py"),
+            "promote-decision",
             "--root",
             str(root),
             "--id",
@@ -414,14 +391,14 @@ def agent_d_decision_suggestion_dry_run(skill_path: Path, python: str, parent: P
             "Dry-run decision promotion for usability testing.",
             "--dry-run",
             "--json",
-        ], cwd=research_repo),
-        _run_command([python, _script(plugin_path, "check_decision_acceptance.py"), "--root", str(root), "--id", DEMO_DECISION_ID, "--json"], cwd=research_repo, allowed_returncodes={0, 1}),
-        _run_command([python, _script(plugin_path, "accept_decision.py"), "--root", str(root), "--id", DEMO_DECISION_ID, "--force-accept", "--dry-run", "--json"], cwd=research_repo),
+        ), cwd=research_repo, env=env),
+        _run_command(_cli(python, "check-decision-acceptance", "--root", str(root), "--id", DEMO_DECISION_ID, "--json"), cwd=research_repo, allowed_returncodes={0, 1}, env=env),
+        _run_command(_cli(python, "accept-decision", "--root", str(root), "--id", DEMO_DECISION_ID, "--force-accept", "--dry-run", "--json"), cwd=research_repo, env=env),
     ]
     files_changed = _changed_files(repo_before, _file_manifest(research_repo))
     decision_doc = (plugin_path / "capabilities" / "decision-adr.md").read_text(encoding="utf-8", errors="ignore")
-    required_commands = ("apply_suggestion.py", "promote_decision.py", "check_decision_acceptance.py", "accept_decision.py")
-    missing_doc_commands = [name for name in required_commands if name not in decision_doc and name != "apply_suggestion.py"]
+    required_commands = ("promote-decision", "check-decision-acceptance", "accept-decision")
+    missing_doc_commands = [name for name in required_commands if name not in decision_doc]
     observations = {
         "dry_run_preserved_files": not files_changed,
         "acceptance_check_returncode": checks[2]["returncode"],

@@ -20,7 +20,7 @@ The plugin stores reusable code and tools. The research repo stores project-spec
 - `AGENTS.md`: rules for coding agents operating inside the plugin.
 - `capabilities/`: detailed agent-facing capability files.
 - `src/research_cockpit/`: Python runtime, model helpers, Streamlit UI, and component wrapper.
-- `scripts/`: stable wrapper scripts for agents and humans.
+- `research-cockpit` CLI: stable command surface for agents and humans.
 - `templates/`: initial state templates for new research repos.
 - `examples/demo_research_cockpit/`: public demo data and generated context.
 - `schemas/`: exported schema docs or machine-readable schemas as the API stabilizes.
@@ -38,4 +38,4 @@ Commands resolve data root in this order:
 3. Upward search from current working directory for `research_cockpit/`.
 4. Plugin repo fallback `examples/demo_research_cockpit/`.
 
-Run workflow commands from the plugin root, or call wrapper scripts by absolute path and pass `--root`.
+Run workflow commands with `research-cockpit` and pass `--root` when the data root is not obvious.

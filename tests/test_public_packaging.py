@@ -33,7 +33,6 @@ def packaging_files() -> list[Path]:
         ROOT_DIR / "docs",
         ROOT_DIR / "examples",
         ROOT_DIR / "schemas",
-        ROOT_DIR / "scripts",
         ROOT_DIR / "src",
         ROOT_DIR / "templates",
     ):
@@ -53,7 +52,9 @@ class PublicPackagingTests(unittest.TestCase):
         self.assertTrue((SKILL_ROOT / "AGENTS.md").exists())
         self.assertTrue((SKILL_ROOT / "agents" / "openai.yaml").exists())
         self.assertTrue((SKILL_ROOT / "src" / "research_cockpit" / "model.py").exists())
-        self.assertTrue((SKILL_ROOT / "scripts" / "agent_bootstrap.py").exists())
+        self.assertTrue((SKILL_ROOT / "src" / "research_cockpit" / "cli.py").exists())
+        self.assertTrue((SKILL_ROOT / "src" / "research_cockpit" / "command_registry.py").exists())
+        self.assertTrue((SKILL_ROOT / "src" / "research_cockpit" / "commands" / "agent_bootstrap.py").exists())
         self.assertTrue((ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").exists())
         self.assertTrue((SKILL_ROOT / "examples" / "demo_research_cockpit" / "current_state.yaml").exists())
         self.assertTrue((SKILL_ROOT / "templates" / "minimal_research_cockpit" / "current_state.yaml").exists())
@@ -63,6 +64,7 @@ class PublicPackagingTests(unittest.TestCase):
         self.assertFalse((ROOT_DIR / "skills" / "research-cockpit").exists())
         self.assertFalse((ROOT_DIR / "cockpit").exists())
         self.assertFalse((ROOT_DIR / "ui").exists())
+        self.assertFalse((ROOT_DIR / "scripts").exists())
         self.assertFalse((ROOT_DIR / "research_cockpit").exists())
 
     def test_development_materials_are_separate_from_skill_package(self) -> None:

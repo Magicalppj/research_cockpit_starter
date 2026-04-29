@@ -4,24 +4,20 @@ Use this capability when validation, startup, packaging, or dependencies fail.
 
 ## Dependency Failure
 
-If a command reports missing modules, install from the plugin root:
+If a command reports missing modules, install the package from the plugin root:
 
-```powershell
-python -m pip install -r requirements.txt
+```sh
+python -m pip install -e .
 ```
 
-Or run with a Python that already has the dependencies:
-
-```powershell
-$env:RESEARCH_COCKPIT_PYTHON="C:\path\to\python.exe"
-```
+Or activate a Python environment that already has the package and its dependencies installed.
 
 ## Validation
 
 Run:
 
-```powershell
-python scripts\validate_cockpit.py --root research_cockpit --json
+```sh
+research-cockpit validate --root research_cockpit --json
 ```
 
 Common causes:
@@ -35,10 +31,10 @@ Common causes:
 
 From the plugin repo root:
 
-```powershell
+```sh
 python -m unittest discover -s tests
-python scripts\skill_smoke_test.py --root examples\demo_research_cockpit --json
-python dev\scripts\run_skill_release_check.py --json --skip-mutating
+research-cockpit smoke --root examples/demo_research_cockpit --json
+python dev/scripts/run_skill_release_check.py --json --skip-mutating
 git diff --check
 ```
 

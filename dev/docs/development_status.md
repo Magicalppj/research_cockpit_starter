@@ -1,4 +1,30 @@
 # Research Cockpit 开发状态
+## CLI Surface Consolidation v1（2026-04-29）
+
+本批把 `research-cockpit` package CLI 收敛为唯一公共调用入口，移除根目录 `scripts/` wrapper。用户和 agent 安装插件后统一通过 `research-cockpit <subcommand>` 读取、校验、写入和启动 UI。
+
+已完成：
+
+- 扩展 `research-cockpit` 子命令，覆盖 bootstrap、validate、build、commands、smoke、search、suggest-next-actions、option workstream、decision gate、node/status/focus、finding、suggestion、decision 和 note 工作流。
+- 新增 `src/research_cockpit/command_registry.py` 作为 CLI 子命令和底层 command module 的映射来源；`model.py`、UI helper 和 manifest 生成的建议命令统一改为 `research-cockpit ...`。
+- `list_agent_commands.py` manifest 现在以 kebab-case 子命令作为 `name`，`command` 字段输出 `research-cockpit <subcommand>`，不再暴露 `plugin_command` 或 `.agent\skills\research-cockpit\scripts\...` 路径。
+- 删除根目录公共 `scripts/*.py` wrapper；保留 `dev/scripts/` 作为开发检查 harness。
+- 更新 README、SKILL、AGENTS、capabilities、agent manifest、release check、subagent forward check、agent usability check 和测试，明确 editable install 后使用 package CLI。
+- 重新生成 demo dashboards/context packs，确保 context 输出和 UI 修复提示不再建议 `python scripts\...`。
+
+当前验证目标：
+
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s tests`
+- `%RESEARCH_COCKPIT_PYTHON% -m research_cockpit.cli smoke --root examples\demo_research_cockpit --json`
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_skill_release_check.py --json --skip-mutating --python %RESEARCH_COCKPIT_PYTHON%`
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_agent_usability_check.py --json --python %RESEARCH_COCKPIT_PYTHON%`
+- `git diff --check`
+
+下一批候选：
+
+- 清理 `dev/docs` 和 `dev/specs` 中历史阶段的旧路径表述，降低未来被 agent 误读的概率。
+- 评估 wheel/sdist 打包时 templates、examples 和 React Flow build assets 的 package-data 覆盖。
+
 ## Agent Usability Forward Check v1（2026-04-29）
 
 本批新增面向 agent 可读性和易用性的前向测试，模拟“全新研究仓库 + `.agent/skills/research-cockpit/` vendored plugin”的真实使用路径，覆盖文档入口、capability routing、命令 manifest、只读 context 读取、安全写入和 UI 协作说明。

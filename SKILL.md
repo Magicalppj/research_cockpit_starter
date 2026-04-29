@@ -15,16 +15,16 @@ Research Cockpit 是一个项目本地研究状态插件。插件代码位于本
    - In this plugin repo only, commands fall back to `examples/demo_research_cockpit/`.
 2. Run bootstrap before making decisions:
 
-```powershell
-python .agent\skills\research-cockpit\scripts\agent_bootstrap.py --root research_cockpit --build --json
+```sh
+research-cockpit bootstrap --root research_cockpit --build --json
 ```
 
-If the current working directory is already the plugin root, use `python scripts\agent_bootstrap.py --root <path> --build --json` instead.
+If the current working directory is already the plugin root, use `research-cockpit bootstrap --root <path> --build --json` instead.
 
 3. Read generated context before editing:
    - `research_cockpit/dashboards/agent_context_pack.json`
    - `research_cockpit/dashboards/focus_context_pack.json`
-4. Use scripts for mutating operations. Do not bypass helpers by hand-editing YAML unless the relevant capability explicitly says YAML repair is the right path.
+4. Use `research-cockpit` commands for mutating operations. Do not bypass helpers by hand-editing YAML unless the relevant capability explicitly says YAML repair is the right path.
 
 ## Capability Routing
 
@@ -41,19 +41,19 @@ Read only the capability files needed for the current task.
 
 ## Core Commands
 
-```powershell
-python .agent\skills\research-cockpit\scripts\validate_cockpit.py --root research_cockpit
-python .agent\skills\research-cockpit\scripts\build_dashboard.py --root research_cockpit
-python .agent\skills\research-cockpit\scripts\search_knowledge.py --root research_cockpit --query "..." --json
-python .agent\skills\research-cockpit\scripts\suggest_next_actions.py --root research_cockpit --json
-python .agent\skills\research-cockpit\scripts\list_agent_commands.py --json
+```sh
+research-cockpit validate --root research_cockpit
+research-cockpit build --root research_cockpit
+research-cockpit search --root research_cockpit --query "..." --json
+research-cockpit suggest-next-actions --root research_cockpit --json
+research-cockpit commands --json
 ```
 
 After mutating state, validate and rebuild unless the script already did so:
 
-```powershell
-python .agent\skills\research-cockpit\scripts\validate_cockpit.py --root research_cockpit
-python .agent\skills\research-cockpit\scripts\build_dashboard.py --root research_cockpit
+```sh
+research-cockpit validate --root research_cockpit
+research-cockpit build --root research_cockpit
 ```
 
 ## Write Boundary
@@ -67,6 +67,6 @@ Allowed truth-source writes are under:
 - `research_cockpit/graph/interaction_log.yaml`
 - `research_cockpit/notes/**/*.md`
 
-Agents should normally write these files through `scripts/` commands. Direct YAML repair is a last-resort structural fix and must be followed by validation and dashboard rebuild.
+Agents should normally write these files through `research-cockpit` CLI commands. Direct YAML repair is a last-resort structural fix and must be followed by validation and dashboard rebuild.
 
 Generated files under `research_cockpit/dashboards/` must be rebuilt, not hand-authored.

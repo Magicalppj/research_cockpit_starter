@@ -26,7 +26,7 @@ def format_dependency_error(missing: list[str]) -> str:
     modules = ", ".join(missing)
     return (
         f"Missing Python modules: {modules}. "
-        f"From the Research Cockpit plugin root, install requirements with `python -m pip install -r requirements.txt` "
+        f"From the Research Cockpit plugin root, install the package with `python -m pip install -e .` "
         f"or rerun with an interpreter that already has: {packages}."
     )
 
@@ -49,7 +49,7 @@ if not _MISSING_DEPENDENCIES:
 
 
 def _display_path(path: Path) -> str:
-    return display_path(path, base=PLUGIN_ROOT)
+    return display_path(path, base=Path.cwd())
 
 
 def _context_paths(root: Path) -> dict[str, dict[str, Any]]:

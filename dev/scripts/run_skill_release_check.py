@@ -28,14 +28,15 @@ REQUIRED_PACKAGE_PATHS = (
     "requirements.txt",
     "src/research_cockpit/model.py",
     "src/research_cockpit/paths.py",
+    "src/research_cockpit/command_registry.py",
     "src/research_cockpit/ui/app.py",
-    "scripts/agent_bootstrap.py",
-    "scripts/skill_smoke_test.py",
-    "scripts/list_agent_commands.py",
-    "scripts/claim_option.py",
-    "scripts/option_workstream_context.py",
-    "scripts/report_option_workstream.py",
-    "scripts/update_decision_checklist.py",
+    "src/research_cockpit/commands/agent_bootstrap.py",
+    "src/research_cockpit/commands/skill_smoke_test.py",
+    "src/research_cockpit/commands/list_agent_commands.py",
+    "src/research_cockpit/commands/claim_option.py",
+    "src/research_cockpit/commands/option_workstream_context.py",
+    "src/research_cockpit/commands/report_option_workstream.py",
+    "src/research_cockpit/commands/update_decision_checklist.py",
     "examples/demo_research_cockpit/current_state.yaml",
     "templates/minimal_research_cockpit/current_state.yaml",
     "capabilities/graph-state.md",
@@ -49,7 +50,7 @@ REQUIRED_PACKAGE_PATHS = (
     "agents/openai.yaml",
 )
 SCAN_EXCLUDED_PARTS = {"dev", "tests", ".test_tmp", "node_modules", ".streamlit_tmp", ".git", ".venv", "venv"}
-FORBIDDEN_LAYOUT_PARTS = {"skills"}
+FORBIDDEN_LAYOUT_PARTS = {"skills", "scripts"}
 FORBIDDEN_STRINGS = (
     "D:" + "\\Tools",
     "C:" + "\\Users" + "\\" + "22" + "339",
@@ -67,6 +68,10 @@ FORBIDDEN_STRINGS = (
     "decision_flan",
     "exp_041",
     "exp_042",
+    ".agent" + "\\skills" + "\\research-cockpit" + "\\scripts",
+    ".agent/skills/research-cockpit/scripts",
+    "python scripts" + "\\",
+    "python scripts/",
 )
 
 
@@ -98,8 +103,16 @@ def _short_text(value: str, limit: int = 1200) -> str:
     return value[:limit] + "...<truncated>"
 
 
-def _script(skill_path: Path, script_name: str) -> str:
-    return str(skill_path / "scripts" / script_name)
+def _cli(python: str, command: str, *args: str) -> list[str]:
+    return [python, "-m", "research_cockpit.cli", command, *args]
+
+
+def _package_env(skill_path: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    src_path = str(skill_path / "src")
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = src_path if not existing else src_path + os.pathsep + existing
+    return env
 
 
 def _data_root(skill_path: Path) -> str:
@@ -217,7 +230,7 @@ def _scan_files(skill_path: Path) -> list[Path]:
     files: list[Path] = []
     if not skill_path.exists():
         return files
-    for path in skill_path.rglob("*"):
+    for path in _walk_non_excluded_files(skill_path):
         if "__pycache__" in path.parts or not path.is_file():
             continue
         if any(part in SCAN_EXCLUDED_PARTS or part.endswith(".egg-info") for part in path.relative_to(skill_path).parts):
@@ -261,11 +274,26 @@ def _copy_skill_package(source: Path, destination: Path) -> None:
     shutil.copytree(source, destination, ignore=ignore)
 
 
+def _walk_non_excluded_files(root: Path) -> list[Path]:
+    files: list[Path] = []
+    for current, dirs, names in os.walk(root):
+        dirs[:] = [
+            name
+            for name in dirs
+            if name not in SCAN_EXCLUDED_PARTS
+            and name != "__pycache__"
+            and not name.endswith(".egg-info")
+        ]
+        current_path = Path(current)
+        files.extend(current_path / name for name in names)
+    return files
+
+
 def _file_manifest(root: Path) -> dict[str, str]:
     manifest: dict[str, str] = {}
     if not root.exists():
         return manifest
-    for path in root.rglob("*"):
+    for path in _walk_non_excluded_files(root):
         if "__pycache__" in path.parts or not path.is_file():
             continue
         if any(part in SCAN_EXCLUDED_PARTS or part.endswith(".egg-info") for part in path.relative_to(root).parts):
@@ -289,23 +317,16 @@ def read_only_startup_track(skill_path: Path, python: str) -> dict[str, Any]:
     root = _data_root(skill_path)
     option_id = _current_option_id(skill_path)
     commands = [
-        [python, _script(skill_path, "agent_bootstrap.py"), "--root", root, "--json"],
-        [python, _script(skill_path, "skill_smoke_test.py"), "--root", root, "--json"],
-        [python, _script(skill_path, "list_agent_commands.py"), "--json"],
-        [python, _script(skill_path, "search_knowledge.py"), "--root", root, "--query", "demo", "--json", "--limit", "5"],
-        [python, _script(skill_path, "suggest_next_actions.py"), "--root", root, "--json"],
+        _cli(python, "bootstrap", "--root", root, "--json"),
+        _cli(python, "smoke", "--root", root, "--json"),
+        _cli(python, "commands", "--json"),
+        _cli(python, "search", "--root", root, "--query", "demo", "--json", "--limit", "5"),
+        _cli(python, "suggest-next-actions", "--root", root, "--json"),
     ]
     if option_id:
-        commands.append([
-            python,
-            _script(skill_path, "option_workstream_context.py"),
-            "--root",
-            root,
-            "--option",
-            option_id,
-            "--json",
-        ])
-    checks = [_run_command(command, cwd=skill_path) for command in commands]
+        commands.append(_cli(python, "option-workstream-context", "--root", root, "--option", option_id, "--json"))
+    env = _package_env(skill_path)
+    checks = [_run_command(command, cwd=skill_path, env=env) for command in commands]
     return _track(
         "read_only_startup",
         all(check["passed"] for check in checks),
@@ -321,7 +342,7 @@ def portable_copy_track(skill_path: Path, python: str, destination: Path) -> dic
 
     copy_path = destination / "rc"
     _copy_skill_package(skill_path, copy_path)
-    check = _run_command([python, str(copy_path / "scripts" / "skill_smoke_test.py"), "--json"], cwd=destination)
+    check = _run_command(_cli(python, "smoke", "--json"), cwd=copy_path, env=_package_env(copy_path))
     payload = check.get("json") if isinstance(check.get("json"), dict) else {}
     summary = {
         "copy_path": str(copy_path),
@@ -342,9 +363,9 @@ def isolated_mutation_track(skill_path: Path, python: str, destination: Path) ->
     copy_before = _file_manifest(copy_path)
     root = _data_root(copy_path)
     commands = [
-        [
+        _cli(
             python,
-            _script(copy_path, "record_finding.py"),
+            "record-finding",
             "--root",
             root,
             "--experiment",
@@ -357,12 +378,13 @@ def isolated_mutation_track(skill_path: Path, python: str, destination: Path) ->
             "mixed",
             "--summary",
             "Release check synthetic finding recorded in isolated copy.",
-        ],
-        [python, _script(copy_path, "update_decision_evidence.py"), "--root", root, "--id", "decision_demo_prompt_refinement"],
-        [python, _script(copy_path, "validate_cockpit.py"), "--root", root],
-        [python, _script(copy_path, "build_dashboard.py"), "--root", root],
+        ),
+        _cli(python, "update-decision-evidence", "--root", root, "--id", "decision_demo_prompt_refinement"),
+        _cli(python, "validate", "--root", root),
+        _cli(python, "build", "--root", root),
     ]
-    checks = [_run_command(command, cwd=copy_path) for command in commands]
+    env = _package_env(copy_path)
+    checks = [_run_command(command, cwd=copy_path, env=env) for command in commands]
     source_after = _file_manifest(skill_path)
     copy_after = _file_manifest(copy_path)
     copy_changed = _changed_files(copy_before, copy_after)
@@ -385,16 +407,16 @@ def decision_gate_track(skill_path: Path, python: str) -> dict[str, Any]:
     if not dependency["passed"]:
         return _track("decision_gate", False, checks=[dependency], summary=dependency["summary"], stdout=dependency["stdout"])
 
-    command = [
+    command = _cli(
         python,
-        _script(skill_path, "check_decision_acceptance.py"),
+        "check-decision-acceptance",
         "--root",
         _data_root(skill_path),
         "--id",
         "decision_demo_prompt_refinement",
         "--json",
-    ]
-    check = _run_command(command, cwd=skill_path, allowed_returncodes={0, 1})
+    )
+    check = _run_command(command, cwd=skill_path, allowed_returncodes={0, 1}, env=_package_env(skill_path))
     payload = check.get("json") if isinstance(check.get("json"), dict) else {}
     valid_payload = isinstance(payload.get("ready"), bool)
     expected_returncode = 0 if payload.get("ready") else 1

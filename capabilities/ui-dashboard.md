@@ -4,16 +4,16 @@ Use this capability when working with the Streamlit frontend or React Flow graph
 
 ## Launch
 
-```powershell
+```sh
 research-cockpit build --root research_cockpit
 research-cockpit ui --root research_cockpit --server.port 8501
 ```
 
 Source checkout fallback:
 
-```powershell
-python scripts\build_dashboard.py --root research_cockpit
-python -m streamlit run src\research_cockpit\ui\app.py
+```sh
+research-cockpit build --root research_cockpit
+python -m streamlit run src/research_cockpit/ui/app.py
 ```
 
 Set `RESEARCH_COCKPIT_ROOT` if launching Streamlit directly and the current working directory does not contain `research_cockpit/`.
@@ -28,10 +28,10 @@ Use `刷新图谱 / Refresh` when a background agent has changed YAML. Refresh r
 
 Only rebuild after changing frontend source:
 
-```powershell
-cd src\research_cockpit\ui\graph_component\frontend
-npm.cmd install
-npm.cmd run build
+```sh
+cd src/research_cockpit/ui/graph_component/frontend
+npm install
+npm run build
 ```
 
 Do not commit `node_modules`.

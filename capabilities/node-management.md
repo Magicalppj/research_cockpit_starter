@@ -4,16 +4,16 @@ Use this capability when adding nodes, updating status, or applying suggestions.
 
 ## Add Nodes
 
-```powershell
-python .agent\skills\research-cockpit\scripts\add_node.py --root research_cockpit --id problem_x --type problem --title "..." --parent stage_x
+```sh
+research-cockpit add-node --root research_cockpit --id problem_x --type problem --title "..." --parent stage_x
 ```
 
 Prefer explicit parent links. Keep IDs stable ASCII identifiers.
 
 ## Update Status
 
-```powershell
-python .agent\skills\research-cockpit\scripts\update_status.py --root research_cockpit --id option_x --status active
+```sh
+research-cockpit update-status --root research_cockpit --id option_x --status active
 ```
 
 Use only statuses accepted by validation for that node type.
@@ -22,19 +22,19 @@ Use only statuses accepted by validation for that node type.
 
 Read suggestions:
 
-```powershell
-python .agent\skills\research-cockpit\scripts\suggest_next_actions.py --root research_cockpit --json
+```sh
+research-cockpit suggest-next-actions --root research_cockpit --json
 ```
 
-Apply suggestions through scripts, not direct YAML edits:
+Apply suggestions through `research-cockpit` commands, not direct YAML edits:
 
-```powershell
-python .agent\skills\research-cockpit\scripts\apply_suggestion.py --root research_cockpit --id sg_x --target current --dry-run --json
-python .agent\skills\research-cockpit\scripts\apply_suggestion.py --root research_cockpit --id sg_x --target current
+```sh
+research-cockpit apply-suggestion --root research_cockpit --id sg_x --target current --dry-run --json
+research-cockpit apply-suggestion --root research_cockpit --id sg_x --target current
 ```
 
 Update suggestion lifecycle:
 
-```powershell
-python .agent\skills\research-cockpit\scripts\update_suggestion_state.py --root research_cockpit --id sg_x --state dismissed --reason "..."
+```sh
+research-cockpit update-suggestion-state --root research_cockpit --id sg_x --state dismissed --reason "..."
 ```

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-from pathlib import Path
+
+from research_cockpit.command_registry import subcommand_for_script
 
 
 CAPABILITY_BY_COMMAND = {
@@ -67,7 +67,7 @@ COMMANDS: list[dict[str, object]] = [
     },
     {
         "name": "skill_smoke_test.py",
-        "purpose": "Run a read-only agent workflow smoke test with absolute script paths.",
+        "purpose": "Run a read-only agent workflow smoke test through the package CLI.",
         "mutating": False,
         "writes_generated_files": False,
         "supports_json": True,
@@ -240,29 +240,20 @@ COMMANDS: list[dict[str, object]] = [
 ]
 
 
-def python_command() -> str:
-    return os.environ.get("RESEARCH_COCKPIT_PYTHON", "").strip() or "python"
-
-
-def script_command(script_name: str) -> str:
-    return f"{python_command()} scripts\\{script_name}"
-
-
-def research_repo_command(script_name: str) -> str:
-    return f"{python_command()} .agent\\skills\\research-cockpit\\scripts\\{script_name}"
-
-
 def agent_command_manifest() -> list[dict[str, object]]:
-    return [
-        {
+    rows: list[dict[str, object]] = []
+    for command in COMMANDS:
+        script_name = str(command["name"])
+        subcommand = subcommand_for_script(script_name)
+        row = {
             **command,
-            "capability_file": CAPABILITY_BY_COMMAND[str(command["name"])],
-            "command": research_repo_command(str(command["name"])),
-            "plugin_command": script_command(str(command["name"])),
+            "name": subcommand,
+            "capability_file": CAPABILITY_BY_COMMAND[script_name],
+            "command": f"research-cockpit {subcommand}",
             "cwd": "research_repo_root",
         }
-        for command in COMMANDS
-    ]
+        rows.append(row)
+    return rows
 
 
 def main() -> None:

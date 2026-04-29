@@ -1,8 +1,8 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-04-29T02:25:35.132094Z",
-    "source_git_commit": "19f9067",
+    "generated_at": "2026-04-29T03:26:29.650796Z",
+    "source_git_commit": "a48df34",
     "worktree_dirty": true,
     "current_state_updated_at": "2026-04-28"
   },
@@ -361,7 +361,7 @@
       "related_node_ids": [
         "stage_demo_research"
       ],
-      "suggested_command": "python scripts\\update_status.py --id problem_demo_quality_gap --status blocked",
+      "suggested_command": "research-cockpit update-status --id problem_demo_quality_gap --status blocked",
       "is_focus_related": true,
       "key": "sg_73b2b109ac6225a7",
       "lifecycle_state": "active",
@@ -381,7 +381,7 @@
       "related_node_ids": [
         "option_demo_prompt_refinement"
       ],
-      "suggested_command": "python scripts\\update_status.py --id experiment_demo_prompt_refinement --status running",
+      "suggested_command": "research-cockpit update-status --id experiment_demo_prompt_refinement --status running",
       "is_focus_related": true,
       "key": "sg_f87fe9f5344b1ffb",
       "lifecycle_state": "active",
@@ -401,7 +401,7 @@
       "related_node_ids": [
         "option_demo_prompt_refinement"
       ],
-      "suggested_command": "python scripts\\update_decision_evidence.py --id decision_demo_prompt_refinement",
+      "suggested_command": "research-cockpit update-decision-evidence --id decision_demo_prompt_refinement",
       "is_focus_related": true,
       "key": "sg_d9a47b09035c9e9d",
       "lifecycle_state": "active",
@@ -1045,9 +1045,9 @@
     ],
     "blockers": [],
     "suggested_commands": {
-      "claim": "python scripts\\claim_option.py --option option_demo_prompt_refinement --agent <agent_id> --objective \"Describe objective\"",
-      "context": "python scripts\\option_workstream_context.py --option option_demo_prompt_refinement --json",
-      "report": "python scripts\\report_option_workstream.py --option option_demo_prompt_refinement --agent <agent_id> --recommend continue --summary \"Summarize evidence and recommendation\""
+      "claim": "research-cockpit claim-option --option option_demo_prompt_refinement --agent <agent_id> --objective \"Describe objective\"",
+      "context": "research-cockpit option-workstream-context --option option_demo_prompt_refinement --json",
+      "report": "research-cockpit report-option-workstream --option option_demo_prompt_refinement --agent <agent_id> --recommend continue --summary \"Summarize evidence and recommendation\""
     },
     "current_focus_related": false
   },

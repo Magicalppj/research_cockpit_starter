@@ -12,9 +12,9 @@ Use this capability when reading or changing the research graph shape, saved gra
 
 ## Read Commands
 
-```powershell
-python .agent\skills\research-cockpit\scripts\validate_cockpit.py --root research_cockpit --json
-python .agent\skills\research-cockpit\scripts\build_dashboard.py --root research_cockpit
+```sh
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
 ```
 
 ## Saved Views
@@ -25,4 +25,4 @@ The Streamlit UI writes saved views through model helpers. Agents should treat `
 
 ## Interaction Log
 
-Key mutating scripts append compact events to `interaction_log.yaml`, including focus changes, option claims/reports, suggestion application, decision acceptance, and saved graph views. Do not treat the log as the source of truth; use graph nodes and current state for current facts.
+Key mutating commands append compact events to `interaction_log.yaml`, including focus changes, option claims/reports, suggestion application, decision acceptance, and saved graph views. Do not treat the log as the source of truth; use graph nodes and current state for current facts.
