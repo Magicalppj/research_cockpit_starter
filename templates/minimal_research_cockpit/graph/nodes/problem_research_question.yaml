@@ -1,0 +1,13 @@
+id: problem_research_question
+type: problem
+title: Research Question
+status: active
+priority: high
+parent: stage_research
+summary: Replace this with the concrete research question.
+children:
+- option_baseline
+tags:
+- research
+next_actions:
+- Compare the baseline option with one alternative.

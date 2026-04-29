@@ -1,0 +1,12 @@
+id: stage_research
+type: stage
+title: Research Stage
+status: active
+priority: high
+summary: Top-level stage for this research project.
+children:
+- problem_research_question
+tags:
+- research
+next_actions:
+- Clarify the active problem and candidate options.

@@ -1,0 +1,11 @@
+id: option_baseline
+type: option
+title: Baseline Option
+status: open
+priority: medium
+parent: problem_research_question
+summary: First candidate option for the active research question.
+pros: []
+cons: []
+next_actions:
+- Add an experiment node or record supporting evidence.

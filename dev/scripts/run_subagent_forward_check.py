@@ -33,7 +33,7 @@ PROMPT_EXPERIMENT_ID = "experiment_demo_prompt_refinement"
 
 
 def _copy_track_source(skill_path: Path, destination: Path) -> Path:
-    copy_path = destination / "research-cockpit"
+    copy_path = destination / "rc"
     copy_path.parent.mkdir(parents=True, exist_ok=True)
     _copy_skill_package(skill_path, copy_path)
     return copy_path

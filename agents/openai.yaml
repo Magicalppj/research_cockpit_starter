@@ -1,0 +1,11 @@
+display_name: Research Cockpit
+short_description: Inspect and update a YAML-backed research cockpit with generated agent context packs.
+default_prompt: >
+  Use this plugin from a project-local .agent/skills or .codex/skills directory.
+  The research repo should keep state in research_cockpit/.
+  Start with python .agent\skills\research-cockpit\scripts\agent_bootstrap.py --root research_cockpit --build --json
+  from the research repo root, or python scripts\agent_bootstrap.py --root <path> --build --json
+  from the plugin root.
+  If cwd is unreliable, call scripts by absolute path and pass --root.
+  Read the generated context packs before editing. Use workflow scripts for
+  supported YAML writes, then run validation and rebuild dashboard context.

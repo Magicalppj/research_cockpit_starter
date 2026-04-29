@@ -13,7 +13,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_SKILL_PATH = REPO_ROOT / "skills" / "research-cockpit"
+DEFAULT_SKILL_PATH = REPO_ROOT
 DEFAULT_TEMP_PARENT = REPO_ROOT / ".test_tmp"
 TEXT_SUFFIXES = {".py", ".md", ".json", ".yaml", ".yml", ".toml", ".txt"}
 REQUIRED_MODULES = {
@@ -24,8 +24,11 @@ REQUIRED_PACKAGE_PATHS = (
     "SKILL.md",
     "AGENTS.md",
     "README.md",
+    "pyproject.toml",
     "requirements.txt",
-    "cockpit/model.py",
+    "src/research_cockpit/model.py",
+    "src/research_cockpit/paths.py",
+    "src/research_cockpit/ui/app.py",
     "scripts/agent_bootstrap.py",
     "scripts/skill_smoke_test.py",
     "scripts/list_agent_commands.py",
@@ -33,11 +36,20 @@ REQUIRED_PACKAGE_PATHS = (
     "scripts/option_workstream_context.py",
     "scripts/report_option_workstream.py",
     "scripts/update_decision_checklist.py",
-    "ui/app.py",
-    "research_cockpit/current_state.yaml",
+    "examples/demo_research_cockpit/current_state.yaml",
+    "templates/minimal_research_cockpit/current_state.yaml",
+    "capabilities/graph-state.md",
+    "capabilities/focus-context.md",
+    "capabilities/node-management.md",
+    "capabilities/experiment-tracking.md",
+    "capabilities/decision-adr.md",
+    "capabilities/ui-dashboard.md",
+    "capabilities/integrations.md",
+    "capabilities/troubleshooting.md",
     "agents/openai.yaml",
 )
-FORBIDDEN_PACKAGE_PARTS = {"dev", "tests", ".test_tmp", "node_modules"}
+SCAN_EXCLUDED_PARTS = {"dev", "tests", ".test_tmp", "node_modules", ".streamlit_tmp", ".git", ".venv", "venv"}
+FORBIDDEN_LAYOUT_PARTS = {"skills"}
 FORBIDDEN_STRINGS = (
     "D:" + "\\Tools",
     "C:" + "\\Users" + "\\" + "22" + "339",
@@ -91,13 +103,13 @@ def _script(skill_path: Path, script_name: str) -> str:
 
 
 def _data_root(skill_path: Path) -> str:
-    return str(skill_path / "research_cockpit")
+    return str(skill_path / "examples" / "demo_research_cockpit")
 
 
 def _current_option_id(skill_path: Path) -> str | None:
     import yaml
 
-    path = skill_path / "research_cockpit" / "current_state.yaml"
+    path = skill_path / "examples" / "demo_research_cockpit" / "current_state.yaml"
     if not path.exists():
         return None
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -105,10 +117,16 @@ def _current_option_id(skill_path: Path) -> str | None:
     return str(option_id) if option_id else None
 
 
-def _run_command(args: list[str], *, cwd: Path | None = None, allowed_returncodes: set[int] | None = None) -> dict[str, Any]:
+def _run_command(
+    args: list[str],
+    *,
+    cwd: Path | None = None,
+    allowed_returncodes: set[int] | None = None,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
     allowed = allowed_returncodes or {0}
     try:
-        result = subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=False)
+        result = subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, check=False)
     except OSError as exc:
         return {
             "command": args,
@@ -181,7 +199,7 @@ def package_shape_track(skill_path: Path) -> dict[str, Any]:
     forbidden_present = [
         path.name
         for path in skill_path.iterdir()
-        if path.name in FORBIDDEN_PACKAGE_PARTS or path.name in {"docs_development_status.md", "research_cockpit_v2_specs"}
+        if path.name in FORBIDDEN_LAYOUT_PARTS or path.name in {"docs_development_status.md", "research_cockpit_v2_specs"}
     ] if skill_path.exists() else []
     passed = not missing and not forbidden_present
     return _track(
@@ -202,7 +220,7 @@ def _scan_files(skill_path: Path) -> list[Path]:
     for path in skill_path.rglob("*"):
         if "__pycache__" in path.parts or not path.is_file():
             continue
-        if any(part in FORBIDDEN_PACKAGE_PARTS for part in path.relative_to(skill_path).parts):
+        if any(part in SCAN_EXCLUDED_PARTS or part.endswith(".egg-info") for part in path.relative_to(skill_path).parts):
             continue
         if path.suffix.lower() in TEXT_SUFFIXES:
             files.append(path)
@@ -227,7 +245,19 @@ def public_scan_track(skill_path: Path) -> dict[str, Any]:
 
 
 def _copy_skill_package(source: Path, destination: Path) -> None:
-    ignore = shutil.ignore_patterns("__pycache__", "*.pyc", ".venv", "venv", ".git", ".test_tmp", "node_modules")
+    ignore = shutil.ignore_patterns(
+        "__pycache__",
+        "*.pyc",
+        ".venv",
+        "venv",
+        ".git",
+        ".test_tmp",
+        ".streamlit_tmp",
+        "dev",
+        "tests",
+        "node_modules",
+        "*.egg-info",
+    )
     shutil.copytree(source, destination, ignore=ignore)
 
 
@@ -237,6 +267,8 @@ def _file_manifest(root: Path) -> dict[str, str]:
         return manifest
     for path in root.rglob("*"):
         if "__pycache__" in path.parts or not path.is_file():
+            continue
+        if any(part in SCAN_EXCLUDED_PARTS or part.endswith(".egg-info") for part in path.relative_to(root).parts):
             continue
         relative = path.relative_to(root).as_posix()
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -287,7 +319,7 @@ def portable_copy_track(skill_path: Path, python: str, destination: Path) -> dic
     if not dependency["passed"]:
         return _track("portable_copy", False, checks=[dependency], summary=dependency["summary"], stdout=dependency["stdout"])
 
-    copy_path = destination / "research-cockpit"
+    copy_path = destination / "rc"
     _copy_skill_package(skill_path, copy_path)
     check = _run_command([python, str(copy_path / "scripts" / "skill_smoke_test.py"), "--json"], cwd=destination)
     payload = check.get("json") if isinstance(check.get("json"), dict) else {}
@@ -305,7 +337,7 @@ def isolated_mutation_track(skill_path: Path, python: str, destination: Path) ->
         return _track("isolated_mutation", False, checks=[dependency], summary=dependency["summary"], stdout=dependency["stdout"])
 
     source_before = _file_manifest(skill_path)
-    copy_path = destination / "research-cockpit"
+    copy_path = destination / "rc"
     _copy_skill_package(skill_path, copy_path)
     copy_before = _file_manifest(copy_path)
     root = _data_root(copy_path)

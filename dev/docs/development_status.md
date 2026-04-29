@@ -1,4 +1,55 @@
 # Research Cockpit 开发状态
+## Agent Usability Forward Check v1（2026-04-29）
+
+本批新增面向 agent 可读性和易用性的前向测试，模拟“全新研究仓库 + `.agent/skills/research-cockpit/` vendored plugin”的真实使用路径，覆盖文档入口、capability routing、命令 manifest、只读 context 读取、安全写入和 UI 协作说明。
+
+已完成：
+
+- 新增 `dev/scripts/run_agent_usability_check.py`，在 `.test_tmp/` 下创建五个临时研究仓库，分别模拟冷启动、只读上下文导航、option workstream 写入、decision/suggestion dry-run 和 UI 文档理解。
+- 测试输出统一包含 `case`、`commands_run`、`files_changed`、`agent_observations`、`readability_findings` 和 `unexpected_writes`，并断言写入只发生在模拟仓库的 `research_cockpit/`。
+- `list_agent_commands.py` 的 manifest 增加 `capability_file`、研究仓库根目录可直接执行的 `.agent\skills\research-cockpit\scripts\...` 命令、plugin-root `plugin_command` 和 `cwd` 提示。
+- 同步 `README.md`、`SKILL.md`、`agents/openai.yaml` 和 decision/integration capability 文档，明确 vendored skill 调用路径、`--root`、`--build` bootstrap、YAML 写入边界和 YAML repair 后置 validate/build。
+- release / usability 复制 helper 排除 `dev/`、`tests/`、`.venv/` 和 `*.egg-info/`，避免把开发材料、editable install 产物或长路径内容带入 vendored skill 测试副本。
+
+当前验证：
+
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s tests`：169 tests OK
+- `%RESEARCH_COCKPIT_PYTHON% scripts\skill_smoke_test.py --root examples\demo_research_cockpit --json`：OK
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_skill_release_check.py --json --skip-mutating --python %RESEARCH_COCKPIT_PYTHON%`：OK
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_agent_usability_check.py --json --python %RESEARCH_COCKPIT_PYTHON%`：OK
+- `git diff --check` / `git diff --cached --check`：OK（仅 LF/CRLF warning）
+
+接下来可升级：
+
+- 将 `script_command(...)` 生成的建议命令也扩展为同时暴露 research-repo command / plugin command，避免 context pack 中仍只出现 `python scripts\...`。
+- 继续清理 `dev/docs` 中历史旧路径表述，降低未来开源仓库被 agent 误读的概率。
+
+## Plugin Repository Split v1（2026-04-29）
+
+本批把仓库从“外层开发仓库 + `skills/research-cockpit/` 内层 skill 包”调整为独立插件仓库。插件代码、scripts、前端、模板、demo 数据和 agent 能力说明都位于仓库根目录；未来研究仓库只保留自己的 `research_cockpit/` 状态资产，并把本插件 vendoring 到 `.agent/skills/research-cockpit/` 或等价位置。
+
+已完成：
+
+- 将运行时代码迁移到 `src/research_cockpit/`，包括 model helpers、命令实现、Streamlit UI 和 React Flow component wrapper。
+- 在根目录保留 `scripts/*.py` 薄 wrapper，供人类和 agent 继续用稳定命令入口调用；新增 `pyproject.toml` 和 `research-cockpit` CLI。
+- 将公开 demo 状态迁移到 `examples/demo_research_cockpit/`，新增 `templates/minimal_research_cockpit/` 用于初始化真实研究仓库的数据根。
+- 新增 `research_cockpit.paths`：优先使用显式 `--root`，其次 `RESEARCH_COCKPIT_ROOT`，再从当前工作目录向上查找 `research_cockpit/`，插件仓库开发场景回落到 demo 数据。
+- 将根 `SKILL.md` 收敛为薄入口，并把详细 agent 操作说明拆到 `capabilities/graph-state.md`、`focus-context.md`、`node-management.md`、`experiment-tracking.md`、`decision-adr.md`、`ui-dashboard.md`、`integrations.md` 和 `troubleshooting.md`。
+- 将测试目录迁移到根目录 `tests/`，release / subagent forward check 已适配新的插件边界和 demo data root。
+
+当前验证：
+
+- `%RESEARCH_COCKPIT_PYTHON% -m unittest discover -s tests`：169 tests OK
+- `%RESEARCH_COCKPIT_PYTHON% scripts\skill_smoke_test.py --root examples\demo_research_cockpit --json`：OK
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_skill_release_check.py --json --skip-mutating --python %RESEARCH_COCKPIT_PYTHON%`：OK
+- `%RESEARCH_COCKPIT_PYTHON% dev\scripts\run_agent_usability_check.py --json --python %RESEARCH_COCKPIT_PYTHON%`：OK
+
+接下来可升级：
+
+- 将 `dev/docs`、`dev/specs` 和 `dev/scripts` 的历史开发材料进一步整理到 `docs/` / `tools/`，并清理旧路径表述。
+- 为 `record_finding.py`、`update_decision_evidence.py` 和 `update_decision_checklist.py` 继续补 dry-run coverage。
+- 继续验证 React Flow 大图体验，必要时再做 Cytoscape 对照 spike。
+
 
 ## Research Graph Layout Optimization v1 更新（2026-04-28）
 

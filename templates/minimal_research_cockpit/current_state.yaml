@@ -1,0 +1,12 @@
+current_stage: stage_research
+current_problem: problem_research_question
+current_option: option_baseline
+current_focus_node: problem_research_question
+current_focus_path:
+- stage_research
+- problem_research_question
+current_hypothesis: Replace this template with the current research hypothesis.
+open_risks: []
+next_actions:
+- Define the first experiment or evidence collection task.
+updated_at: '2026-04-29'
