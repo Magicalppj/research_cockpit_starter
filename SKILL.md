@@ -32,6 +32,17 @@ If the `research-cockpit` console script is unavailable but the package is insta
 
 Default research graph reasoning centers on `stage`, `problem`, `option`, `experiment`, and `decision`. Treat `artifact` nodes as supporting evidence/resources by default; do not create an artifact node for an ordinary file, config, JSON, or result unless that artifact is itself a long-lived research object or key deliverable.
 
+Status semantics:
+
+- `stage`: `planned`, `active`, `blocked`, `done`.
+- `problem`: `open`, `active`, `blocked`, `resolved`, `parked`.
+- `option`: `open`, `active`, `promising`, `rejected`, `accepted`, `paused`, `parked`.
+- `experiment`: `planned`, `queued`, `running`, `done`, `failed`, `cancelled`.
+- `decision`: `proposed`, `accepted`, `superseded`, `rejected`.
+- `artifact`: `draft`, `planned`, `active`, `done`, `superseded`, `deprecated`, `archived`.
+
+Use `promising` only for an `option` that has positive signal but is not yet accepted. Do not set decisions to `accepted` directly; use `research-cockpit accept-decision`.
+
 ## Capability Routing
 
 - Graph state, data files, saved graph views, and interaction log: `capabilities/graph-state.md`

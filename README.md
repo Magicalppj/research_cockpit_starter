@@ -13,6 +13,34 @@ Research Cockpit 是一个 repo-native 的研究记录与 agent 协作插件。�
 - 本地优先记录：所有状态文件都可以进入 git diff、code review 和归档流程。
 - 轻量数据层：当前接受 YAML / JSON 作为数据库，不依赖外部服务。
 
+## 核心节点与状态
+
+Research Cockpit 的主图默认围绕一条研究链组织：
+
+```text
+stage -> problem -> option -> experiment -> decision
+```
+
+- `stage`：研究阶段或里程碑。
+- `problem`：当前要解释、修复或回答的问题。
+- `option`：候选方案、假设、路线或分支。
+- `experiment`：用于验证 option 的实验、评测或观察。
+- `decision`：基于证据形成的 ADR-style 决策。
+- `artifact`：文件、配置、数据集、结果产物等支持材料；默认不作为主研究链节点展示。
+
+常见状态含义：
+
+| 节点类型 | 状态 | 含义 |
+| --- | --- | --- |
+| `stage` | `planned` / `active` / `blocked` / `done` | 已规划 / 正在推进 / 被阻塞 / 已完成 |
+| `problem` | `open` / `active` / `blocked` / `resolved` / `parked` | 已记录 / 正在处理 / 被阻塞 / 已解决 / 暂时搁置 |
+| `option` | `open` / `active` / `promising` / `rejected` / `accepted` / `paused` / `parked` | 候选 / 正在探索 / 有希望、值得优先验证或推进决策 / 已否定 / 已采纳 / 暂停 / 搁置 |
+| `experiment` | `planned` / `queued` / `running` / `done` / `failed` / `cancelled` | 已规划 / 排队 / 运行中 / 已完成 / 失败 / 取消 |
+| `decision` | `proposed` / `accepted` / `superseded` / `rejected` | 决策草案 / 已接受 / 被后续决策取代 / 未采纳 |
+| `artifact` | `draft` / `planned` / `active` / `done` / `superseded` / `deprecated` / `archived` | 草稿 / 计划产出 / 正在使用 / 已完成 / 被替代 / 不推荐继续使用 / 已归档 |
+
+`promising` 特指 `option` 已经出现正向信号，但还没有被正式采纳。通常下一步是补实验结果、比较 alternatives，或者用 `research-cockpit promote-decision` 生成 `decision` 草案。
+
 ## 仓库组织
 
 插件仓库：
