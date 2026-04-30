@@ -2,20 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 import re
 
-from research_cockpit.model import (
+from research_cockpit.graph_core import focus_related_ids
+from research_cockpit.storage import load_yaml, normalize_relative_path, relative_to_root
+from research_cockpit.types import (
     RESOURCE_SEARCH_ALLOWED_SUFFIXES,
     RESOURCE_SEARCH_MAX_BYTES,
     SEARCH_NODE_TEXT_FIELDS,
     ResearchNode,
-    _focus_related_ids,
-    _is_external_target,
-    _normalize_relative_path,
-    _relative_to_root,
-    build_link_rows,
-    load_yaml,
 )
+from research_cockpit.model import build_link_rows
 
 
 def _node_file_paths(root: Path) -> dict[str, str]:
@@ -24,7 +22,7 @@ def _node_file_paths(root: Path) -> dict[str, str]:
         data = load_yaml(path)
         node_id = data.get("id")
         if node_id:
-            paths[str(node_id)] = _relative_to_root(root, path)
+            paths[str(node_id)] = relative_to_root(root, path)
     return paths
 
 
@@ -36,7 +34,7 @@ def _node_note_paths(nodes: dict[str, ResearchNode]) -> dict[str, str]:
             continue
         note_path = links.get("notes")
         if note_path:
-            note_paths[_normalize_relative_path(note_path)] = node.id
+            note_paths[normalize_relative_path(note_path)] = node.id
     return note_paths
 
 
@@ -118,7 +116,7 @@ def _resource_search_entry(
 
 
 def _resource_path_under_root(root: Path, target: str) -> tuple[Path | None, str]:
-    normalized = _normalize_relative_path(target)
+    normalized = normalize_relative_path(target)
     if not normalized:
         return None, ""
     path = Path(target)
@@ -138,7 +136,7 @@ def _resource_skip_reason(
     normalized_note_paths: set[str],
 ) -> tuple[str, Path | None, str]:
     target = str(row.get("target") or "")
-    normalized = _normalize_relative_path(target)
+    normalized = normalize_relative_path(target)
     kind = str(row.get("kind") or "")
     if normalized in normalized_note_paths and normalized.lower().endswith(".md"):
         return "indexed_as_note", None, normalized
@@ -148,7 +146,7 @@ def _resource_skip_reason(
         return "linked_artifact", None, normalized or target
     if Path(target).is_absolute():
         return "absolute_path", None, normalized or target
-    if _is_external_target(target):
+    if urlparse(target).scheme in {"http", "https"}:
         return "external", None, normalized or target
     path, normalized = _resource_path_under_root(root, target)
     if path is None:
@@ -178,7 +176,7 @@ def _resource_search_entries(
     current: dict[str, Any],
     note_paths: dict[str, str],
 ) -> list[dict[str, Any]]:
-    focus_ids = _focus_related_ids(nodes, current) if current else set()
+    focus_ids = focus_related_ids(nodes, current) if current else set()
     normalized_note_paths = set(note_paths)
     entries: list[dict[str, Any]] = []
     for row in build_link_rows(root, nodes):
@@ -208,7 +206,7 @@ def build_search_index(
     current: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     current = current or {}
-    focus_ids = _focus_related_ids(nodes, current) if current else set()
+    focus_ids = focus_related_ids(nodes, current) if current else set()
     node_paths = _node_file_paths(root)
     note_paths = _node_note_paths(nodes)
     entries: list[dict[str, Any]] = []
@@ -230,8 +228,8 @@ def build_search_index(
     notes_dir = root / "notes"
     if notes_dir.exists():
         for path in sorted(notes_dir.glob("**/*.md")):
-            rel_path = _relative_to_root(root, path)
-            normalized = _normalize_relative_path(rel_path)
+            rel_path = relative_to_root(root, path)
+            normalized = normalize_relative_path(rel_path)
             text = path.read_text(encoding="utf-8", errors="replace")
             node_id = note_paths.get(normalized)
             node = nodes.get(node_id) if node_id else None

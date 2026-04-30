@@ -4,22 +4,22 @@ from pathlib import Path
 from typing import Any
 import sys
 
+from research_cockpit.graph_core import (
+    child_ids,
+    derive_focus_path,
+    node_context,
+    node_has_evidence,
+    node_id_by_type_in_path,
+    ordered_node_contexts,
+)
+from research_cockpit.storage import load_yaml, relative_to_root
+from research_cockpit.types import VALID_COMMAND_STYLES, ResearchNode
 from research_cockpit.model import (
-    VALID_COMMAND_STYLES,
-    ResearchNode,
-    _child_ids,
-    _has_experiment_evidence,
-    _node_id_by_type_in_path,
-    _ordered_node_contexts,
-    _relative_to_root,
     build_action_suggestions,
     build_decision_acceptance_checklist,
     build_decision_trace,
     build_link_rows,
     build_option_workstream_context,
-    derive_focus_path,
-    load_yaml,
-    node_context,
     recent_interactions,
 )
 
@@ -47,7 +47,7 @@ def _rooted_cli_command(root: Path, subcommand: str, *parts: Any, command_style:
 def _node_context_file_info(root: Path, filename: str) -> dict[str, Any]:
     path = root / "dashboards" / filename
     info: dict[str, Any] = {
-        "path": _relative_to_root(root, path),
+        "path": relative_to_root(root, path),
         "exists": path.exists(),
     }
     if path.exists():
@@ -72,7 +72,7 @@ def _node_context_freshness(root: Path) -> dict[str, Any]:
 
 def _node_id_in_path(nodes: dict[str, ResearchNode], node_id: str, node_type: str, *, nearest: bool = False) -> str | None:
     try:
-        return _node_id_by_type_in_path(nodes, derive_focus_path(nodes, node_id), node_type, nearest=nearest)
+        return node_id_by_type_in_path(nodes, derive_focus_path(nodes, node_id), node_type, nearest=nearest)
     except ValueError:
         return None
 
@@ -156,7 +156,7 @@ def _experiment_context(
         )
     ]
     findings = experiment.raw.get("findings", []) or []
-    missing_evidence = not _has_experiment_evidence(experiment)
+    missing_evidence = not node_has_evidence(experiment)
     return {
         "kind": "experiment",
         "parent_stage": node_context(nodes[stage_id]) if stage_id else None,
@@ -167,7 +167,7 @@ def _experiment_context(
         "result_summary": experiment.raw.get("result_summary"),
         "outcome": experiment.raw.get("outcome"),
         "missing_evidence": missing_evidence,
-        "related_decisions": _ordered_node_contexts(nodes, decision_ids),
+        "related_decisions": ordered_node_contexts(nodes, decision_ids),
         "suggested_commands": {
             "mark_running": _rooted_cli_command(
                 root,
@@ -200,7 +200,7 @@ def _alternative_option_for_decision(nodes: dict[str, ResearchNode], decision: R
     problem_id = nodes[str(option_id)].parent if option_id else None
     if not problem_id or problem_id not in nodes:
         return "<option_id>"
-    for child_id in _child_ids(nodes, nodes[str(problem_id)]):
+    for child_id in child_ids(nodes, nodes[str(problem_id)]):
         if child_id != option_id and child_id in nodes and nodes[child_id].type == "option":
             return child_id
     return "<option_id>"
@@ -553,11 +553,11 @@ def build_node_onboarding_context(
         raise ValueError(f"Node does not exist: {node_id}")
     node = nodes[node_id]
     path_ids = derive_focus_path(nodes, node_id)
-    child_ids = _child_ids(nodes, node)
+    child_ids_for_node = child_ids(nodes, node)
     sibling_ids: list[str] = []
     if node.parent and node.parent in nodes:
-        sibling_ids = [child_id for child_id in _child_ids(nodes, nodes[str(node.parent)]) if child_id != node.id]
-    related_ids = set(path_ids + child_ids + sibling_ids)
+        sibling_ids = [child_id for child_id in child_ids(nodes, nodes[str(node.parent)]) if child_id != node.id]
+    related_ids = set(path_ids + child_ids_for_node + sibling_ids)
     link_rows = build_link_rows(root, nodes)
     suggestions = build_action_suggestions(root, nodes, current, link_rows)
 
@@ -573,14 +573,14 @@ def build_node_onboarding_context(
     command_drafts = _node_command_drafts(root, node, type_context, command_style=command_style)
     payload = {
         "node": node_context(node),
-        "parent_chain": _ordered_node_contexts(nodes, path_ids),
+        "parent_chain": ordered_node_contexts(nodes, path_ids),
         "relations": {
-            "parents": _ordered_node_contexts(nodes, path_ids[:-1]),
-            "children": _ordered_node_contexts(nodes, child_ids),
-            "siblings": _ordered_node_contexts(nodes, sibling_ids),
+            "parents": ordered_node_contexts(nodes, path_ids[:-1]),
+            "children": ordered_node_contexts(nodes, child_ids_for_node),
+            "siblings": ordered_node_contexts(nodes, sibling_ids),
         },
-        "blockers": _node_blocker_rows(nodes, path_ids + child_ids),
-        "next_actions": _node_next_action_rows(nodes, path_ids + child_ids, current),
+        "blockers": _node_blocker_rows(nodes, path_ids + child_ids_for_node),
+        "next_actions": _node_next_action_rows(nodes, path_ids + child_ids_for_node, current),
         "relevant_suggestions": _node_relevant_suggestions(suggestions, node.id, related_ids),
         "resources": [row for row in link_rows if row.get("node_id") in related_ids],
         "recent_interactions": _node_recent_interactions(root, node.id),
