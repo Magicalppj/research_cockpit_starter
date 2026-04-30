@@ -14,7 +14,6 @@ from research_cockpit.model import (
     ACTIVE_WORKSTREAM_STATUSES,
     ResearchNode,
     ValidationError,
-    append_interaction_log,
     derive_focus_path,
     load_explicit_edges,
     load_nodes,
@@ -23,6 +22,7 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
+from research_cockpit.interaction_log import append_interaction_log
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.record_finding import find_node_file
 

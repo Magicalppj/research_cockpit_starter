@@ -12,6 +12,7 @@ from research_cockpit.graph_core import (
     node_id_by_type_in_path,
     ordered_node_contexts,
 )
+from research_cockpit.interaction_log import recent_interactions
 from research_cockpit.storage import load_yaml, relative_to_root
 from research_cockpit.types import VALID_COMMAND_STYLES, ResearchNode
 from research_cockpit.model import (
@@ -20,7 +21,6 @@ from research_cockpit.model import (
     build_decision_trace,
     build_link_rows,
     build_option_workstream_context,
-    recent_interactions,
 )
 
 

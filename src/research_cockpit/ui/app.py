@@ -32,12 +32,11 @@ from research_cockpit.model import (
     build_suggestion_lifecycle_summary,
     graph_to_json,
     load_explicit_edges,
-    load_graph_views,
     load_nodes,
     load_yaml,
-    upsert_graph_view,
     validate_cockpit,
 )
+from research_cockpit.graph_views import load_graph_views, upsert_graph_view
 from research_cockpit.ui.graph_component import graph_component_build_available, render_research_graph_component
 from research_cockpit.ui.pyvis_renderer import build_pyvis_html, render_pyvis_graph
 from research_cockpit.ui.text import get_text
