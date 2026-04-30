@@ -28,6 +28,31 @@ The plugin stores reusable code and tools. The research repo stores project-spec
 - `requirements.txt`: script/runtime dependency list.
 - `pyproject.toml`: installable package metadata and `research-cockpit` CLI entry point.
 
+## Maintainer References
+
+- `docs/internal-architecture.md`: internal Python module boundaries and dependency rules.
+- `docs/decisions/0001-layered-plugin-architecture.md`: rationale for the layered plugin architecture and the temporary `model.py` compatibility facade.
+
+## Source Module Map
+
+`src/research_cockpit/` is organized around stable internal boundaries:
+
+- `cli.py` and `command_registry.py`: public CLI dispatch and command metadata.
+- `commands/`: command implementations. Commands validate input, call domain helpers, and perform controlled writes.
+- `commands/_runtime.py`: shared command runtime for validated state loading and mutation finalization.
+- `types.py`: core dataclasses, validation error type, node/status constants, and search constants.
+- `storage.py`: YAML IO and path normalization helpers.
+- `paths.py`: plugin and data-root discovery.
+- `graph_core.py`: node loading, explicit edge loading, graph traversal, focus path derivation, and graph JSON.
+- `resources.py`: node links, linked artifacts, and local resource row extraction.
+- `interaction_log.py` and `graph_views.py`: sidecar state helpers.
+- `decisions.py`, `option_workstreams.py`, and `suggestions.py`: domain logic.
+- `search_index.py`: search index construction and query helpers.
+- `node_onboarding.py`: single-node onboarding payloads for new agents.
+- `context_packs.py`: agent/focus/current-state context payload builders and dashboard Markdown writer.
+- `ui/`: Streamlit UI, view helpers, PyVis fallback, and React Flow component wrapper.
+- `model.py`: compatibility facade for older imports; new code should prefer the focused modules above.
+
 ## Data Root Resolution
 
 Commands resolve data root in this order:
