@@ -13,7 +13,7 @@ from research_cockpit.types import (
     SEARCH_NODE_TEXT_FIELDS,
     ResearchNode,
 )
-from research_cockpit.model import build_link_rows
+from research_cockpit.resources import build_link_rows
 
 
 def _node_file_paths(root: Path) -> dict[str, str]:

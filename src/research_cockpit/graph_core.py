@@ -14,6 +14,7 @@ from research_cockpit.types import (
     ResearchNode,
     ValidationError,
 )
+from research_cockpit.resources import node_link_entries
 
 
 def load_nodes(root: Path) -> dict[str, ResearchNode]:
@@ -311,7 +312,7 @@ def node_context(node: ResearchNode) -> dict[str, Any]:
         "contradicting_experiments": node.raw.get("contradicting_experiments", []),
         "supporting_decisions": node.raw.get("supporting_decisions", []),
         "linked_artifacts": node.raw.get("linked_artifacts", []),
-        "links": node.raw.get("links", []),
+        "links": node_link_entries(node),
         "findings": node.raw.get("findings", []),
         "implementation_steps": node.raw.get("implementation_steps", []),
         "success_criteria": node.raw.get("success_criteria", []),

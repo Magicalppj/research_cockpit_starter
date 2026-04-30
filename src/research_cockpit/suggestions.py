@@ -249,7 +249,7 @@ def build_action_suggestions(
             ))
 
     if link_rows is None:
-        from research_cockpit.model import build_link_rows
+        from research_cockpit.resources import build_link_rows
 
         link_rows = build_link_rows(root, nodes)
 

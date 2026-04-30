@@ -8,20 +8,22 @@ import json
 
 ROOT = default_data_root()
 
-from research_cockpit.model import (
+from research_cockpit.context_packs import (
     build_agent_context,
     build_current_state_payload,
-    build_experiment_matrix,
     build_focus_context,
-    build_link_rows,
+    write_dashboard_markdown,
+)
+from research_cockpit.model import (
+    build_experiment_matrix,
     build_search_index,
     graph_to_json,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     validate_cockpit,
-    write_dashboard_markdown,
 )
+from research_cockpit.resources import build_link_rows
 from research_cockpit.decisions import build_decision_acceptance_checklists
 from research_cockpit.option_workstreams import build_option_workstream_rows
 from research_cockpit.suggestions import build_action_suggestions

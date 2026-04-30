@@ -18,9 +18,7 @@ from research_cockpit.option_workstreams import build_option_workstream_context
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.storage import load_yaml, relative_to_root
 from research_cockpit.types import VALID_COMMAND_STYLES, ResearchNode
-from research_cockpit.model import (
-    build_link_rows,
-)
+from research_cockpit.resources import build_link_rows
 
 
 def _command_arg(value: Any) -> str:

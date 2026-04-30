@@ -34,9 +34,8 @@ def format_dependency_error(missing: list[str]) -> str:
 _MISSING_DEPENDENCIES = missing_runtime_dependencies()
 
 if not _MISSING_DEPENDENCIES:
+    from research_cockpit.context_packs import build_context_metadata
     from research_cockpit.model import (
-        build_context_metadata,
-        build_link_rows,
         build_search_index,
         build_search_index_summary,
         focus_node_id_from_current,
@@ -44,6 +43,7 @@ if not _MISSING_DEPENDENCIES:
         load_yaml,
         validate_cockpit,
     )
+    from research_cockpit.resources import build_link_rows
     from research_cockpit.suggestions import build_action_suggestions
     from research_cockpit.commands.build_dashboard import build_dashboard
 

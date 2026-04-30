@@ -15,10 +15,9 @@ except ModuleNotFoundError:
 RESEARCH_ROOT = default_data_root()
 COMMAND_LANGUAGE = "bash"
 
+from research_cockpit.context_packs import build_agent_context
 from research_cockpit.model import (
-    build_agent_context,
     build_experiment_matrix,
-    build_link_rows,
     build_search_index,
     build_search_index_summary,
     graph_to_json,
@@ -27,6 +26,7 @@ from research_cockpit.model import (
     load_yaml,
     validate_cockpit,
 )
+from research_cockpit.resources import build_link_rows
 from research_cockpit.decisions import (
     build_decision_acceptance_checklist,
     build_decision_evidence_summary,
