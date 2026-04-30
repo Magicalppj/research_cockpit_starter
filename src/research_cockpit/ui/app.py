@@ -58,6 +58,7 @@ from research_cockpit.ui.view_helpers import (
     context_rows,
     build_graph_component_payload,
     default_detail_node_id,
+    default_selected_node_types,
     default_selected_statuses,
     filter_action_suggestions,
     filter_graph_for_view,
@@ -412,7 +413,11 @@ def render_graph_tab(
         all_stages=all_stages,
         all_focus_roles=all_focus_roles,
     )
-    selected_types = set(selected_values("graph_node_types", all_types, all_types))
+    selected_types = set(selected_values(
+        "graph_node_types",
+        all_types,
+        default_selected_node_types(all_types),
+    ))
     selected_statuses = set(selected_values(
         "graph_statuses",
         all_statuses,

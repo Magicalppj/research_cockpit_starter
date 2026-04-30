@@ -10,6 +10,8 @@ Use this capability when reading or changing the research graph shape, saved gra
 - `research_cockpit/graph/graph_views.yaml`: saved dynamic view presets, not frozen snapshots.
 - `research_cockpit/graph/interaction_log.yaml`: append-only operation summaries, not an immutable audit log.
 
+The main research graph should stay focused on `stage -> problem -> option -> experiment -> decision`. `artifact` is still a valid node type, but it is supporting material by default and is hidden from the Streamlit graph unless the researcher explicitly enables it.
+
 ## Read Commands
 
 ```sh

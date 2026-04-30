@@ -138,7 +138,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": False,
         "supports_dry_run": False,
         "supports_no_build": False,
-        "recommended_when": "Add a stage, problem, option, experiment, decision, or artifact.",
+        "recommended_when": "Add a stage, problem, option, experiment, decision, or long-lived artifact.",
     },
     {
         "name": "update_status.py",

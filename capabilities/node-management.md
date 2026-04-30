@@ -10,6 +10,8 @@ research-cockpit add-node --root research_cockpit --id problem_x --type problem 
 
 Prefer explicit parent links. Keep IDs stable ASCII identifiers.
 
+Do not create `artifact` nodes for routine files, configs, JSON outputs, or experiment byproducts. Prefer `linked_artifacts`, `links`, notes, or resource references on the relevant research node. Create an `artifact` node only when the artifact is a long-lived research object or key deliverable that needs its own status and history.
+
 ## Update Status
 
 ```sh

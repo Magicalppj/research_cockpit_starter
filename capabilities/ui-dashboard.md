@@ -22,6 +22,8 @@ Set `RESEARCH_COCKPIT_ROOT` if launching Streamlit directly and the current work
 
 The graph uses React Flow with Dagre layout. Node clicks return a selected node id to Streamlit and drive the right-side inspector. Temporary dragging is visual only; positions are not written to YAML.
 
+The graph hides `artifact` nodes by default so the first view stays focused on research reasoning. Researchers can show artifact nodes from Graph Controls when they need to inspect supporting materials in the graph.
+
 Use `刷新图谱 / Refresh` when a background agent has changed YAML. Refresh reruns Streamlit and reloads the current graph data without rebuilding the React bundle.
 
 ## Frontend Build
