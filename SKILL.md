@@ -23,13 +23,13 @@ research-cockpit bootstrap --root research_cockpit --json
 
 If the current working directory is already the plugin root, use `research-cockpit bootstrap --root <path> --json` instead.
 
-If the `research-cockpit` console script is unavailable but the package is installed, use `python -m research_cockpit.cli <command>` with the same Python environment.
+If the `research-cockpit` console script is unavailable but the package is installed, use `python -m research_cockpit.cli <command>` with the same Python environment. For `node-context`, add `--command-style python` so returned command drafts use the module entrypoint too.
 
-3. If generated dashboards are missing or stale and the task allows generated-file writes, run `research-cockpit build --root research_cockpit`.
+3. If generated dashboards are missing or stale and the task allows generated-file writes, run `research-cockpit build --root research_cockpit`. Do not run `bootstrap --build` or `build` for read-only onboarding tasks.
 4. Read generated context before editing:
    - `research_cockpit/dashboards/agent_context_pack.json`
    - `research_cockpit/dashboards/focus_context_pack.json`
-   - If the task names a specific node id, run `research-cockpit node-context --root research_cockpit --id <node_id> --json` before reading raw YAML or broader context.
+   - If the task names a specific node id, run `research-cockpit node-context --root research_cockpit --id <node_id> --compact --json` before reading raw YAML or broader context.
 5. Use `research-cockpit` commands for mutating operations. Do not bypass helpers by hand-editing YAML unless the relevant capability explicitly says YAML repair is the right path.
 
 Default research graph reasoning centers on `stage`, `problem`, `option`, `experiment`, and `decision`. Treat `artifact` nodes as supporting evidence/resources by default; do not create an artifact node for an ordinary file, config, JSON, or result unless that artifact is itself a long-lived research object or key deliverable.
@@ -62,13 +62,13 @@ Read only the capability files needed for the current task.
 
 ```sh
 research-cockpit validate --root research_cockpit
-research-cockpit node-context --root research_cockpit --id <node_id> --json
+research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
 research-cockpit search --root research_cockpit --query "..." --json
 research-cockpit suggest-next-actions --root research_cockpit --json
 research-cockpit commands --json
 ```
 
-`node-context` is read-only and computed from truth-source YAML. Use it as the shortest onboarding path when a human asks you to continue from one node; it returns the node's parent chain, evidence state, blockers, next actions, recent interactions, resources, and safe command drafts with `--root` included.
+`node-context` is read-only and computed from truth-source YAML. Use `--compact --json` as the shortest onboarding path when a human asks you to continue from one node; the full `--json` output remains available when you need parent chain, relations, resources, recent interactions, and type-specific traces. Command drafts include `--root`; add `--command-style python` when the console script is unavailable.
 
 After mutating state, validate and rebuild unless the script already did so:
 

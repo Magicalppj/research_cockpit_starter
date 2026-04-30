@@ -10,11 +10,13 @@ Use this capability at the start of an agent session and before making local res
 research-cockpit bootstrap --root research_cockpit --json
 ```
 
-2. If dashboard files are missing or stale:
+2. If dashboard files are missing or stale and generated-file writes are allowed:
 
 ```sh
 research-cockpit build --root research_cockpit
 ```
+
+Do not run `bootstrap --build` or `build` during read-only onboarding.
 
 3. Read:
    - `research_cockpit/dashboards/agent_context_pack.json`
@@ -26,10 +28,18 @@ research-cockpit build --root research_cockpit
 When a human assigns a specific node id, use the read-only onboarding command before opening raw YAML:
 
 ```sh
-research-cockpit node-context --root research_cockpit --id <node_id> --json
+research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
 ```
 
 The payload is computed from truth-source YAML, not from stale generated dashboards. It includes parent chain, relations, blockers, next actions, relevant suggestions, resources, recent interactions, and type-specific context for options, experiments, and decisions. Command drafts in the payload include `--root` so they can be reused safely from an agent shell.
+
+The compact form is the shortest no-context handoff. Use full `--json` without `--compact` when you need complete relations, resources, recent interactions, or type-specific traces.
+
+If the console script is unavailable, use:
+
+```sh
+python -m research_cockpit.cli node-context --root research_cockpit --id <node_id> --compact --json --command-style python
+```
 
 ## Search
 

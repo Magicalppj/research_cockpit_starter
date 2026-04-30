@@ -18,12 +18,25 @@ from research_cockpit.model import (
 )
 
 
-def node_context_payload(root: Path, *, node_id: str) -> dict:
+def node_context_payload(
+    root: Path,
+    *,
+    node_id: str,
+    compact: bool = False,
+    command_style: str = "console",
+) -> dict:
     nodes = load_nodes(root)
     current = load_yaml(root / "current_state.yaml")
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
-    return build_node_onboarding_context(root, nodes, current, node_id)
+    return build_node_onboarding_context(
+        root,
+        nodes,
+        current,
+        node_id,
+        compact=compact,
+        command_style=command_style,
+    )
 
 
 def _print_human(payload: dict) -> None:
@@ -43,10 +56,22 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--id", required=True, dest="node_id")
     parser.add_argument("--json", action="store_true", dest="as_json")
+    parser.add_argument("--compact", action="store_true", help="Print compact onboarding context")
+    parser.add_argument(
+        "--command-style",
+        choices=["console", "python"],
+        default="console",
+        help="Command draft style to emit",
+    )
     args = parser.parse_args()
 
     try:
-        payload = node_context_payload(args.root, node_id=args.node_id)
+        payload = node_context_payload(
+            args.root,
+            node_id=args.node_id,
+            compact=args.compact,
+            command_style=args.command_style,
+        )
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc

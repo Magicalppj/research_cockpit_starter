@@ -8,12 +8,14 @@ from urllib.parse import urlparse
 import hashlib
 import re
 import subprocess
+import sys
 import yaml
 import networkx as nx
 
 from research_cockpit.command_registry import cli_command_for_script
 
 
+VALID_COMMAND_STYLES = {"console", "python"}
 VALID_NODE_TYPES = {"stage", "problem", "option", "experiment", "decision", "artifact"}
 
 VALID_STATUSES_BY_TYPE = {
@@ -2301,8 +2303,13 @@ def _command_arg(value: Any) -> str:
     return text
 
 
-def _rooted_cli_command(root: Path, subcommand: str, *parts: Any) -> str:
-    command = ["research-cockpit", subcommand, "--root", _command_arg(root)]
+def _rooted_cli_command(root: Path, subcommand: str, *parts: Any, command_style: str = "console") -> str:
+    if command_style not in VALID_COMMAND_STYLES:
+        raise ValueError(f"Invalid command style: {command_style}")
+    if command_style == "python":
+        command = [_command_arg(sys.executable), "-m", "research_cockpit.cli", subcommand, "--root", _command_arg(root)]
+    else:
+        command = ["research-cockpit", subcommand, "--root", _command_arg(root)]
     command.extend(_command_arg(part) for part in parts if part not in (None, ""))
     return " ".join(command)
 
@@ -2399,7 +2406,13 @@ def _node_recent_interactions(root: Path, node_id: str, limit: int = 5) -> list[
     return rows
 
 
-def _experiment_context(root: Path, nodes: dict[str, ResearchNode], experiment: ResearchNode) -> dict[str, Any]:
+def _experiment_context(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    experiment: ResearchNode,
+    *,
+    command_style: str = "console",
+) -> dict[str, Any]:
     option_id = _node_id_in_path(nodes, experiment.id, "option", nearest=True)
     problem_id = _node_id_in_path(nodes, experiment.id, "problem", nearest=True)
     stage_id = _node_id_in_path(nodes, experiment.id, "stage")
@@ -2426,7 +2439,15 @@ def _experiment_context(root: Path, nodes: dict[str, ResearchNode], experiment: 
         "missing_evidence": missing_evidence,
         "related_decisions": _ordered_node_contexts(nodes, decision_ids),
         "suggested_commands": {
-            "mark_running": _rooted_cli_command(root, "update-status", "--id", experiment.id, "--status", "running"),
+            "mark_running": _rooted_cli_command(
+                root,
+                "update-status",
+                "--id",
+                experiment.id,
+                "--status",
+                "running",
+                command_style=command_style,
+            ),
             "record_finding": _rooted_cli_command(
                 root,
                 "record-finding",
@@ -2438,6 +2459,7 @@ def _experiment_context(root: Path, nodes: dict[str, ResearchNode], experiment: 
                 "medium",
                 "--outcome",
                 "inconclusive",
+                command_style=command_style,
             ),
         },
     }
@@ -2454,7 +2476,14 @@ def _alternative_option_for_decision(nodes: dict[str, ResearchNode], decision: R
     return "<option_id>"
 
 
-def _decision_repair_hints(root: Path, nodes: dict[str, ResearchNode], decision: ResearchNode, checklist: dict[str, Any]) -> list[dict[str, str]]:
+def _decision_repair_hints(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    decision: ResearchNode,
+    checklist: dict[str, Any],
+    *,
+    command_style: str = "console",
+) -> list[dict[str, str]]:
     hints: list[dict[str, str]] = []
     alternative_id = _alternative_option_for_decision(nodes, decision)
     for item in checklist.get("blocking_failures", []) or []:
@@ -2474,11 +2503,26 @@ def _decision_repair_hints(root: Path, nodes: dict[str, ResearchNode], decision:
                 "medium",
                 "--outcome",
                 "inconclusive",
+                command_style=command_style,
             )
         elif check_id in {"supporting_experiments", "evidence_strength", "evidence_summary"}:
-            command = _rooted_cli_command(root, "update-decision-evidence", "--id", decision.id)
+            command = _rooted_cli_command(
+                root,
+                "update-decision-evidence",
+                "--id",
+                decision.id,
+                command_style=command_style,
+            )
         elif check_id == "alternatives_considered":
-            command = _rooted_cli_command(root, "update-decision-checklist", "--id", decision.id, "--alternative", alternative_id)
+            command = _rooted_cli_command(
+                root,
+                "update-decision-checklist",
+                "--id",
+                decision.id,
+                "--alternative",
+                alternative_id,
+                command_style=command_style,
+            )
         elif check_id == "consequences":
             command = _rooted_cli_command(
                 root,
@@ -2487,6 +2531,7 @@ def _decision_repair_hints(root: Path, nodes: dict[str, ResearchNode], decision:
                 decision.id,
                 "--consequence",
                 "Describe downstream impact",
+                command_style=command_style,
             )
         elif check_id == "next_required_actions":
             command = _rooted_cli_command(
@@ -2496,6 +2541,7 @@ def _decision_repair_hints(root: Path, nodes: dict[str, ResearchNode], decision:
                 decision.id,
                 "--next-required-action",
                 "Describe required follow-up",
+                command_style=command_style,
             )
         hints.append({
             "check_id": check_id,
@@ -2506,27 +2552,61 @@ def _decision_repair_hints(root: Path, nodes: dict[str, ResearchNode], decision:
         hints.append({
             "check_id": "refresh_evidence",
             "reason": "Refresh decision evidence after recording experiment findings.",
-            "command": _rooted_cli_command(root, "update-decision-evidence", "--id", decision.id),
+            "command": _rooted_cli_command(
+                root,
+                "update-decision-evidence",
+                "--id",
+                decision.id,
+                command_style=command_style,
+            ),
         })
     return hints
 
 
-def _decision_context(root: Path, nodes: dict[str, ResearchNode], decision: ResearchNode) -> dict[str, Any]:
+def _decision_context(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    decision: ResearchNode,
+    *,
+    command_style: str = "console",
+) -> dict[str, Any]:
     checklist = build_decision_acceptance_checklist(nodes, decision.id)
     trace = build_decision_trace(nodes, decision.id)
     return {
         "kind": "decision",
         "trace": trace,
         "acceptance": checklist,
-        "repair_hints": _decision_repair_hints(root, nodes, decision, checklist),
+        "repair_hints": _decision_repair_hints(root, nodes, decision, checklist, command_style=command_style),
         "suggested_commands": {
-            "check_acceptance": _rooted_cli_command(root, "check-decision-acceptance", "--id", decision.id, "--json"),
-            "accept_dry_run": _rooted_cli_command(root, "accept-decision", "--id", decision.id, "--dry-run", "--json"),
+            "check_acceptance": _rooted_cli_command(
+                root,
+                "check-decision-acceptance",
+                "--id",
+                decision.id,
+                "--json",
+                command_style=command_style,
+            ),
+            "accept_dry_run": _rooted_cli_command(
+                root,
+                "accept-decision",
+                "--id",
+                decision.id,
+                "--dry-run",
+                "--json",
+                command_style=command_style,
+            ),
         },
     }
 
 
-def _option_onboarding_context(root: Path, nodes: dict[str, ResearchNode], current: dict[str, Any], option: ResearchNode) -> dict[str, Any]:
+def _option_onboarding_context(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any],
+    option: ResearchNode,
+    *,
+    command_style: str = "console",
+) -> dict[str, Any]:
     workstream = build_option_workstream_context(root, nodes, current, option.id)
     workstream["suggested_commands"] = {
         "claim": _rooted_cli_command(
@@ -2538,8 +2618,16 @@ def _option_onboarding_context(root: Path, nodes: dict[str, ResearchNode], curre
             "<agent_id>",
             "--objective",
             "Describe objective",
+            command_style=command_style,
         ),
-        "context": _rooted_cli_command(root, "option-workstream-context", "--option", option.id, "--json"),
+        "context": _rooted_cli_command(
+            root,
+            "option-workstream-context",
+            "--option",
+            option.id,
+            "--json",
+            command_style=command_style,
+        ),
         "report": _rooted_cli_command(
             root,
             "report-option-workstream",
@@ -2551,6 +2639,7 @@ def _option_onboarding_context(root: Path, nodes: dict[str, ResearchNode], curre
             "continue",
             "--summary",
             "Summarize evidence and recommendation",
+            command_style=command_style,
         ),
     }
     return {
@@ -2559,11 +2648,17 @@ def _option_onboarding_context(root: Path, nodes: dict[str, ResearchNode], curre
     }
 
 
-def _node_command_drafts(root: Path, node: ResearchNode, type_context: dict[str, Any]) -> dict[str, str]:
+def _node_command_drafts(
+    root: Path,
+    node: ResearchNode,
+    type_context: dict[str, Any],
+    *,
+    command_style: str = "console",
+) -> dict[str, str]:
     drafts = {
-        "validate": _rooted_cli_command(root, "validate", "--json"),
-        "build": _rooted_cli_command(root, "build"),
-        "search_node": _rooted_cli_command(root, "search", "--query", node.id, "--json"),
+        "validate": _rooted_cli_command(root, "validate", "--json", command_style=command_style),
+        "build": _rooted_cli_command(root, "build", command_style=command_style),
+        "search_node": _rooted_cli_command(root, "search", "--query", node.id, "--json", command_style=command_style),
     }
     if node.type == "option":
         drafts.update({
@@ -2578,8 +2673,16 @@ def _node_command_drafts(root: Path, node: ResearchNode, type_context: dict[str,
                 "Describe objective",
                 "--dry-run",
                 "--json",
+                command_style=command_style,
             ),
-            "option_workstream_context": _rooted_cli_command(root, "option-workstream-context", "--option", node.id, "--json"),
+            "option_workstream_context": _rooted_cli_command(
+                root,
+                "option-workstream-context",
+                "--option",
+                node.id,
+                "--json",
+                command_style=command_style,
+            ),
             "report_option_workstream": _rooted_cli_command(
                 root,
                 "report-option-workstream",
@@ -2593,6 +2696,7 @@ def _node_command_drafts(root: Path, node: ResearchNode, type_context: dict[str,
                 "Summarize evidence and recommendation",
                 "--dry-run",
                 "--json",
+                command_style=command_style,
             ),
         })
     elif node.type == "experiment":
@@ -2627,12 +2731,94 @@ def _recommended_next_steps(node: ResearchNode, type_context: dict[str, Any], dr
     return []
 
 
+def _compact_node_summary(node: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not node:
+        return None
+    fields = [
+        "id",
+        "type",
+        "title",
+        "status",
+        "priority",
+        "summary",
+        "question",
+        "hypothesis",
+        "current_best_option",
+        "decision_state",
+        "evidence_strength",
+        "evidence_summary",
+        "result_summary",
+        "outcome",
+    ]
+    return {field: node.get(field) for field in fields if node.get(field) not in (None, "", [])}
+
+
+def _compact_core_problem(parent_path: list[dict[str, Any]]) -> dict[str, Any] | None:
+    for node in reversed(parent_path):
+        if node.get("type") == "problem":
+            return node
+    return None
+
+
+def _compact_evidence_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    node = payload.get("node", {})
+    type_context = payload.get("type_context", {})
+    kind = type_context.get("kind") or node.get("type")
+    if kind == "option":
+        workstream = type_context.get("workstream", {})
+        evidence = workstream.get("evidence_summary", {})
+        return evidence if isinstance(evidence, dict) else {}
+    if kind == "decision":
+        trace = type_context.get("trace", {})
+        evidence = trace.get("evidence_summary", {})
+        return evidence if isinstance(evidence, dict) else {}
+    if kind == "experiment":
+        findings = type_context.get("findings", []) or []
+        return {
+            "findings_count": len(findings) if isinstance(findings, list) else 0,
+            "missing_evidence": bool(type_context.get("missing_evidence")),
+            "result_summary": type_context.get("result_summary"),
+            "outcome": type_context.get("outcome"),
+        }
+    return {
+        "evidence_strength": node.get("evidence_strength"),
+        "evidence_summary": node.get("evidence_summary"),
+    }
+
+
+def _compact_node_onboarding_context(payload: dict[str, Any]) -> dict[str, Any]:
+    parent_path = [
+        summary
+        for summary in (_compact_node_summary(item) for item in payload.get("parent_chain", []))
+        if summary
+    ]
+    recommended_next_steps = payload.get("recommended_next_steps", []) or []
+    return {
+        "schema_version": "node_context_compact_v1",
+        "node": _compact_node_summary(payload.get("node")) or {},
+        "parent_path": parent_path,
+        "core_problem": _compact_core_problem(parent_path),
+        "blockers": payload.get("blockers", []) or [],
+        "next_actions": payload.get("next_actions", []) or [],
+        "evidence_summary": _compact_evidence_summary(payload),
+        "recommended_next_step": recommended_next_steps[0] if recommended_next_steps else None,
+        "recommended_next_steps": recommended_next_steps,
+        "command_drafts": payload.get("command_drafts", {}) or {},
+        "context_freshness": payload.get("context_freshness", {}) or {},
+    }
+
+
 def build_node_onboarding_context(
     root: Path,
     nodes: dict[str, ResearchNode],
     current: dict[str, Any],
     node_id: str,
+    *,
+    compact: bool = False,
+    command_style: str = "console",
 ) -> dict[str, Any]:
+    if command_style not in VALID_COMMAND_STYLES:
+        raise ValueError(f"Invalid command style: {command_style}")
     if node_id not in nodes:
         raise ValueError(f"Node does not exist: {node_id}")
     node = nodes[node_id]
@@ -2646,16 +2832,16 @@ def build_node_onboarding_context(
     suggestions = build_action_suggestions(root, nodes, current, link_rows)
 
     if node.type == "option":
-        type_context = _option_onboarding_context(root, nodes, current, node)
+        type_context = _option_onboarding_context(root, nodes, current, node, command_style=command_style)
     elif node.type == "experiment":
-        type_context = _experiment_context(root, nodes, node)
+        type_context = _experiment_context(root, nodes, node, command_style=command_style)
     elif node.type == "decision":
-        type_context = _decision_context(root, nodes, node)
+        type_context = _decision_context(root, nodes, node, command_style=command_style)
     else:
         type_context = {"kind": node.type}
 
-    command_drafts = _node_command_drafts(root, node, type_context)
-    return {
+    command_drafts = _node_command_drafts(root, node, type_context, command_style=command_style)
+    payload = {
         "node": node_context(node),
         "parent_chain": _ordered_node_contexts(nodes, path_ids),
         "relations": {
@@ -2673,6 +2859,9 @@ def build_node_onboarding_context(
         "command_drafts": command_drafts,
         "recommended_next_steps": _recommended_next_steps(node, type_context, command_drafts),
     }
+    if compact:
+        return _compact_node_onboarding_context(payload)
+    return payload
 
 
 def build_option_subtree(nodes: dict[str, ResearchNode], option_id: str) -> dict[str, Any]:
