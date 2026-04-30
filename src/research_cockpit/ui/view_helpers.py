@@ -6,6 +6,9 @@ from typing import Any
 from research_cockpit.model import script_command, search_knowledge
 
 
+PRIMARY_GRAPH_NODE_TYPES = ("stage", "problem", "option", "experiment", "decision")
+
+
 def ordered_tab_keys(text: dict[str, str]) -> list[str]:
     keys = [
         "research_graph",
@@ -610,6 +613,11 @@ def default_selected_statuses(graph: dict, all_statuses: list[str]) -> list[str]
     return defaults or all_statuses
 
 
+def default_selected_node_types(all_types: list[str]) -> list[str]:
+    primary_types = set(PRIMARY_GRAPH_NODE_TYPES)
+    return [node_type for node_type in all_types if node_type in primary_types]
+
+
 def graph_filter_options(graph: dict) -> dict[str, list[str]]:
     available = graph.get("available_filters") or {}
     keys = ("types", "statuses", "stages", "focus_roles", "workstreams", "priorities")
@@ -704,7 +712,7 @@ def reset_global_graph_filter_state(
     if view_mode != "global" or previous_view_mode == "global" or skip_reset:
         return False
 
-    session_state["graph_node_types"] = list(all_types)
+    session_state["graph_node_types"] = default_selected_node_types(all_types)
     session_state["graph_statuses"] = list(all_statuses)
     session_state["graph_stages"] = list(all_stages)
     session_state["graph_focus_roles"] = list(all_focus_roles)

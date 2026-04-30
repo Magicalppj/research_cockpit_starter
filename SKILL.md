@@ -30,6 +30,8 @@ If the `research-cockpit` console script is unavailable but the package is insta
    - `research_cockpit/dashboards/focus_context_pack.json`
 4. Use `research-cockpit` commands for mutating operations. Do not bypass helpers by hand-editing YAML unless the relevant capability explicitly says YAML repair is the right path.
 
+Default research graph reasoning centers on `stage`, `problem`, `option`, `experiment`, and `decision`. Treat `artifact` nodes as supporting evidence/resources by default; do not create an artifact node for an ordinary file, config, JSON, or result unless that artifact is itself a long-lived research object or key deliverable.
+
 ## Capability Routing
 
 - Graph state, data files, saved graph views, and interaction log: `capabilities/graph-state.md`

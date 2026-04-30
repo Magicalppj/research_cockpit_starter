@@ -1,6 +1,8 @@
 # Research Cockpit
 
-Research Cockpit 是一个 repo-native 的研究记录与 agent 协作插件。它把长期研究拆成可追踪的图谱节点：`stage`、`problem`、`option`、`experiment`、`decision` 和 `artifact`，并用本地 YAML / Markdown / JSON 保存研究状态、证据、决策和 agent 可读上下文。
+Research Cockpit 是一个 repo-native 的研究记录与 agent 协作插件。它把长期研究拆成可追踪的主图节点：`stage`、`problem`、`option`、`experiment` 和 `decision`，并用本地 YAML / Markdown / JSON 保存研究状态、证据、决策和 agent 可读上下文。
+
+`artifact` 仍是合法节点类型，但默认作为 evidence / resource / supporting material 使用。普通文件、配置、JSON、数据集和实验结果优先通过 `linked_artifacts`、`links`、notes 或 Resources 页面挂到研究节点上；只有 artifact 本身是长期研究对象或关键产出时，才建议提升为主图可见节点。
 
 这个仓库本身就是可安装的 agent skill / plugin。核心代码和工具在插件仓库内，真实研究项目只需要在仓库根目录保存自己的 `research_cockpit/` 状态资产。
 
@@ -126,7 +128,7 @@ research-cockpit ui --root research_cockpit --server.port 8501
 
 前端主要页面：
 
-- Research Graph：React Flow 图谱、节点点击、右侧 inspector、筛选、保存/加载视图、PyVis fallback。
+- Research Graph：React Flow 图谱、节点点击、右侧 inspector、筛选、保存/加载视图、PyVis fallback；默认聚焦研究主链，artifact 可在 Graph Controls 中手动显示。
 - Dashboard：当前上下文、建议动作和数据摘要。
 - Branch Comparison：比较同一 problem 下的 options。
 - Decision Trace：查看 decision checklist、证据和修复提示。
