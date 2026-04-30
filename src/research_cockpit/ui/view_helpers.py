@@ -46,6 +46,82 @@ def format_node_option(nodes: dict, node_id: str) -> str:
     return f"{node.title} | {node.id} | {node.type}/{node.status}"
 
 
+def _first_text(*values: object) -> str:
+    for value in values:
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def build_node_overview(
+    node: Any,
+    nodes: dict,
+    current: dict | None,
+    link_rows: list[dict] | None,
+    action_suggestions: list[dict] | None,
+) -> dict[str, Any]:
+    raw = getattr(node, "raw", {}) or {}
+    purpose_by_type = {
+        "problem": (raw.get("question"), getattr(node, "summary", "")),
+        "option": (raw.get("hypothesis"), getattr(node, "summary", "")),
+        "experiment": (getattr(node, "summary", ""), raw.get("hypothesis")),
+        "decision": (raw.get("decision_summary"), raw.get("rationale"), getattr(node, "summary", "")),
+    }
+    purpose = _first_text(*(purpose_by_type.get(getattr(node, "type", ""), (getattr(node, "summary", ""),))))
+
+    blockers = [str(item) for item in raw.get("blockers", []) or [] if item not in (None, "")]
+    if blockers:
+        current_state = {"kind": "blockers", "items": blockers}
+    else:
+        state_value = _first_text(
+            raw.get("result_summary"),
+            raw.get("evidence_summary"),
+            raw.get("outcome"),
+            f"{getattr(node, 'title', getattr(node, 'id', ''))} is currently {getattr(node, 'status', '')}.",
+        )
+        state_kind = "status"
+        for candidate in ("result_summary", "evidence_summary", "outcome"):
+            if raw.get(candidate) not in (None, ""):
+                state_kind = candidate
+                break
+        current_state = {"kind": state_kind, "items": [state_value] if state_value else []}
+
+    next_items = [str(item) for item in raw.get("next_actions", []) or [] if item not in (None, "")]
+    for suggestion in action_suggestions or []:
+        related_ids = [str(item) for item in suggestion.get("related_node_ids", []) or []]
+        if suggestion.get("source_node_id") == getattr(node, "id", "") or getattr(node, "id", "") in related_ids:
+            action = suggestion.get("action")
+            if action not in (None, "") and str(action) not in next_items:
+                next_items.append(str(action))
+
+    node_link_rows = [
+        row
+        for row in (link_rows or [])
+        if row.get("node_id") == getattr(node, "id", "")
+    ]
+
+    def relation_row(node_id: str) -> dict[str, str]:
+        return {
+            "id": node_id,
+            "label": format_node_option(nodes, node_id),
+        }
+
+    parent_id = getattr(node, "parent", None)
+    child_ids = list(getattr(node, "children", []) or [])
+    relations = {
+        "parent": [relation_row(str(parent_id))] if parent_id else [],
+        "children": [relation_row(str(child_id)) for child_id in child_ids],
+    }
+
+    return {
+        "purpose": purpose,
+        "current_state": current_state,
+        "next": next_items,
+        "key_resources": node_link_rows[:3],
+        "relations": relations,
+    }
+
+
 def build_set_focus_command(current: dict, focus_node_id: str) -> str:
     parts = [script_command("set_focus.py")]
     for field, flag in (
