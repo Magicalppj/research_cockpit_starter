@@ -10,12 +10,12 @@ ROOT = default_data_root()
 
 from research_cockpit.model import (
     ValidationError,
-    build_node_onboarding_context,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     validate_cockpit,
 )
+from research_cockpit.node_onboarding import build_node_onboarding_context
 
 
 def node_context_payload(
