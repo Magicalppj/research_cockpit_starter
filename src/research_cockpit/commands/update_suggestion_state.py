@@ -12,13 +12,13 @@ ROOT = default_data_root()
 from research_cockpit.model import (
     VALID_SUGGESTION_LIFECYCLE_STATES,
     ValidationError,
-    build_link_rows,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     save_yaml,
     validate_cockpit,
 )
+from research_cockpit.resources import build_link_rows
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.commands.build_dashboard import build_dashboard
 
