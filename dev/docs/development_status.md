@@ -1,4 +1,22 @@
 # Research Cockpit 开发状态
+## Node Inspector Information Architecture v1（2026-04-30）
+
+本批优化 Streamlit 右侧节点 inspector，让点击节点后的第一屏从元数据展示转为研究判断视图。
+
+已完成：
+
+- 节点标题下方改为紧凑 chips 展示 type/status/priority，节点 ID 下沉为辅助 caption，不再用大块 code card 占据首屏。
+- 新增 Overview/概览 tab，优先展示节点目的、当前进展、下一步行动和关键资源。
+- 新增 `build_node_overview(...)` UI helper，按节点类型选择 purpose 字段，并优先显示 blockers、result summary、evidence summary、outcome 或状态说明。
+- 相关 action suggestions 可出现在 Overview 的 Next 区域，完整安全命令仍保留在 Actions tab。
+- 父子关系下沉到 Relations/关系 tab，并用可读标题和 type/status 展示，不再优先裸露 raw ID。
+- 增加 UI 单元测试，覆盖字段优先级、done experiment 的 result summary、next actions/suggestions、资源截断和关系可读标签。
+
+后续可选：
+
+- 为 Overview 增加更细的节点类型模板，例如 problem 显示 candidate options，decision 显示 acceptance readiness。
+- 在右侧 inspector 中为 note/resource 链接增加更紧凑的可点击展示。
+
 ## Artifact Supporting Material Semantics v1（2026-04-30）
 
 本批将 `artifact` 从默认研究主图节点调整为证据 / 资源 / 补充材料语义，避免文件级对象干扰长期研究图谱的主推理链。

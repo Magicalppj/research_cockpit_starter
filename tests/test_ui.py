@@ -17,6 +17,7 @@ from research_cockpit.ui.view_helpers import (
     build_check_decision_acceptance_command,
     build_cleanup_suggestion_lifecycle_command,
     build_create_note_command,
+    build_node_overview,
     build_promote_decision_command,
     build_record_finding_command,
     build_set_focus_command,
@@ -133,6 +134,19 @@ class UiRenderingTests(unittest.TestCase):
         self.assertNotEqual(select_key_index, -1)
         self.assertLess(pending_index, search_widget_index)
         self.assertLess(pending_index, select_key_index)
+
+    def test_node_detail_prioritizes_overview_before_raw_metadata(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+        detail_start = source.find("def render_node_detail(")
+        evidence_start = source.find("with evidence_tab:", detail_start)
+        overview_block = source[detail_start:evidence_start]
+
+        self.assertIn('text["overview_tab"]', overview_block)
+        self.assertIn('text["node_purpose"]', overview_block)
+        self.assertIn('text["current_state"]', overview_block)
+        self.assertIn('text["key_resources"]', overview_block)
+        self.assertNotIn("c1.code(node.type)", overview_block)
+        self.assertNotIn("c2.code(node.status)", overview_block)
 
     def test_global_graph_transition_resets_stale_scope_filters(self) -> None:
         state = {
@@ -593,6 +607,153 @@ class UiRenderingTests(unittest.TestCase):
         defaults = default_selected_node_types(["artifact", "decision", "experiment", "option", "problem", "stage"])
 
         self.assertEqual(defaults, ["decision", "experiment", "option", "problem", "stage"])
+
+    def test_node_overview_uses_type_specific_purpose_fields(self) -> None:
+        nodes = {
+            "problem_text": SimpleNamespace(
+                id="problem_text",
+                title="Weak text control",
+                type="problem",
+                status="active",
+                priority="high",
+                summary="Fallback problem summary",
+                parent="stage_text",
+                children=[],
+                tags=[],
+                raw={"question": "Why is text control weak?"},
+            ),
+            "option_t5": SimpleNamespace(
+                id="option_t5",
+                title="T5 option",
+                type="option",
+                status="active",
+                priority="medium",
+                summary="Fallback option summary",
+                parent="problem_text",
+                children=[],
+                tags=[],
+                raw={"hypothesis": "T5 alignment improves edits."},
+            ),
+            "decision_t5": SimpleNamespace(
+                id="decision_t5",
+                title="Use T5",
+                type="decision",
+                status="proposed",
+                priority="high",
+                summary="Fallback decision summary",
+                parent="option_t5",
+                children=[],
+                tags=[],
+                raw={"rationale": "Best evidence so far."},
+            ),
+        }
+
+        problem = build_node_overview(nodes["problem_text"], nodes, {}, [], [])
+        option = build_node_overview(nodes["option_t5"], nodes, {}, [], [])
+        decision = build_node_overview(nodes["decision_t5"], nodes, {}, [], [])
+
+        self.assertEqual(problem["purpose"], "Why is text control weak?")
+        self.assertEqual(option["purpose"], "T5 alignment improves edits.")
+        self.assertEqual(decision["purpose"], "Best evidence so far.")
+
+    def test_node_overview_prioritizes_result_summary_for_done_experiment(self) -> None:
+        node = SimpleNamespace(
+            id="experiment_t5",
+            title="T5 evaluation",
+            type="experiment",
+            status="done",
+            priority=None,
+            summary="Run T5 evaluation.",
+            parent="option_t5",
+            children=[],
+            tags=[],
+            raw={"result_summary": "T5 improves alignment but hurts latency."},
+        )
+
+        overview = build_node_overview(node, {"experiment_t5": node}, {}, [], [])
+
+        self.assertEqual(overview["current_state"]["kind"], "result_summary")
+        self.assertEqual(overview["current_state"]["items"], ["T5 improves alignment but hurts latency."])
+
+    def test_node_overview_combines_next_actions_and_related_suggestions(self) -> None:
+        node = SimpleNamespace(
+            id="experiment_t5",
+            title="T5 evaluation",
+            type="experiment",
+            status="done",
+            priority=None,
+            summary="Run T5 evaluation.",
+            parent=None,
+            children=[],
+            tags=[],
+            raw={"next_actions": ["Record final metrics."]},
+        )
+        suggestions = [
+            {"source_node_id": "experiment_t5", "action": "Promote the strongest option."},
+            {"source_node_id": "other", "related_node_ids": ["experiment_t5"], "action": "Review related decision."},
+            {"source_node_id": "other", "action": "Ignore unrelated suggestion."},
+        ]
+
+        overview = build_node_overview(node, {"experiment_t5": node}, {}, [], suggestions)
+
+        self.assertEqual(
+            overview["next"],
+            ["Record final metrics.", "Promote the strongest option.", "Review related decision."],
+        )
+
+    def test_node_overview_limits_key_resources_and_uses_readable_relation_labels(self) -> None:
+        parent = SimpleNamespace(
+            id="option_t5",
+            title="T5 option",
+            type="option",
+            status="active",
+            priority=None,
+            summary="",
+            parent=None,
+            children=["experiment_t5"],
+            tags=[],
+            raw={},
+        )
+        child = SimpleNamespace(
+            id="experiment_t5",
+            title="T5 evaluation",
+            type="experiment",
+            status="done",
+            priority=None,
+            summary="Run T5 evaluation.",
+            parent="option_t5",
+            children=["decision_t5"],
+            tags=[],
+            raw={},
+        )
+        decision = SimpleNamespace(
+            id="decision_t5",
+            title="Use T5",
+            type="decision",
+            status="proposed",
+            priority=None,
+            summary="",
+            parent="experiment_t5",
+            children=[],
+            tags=[],
+            raw={},
+        )
+        resources = [
+            {"node_id": "experiment_t5", "target": f"resource_{index}.json", "kind": "path"}
+            for index in range(4)
+        ]
+
+        overview = build_node_overview(
+            child,
+            {"option_t5": parent, "experiment_t5": child, "decision_t5": decision},
+            {},
+            resources,
+            [],
+        )
+
+        self.assertEqual([row["target"] for row in overview["key_resources"]], ["resource_0.json", "resource_1.json", "resource_2.json"])
+        self.assertEqual(overview["relations"]["parent"][0]["label"], "T5 option | option_t5 | option/active")
+        self.assertEqual(overview["relations"]["children"][0]["label"], "Use T5 | decision_t5 | decision/proposed")
 
     def test_build_set_focus_command_includes_focus_node(self) -> None:
         current = {
