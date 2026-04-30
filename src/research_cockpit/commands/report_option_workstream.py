@@ -14,16 +14,12 @@ from research_cockpit.model import (
     ResearchNode,
     VALID_WORKSTREAM_RECOMMENDATIONS,
     ValidationError,
-    load_explicit_edges,
-    load_nodes,
     load_yaml,
-    save_yaml,
     script_command,
     validate_cockpit,
 )
 from research_cockpit.option_workstreams import build_option_workstream_context
-from research_cockpit.interaction_log import append_interaction_log
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands._runtime import finish_mutation, load_validated_state
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -41,10 +37,9 @@ def report_option_workstream(
         allowed = ", ".join(sorted(VALID_WORKSTREAM_RECOMMENDATIONS))
         raise ValueError(f"Invalid recommendation {recommendation!r}; allowed: {allowed}")
 
-    nodes = load_nodes(root)
-    current = load_yaml(root / "current_state.yaml")
-    explicit_edges = load_explicit_edges(root)
-    validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
+    state = load_validated_state(root)
+    nodes = state.nodes
+    current = state.current
     if option_id not in nodes:
         raise ValueError(f"Option node does not exist: {option_id}")
     if nodes[option_id].type != "option":
@@ -84,7 +79,7 @@ def report_option_workstream(
 
     candidate = dict(nodes)
     candidate[option_id] = ResearchNode.from_dict(data)
-    validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
+    validate_cockpit(root, candidate, current, state.explicit_edges, raise_on_error=True)
     preview = {
         "dry_run": dry_run,
         "changed": not dry_run,
@@ -106,32 +101,33 @@ def report_option_workstream(
         preview["changed"] = False
         return preview
 
-    save_yaml(option_path, data)
-    append_interaction_log(
+    finish_mutation(
         root,
-        kind="report_option",
-        actor=agent_id,
-        node_id=option_id,
-        command=(
-            f"{script_command('report_option_workstream.py')}"
-            f" --option {option_id} --agent {agent_id} --recommend {recommendation}"
-        ),
-        before={
-            "agent_workstream": before_workstream,
-            "workstream_report": before_report,
+        [(option_path, data)],
+        interaction={
+            "kind": "report_option",
+            "actor": agent_id,
+            "node_id": option_id,
+            "command": (
+                f"{script_command('report_option_workstream.py')}"
+                f" --option {option_id} --agent {agent_id} --recommend {recommendation}"
+            ),
+            "before": {
+                "agent_workstream": before_workstream,
+                "workstream_report": before_report,
+            },
+            "after": {
+                "agent_workstream": data["agent_workstream"],
+                "workstream_report": data["workstream_report"],
+            },
+            "extra": {
+                "option_id": option_id,
+                "agent_id": agent_id,
+                "recommendation": recommendation,
+            },
         },
-        after={
-            "agent_workstream": data["agent_workstream"],
-            "workstream_report": data["workstream_report"],
-        },
-        extra={
-            "option_id": option_id,
-            "agent_id": agent_id,
-            "recommendation": recommendation,
-        },
+        rebuild_dashboard=rebuild_dashboard,
     )
-    if rebuild_dashboard:
-        build_dashboard(root)
     return option_path
 
 

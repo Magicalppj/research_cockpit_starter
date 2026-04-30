@@ -13,14 +13,11 @@ from research_cockpit.model import (
     ResearchNode,
     VALID_FINDING_CONFIDENCES,
     VALID_FINDING_OUTCOMES,
-    load_nodes,
     load_yaml,
-    save_yaml,
     script_command,
     validate_cockpit,
 )
-from research_cockpit.interaction_log import append_interaction_log
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands._runtime import finish_mutation, load_validated_state
 
 
 def find_node_file(root: Path, node_id: str) -> Path:
@@ -53,7 +50,8 @@ def record_finding(
     summary: str | None = None,
     rebuild_dashboard: bool = True,
 ) -> Path:
-    nodes = load_nodes(root)
+    state = load_validated_state(root)
+    nodes = state.nodes
     if experiment_id not in nodes:
         raise FileNotFoundError(f"Experiment node does not exist: {experiment_id}")
     experiment = nodes[experiment_id]
@@ -101,32 +99,33 @@ def record_finding(
 
     candidate = dict(nodes)
     candidate[experiment_id] = ResearchNode.from_dict(data)
-    validate_cockpit(root, candidate, load_yaml(root / "current_state.yaml"), raise_on_error=True)
+    validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
 
-    save_yaml(path, data)
-    append_interaction_log(
+    finish_mutation(
         root,
-        kind="record_finding",
-        actor="researcher",
-        node_id=experiment_id,
-        command=f"{script_command('record_finding.py')} --experiment {experiment_id} --confidence {confidence}",
-        before=before_summary,
-        after={
-            "finding_count": len(findings),
-            "result_summary": data.get("result_summary"),
-            "latest_finding_id": finding["id"],
+        [(path, data)],
+        interaction={
+            "kind": "record_finding",
+            "actor": "researcher",
+            "node_id": experiment_id,
+            "command": f"{script_command('record_finding.py')} --experiment {experiment_id} --confidence {confidence}",
+            "before": before_summary,
+            "after": {
+                "finding_count": len(findings),
+                "result_summary": data.get("result_summary"),
+                "latest_finding_id": finding["id"],
+            },
+            "extra": {
+                "experiment_id": experiment_id,
+                "finding_id": finding["id"],
+                "confidence": confidence,
+                "outcome": outcome,
+                "metric_count": len(metrics or []),
+                "linked_artifacts": artifacts,
+            },
         },
-        extra={
-            "experiment_id": experiment_id,
-            "finding_id": finding["id"],
-            "confidence": confidence,
-            "outcome": outcome,
-            "metric_count": len(metrics or []),
-            "linked_artifacts": artifacts,
-        },
+        rebuild_dashboard=rebuild_dashboard,
     )
-    if rebuild_dashboard:
-        build_dashboard(root)
     return path
 
 
