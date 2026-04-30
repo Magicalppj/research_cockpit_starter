@@ -41,6 +41,11 @@ def _summarize_json(name: str, stdout: str) -> dict[str, Any]:
         return {"result_count": len(data) if isinstance(data, list) else 0}
     if name == "suggest_next_actions":
         return {"suggestion_count": len(data) if isinstance(data, list) else 0}
+    if name == "node_context":
+        return {
+            "node_id": data.get("node", {}).get("id") if isinstance(data, dict) else None,
+            "recommended_next_step_count": len(data.get("recommended_next_steps", [])) if isinstance(data, dict) else None,
+        }
     if name == "option_workstream_context":
         return {
             "option_id": data.get("option", {}).get("id") if isinstance(data, dict) else None,
@@ -139,6 +144,10 @@ def skill_smoke_test_payload(
         _run_check("suggest_next_actions", _cli_args(python, "suggest-next-actions", "--root", root_arg, "--json")),
     ]
     if option_id:
+        checks.append(_run_check(
+            "node_context",
+            _cli_args(python, "node-context", "--root", root_arg, "--id", option_id, "--json"),
+        ))
         checks.append(_run_check(
             "option_workstream_context",
             _cli_args(python, "option-workstream-context", "--root", root_arg, "--option", option_id, "--json"),

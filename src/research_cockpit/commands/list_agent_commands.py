@@ -15,6 +15,7 @@ CAPABILITY_BY_COMMAND = {
     "skill_smoke_test.py": "capabilities/integrations.md",
     "search_knowledge.py": "capabilities/focus-context.md",
     "suggest_next_actions.py": "capabilities/focus-context.md",
+    "node_context.py": "capabilities/focus-context.md",
     "option_workstream_context.py": "capabilities/experiment-tracking.md",
     "check_decision_acceptance.py": "capabilities/decision-adr.md",
     "add_node.py": "capabilities/node-management.md",
@@ -77,7 +78,7 @@ COMMANDS: list[dict[str, object]] = [
     {
         "name": "build_dashboard.py",
         "purpose": "Regenerate dashboard and context JSON from YAML truth source.",
-        "mutating": False,
+        "mutating": True,
         "writes_dashboard": True,
         "writes_generated_files": True,
         "supports_json": False,
@@ -112,6 +113,15 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": False,
         "supports_no_build": False,
         "recommended_when": "Decide what work should happen next.",
+    },
+    {
+        "name": "node_context.py",
+        "purpose": "Read a single node onboarding context with parent chain, blockers, evidence, and safe next commands.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "recommended_when": "Start work from a specific research node id.",
     },
     {
         "name": "option_workstream_context.py",

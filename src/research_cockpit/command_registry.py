@@ -9,6 +9,7 @@ COMMAND_MODULES: dict[str, str] = {
     "smoke": "skill_smoke_test",
     "search": "search_knowledge",
     "suggest-next-actions": "suggest_next_actions",
+    "node-context": "node_context",
     "option-workstream-context": "option_workstream_context",
     "check-decision-acceptance": "check_decision_acceptance",
     "add-node": "add_node",

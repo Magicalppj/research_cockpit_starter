@@ -27,6 +27,12 @@ from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.record_finding import find_node_file
 
 
+class DecisionNotReadyError(ValueError):
+    def __init__(self, message: str, checklist: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.checklist = checklist
+
+
 def accept_decision(
     root: Path,
     *,
@@ -44,7 +50,7 @@ def accept_decision(
 
     checklist = build_decision_acceptance_checklist(nodes, decision_id)
     if not force_accept and not checklist["ready"]:
-        raise ValueError(decision_acceptance_failure_message(checklist))
+        raise DecisionNotReadyError(decision_acceptance_failure_message(checklist), checklist)
 
     option_id = decision.parent
     if not option_id or option_id not in nodes or nodes[str(option_id)].type != "option":
@@ -156,6 +162,21 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
         )
+    except DecisionNotReadyError as exc:
+        if args.json:
+            payload = {
+                "decision_id": args.decision_id,
+                "dry_run": args.dry_run,
+                "changed": False,
+                "ready": False,
+                "error": str(exc),
+                "checklist": exc.checklist,
+                "blocking_failures": exc.checklist.get("blocking_failures", []),
+            }
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(str(exc))
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc
