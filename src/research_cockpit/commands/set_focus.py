@@ -9,7 +9,6 @@ from research_cockpit.paths import default_data_root
 ROOT = default_data_root()
 
 from research_cockpit.model import (
-    append_interaction_log,
     derive_focus_fields,
     load_nodes,
     load_yaml,
@@ -17,6 +16,7 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
+from research_cockpit.interaction_log import append_interaction_log
 from research_cockpit.commands.build_dashboard import build_dashboard
 
 
