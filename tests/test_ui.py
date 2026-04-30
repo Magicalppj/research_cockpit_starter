@@ -23,6 +23,7 @@ from research_cockpit.ui.view_helpers import (
     build_update_decision_checklist_command,
     build_update_suggestion_state_command,
     default_detail_node_id,
+    default_selected_node_types,
     default_selected_statuses,
     edge_style_for_type,
     format_comparison_rows,
@@ -136,7 +137,7 @@ class UiRenderingTests(unittest.TestCase):
     def test_global_graph_transition_resets_stale_scope_filters(self) -> None:
         state = {
             "graph_previous_view_mode": "focus_depth_2",
-            "graph_node_types": ["stage", "problem", "option"],
+            "graph_node_types": ["stage", "problem", "option", "artifact"],
             "graph_statuses": ["active"],
             "graph_stages": ["stage_demo"],
             "graph_focus_roles": ["parent", "current", "unrelated"],
@@ -149,7 +150,7 @@ class UiRenderingTests(unittest.TestCase):
         changed = reset_global_graph_filter_state(
             state,
             "global",
-            all_types=["decision", "experiment", "option", "problem", "stage"],
+            all_types=["artifact", "decision", "experiment", "option", "problem", "stage"],
             all_statuses=["active", "open", "parked", "planned", "proposed"],
             all_stages=["stage_demo"],
             all_focus_roles=["child", "current", "parent", "sibling", "unrelated"],
@@ -157,6 +158,7 @@ class UiRenderingTests(unittest.TestCase):
 
         self.assertTrue(changed)
         self.assertEqual(state["graph_previous_view_mode"], "global")
+        self.assertEqual(state["graph_node_types"], ["decision", "experiment", "option", "problem", "stage"])
         self.assertEqual(state["graph_statuses"], ["active", "open", "parked", "planned", "proposed"])
         self.assertEqual(state["graph_focus_roles"], ["child", "current", "parent", "sibling", "unrelated"])
         self.assertEqual(state["graph_workstreams"], [])
@@ -413,7 +415,7 @@ class UiRenderingTests(unittest.TestCase):
             {
                 "scope": "current_branch",
                 "filters": {
-                    "node_types": ["problem", "missing_type"],
+                    "node_types": ["problem", "artifact", "missing_type"],
                     "statuses": ["active", "archived"],
                     "stages": ["stage_text", "stage_old"],
                     "focus_roles": ["current", "unrelated"],
@@ -424,7 +426,7 @@ class UiRenderingTests(unittest.TestCase):
                 },
             },
             {
-                "types": ["problem", "option"],
+                "types": ["problem", "artifact", "option"],
                 "statuses": ["active"],
                 "stages": ["stage_text"],
                 "focus_roles": ["current", "child"],
@@ -437,7 +439,7 @@ class UiRenderingTests(unittest.TestCase):
         )
 
         self.assertEqual(state["graph_view_mode"], "Current Branch")
-        self.assertEqual(state["graph_node_types"], ["problem"])
+        self.assertEqual(state["graph_node_types"], ["problem", "artifact"])
         self.assertEqual(state["graph_statuses"], ["active"])
         self.assertEqual(state["graph_stages"], ["stage_text"])
         self.assertEqual(state["graph_focus_roles"], ["current"])
@@ -586,6 +588,11 @@ class UiRenderingTests(unittest.TestCase):
         defaults = default_selected_statuses(graph, ["active", "archived", "parked", "rejected"])
 
         self.assertEqual(defaults, ["active"])
+
+    def test_default_node_type_filter_treats_artifact_as_supporting_material(self) -> None:
+        defaults = default_selected_node_types(["artifact", "decision", "experiment", "option", "problem", "stage"])
+
+        self.assertEqual(defaults, ["decision", "experiment", "option", "problem", "stage"])
 
     def test_build_set_focus_command_includes_focus_node(self) -> None:
         current = {

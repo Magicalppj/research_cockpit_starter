@@ -1,4 +1,21 @@
 # Research Cockpit 开发状态
+## Artifact Supporting Material Semantics v1（2026-04-30）
+
+本批将 `artifact` 从默认研究主图节点调整为证据 / 资源 / 补充材料语义，避免文件级对象干扰长期研究图谱的主推理链。
+
+已完成：
+
+- 保留 `artifact` 为合法节点类型，不修改 YAML/schema 兼容性、`linked_artifacts` 校验、`record-finding --artifact` 或 context pack 输出。
+- Streamlit 图谱默认 node type 选择改为 `stage/problem/option/experiment/decision`，`artifact` 默认隐藏，但 Graph Controls 仍可手动勾选显示。
+- Global graph 自动重置筛选时同样默认排除 `artifact`；saved graph view 如果显式包含 `artifact`，加载时继续保留。
+- README、`SKILL.md`、capabilities、命令 manifest 和图谱 legend 已同步说明：普通文件、config、JSON、实验结果优先作为 linked resources / evidence / notes，只有长期研究对象或关键产出才提升为 artifact 节点。
+- 新增 UI helper 测试覆盖默认 node type、global reset 和 saved view 显式 artifact 保留行为。
+
+后续可选：
+
+- 为 Resources 页面增加更明确的 artifact/resource 分组说明。
+- 在 `add-node --type artifact` 帮助文本中补充“只用于长期研究对象或关键产出”的提示。
+
 ## Subagent CLI Findings Repair v1（2026-04-29）
 
 本批修复真实 subagent CLI 实战测试中暴露的小缺口，目标是让已安装插件在受限 agent shell 中更容易被正确调用，并补齐关键写入事件的可追踪性。
