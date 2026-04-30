@@ -48,6 +48,7 @@ from research_cockpit.ui.view_helpers import (
     build_claim_option_command,
     build_cleanup_suggestion_lifecycle_command,
     build_create_note_command,
+    build_node_overview,
     build_option_workstream_context_command,
     build_promote_decision_command,
     build_record_finding_command,
@@ -148,39 +149,61 @@ def render_node_detail(
     text: dict[str, str],
     current: dict | None = None,
     link_rows: list[dict] | None = None,
+    action_suggestions: list[dict] | None = None,
 ) -> None:
     if not node_id:
         st.info(text["select_node_hint"])
         return
 
     node = nodes[node_id]
+    overview = build_node_overview(node, nodes, current, link_rows, action_suggestions)
     st.subheader(node.title)
-    summary_tab, evidence_tab, resources_tab, actions_tab, agent_tab = st.tabs([
-        text["summary_tab"],
+    chips = [node.type, node.status]
+    if node.priority:
+        chips.append(node.priority)
+    st.caption(" · ".join(chips))
+    st.caption(f"ID: `{node.id}`")
+    overview_tab, evidence_tab, resources_tab, relations_tab, actions_tab, agent_tab = st.tabs([
+        text["overview_tab"],
         text["evidence_tab"],
         text["resources_tab"],
+        text["relations_tab"],
         text["actions_tab"],
         text["agent_tab"],
     ])
 
-    with summary_tab:
-        c1, c2 = st.columns(2)
-        c1.write(text["type"])
-        c1.code(node.type)
-        c2.write(text["status"])
-        c2.code(node.status)
-        st.write(text["priority"])
-        st.code(node.priority or text["none"])
-        st.write(text["summary"])
-        st.write(node.summary or text["no_summary"])
+    with overview_tab:
+        st.write(text["node_purpose"])
+        st.write(overview["purpose"] or text["no_summary"])
+        st.write(text["current_state"])
+        current_state = overview["current_state"]
+        state_items = current_state.get("items", [])
+        if state_items:
+            for item in state_items:
+                if current_state.get("kind") == "blockers":
+                    st.warning(item)
+                else:
+                    st.write(item)
+        else:
+            st.caption(text["none"])
+        st.write(text["next_actions"])
+        if overview["next"]:
+            for item in overview["next"]:
+                st.write(f"- {item}")
+        else:
+            st.caption(text["no_next_actions"])
+        st.write(text["key_resources"])
+        if overview["key_resources"]:
+            st.dataframe(
+                pd.DataFrame(format_resource_rows(overview["key_resources"])),
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.caption(text["no_resources"])
         if node.tags:
             st.write(text["tags"])
             st.write(", ".join(node.tags))
-        c3, c4 = st.columns(2)
-        c3.write(text["parent"])
-        c3.code(node.parent or text["none"])
-        c4.write(text["children"])
-        c4.code(", ".join(node.children) if node.children else text["none"])
 
     with evidence_tab:
         evidence_fields = [
@@ -228,6 +251,20 @@ def render_node_detail(
             st.dataframe(pd.DataFrame(format_resource_rows(node_link_rows)), use_container_width=True, hide_index=True)
         else:
             st.caption(text["no_resources"])
+
+    with relations_tab:
+        st.write(text["parent"])
+        if overview["relations"]["parent"]:
+            for row in overview["relations"]["parent"]:
+                st.write(row["label"])
+        else:
+            st.caption(text["none"])
+        st.write(text["children"])
+        if overview["relations"]["children"]:
+            for row in overview["relations"]["children"]:
+                st.write(f"- {row['label']}")
+        else:
+            st.caption(text["none"])
 
     with actions_tab:
         if current:
@@ -372,6 +409,7 @@ def render_graph_tab(
     text: dict[str, str],
     link_rows: list[dict],
     saved_graph_views: list[dict],
+    action_suggestions: list[dict] | None = None,
 ) -> None:
     options = graph_filter_options(graph)
     all_types = options["types"] or sorted({node["type"] for node in graph["nodes"]})
@@ -529,7 +567,7 @@ def render_graph_tab(
         if node_id != st.session_state.get("graph_detail_node"):
             st.session_state["graph_detail_node"] = node_id
             selection_changed = True
-        render_node_detail(nodes, node_id, text, current, link_rows)
+        render_node_detail(nodes, node_id, text, current, link_rows, action_suggestions)
 
     saved_view_by_id = {str(view.get("id")): view for view in saved_graph_views if view.get("id")}
     if saved_view_by_id:
@@ -1212,7 +1250,7 @@ def main() -> None:
         st.caption(text["page_caption"])
 
     if page_key == "research_graph":
-        render_graph_tab(nodes, graph, current, text, link_rows, saved_graph_views)
+        render_graph_tab(nodes, graph, current, text, link_rows, saved_graph_views, action_suggestions)
     elif page_key == "dashboard":
         render_dashboard(context, validation_errors, text, action_suggestions)
     elif page_key == "branch_comparison":
