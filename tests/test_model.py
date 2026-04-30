@@ -24,6 +24,7 @@ from research_cockpit.model import (
     build_focus_context,
     build_experiment_matrix,
     build_link_rows,
+    build_node_onboarding_context,
     build_option_subtree,
     build_option_workstream_context,
     build_option_workstream_rows,
@@ -1079,6 +1080,59 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(context["evidence_summary"]["findings_count"], 1)
         self.assertIn("Try sub option", context["open_next_actions"])
         self.assertEqual(rows[0]["option_id"], "option_t5")
+
+    def test_node_onboarding_context_for_option_includes_workstream_and_rooted_commands(self) -> None:
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        context = build_node_onboarding_context(self.root, nodes, current, "option_t5")
+
+        self.assertEqual(context["node"]["id"], "option_t5")
+        self.assertEqual([item["id"] for item in context["parent_chain"]], ["stage_text", "problem_text", "option_t5"])
+        self.assertEqual(context["type_context"]["kind"], "option")
+        self.assertEqual(context["type_context"]["workstream"]["option"]["id"], "option_t5")
+        self.assertIn("evidence_summary", context["type_context"]["workstream"])
+        for command in context["type_context"]["workstream"]["suggested_commands"].values():
+            self.assertIn("--root", command)
+            self.assertIn(str(self.root), command)
+        self.assertIn("--root", context["command_drafts"]["claim_option"])
+        self.assertIn(str(self.root), context["command_drafts"]["claim_option"])
+        self.assertNotIn("python scripts", context["command_drafts"]["claim_option"])
+        self.assertNotIn(".py", context["command_drafts"]["claim_option"])
+
+    def test_node_onboarding_context_for_experiment_points_to_missing_evidence_and_record_command(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["metrics"] = ["accuracy", "latency"]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        context = build_node_onboarding_context(self.root, nodes, current, "exp_t5")
+
+        self.assertEqual(context["type_context"]["kind"], "experiment")
+        self.assertEqual(context["type_context"]["parent_option"]["id"], "option_t5")
+        self.assertEqual(context["type_context"]["metrics"], ["accuracy", "latency"])
+        self.assertTrue(context["type_context"]["missing_evidence"])
+        self.assertIn("record-finding", context["command_drafts"]["record_finding"])
+        self.assertIn("--root", context["command_drafts"]["record_finding"])
+
+    def test_node_onboarding_context_for_decision_includes_acceptance_repairs(self) -> None:
+        decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
+        decision["supporting_experiments"] = ["exp_t5"]
+        save_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml", decision)
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        context = build_node_onboarding_context(self.root, nodes, current, "decision_t5")
+
+        self.assertEqual(context["type_context"]["kind"], "decision")
+        self.assertFalse(context["type_context"]["acceptance"]["ready"])
+        failed_ids = {item["id"] for item in context["type_context"]["acceptance"]["blocking_failures"]}
+        self.assertIn("supporting_evidence", failed_ids)
+        repair_commands = " ".join(item.get("command", "") for item in context["type_context"]["repair_hints"])
+        self.assertIn("record-finding", repair_commands)
+        self.assertIn("update-decision-evidence", repair_commands)
+        self.assertIn("--root", repair_commands)
 
     def test_branch_comparison_summarizes_problem_options(self) -> None:
         option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")

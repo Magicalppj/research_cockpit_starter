@@ -29,6 +29,7 @@ from research_cockpit.commands.claim_option import claim_option
 from research_cockpit.commands.cleanup_suggestion_lifecycle import cleanup_suggestion_lifecycle
 from research_cockpit.commands.create_note import create_note
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
+from research_cockpit.commands.node_context import node_context_payload
 from research_cockpit.commands.option_workstream_context import option_workstream_context_payload
 from research_cockpit.commands.promote_decision import promote_decision
 from research_cockpit.commands.record_finding import record_finding
@@ -460,6 +461,49 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["option"]["id"], "option_t5")
         self.assertEqual(payload["upstream_problem"]["id"], "problem_text")
 
+    def test_node_context_cli_outputs_json_and_manifest_lists_command(self) -> None:
+        result = subprocess.run(
+            [*cli_command("node-context"), "--root", str(self.root), "--id", "option_t5", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        manifest = agent_command_manifest()
+
+        self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["node"]["id"], "option_t5")
+        self.assertEqual(payload["type_context"]["kind"], "option")
+        self.assertIn("--root", payload["command_drafts"]["claim_option"])
+        self.assertNotIn("python scripts", payload["command_drafts"]["claim_option"])
+        self.assertNotIn(".py", payload["command_drafts"]["claim_option"])
+        command = [item for item in manifest if item["name"] == "node-context"][0]
+        self.assertFalse(command["mutating"])
+        self.assertTrue(command["supports_json"])
+
+    def test_node_context_payload_for_decision_includes_acceptance_repairs(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+                "supporting_experiments": ["exp_t5"],
+            },
+        )
+
+        payload = node_context_payload(self.root, node_id="decision_t5")
+
+        self.assertEqual(payload["node"]["id"], "decision_t5")
+        self.assertFalse(payload["type_context"]["acceptance"]["ready"])
+        self.assertTrue(payload["type_context"]["repair_hints"])
+        repair_commands = " ".join(item.get("command", "") for item in payload["type_context"]["repair_hints"])
+        self.assertIn("record-finding", repair_commands)
+        self.assertIn("--root", repair_commands)
+
     def test_report_option_workstream_writes_report_and_marks_reported(self) -> None:
         claim_option(self.root, option_id="option_t5", agent_id="agent_t5", rebuild_dashboard=False)
         record_finding(
@@ -668,6 +712,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["update-decision-checklist"]["mutating"])
         self.assertTrue(by_name["update-decision-checklist"]["supports_no_build"])
         self.assertTrue(by_name["cleanup-suggestion-lifecycle"]["supports_dry_run"])
+        self.assertTrue(by_name["build"]["mutating"])
         self.assertTrue(by_name["build"]["writes_generated_files"])
         self.assertTrue(all(item["command"].startswith("research-cockpit ") for item in manifest))
         self.assertTrue(all("plugin_command" not in item for item in manifest))
@@ -1909,6 +1954,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "--id",
                 "decision_t5",
                 "--dry-run",
+                "--json",
             ],
             capture_output=True,
             text=True,
@@ -1917,7 +1963,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         after = decision_path.read_text(encoding="utf-8")
 
         self.assertEqual(out.returncode, 1)
-        self.assertIn("not ready", out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertFalse(payload["ready"])
+        self.assertFalse(payload["changed"])
+        self.assertIn("blocking_failures", payload)
+        self.assertIn("not ready", payload["error"])
         self.assertEqual(before, after)
         self.assertFalse((self.root / "graph" / "interaction_log.yaml").exists())
         self.assertFalse((self.root / "dashboards").exists())

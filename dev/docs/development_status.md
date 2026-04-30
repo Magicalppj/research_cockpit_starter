@@ -1,4 +1,23 @@
 # Research Cockpit 开发状态
+
+## Node Onboarding Context v1（2026-04-30）
+
+本批新增面向 agent 快速接手单个节点的只读上下文入口，目标是把“bootstrap、读 context pack、搜索、回读 YAML、再找安全命令”的流程压缩成一次命令。
+
+已完成：
+
+- 新增 `research-cockpit node-context --root <root> --id <node_id> --json`，直接从 truth-source YAML 实时计算，不写 YAML、不重建 dashboard。
+- 输出单个节点的 parent chain、relations、blockers、next actions、relevant suggestions、resources、recent interactions 和 context freshness。
+- 为 option / experiment / decision 补充专用上下文：option workstream、实验证据状态、decision acceptance checklist、blocking failures 和 repair hints。
+- 返回的 command drafts 统一使用公开 `research-cockpit ... --root <root>` 形式，避免新 agent 继续寻找旧脚本路径。
+- `accept-decision --dry-run --json` 在 decision 未 ready 时也会输出结构化 JSON，包含 `ready=false`、checklist 和 blocking failures，再以非零退出。
+- README、`SKILL.md`、`AGENTS.md` 和 focus context capability 已同步“新 agent 接手节点”的最短流程。
+- 基于 3 个无上下文 subagent 的只读接手测试，把默认启动文档从 `bootstrap --build --json` 收敛为 `bootstrap --json`；`build` 在 command manifest 中明确为会写 generated files 的命令。
+
+后续可选：
+
+- 为 `node-context` 增加 compact 输出，减少 parent chain / relations / type-specific trace 的重复信息。
+- 为 `record-finding` 增加 `--dry-run --json`，让 experiment 节点 onboarding 后的首个写入动作也可预览。
 ## Node Inspector Information Architecture v1（2026-04-30）
 
 本批优化 Streamlit 右侧节点 inspector，让点击节点后的第一屏从元数据展示转为研究判断视图。
