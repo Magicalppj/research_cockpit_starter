@@ -13,16 +13,12 @@ ROOT = default_data_root()
 from research_cockpit.model import (
     ResearchNode,
     ValidationError,
-    load_explicit_edges,
-    load_nodes,
     load_yaml,
-    save_yaml,
     script_command,
     validate_cockpit,
 )
 from research_cockpit.decisions import build_decision_acceptance_checklist, decision_acceptance_failure_message
-from research_cockpit.interaction_log import append_interaction_log
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands._runtime import finish_mutation, load_validated_state
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -40,7 +36,8 @@ def accept_decision(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    nodes = load_nodes(root)
+    state = load_validated_state(root)
+    nodes = state.nodes
     if decision_id not in nodes:
         raise ValueError(f"Decision node does not exist: {decision_id}")
     decision = nodes[decision_id]
@@ -90,9 +87,7 @@ def accept_decision(
     candidate[decision_id] = ResearchNode.from_dict(decision_data)
     candidate[str(option_id)] = ResearchNode.from_dict(option_data)
     candidate[str(problem_id)] = ResearchNode.from_dict(problem_data)
-    current = load_yaml(root / "current_state.yaml")
-    explicit_edges = load_explicit_edges(root)
-    validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
+    validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
 
     after = {
         "decision_status": decision_data.get("status"),
@@ -117,29 +112,32 @@ def accept_decision(
         result["changed"] = False
         return result
 
-    save_yaml(decision_path, decision_data)
-    save_yaml(option_path, option_data)
-    save_yaml(problem_path, problem_data)
     command = f"{script_command('accept_decision.py')} --id {decision_id}"
     if force_accept:
         command += " --force-accept"
-    append_interaction_log(
+    finish_mutation(
         root,
-        kind="accept_decision",
-        actor="researcher",
-        node_id=decision_id,
-        command=command,
-        before=before,
-        after=after,
-        extra={
-            "decision_id": decision_id,
-            "option_id": str(option_id),
-            "problem_id": str(problem_id),
-            "forced": force_accept,
+        [
+            (decision_path, decision_data),
+            (option_path, option_data),
+            (problem_path, problem_data),
+        ],
+        interaction={
+            "kind": "accept_decision",
+            "actor": "researcher",
+            "node_id": decision_id,
+            "command": command,
+            "before": before,
+            "after": after,
+            "extra": {
+                "decision_id": decision_id,
+                "option_id": str(option_id),
+                "problem_id": str(problem_id),
+                "forced": force_accept,
+            },
         },
+        rebuild_dashboard=rebuild_dashboard,
     )
-    if rebuild_dashboard:
-        build_dashboard(root)
     return result
 
 

@@ -15,15 +15,11 @@ from research_cockpit.model import (
     ResearchNode,
     ValidationError,
     derive_focus_path,
-    load_explicit_edges,
-    load_nodes,
     load_yaml,
-    save_yaml,
     script_command,
     validate_cockpit,
 )
-from research_cockpit.interaction_log import append_interaction_log
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands._runtime import finish_mutation, load_validated_state
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -52,7 +48,8 @@ def claim_option(
         allowed = ", ".join(sorted(VALID_CLAIM_STATUSES))
         raise ValueError(f"Invalid claim status {status!r}; allowed: {allowed}")
 
-    nodes = load_nodes(root)
+    state = load_validated_state(root)
+    nodes = state.nodes
     if option_id not in nodes:
         raise ValueError(f"Option node does not exist: {option_id}")
     option = nodes[option_id]
@@ -90,9 +87,7 @@ def claim_option(
 
     candidate = dict(nodes)
     candidate[option_id] = ResearchNode.from_dict(data)
-    current = load_yaml(root / "current_state.yaml")
-    explicit_edges = load_explicit_edges(root)
-    validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
+    validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
     preview = {
         "dry_run": dry_run,
         "changed": not dry_run,
@@ -108,27 +103,28 @@ def claim_option(
         preview["changed"] = False
         return preview
 
-    save_yaml(option_path, data)
     command = f"{script_command('claim_option.py')} --option {option_id} --agent {agent_id} --status {status}"
     if force:
         command += " --force"
-    append_interaction_log(
+    finish_mutation(
         root,
-        kind="claim_option",
-        actor=agent_id,
-        node_id=option_id,
-        command=command,
-        before={"agent_workstream": before_workstream},
-        after={"agent_workstream": data["agent_workstream"]},
-        extra={
-            "option_id": option_id,
-            "agent_id": agent_id,
-            "status": status,
-            "force": force,
+        [(option_path, data)],
+        interaction={
+            "kind": "claim_option",
+            "actor": agent_id,
+            "node_id": option_id,
+            "command": command,
+            "before": {"agent_workstream": before_workstream},
+            "after": {"agent_workstream": data["agent_workstream"]},
+            "extra": {
+                "option_id": option_id,
+                "agent_id": agent_id,
+                "status": status,
+                "force": force,
+            },
         },
+        rebuild_dashboard=rebuild_dashboard,
     )
-    if rebuild_dashboard:
-        build_dashboard(root)
     return option_path
 
 
