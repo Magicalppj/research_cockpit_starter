@@ -16,27 +16,30 @@ RESEARCH_ROOT = default_data_root()
 COMMAND_LANGUAGE = "bash"
 
 from research_cockpit.model import (
-    build_action_suggestions,
     build_agent_context,
-    build_branch_comparison,
-    build_decision_acceptance_checklist,
-    build_decision_rows,
-    build_decision_evidence_summary,
-    build_decision_trace,
     build_experiment_matrix,
     build_link_rows,
-    build_option_workstream_rows,
     build_search_index,
     build_search_index_summary,
-    build_suggestion_lifecycle_rows,
-    build_suggestion_lifecycle_summary,
     graph_to_json,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     validate_cockpit,
 )
+from research_cockpit.decisions import (
+    build_decision_acceptance_checklist,
+    build_decision_evidence_summary,
+    build_decision_rows,
+    build_decision_trace,
+)
 from research_cockpit.graph_views import load_graph_views, upsert_graph_view
+from research_cockpit.option_workstreams import build_branch_comparison, build_option_workstream_rows
+from research_cockpit.suggestions import (
+    build_action_suggestions,
+    build_suggestion_lifecycle_rows,
+    build_suggestion_lifecycle_summary,
+)
 from research_cockpit.ui.graph_component import graph_component_build_available, render_research_graph_component
 from research_cockpit.ui.pyvis_renderer import build_pyvis_html, render_pyvis_graph
 from research_cockpit.ui.text import get_text

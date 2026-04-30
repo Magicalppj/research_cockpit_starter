@@ -9,14 +9,11 @@ import json
 ROOT = default_data_root()
 
 from research_cockpit.model import (
-    build_action_suggestions,
     build_agent_context,
     build_current_state_payload,
-    build_decision_acceptance_checklists,
     build_experiment_matrix,
     build_focus_context,
     build_link_rows,
-    build_option_workstream_rows,
     build_search_index,
     graph_to_json,
     load_explicit_edges,
@@ -25,6 +22,9 @@ from research_cockpit.model import (
     validate_cockpit,
     write_dashboard_markdown,
 )
+from research_cockpit.decisions import build_decision_acceptance_checklists
+from research_cockpit.option_workstreams import build_option_workstream_rows
+from research_cockpit.suggestions import build_action_suggestions
 
 
 def build_dashboard(root: Path = ROOT) -> list[Path]:

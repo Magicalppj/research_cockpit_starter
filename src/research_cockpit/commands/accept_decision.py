@@ -13,8 +13,6 @@ ROOT = default_data_root()
 from research_cockpit.model import (
     ResearchNode,
     ValidationError,
-    build_decision_acceptance_checklist,
-    decision_acceptance_failure_message,
     load_explicit_edges,
     load_nodes,
     load_yaml,
@@ -22,6 +20,7 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
+from research_cockpit.decisions import build_decision_acceptance_checklist, decision_acceptance_failure_message
 from research_cockpit.interaction_log import append_interaction_log
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.record_finding import find_node_file

@@ -10,12 +10,12 @@ ROOT = default_data_root()
 
 from research_cockpit.model import (
     ValidationError,
-    build_option_workstream_context,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     validate_cockpit,
 )
+from research_cockpit.option_workstreams import build_option_workstream_context
 
 
 def option_workstream_context_payload(root: Path, *, option_id: str) -> dict:

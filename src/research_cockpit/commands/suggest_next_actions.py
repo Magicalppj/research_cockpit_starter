@@ -10,13 +10,13 @@ ROOT = default_data_root()
 
 from research_cockpit.model import (
     ValidationError,
-    build_action_suggestions,
     build_link_rows,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     validate_cockpit,
 )
+from research_cockpit.suggestions import build_action_suggestions
 
 
 def select_suggestions(
