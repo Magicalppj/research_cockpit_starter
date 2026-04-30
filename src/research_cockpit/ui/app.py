@@ -13,6 +13,7 @@ except ModuleNotFoundError:
     from research_cockpit.paths import default_data_root
 
 RESEARCH_ROOT = default_data_root()
+COMMAND_LANGUAGE = "bash"
 
 from research_cockpit.model import (
     build_action_suggestions,
@@ -137,7 +138,7 @@ def render_decision_repair_hints(checklist: dict, text: dict[str, str]) -> None:
         with st.expander(text["decision_repair_commands"]):
             for row in command_rows:
                 st.caption(f"{row['check_id']}: {row['label']}")
-                st.code(row["suggested_command"], language="powershell")
+                st.code(row["suggested_command"], language=COMMAND_LANGUAGE)
 
 
 def render_node_detail(
@@ -244,30 +245,30 @@ def render_node_detail(
                 except Exception as exc:
                     st.error(f"{text['focus_update_failed']} {exc}")
             st.write(text["set_focus_command"])
-            st.code(build_set_focus_command(current, node_id), language="powershell")
+            st.code(build_set_focus_command(current, node_id), language=COMMAND_LANGUAGE)
             st.caption(text["set_focus_command_hint"])
         if node.type == "experiment":
             st.write(text["record_finding_command"])
-            st.code(build_record_finding_command(node_id), language="powershell")
+            st.code(build_record_finding_command(node_id), language=COMMAND_LANGUAGE)
         if node.type == "option":
             st.write(text["promote_decision_command"])
-            st.code(build_promote_decision_command(node_id), language="powershell")
+            st.code(build_promote_decision_command(node_id), language=COMMAND_LANGUAGE)
             st.write(text["claim_option_command"])
-            st.code(build_claim_option_command(node_id), language="powershell")
+            st.code(build_claim_option_command(node_id), language=COMMAND_LANGUAGE)
             st.write(text["option_context_command"])
-            st.code(build_option_workstream_context_command(node_id), language="powershell")
+            st.code(build_option_workstream_context_command(node_id), language=COMMAND_LANGUAGE)
             st.write(text["report_option_command"])
-            st.code(build_report_option_workstream_command(node_id), language="powershell")
+            st.code(build_report_option_workstream_command(node_id), language=COMMAND_LANGUAGE)
         if node.type == "decision":
             st.write(text["check_decision_command"])
-            st.code(build_check_decision_acceptance_command(node_id), language="powershell")
+            st.code(build_check_decision_acceptance_command(node_id), language=COMMAND_LANGUAGE)
             st.write(text["update_decision_checklist_command"])
-            st.code(build_update_decision_checklist_command(node_id), language="powershell")
+            st.code(build_update_decision_checklist_command(node_id), language=COMMAND_LANGUAGE)
             st.write(text["accept_decision_command"])
-            st.code(build_accept_decision_command(node_id), language="powershell")
+            st.code(build_accept_decision_command(node_id), language=COMMAND_LANGUAGE)
         if node.type in {"problem", "option", "experiment", "decision"}:
             st.write(text["create_note_command"])
-            st.code(build_create_note_command(node_id), language="powershell")
+            st.code(build_create_note_command(node_id), language=COMMAND_LANGUAGE)
         blockers = node.raw.get("blockers", [])
         if blockers:
             st.write(text["blockers"])
@@ -797,7 +798,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
             format_func=lambda item: f"{item.get('kind')} | {item.get('source_node_id')}",
             key="action_guidance_command",
         )
-        st.code(selected["suggested_command"], language="powershell")
+        st.code(selected["suggested_command"], language=COMMAND_LANGUAGE)
 
     selected_suggestion = st.selectbox(
         text["queue_suggestion"],
@@ -810,7 +811,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
     reason = st.text_input(text["suggestion_reason"], value="", key=f"reason_{selected_key}")
     lifecycle_cols = st.columns(3)
     with lifecycle_cols[0]:
-        st.code(build_update_suggestion_state_command(str(selected_key), "dismissed"), language="powershell")
+        st.code(build_update_suggestion_state_command(str(selected_key), "dismissed"), language=COMMAND_LANGUAGE)
         if st.button(
             text["dismiss_suggestion"],
             key=f"dismiss_{selected_key}",
@@ -828,7 +829,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
             except Exception as exc:
                 st.error(f"{text['suggestion_state_failed']} {exc}")
     with lifecycle_cols[1]:
-        st.code(build_update_suggestion_state_command(str(selected_key), "completed"), language="powershell")
+        st.code(build_update_suggestion_state_command(str(selected_key), "completed"), language=COMMAND_LANGUAGE)
         if st.button(
             text["complete_suggestion"],
             key=f"complete_{selected_key}",
@@ -846,7 +847,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
             except Exception as exc:
                 st.error(f"{text['suggestion_state_failed']} {exc}")
     with lifecycle_cols[2]:
-        st.code(build_update_suggestion_state_command(str(selected_key), "active"), language="powershell")
+        st.code(build_update_suggestion_state_command(str(selected_key), "active"), language=COMMAND_LANGUAGE)
         if st.button(
             text["restore_suggestion"],
             key=f"restore_{selected_key}",
@@ -864,7 +865,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
         st.caption(text["inactive_queue_disabled"])
     current_col, node_col = st.columns(2)
     with current_col:
-        st.code(build_apply_suggestion_command(selected_suggestion["id"], "current"), language="powershell")
+        st.code(build_apply_suggestion_command(selected_suggestion["id"], "current"), language=COMMAND_LANGUAGE)
         if selected_suggestion.get("queued_in_current"):
             st.caption(text["queued_current"])
         if st.button(
@@ -879,7 +880,7 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
             except Exception as exc:
                 st.error(f"{text['queue_failed']} {exc}")
     with node_col:
-        st.code(build_apply_suggestion_command(selected_suggestion["id"], "node"), language="powershell")
+        st.code(build_apply_suggestion_command(selected_suggestion["id"], "node"), language=COMMAND_LANGUAGE)
         if selected_suggestion.get("queued_in_node"):
             st.caption(text["queued_node"])
         if st.button(
@@ -917,11 +918,11 @@ def render_option_workstreams(option_workstreams: list[dict], text: dict[str, st
 
     option_id = selected["option_id"]
     st.write(text["option_context_command"])
-    st.code(build_option_workstream_context_command(option_id), language="powershell")
+    st.code(build_option_workstream_context_command(option_id), language=COMMAND_LANGUAGE)
     st.write(text["claim_option_command"])
-    st.code(build_claim_option_command(option_id), language="powershell")
+    st.code(build_claim_option_command(option_id), language=COMMAND_LANGUAGE)
     st.write(text["report_option_command"])
-    st.code(build_report_option_workstream_command(option_id), language="powershell")
+    st.code(build_report_option_workstream_command(option_id), language=COMMAND_LANGUAGE)
 
 
 def render_search(search_index: list[dict], nodes: dict, text: dict[str, str]) -> None:
@@ -1139,9 +1140,9 @@ def render_data_health(
             hide_index=True,
         )
         st.caption(text["cleanup_lifecycle_dry_run"])
-        st.code(build_cleanup_suggestion_lifecycle_command(dry_run=True), language="powershell")
+        st.code(build_cleanup_suggestion_lifecycle_command(dry_run=True), language=COMMAND_LANGUAGE)
         st.caption(text["cleanup_lifecycle_apply"])
-        st.code(build_cleanup_suggestion_lifecycle_command(dry_run=False), language="powershell")
+        st.code(build_cleanup_suggestion_lifecycle_command(dry_run=False), language=COMMAND_LANGUAGE)
 
     st.subheader(text["search_index"])
     search_summary = build_search_index_summary(search_index)

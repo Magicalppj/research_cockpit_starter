@@ -14,6 +14,7 @@ Research Cockpit 是一个项目本地研究状态插件。插件代码位于本
    - Use an absolute `--root` when the agent shell may not preserve the expected current working directory.
    - If omitted, commands search from the current working directory upward for `research_cockpit/`.
    - In this plugin repo only, commands fall back to `examples/demo_research_cockpit/`.
+   - If the caller repository has no data root yet, initialize one with `research-cockpit init --root research_cockpit` from the caller repository root.
 2. Run bootstrap before making decisions:
 
 ```sh
@@ -73,3 +74,5 @@ Allowed truth-source writes are under:
 Agents should normally write these files through `research-cockpit` CLI commands. Direct YAML repair is a last-resort structural fix and must be followed by validation and dashboard rebuild.
 
 Generated files under `research_cockpit/dashboards/` must be rebuilt, not hand-authored.
+
+Never create or update project research state inside the plugin directory itself unless you are intentionally editing `examples/demo_research_cockpit/` for plugin development.

@@ -48,7 +48,7 @@ If a mutating script is being tested, use a copied data root or `.test_tmp/`; do
 
 ## Terminal Encoding
 
-The Markdown files are UTF-8. If Chinese text appears garbled in legacy Windows PowerShell output, switch the terminal to UTF-8 or use a modern shell before judging the file contents:
+The Markdown files are UTF-8. If Chinese text appears garbled in a terminal, switch to a UTF-8 capable terminal before judging the file contents. On legacy Windows terminals this may require:
 
 ```sh
 chcp 65001

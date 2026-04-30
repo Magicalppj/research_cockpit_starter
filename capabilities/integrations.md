@@ -28,6 +28,7 @@ Commands resolve data root in this order:
 Installed CLI:
 
 ```sh
+research-cockpit init --root research_cockpit
 research-cockpit bootstrap --root research_cockpit --json
 research-cockpit validate --root research_cockpit
 research-cockpit build --root research_cockpit

@@ -31,7 +31,7 @@ research-cockpit/
 研究仓库：
 
 ```text
-audio-edit-research/
+my-research-repo/
   research_cockpit/           # 项目自己的研究状态资产
   .agent/skills/research-cockpit/
 ```
@@ -55,6 +55,8 @@ python -m research_cockpit.cli bootstrap --root /absolute/path/to/research_cockp
 在受限 agent shell 中，优先传入绝对 `--root`，避免当前工作目录不可控导致读写到错误位置。
 
 如果需要隔离环境，可以先创建并激活任意 Python virtual environment 或 conda environment，再执行同一条 `python -m pip install -e .`。
+
+命令示例使用跨平台的 `sh` 代码块和 `/` 路径分隔符；这些路径同样可被 Python 和 Git for Windows / PowerShell / cmd 识别。不要把本机绝对路径、用户名、私有数据目录或虚拟环境路径写入研究状态和提交历史。
 
 主要 Python 依赖：
 
@@ -91,7 +93,9 @@ npm run build
 在研究仓库根目录运行：
 
 ```sh
-research-cockpit init
+research-cockpit init --root research_cockpit
+research-cockpit bootstrap --root research_cockpit --build --json
+research-cockpit validate --root research_cockpit --json
 ```
 
 这会创建：
@@ -144,7 +148,7 @@ your-research-repo/
 然后告诉 agent：
 
 ```text
-使用 research-cockpit skill。先运行 `research-cockpit bootstrap --json`，
+使用 research-cockpit skill。先运行 `research-cockpit bootstrap --root research_cockpit --build --json`，
 读取 agent_context_pack 和 focus_context_pack，再通过 `research-cockpit` CLI 写入研究状态。
 ```
 
@@ -156,6 +160,20 @@ research-cockpit validate --root research_cockpit
 ```
 
 所有关键写入都应走 `research-cockpit` CLI，不要让 agent 直接手写 YAML，除非对应 capability 明确允许并说明字段边界。
+
+常见 agent 流程：
+
+```sh
+research-cockpit bootstrap --root research_cockpit --build --json
+research-cockpit suggest-next-actions --root research_cockpit --json
+research-cockpit commands --json
+research-cockpit claim-option --root research_cockpit --option <option_id> --agent <agent_id> --dry-run --json
+research-cockpit validate --root research_cockpit --json
+```
+
+## 隐私边界
+
+Research Cockpit 不会把数据发送到外部服务，但 `research_cockpit/` 是研究状态本身。公开仓库中只应提交可公开的节点、notes、context packs 和 linked resource 摘要；敏感实验记录、私有路径、凭据和未公开数据集位置应留在私有仓库或本地忽略文件中。
 
 ## 开发验证
 
