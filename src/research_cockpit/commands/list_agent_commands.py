@@ -280,6 +280,7 @@ def agent_command_manifest() -> list[dict[str, object]]:
             "name": subcommand,
             "capability_file": CAPABILITY_BY_COMMAND[command_name],
             "command": f"research-cockpit {subcommand}",
+            "python_module_command": f"python -m research_cockpit.cli {subcommand}",
             "cwd": "research_repo_root",
         }
         rows.append(row)
