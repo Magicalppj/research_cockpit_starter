@@ -19,8 +19,9 @@
 1. Run `research-cockpit bootstrap --root <data-root> --json`.
 2. Read `<data-root>/dashboards/agent_context_pack.json`.
 3. Read `<data-root>/dashboards/focus_context_pack.json` for local focus.
-4. Use `research-cockpit search --root <data-root> --query "..." --json` when more context is needed.
-5. Use `research-cockpit commands --json` to choose safe workflow commands.
+4. If assigned a specific node id, run `research-cockpit node-context --root <data-root> --id <node_id> --json`.
+5. Use `research-cockpit search --root <data-root> --query "..." --json` when more context is needed.
+6. Use `research-cockpit commands --json` to choose safe workflow commands.
 
 If the working directory is unreliable, use absolute `--root` paths.
 
@@ -28,6 +29,7 @@ If the working directory is unreliable, use absolute `--root` paths.
 
 - Prefer `research-cockpit` commands over manual YAML edits for all supported operations.
 - Use mutating CLI commands for focus, status, findings, decisions, notes, suggestions, and lifecycle cleanup.
+- Use `research-cockpit node-context` as the shortest read-only handoff when continuing work from a known node id.
 - Do not directly set a decision to `accepted`; use `research-cockpit accept-decision --root <data-root> --id <decision_id>`.
 - Do not execute a suggested command just because it appears in Action Guidance. Queue, dismiss, or complete suggestions only when asked.
 

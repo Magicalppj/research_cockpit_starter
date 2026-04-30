@@ -177,28 +177,35 @@ your-research-repo/
 然后告诉 agent：
 
 ```text
-使用 research-cockpit skill。先运行 `research-cockpit bootstrap --root research_cockpit --build --json`，
+使用 research-cockpit skill。先运行 `research-cockpit bootstrap --root research_cockpit --json`，
 读取 agent_context_pack 和 focus_context_pack，再通过 `research-cockpit` CLI 写入研究状态。
+如果要从某个节点接手工作，先运行 `research-cockpit node-context --root research_cockpit --id <node_id> --json`。
 ```
 
 推荐启动命令：
 
 ```sh
 research-cockpit bootstrap --root research_cockpit --json
+research-cockpit node-context --root research_cockpit --id <node_id> --json
 research-cockpit validate --root research_cockpit
 ```
+
+`node-context` 是只读命令，会直接从 truth-source YAML 实时整理单个节点的 parent chain、blockers、next actions、证据状态、资源、recent interactions 和安全命令草案。新 agent 如果已经拿到目标 node id，通常先跑这一条命令，再按返回的 `recommended_next_steps` 选择下一步写入命令。
 
 所有关键写入都应走 `research-cockpit` CLI，不要让 agent 直接手写 YAML，除非对应 capability 明确允许并说明字段边界。
 
 常见 agent 流程：
 
 ```sh
-research-cockpit bootstrap --root research_cockpit --build --json
+research-cockpit bootstrap --root research_cockpit --json
+research-cockpit node-context --root research_cockpit --id <node_id> --json
 research-cockpit suggest-next-actions --root research_cockpit --json
 research-cockpit commands --json
 research-cockpit claim-option --root research_cockpit --option <option_id> --agent <agent_id> --dry-run --json
 research-cockpit validate --root research_cockpit --json
 ```
+
+如果需要刷新 generated dashboard/context，再显式运行 `research-cockpit build --root research_cockpit`。只读接手场景不要默认加 `--build`。
 
 ## 隐私边界
 

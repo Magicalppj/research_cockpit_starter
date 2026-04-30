@@ -7,7 +7,7 @@ Use this capability at the start of an agent session and before making local res
 1. Bootstrap:
 
 ```sh
-research-cockpit bootstrap --root research_cockpit --build --json
+research-cockpit bootstrap --root research_cockpit --json
 ```
 
 2. If dashboard files are missing or stale:
@@ -20,6 +20,16 @@ research-cockpit build --root research_cockpit
    - `research_cockpit/dashboards/agent_context_pack.json`
    - `research_cockpit/dashboards/focus_context_pack.json`
    - `research_cockpit/dashboards/search_index.json` when searching.
+
+## Node Handoff
+
+When a human assigns a specific node id, use the read-only onboarding command before opening raw YAML:
+
+```sh
+research-cockpit node-context --root research_cockpit --id <node_id> --json
+```
+
+The payload is computed from truth-source YAML, not from stale generated dashboards. It includes parent chain, relations, blockers, next actions, relevant suggestions, resources, recent interactions, and type-specific context for options, experiments, and decisions. Command drafts in the payload include `--root` so they can be reused safely from an agent shell.
 
 ## Search
 
