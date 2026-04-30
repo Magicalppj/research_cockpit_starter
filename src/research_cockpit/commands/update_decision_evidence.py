@@ -12,13 +12,13 @@ ROOT = default_data_root()
 from research_cockpit.model import (
     ResearchNode,
     ValidationError,
-    build_decision_evidence_bundle,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     save_yaml,
     validate_cockpit,
 )
+from research_cockpit.decisions import build_decision_evidence_bundle
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.record_finding import find_node_file
 

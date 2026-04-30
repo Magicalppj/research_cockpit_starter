@@ -10,12 +10,12 @@ ROOT = default_data_root()
 
 from research_cockpit.model import (
     ValidationError,
-    build_decision_acceptance_checklist,
     load_explicit_edges,
     load_nodes,
     load_yaml,
     validate_cockpit,
 )
+from research_cockpit.decisions import build_decision_acceptance_checklist
 
 
 def decision_acceptance_payload(root: Path, decision_id: str) -> dict:

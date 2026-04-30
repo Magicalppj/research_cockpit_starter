@@ -35,7 +35,6 @@ _MISSING_DEPENDENCIES = missing_runtime_dependencies()
 
 if not _MISSING_DEPENDENCIES:
     from research_cockpit.model import (
-        build_action_suggestions,
         build_context_metadata,
         build_link_rows,
         build_search_index,
@@ -45,6 +44,7 @@ if not _MISSING_DEPENDENCIES:
         load_yaml,
         validate_cockpit,
     )
+    from research_cockpit.suggestions import build_action_suggestions
     from research_cockpit.commands.build_dashboard import build_dashboard
 
 
