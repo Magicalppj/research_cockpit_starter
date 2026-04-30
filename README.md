@@ -58,6 +58,12 @@ research-cockpit/
   SKILL.md                    # 薄入口
 ```
 
+Maintainer docs:
+
+- `docs/repo-layout.md`: repository layout and source module map.
+- `docs/internal-architecture.md`: internal module boundaries and dependency rules.
+- `docs/decisions/0001-layered-plugin-architecture.md`: rationale for the layered plugin architecture.
+
 研究仓库：
 
 ```text

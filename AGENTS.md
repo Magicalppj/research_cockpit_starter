@@ -13,6 +13,7 @@
 - Public workflow commands live in the `research-cockpit` CLI.
 - Agent-facing details are split under `capabilities/`.
 - Project-specific research state belongs in the caller repository's `research_cockpit/`, not inside the plugin directory.
+- For internal module boundaries, read `docs/internal-architecture.md`; for the rationale behind the layered layout, read `docs/decisions/0001-layered-plugin-architecture.md`.
 
 ## Read Order
 
