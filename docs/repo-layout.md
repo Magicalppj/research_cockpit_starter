@@ -25,7 +25,6 @@ The plugin stores reusable code and tools. The research repo stores project-spec
 - `examples/demo_research_cockpit/`: public demo data and generated context.
 - `schemas/`: exported schema docs or machine-readable schemas as the API stabilizes.
 - `docs/`: human and maintainer documentation.
-- `tests/`: plugin regression tests.
 - `requirements.txt`: script/runtime dependency list.
 - `pyproject.toml`: installable package metadata and `research-cockpit` CLI entry point.
 

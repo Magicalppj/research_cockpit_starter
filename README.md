@@ -23,7 +23,6 @@ research-cockpit/
   examples/demo_research_cockpit/
   schemas/
   docs/
-  tests/
   pyproject.toml
   SKILL.md                    # 薄入口
 ```
@@ -175,12 +174,12 @@ research-cockpit validate --root research_cockpit --json
 
 Research Cockpit 不会把数据发送到外部服务，但 `research_cockpit/` 是研究状态本身。公开仓库中只应提交可公开的节点、notes、context packs 和 linked resource 摘要；敏感实验记录、私有路径、凭据和未公开数据集位置应留在私有仓库或本地忽略文件中。
 
-## 开发验证
+## 发布包自检
 
 ```sh
-python -m unittest discover -s tests
+research-cockpit bootstrap --root examples/demo_research_cockpit --build --json
+research-cockpit validate --root examples/demo_research_cockpit --json
 research-cockpit smoke --root examples/demo_research_cockpit --json
-python dev/scripts/run_skill_release_check.py --json --skip-mutating
-python dev/scripts/run_agent_usability_check.py --json
+research-cockpit commands --json
 git diff --check
 ```

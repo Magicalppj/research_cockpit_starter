@@ -41,11 +41,13 @@ research-cockpit build --root <data-root>
 research-cockpit smoke --root <data-root> --json
 ```
 
-For plugin development, run:
+For release package verification, run:
 
 ```sh
-python -m unittest discover -s tests
-python dev/scripts/run_skill_release_check.py --json --skip-mutating
+research-cockpit bootstrap --root examples/demo_research_cockpit --build --json
+research-cockpit validate --root examples/demo_research_cockpit --json
+research-cockpit smoke --root examples/demo_research_cockpit --json
+research-cockpit commands --json
 ```
 
 ## Environment
