@@ -251,3 +251,30 @@ research-cockpit smoke --root examples/demo_research_cockpit --json
 research-cockpit commands --json
 git diff --check
 ```
+
+## Agent Graph Update Workflow
+
+For batch graph changes, preview first, then write with `--no-build`, then validate and rebuild once:
+
+```sh
+research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
+research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --no-build
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
+```
+
+Use `create-workstream` for the common `problem -> active option -> experiments + follow-up options` shape:
+
+```sh
+research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
+research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
+```
+
+`create-workstream` sets the new problem `current_best_option` and active option `supporting_experiments`, but it does not change focus, pause old options, or delete old branches.
+
+When a focus node already has canonical actions, use:
+
+```sh
+research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --dry-run --json --show-diff
+research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --no-build
+```
