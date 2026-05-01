@@ -70,6 +70,38 @@ def _context_paths(root: Path) -> dict[str, dict[str, Any]]:
     }
 
 
+def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    focus_node_id = focus_node_id_from_current(current, nodes)
+    focus_node = nodes.get(focus_node_id) if focus_node_id else None
+    problem_id = current.get("current_problem")
+    problem = nodes.get(str(problem_id)) if problem_id else None
+    current_best_option = None
+    if problem:
+        current_best_option = problem.raw.get("current_best_option") or current.get("current_option")
+    elif focus_node:
+        current_best_option = focus_node.raw.get("current_best_option") or current.get("current_option")
+
+    pause_candidates: list[str] = []
+    if problem:
+        for node in nodes.values():
+            if node.type == "option" and node.parent == problem.id and node.id != current_best_option:
+                if node.status in {"active", "promising", "open"}:
+                    pause_candidates.append(node.id)
+
+    return {
+        "current_focus_node": focus_node_id,
+        "current_best_option": current_best_option,
+        "pause_candidate_options": sorted(pause_candidates),
+        "batching": "Use --dry-run --json --show-diff first, then run mutating commands with --no-build and finish with validate --json plus build.",
+        "command_skeletons": [
+            "research-cockpit add-node --root <root> --id <node_id> --type <type> --title \"...\" --parent <parent_id> --no-build",
+            "research-cockpit update-node-fields --root <root> --id <node_id> --question \"...\" --tag <tag> --no-build",
+            "research-cockpit apply-graph-plan --root <root> --file graph_update.yaml --dry-run --json --show-diff",
+            "research-cockpit create-workstream --root <root> --file workstream.yaml --dry-run --json --show-diff",
+        ],
+    }
+
+
 def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[str, Any]:
     if _MISSING_DEPENDENCIES:
         raise RuntimeError(format_dependency_error(_MISSING_DEPENDENCIES))
@@ -110,6 +142,7 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
             "exists": PLUGIN_ROOT.exists(),
         },
         "top_suggestions": suggestions[:3],
+        "mutation_guidance": _mutation_guidance(nodes, current),
         "search_summary": build_search_index_summary(search_index),
         "git": {
             "source_git_commit": metadata["source_git_commit"],

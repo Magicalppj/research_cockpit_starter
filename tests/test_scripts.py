@@ -22,12 +22,14 @@ from research_cockpit.model import load_nodes, load_yaml, save_yaml
 from research_cockpit.commands.accept_decision import accept_decision
 from research_cockpit.commands.add_node import add_node
 from research_cockpit.commands.agent_bootstrap import agent_bootstrap_payload, format_dependency_error, missing_runtime_dependencies
+from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.apply_suggestion import apply_suggestion
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.check_decision_acceptance import decision_acceptance_payload
 from research_cockpit.commands.claim_option import claim_option
 from research_cockpit.commands.cleanup_suggestion_lifecycle import cleanup_suggestion_lifecycle
 from research_cockpit.commands.complete_experiment import complete_experiment
+from research_cockpit.commands.create_workstream import create_workstream
 from research_cockpit.commands.create_note import create_note
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
 from research_cockpit.commands.node_context import node_context_payload
@@ -37,6 +39,7 @@ from research_cockpit.commands.record_finding import record_finding
 from research_cockpit.commands.report_option_workstream import report_option_workstream
 from research_cockpit.commands.set_focus import set_focus
 from research_cockpit.commands.skill_smoke_test import missing_modules_for_python, skill_smoke_test_payload
+from research_cockpit.commands.sync_focus_actions import sync_focus_actions
 from research_cockpit.commands.suggest_next_actions import select_suggestions
 from research_cockpit.commands.update_decision_evidence import update_decision_evidence
 from research_cockpit.commands.update_decision_checklist import update_decision_checklist
@@ -148,6 +151,85 @@ class ScriptBehaviorTests(unittest.TestCase):
             )
 
         self.assertIn("missing_problem", str(ctx.exception))
+
+    def test_add_node_cli_supports_dry_run_json_no_build_and_default_build(self) -> None:
+        dry_run = subprocess.run(
+            [
+                *cli_command("add-node"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_preview",
+                "--type",
+                "experiment",
+                "--title",
+                "Preview experiment",
+                "--parent",
+                "option_t5",
+                "--dry-run",
+                "--show-diff",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(dry_run.stdout)
+
+        self.assertEqual(dry_run.returncode, 0, dry_run.stdout + dry_run.stderr)
+        self.assertTrue(payload["would_change"])
+        self.assertFalse(payload["changed"])
+        self.assertIn("diff", payload)
+        self.assertFalse((self.root / "graph" / "nodes" / "exp_preview.yaml").exists())
+
+        no_build = subprocess.run(
+            [
+                *cli_command("add-node"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_no_build",
+                "--type",
+                "experiment",
+                "--title",
+                "No build experiment",
+                "--parent",
+                "option_t5",
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        no_build_payload = json.loads(no_build.stdout)
+
+        self.assertEqual(no_build.returncode, 0, no_build.stdout + no_build.stderr)
+        self.assertTrue(no_build_payload["changed"])
+        self.assertTrue((self.root / "graph" / "nodes" / "exp_no_build.yaml").exists())
+        self.assertFalse((self.root / "dashboards").exists())
+
+        default_build = subprocess.run(
+            [
+                *cli_command("add-node"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_build",
+                "--type",
+                "experiment",
+                "--title",
+                "Build experiment",
+                "--parent",
+                "option_t5",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(default_build.returncode, 0, default_build.stdout + default_build.stderr)
+        self.assertTrue((self.root / "dashboards" / "graph_view.json").exists())
 
     def test_cli_validation_errors_are_clean_without_traceback(self) -> None:
         add_failed = subprocess.run(
@@ -656,6 +738,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["skill"]["exists"])
         self.assertIn("top_suggestions", payload)
         self.assertIn("search_summary", payload)
+        self.assertIn("mutation_guidance", payload)
+        self.assertIn("apply-graph-plan", " ".join(payload["mutation_guidance"]["command_skeletons"]))
         self.assertIsInstance(payload["git"]["worktree_dirty"], bool)
 
     def test_agent_bootstrap_cli_json_builds_when_requested(self) -> None:
@@ -719,7 +803,19 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_name["ui"]["capability_file"], "capabilities/ui-dashboard.md")
         self.assertTrue(by_name["record-finding"]["mutating"])
         self.assertTrue(by_name["record-finding"]["supports_no_build"])
+        self.assertTrue(by_name["add-node"]["supports_json"])
+        self.assertTrue(by_name["add-node"]["supports_dry_run"])
+        self.assertTrue(by_name["add-node"]["supports_no_build"])
+        self.assertTrue(by_name["add-node"]["writes_truth_source"])
+        self.assertTrue(by_name["add-node"]["writes_generated_files"])
+        self.assertTrue(by_name["add-node"]["can_batch"])
         self.assertTrue(by_name["update-status"]["supports_no_build"])
+        self.assertTrue(by_name["apply-graph-plan"]["supports_json"])
+        self.assertTrue(by_name["apply-graph-plan"]["supports_dry_run"])
+        self.assertTrue(by_name["apply-graph-plan"]["supports_no_build"])
+        self.assertTrue(by_name["apply-graph-plan"]["can_batch"])
+        self.assertTrue(by_name["create-workstream"]["supports_json"])
+        self.assertTrue(by_name["sync-focus-actions"]["supports_dry_run"])
         self.assertTrue(by_name["complete-experiment"]["mutating"])
         self.assertTrue(by_name["complete-experiment"]["supports_json"])
         self.assertTrue(by_name["complete-experiment"]["supports_dry_run"])
@@ -728,6 +824,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["update-node-fields"]["supports_json"])
         self.assertTrue(by_name["update-node-fields"]["supports_dry_run"])
         self.assertTrue(by_name["update-node-fields"]["supports_no_build"])
+        self.assertIn("question", by_name["update-node-fields"]["fields_supported"])
+        self.assertIn("supporting_experiments", by_name["update-node-fields"]["fields_supported"])
         self.assertTrue(by_name["claim-option"]["supports_json"])
         self.assertTrue(by_name["claim-option"]["supports_dry_run"])
         self.assertTrue(by_name["report-option-workstream"]["supports_json"])
@@ -743,6 +841,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["cleanup-suggestion-lifecycle"]["supports_dry_run"])
         self.assertTrue(by_name["build"]["mutating"])
         self.assertTrue(by_name["build"]["writes_generated_files"])
+        self.assertFalse(by_name["build"]["writes_truth_source"])
+        self.assertTrue(by_name["validate"]["safe_in_plan_mode"])
+        self.assertFalse(by_name["update-node-fields"]["safe_in_plan_mode"])
         self.assertTrue(all(item["command"].startswith("research-cockpit ") for item in manifest))
         self.assertTrue(all("plugin_command" not in item for item in manifest))
 
@@ -764,6 +865,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("record-finding", {item["name"] for item in payload["commands"]})
         self.assertIn("complete-experiment", {item["name"] for item in payload["commands"]})
         self.assertIn("update-node-fields", {item["name"] for item in payload["commands"]})
+        self.assertIn("apply-graph-plan", {item["name"] for item in payload["commands"]})
+        self.assertIn("create-workstream", {item["name"] for item in payload["commands"]})
+        self.assertIn("sync-focus-actions", {item["name"] for item in payload["commands"]})
 
     def test_skill_smoke_test_payload_runs_read_only_workflow(self) -> None:
         payload = skill_smoke_test_payload(root=self.root, query="t5", python_executable=sys.executable)
@@ -910,6 +1014,70 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         selected = select_suggestions(suggestions, kinds=["run_experiment"], limit=1, focus_only=True)
         self.assertEqual(len(selected), 1)
+
+    def test_suggest_next_actions_dedupes_normalized_focus_actions(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["next_actions"] = ["Review graph plan."]
+        save_yaml(self.root / "current_state.yaml", current)
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["next_actions"] = ["  review   graph plan  "]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        out = subprocess.run(
+            [
+                *cli_command("suggest-next-actions"),
+                "--root",
+                str(self.root),
+                "--kind",
+                "focus_next_action",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        suggestions = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(len(suggestions), 1)
+        self.assertTrue(suggestions[0]["queued_in_current"])
+        self.assertTrue(suggestions[0]["queued_in_node"])
+
+    def test_sync_focus_actions_replaces_and_appends_from_node(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["next_actions"] = ["Review graph plan.", "Record decision."]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        current = load_yaml(self.root / "current_state.yaml")
+        current["next_actions"] = ["Old action."]
+        save_yaml(self.root / "current_state.yaml", current)
+
+        dry_run = sync_focus_actions(
+            self.root,
+            from_node="problem_text",
+            mode="replace",
+            dry_run=True,
+            show_diff=True,
+        )
+        self.assertTrue(dry_run["would_change"])
+        self.assertIn("diff", dry_run)
+        self.assertEqual(load_yaml(self.root / "current_state.yaml")["next_actions"], ["Old action."])
+
+        replaced = sync_focus_actions(self.root, from_node="problem_text", mode="replace", rebuild_dashboard=False)
+        self.assertTrue(replaced["changed"])
+        self.assertEqual(
+            load_yaml(self.root / "current_state.yaml")["next_actions"],
+            ["Review graph plan.", "Record decision."],
+        )
+
+        problem["next_actions"] = ["Record decision.", "Draft ADR."]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        appended = sync_focus_actions(self.root, from_node="problem_text", mode="append", rebuild_dashboard=False)
+
+        self.assertTrue(appended["changed"])
+        self.assertEqual(
+            load_yaml(self.root / "current_state.yaml")["next_actions"],
+            ["Review graph plan.", "Record decision.", "Draft ADR."],
+        )
 
     def test_apply_and_update_suggestion_accept_stable_suggestion_id(self) -> None:
         first = apply_suggestion(self.root, suggestion_id="next_action_001", target="current", rebuild_dashboard=False)
@@ -1689,6 +1857,105 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue((self.root / "dashboards" / "graph_view.json").exists())
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "update_node_fields")
 
+    def test_update_node_fields_supports_rich_scalar_list_and_ref_fields(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_report",
+                "type": "artifact",
+                "title": "Report",
+                "status": "active",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "decision_ref",
+                "type": "decision",
+                "title": "Decision",
+                "status": "proposed",
+                "parent": "option_t5",
+            },
+        )
+
+        result = update_node_fields(
+            self.root,
+            node_id="problem_text",
+            scalar_updates={
+                "question": "Which branch should we test next?",
+                "hypothesis": "Shorter branch setup improves throughput.",
+                "priority": "high",
+            },
+            list_appends={
+                "tags": ["timeline-control", "timeline-control"],
+                "success_criteria": ["Agent can update graph without patching YAML."],
+                "metrics": ["command_count"],
+                "pros": ["Fewer rebuilds."],
+                "cons": ["Needs plan validation."],
+                "next_actions": ["Review graph plan."],
+                "supporting_experiments": ["exp_t5"],
+                "supporting_decisions": ["decision_ref"],
+                "linked_artifacts": ["artifact_report"],
+                "alternatives_considered": ["option_alt"],
+                "derived_from": ["option_t5"],
+            },
+            rebuild_dashboard=False,
+            show_diff=True,
+        )
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+
+        self.assertTrue(result["changed"])
+        self.assertIn("diff", result)
+        self.assertEqual(problem["question"], "Which branch should we test next?")
+        self.assertEqual(problem["hypothesis"], "Shorter branch setup improves throughput.")
+        self.assertEqual(problem["priority"], "high")
+        self.assertEqual(problem["tags"], ["timeline-control"])
+        self.assertEqual(problem["supporting_experiments"], ["exp_t5"])
+        self.assertEqual(problem["supporting_decisions"], ["decision_ref"])
+        self.assertEqual(problem["linked_artifacts"], ["artifact_report"])
+        self.assertEqual(problem["alternatives_considered"], ["option_alt"])
+
+        with self.assertRaises(ValueError) as bad_ref:
+            update_node_fields(
+                self.root,
+                node_id="problem_text",
+                list_appends={"linked_artifacts": ["option_t5"]},
+                rebuild_dashboard=False,
+            )
+        self.assertIn("expected 'artifact'", str(bad_ref.exception))
+
+    def test_update_node_fields_cli_rejects_next_action_replace_conflict(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("update-node-fields"),
+                "--root",
+                str(self.root),
+                "--id",
+                "problem_text",
+                "--next-action",
+                "Append action.",
+                "--replace-next-actions",
+                "Replace action.",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("--next-action", out.stdout + out.stderr)
+
     def test_update_node_fields_dry_run_cli_and_rejects_cross_problem_option(self) -> None:
         write_node(
             self.root,
@@ -1767,6 +2034,131 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(cli_payload["changed"])
         self.assertEqual(problem["next_actions"], ["Review branch.", "Record decision."])
         self.assertFalse((self.root / "dashboards").exists())
+
+    def test_apply_graph_plan_creates_batched_subtree_and_syncs_parent_children(self) -> None:
+        plan = {
+            "nodes": [
+                {
+                    "id": "problem_batch",
+                    "type": "problem",
+                    "title": "Batch problem",
+                    "parent": "stage_text",
+                    "status": "active",
+                    "fields": {
+                        "current_best_option": "option_batch_active",
+                        "question": "Can one plan create the branch?",
+                    },
+                },
+                {
+                    "id": "option_batch_active",
+                    "type": "option",
+                    "title": "Active batch option",
+                    "parent": "problem_batch",
+                    "status": "active",
+                    "fields": {
+                        "supporting_experiments": ["exp_batch_1", "exp_batch_2", "exp_batch_3"],
+                    },
+                },
+                {"id": "exp_batch_1", "type": "experiment", "title": "Batch exp 1", "parent": "option_batch_active"},
+                {"id": "exp_batch_2", "type": "experiment", "title": "Batch exp 2", "parent": "option_batch_active"},
+                {"id": "exp_batch_3", "type": "experiment", "title": "Batch exp 3", "parent": "option_batch_active"},
+                {"id": "option_batch_follow_1", "type": "option", "title": "Follow option 1", "parent": "problem_batch"},
+                {"id": "option_batch_follow_2", "type": "option", "title": "Follow option 2", "parent": "problem_batch"},
+            ]
+        }
+
+        result = apply_graph_plan(self.root, plan=plan, rebuild_dashboard=False, show_diff=True)
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_batch.yaml")
+        option = load_yaml(self.root / "graph" / "nodes" / "option_batch_active.yaml")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(len(result["created_nodes"]), 7)
+        self.assertIn("diff", result)
+        self.assertEqual(problem["current_best_option"], "option_batch_active")
+        self.assertEqual(
+            problem["children"],
+            ["option_batch_active", "option_batch_follow_1", "option_batch_follow_2"],
+        )
+        self.assertEqual(option["children"], ["exp_batch_1", "exp_batch_2", "exp_batch_3"])
+        self.assertEqual(option["supporting_experiments"], ["exp_batch_1", "exp_batch_2", "exp_batch_3"])
+        self.assertFalse((self.root / "dashboards").exists())
+
+    def test_apply_graph_plan_dry_run_and_invalid_plan_do_not_write(self) -> None:
+        dry_run = apply_graph_plan(
+            self.root,
+            plan={
+                "nodes": [
+                    {
+                        "id": "problem_preview",
+                        "type": "problem",
+                        "title": "Preview problem",
+                        "parent": "stage_text",
+                    }
+                ]
+            },
+            dry_run=True,
+            show_diff=True,
+        )
+
+        self.assertTrue(dry_run["would_change"])
+        self.assertFalse(dry_run["changed"])
+        self.assertFalse((self.root / "graph" / "nodes" / "problem_preview.yaml").exists())
+
+        with self.assertRaises(ValueError):
+            apply_graph_plan(
+                self.root,
+                plan={
+                    "nodes": [
+                        {
+                            "id": "problem_invalid_plan",
+                            "type": "problem",
+                            "title": "Invalid plan",
+                            "parent": "stage_text",
+                            "fields": {"supporting_experiments": ["missing_exp"]},
+                        }
+                    ]
+                },
+                rebuild_dashboard=False,
+            )
+        self.assertFalse((self.root / "graph" / "nodes" / "problem_invalid_plan.yaml").exists())
+
+    def test_create_workstream_creates_branch_without_focus_or_old_option_changes(self) -> None:
+        before_current = load_yaml(self.root / "current_state.yaml")
+        before_old_option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        result = create_workstream(
+            self.root,
+            workstream={
+                "problem": {
+                    "id": "problem_workstream",
+                    "title": "Workstream problem",
+                    "parent": "stage_text",
+                    "question": "Which branch is fastest?",
+                },
+                "active_option": {
+                    "id": "option_workstream_active",
+                    "title": "Active workstream option",
+                    "hypothesis": "A file plan is faster.",
+                },
+                "experiments": [
+                    {"id": "exp_workstream_1", "title": "Run first check"},
+                    {"id": "exp_workstream_2", "title": "Run second check"},
+                ],
+                "followup_options": [
+                    {"id": "option_workstream_follow", "title": "Follow-up option"},
+                ],
+            },
+            rebuild_dashboard=False,
+        )
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_workstream.yaml")
+        option = load_yaml(self.root / "graph" / "nodes" / "option_workstream_active.yaml")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(problem["current_best_option"], "option_workstream_active")
+        self.assertEqual(problem["question"], "Which branch is fastest?")
+        self.assertEqual(option["status"], "active")
+        self.assertEqual(option["supporting_experiments"], ["exp_workstream_1", "exp_workstream_2"])
+        self.assertEqual(load_yaml(self.root / "current_state.yaml"), before_current)
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml"), before_old_option)
 
     def test_promote_decision_creates_proposed_decision(self) -> None:
         write_node(

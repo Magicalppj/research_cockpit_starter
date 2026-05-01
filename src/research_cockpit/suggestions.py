@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 import hashlib
+import re
 
 from research_cockpit.command_registry import cli_command_for_script
 from research_cockpit.graph_core import child_ids, focus_node_id_from_current, unique_strings
@@ -27,6 +28,12 @@ def _suggestion_priority(node: ResearchNode | None, default: str = "medium") -> 
 def suggestion_key(kind: str, source_node_id: str, action: str) -> str:
     payload = f"{kind}\0{source_node_id}\0{action}".encode("utf-8")
     return f"sg_{hashlib.sha1(payload).hexdigest()[:16]}"
+
+
+def normalize_action_text(action: Any) -> str:
+    text = str(action or "").strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    return text.rstrip(" \t\r\n.!?;:。！？；：")
 
 
 def _focus_related_ids(nodes: dict[str, ResearchNode], current: dict[str, Any]) -> set[str]:
@@ -82,12 +89,16 @@ def _finalize_suggestions(suggestions: list[dict[str, Any]]) -> list[dict[str, A
         key = (
             str(suggestion.get("kind")),
             str(suggestion.get("source_node_id")),
-            str(suggestion.get("action")),
+            normalize_action_text(suggestion.get("action")),
         )
         if key in seen:
             continue
         seen.add(key)
-        suggestion["key"] = suggestion_key(key[0], key[1], key[2])
+        suggestion["key"] = suggestion_key(
+            str(suggestion.get("kind")),
+            str(suggestion.get("source_node_id")),
+            str(suggestion.get("action")),
+        )
         deduped.append(suggestion)
 
     kind_rank = {
@@ -152,15 +163,16 @@ def _mark_queued_suggestions(
     nodes: dict[str, ResearchNode],
     current: dict[str, Any],
 ) -> list[dict[str, Any]]:
-    current_actions = {str(action) for action in current.get("next_actions", []) or []}
+    current_actions = {normalize_action_text(action) for action in current.get("next_actions", []) or []}
     for suggestion in suggestions:
         action = str(suggestion.get("action") or "")
         source = nodes.get(str(suggestion.get("source_node_id")))
         node_actions = set()
         if source:
-            node_actions = {str(item) for item in source.raw.get("next_actions", []) or []}
-        suggestion["queued_in_current"] = action in current_actions
-        suggestion["queued_in_node"] = action in node_actions
+            node_actions = {normalize_action_text(item) for item in source.raw.get("next_actions", []) or []}
+        normalized_action = normalize_action_text(action)
+        suggestion["queued_in_current"] = normalized_action in current_actions
+        suggestion["queued_in_node"] = normalized_action in node_actions
     return suggestions
 
 

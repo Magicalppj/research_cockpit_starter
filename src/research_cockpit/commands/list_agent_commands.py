@@ -4,6 +4,7 @@ import argparse
 import json
 
 from research_cockpit.command_registry import subcommand_for_script
+from research_cockpit.commands.update_node_fields import supported_field_names
 
 
 CAPABILITY_BY_COMMAND = {
@@ -19,8 +20,11 @@ CAPABILITY_BY_COMMAND = {
     "option_workstream_context.py": "capabilities/experiment-tracking.md",
     "check_decision_acceptance.py": "capabilities/decision-adr.md",
     "add_node.py": "capabilities/node-management.md",
+    "apply_graph_plan.py": "capabilities/node-management.md",
+    "create_workstream.py": "capabilities/node-management.md",
     "update_status.py": "capabilities/node-management.md",
     "set_focus.py": "capabilities/focus-context.md",
+    "sync_focus_actions.py": "capabilities/focus-context.md",
     "claim_option.py": "capabilities/experiment-tracking.md",
     "report_option_workstream.py": "capabilities/experiment-tracking.md",
     "record_finding.py": "capabilities/experiment-tracking.md",
@@ -81,8 +85,10 @@ COMMANDS: list[dict[str, object]] = [
         "name": "build_dashboard.py",
         "purpose": "Regenerate dashboard and context JSON from YAML truth source.",
         "mutating": True,
+        "writes_truth_source": False,
         "writes_dashboard": True,
         "writes_generated_files": True,
+        "rebuild_default": True,
         "supports_json": False,
         "supports_dry_run": False,
         "supports_no_build": False,
@@ -147,10 +153,30 @@ COMMANDS: list[dict[str, object]] = [
         "name": "add_node.py",
         "purpose": "Create a new research node YAML file.",
         "mutating": True,
-        "supports_json": False,
-        "supports_dry_run": False,
-        "supports_no_build": False,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
         "recommended_when": "Add a stage, problem, option, experiment, decision, or long-lived artifact.",
+    },
+    {
+        "name": "apply_graph_plan.py",
+        "purpose": "Apply a validated YAML graph update plan in one batched mutation.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "can_batch": True,
+        "recommended_when": "Create or update several nodes without repeated rebuilds.",
+    },
+    {
+        "name": "create_workstream.py",
+        "purpose": "Create a problem, active option, experiments, and follow-up options from a workstream YAML file.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "can_batch": True,
+        "recommended_when": "Start a new research branch from a structured workstream plan.",
     },
     {
         "name": "update_status.py",
@@ -169,6 +195,15 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": False,
         "supports_no_build": True,
         "recommended_when": "Change the current research focus.",
+    },
+    {
+        "name": "sync_focus_actions.py",
+        "purpose": "Replace or append current_state next_actions from a node's next_actions.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "recommended_when": "Keep focus actions aligned with the current focus node.",
     },
     {
         "name": "claim_option.py",
@@ -244,11 +279,12 @@ COMMANDS: list[dict[str, object]] = [
     },
     {
         "name": "update_node_fields.py",
-        "purpose": "Update narrow node fields such as current_best_option or replacement next_actions.",
+        "purpose": "Update supported structured node fields without hand-editing YAML.",
         "mutating": True,
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "fields_supported": supported_field_names(),
         "recommended_when": "Update supported node fields without hand-editing YAML.",
     },
     {
@@ -295,6 +331,13 @@ def agent_command_manifest() -> list[dict[str, object]]:
     for command in COMMANDS:
         command_name = str(command["name"])
         subcommand = subcommand_for_script(command_name) if command_name.endswith(".py") else command_name
+        mutating = bool(command["mutating"])
+        supports_no_build = bool(command.get("supports_no_build"))
+        rebuild_default = bool(command.get("rebuild_default", mutating and supports_no_build))
+        writes_truth_source = bool(command.get("writes_truth_source", mutating and command_name != "build_dashboard.py"))
+        writes_generated_files = bool(
+            command.get("writes_generated_files", rebuild_default or command.get("writes_dashboard", False))
+        )
         row = {
             **command,
             "name": subcommand,
@@ -302,6 +345,12 @@ def agent_command_manifest() -> list[dict[str, object]]:
             "command": f"research-cockpit {subcommand}",
             "python_module_command": f"python -m research_cockpit.cli {subcommand}",
             "cwd": "research_repo_root",
+            "writes_truth_source": writes_truth_source,
+            "writes_generated_files": writes_generated_files,
+            "can_batch": bool(command.get("can_batch", supports_no_build)),
+            "safe_in_plan_mode": bool(command.get("safe_in_plan_mode", not mutating)),
+            "rebuild_default": rebuild_default,
+            "fields_supported": command.get("fields_supported", []),
         }
         rows.append(row)
     return rows

@@ -68,3 +68,16 @@ research-cockpit set-focus --root research_cockpit --focus-node problem_id
 Focus changes write `current_state.yaml`, append `interaction_log.yaml`, and rebuild dashboard/context unless `--no-build` is passed.
 
 Passing `--next-action` replaces the current_state `next_actions` list with the repeated values supplied in this command. It does not append.
+
+## Sync Focus Actions
+
+When the current focus node already has the canonical `next_actions`, sync them into `current_state.yaml` instead of hand-copying action text:
+
+```sh
+research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --dry-run --json --show-diff
+research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --no-build
+```
+
+Default mode is `replace`: current_state `next_actions` becomes the node `next_actions`. Use `--mode append` to append de-duplicated node actions after existing current_state actions.
+
+`suggest-next-actions` deterministically de-duplicates focus actions after trimming, lowercasing, collapsing whitespace, and stripping trailing punctuation. This avoids duplicate suggestions when current_state and the focus node differ only in formatting.

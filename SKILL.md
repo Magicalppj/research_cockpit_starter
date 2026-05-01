@@ -65,8 +65,12 @@ Read only the capability files needed for the current task.
 
 ```sh
 research-cockpit validate --root research_cockpit
+research-cockpit add-node --root research_cockpit --id <node_id> --type <type> --title "..." --parent <parent_id> --dry-run --json --show-diff
+research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
+research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit complete-experiment --root research_cockpit --id <experiment_id> --finding "..." --confidence medium --no-build
-research-cockpit update-node-fields --root research_cockpit --id <node_id> --replace-next-actions "..." --no-build
+research-cockpit update-node-fields --root research_cockpit --id <node_id> --question "..." --tag <tag> --no-build
+research-cockpit sync-focus-actions --root research_cockpit --from-node <node_id> --dry-run --json --show-diff
 research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
 research-cockpit search --root research_cockpit --query "..." --json
 research-cockpit suggest-next-actions --root research_cockpit --json
@@ -81,6 +85,17 @@ When making several related state changes, pass `--no-build` to each supported m
 research-cockpit validate --root research_cockpit
 research-cockpit build --root research_cockpit
 ```
+
+For several node creations or rich field edits, prefer a single plan file:
+
+```sh
+research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
+research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --no-build
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
+```
+
+Use `create-workstream` for the common `problem -> active option -> experiments + follow-up options` shape. It creates the branch and sets the new problem `current_best_option`, but it does not change focus or pause old options.
 
 Run `suggest-next-actions` once before choosing work. Re-run it only after you changed `next_actions` or suggestion lifecycle state.
 

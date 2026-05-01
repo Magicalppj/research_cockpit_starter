@@ -4,6 +4,15 @@ Use this capability for experiments, findings, and option workstreams.
 
 ## Option Workstreams
 
+Create a new problem/option/experiment branch from a file when planning a new workstream:
+
+```sh
+research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
+research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
+```
+
+This creates planned experiment nodes under the active option and records them as that option's `supporting_experiments`. It does not claim an agent workstream, change focus, or pause existing options.
+
 Claim an option branch:
 
 ```sh

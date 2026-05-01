@@ -10,9 +10,56 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state
+from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import ResearchNode, ValidationError, load_yaml, script_command, validate_cockpit
+
+
+SCALAR_FIELDS = {
+    "title",
+    "summary",
+    "question",
+    "hypothesis",
+    "evidence_summary",
+    "result_summary",
+    "priority",
+}
+
+LIST_APPEND_FIELDS = {
+    "tags",
+    "success_criteria",
+    "metrics",
+    "pros",
+    "cons",
+    "next_actions",
+    "supporting_experiments",
+    "contradicting_experiments",
+    "supporting_decisions",
+    "linked_artifacts",
+    "alternatives_considered",
+    "derived_from",
+}
+
+FIELD_ALIASES = {
+    "tag": "tags",
+    "success_criterion": "success_criteria",
+    "metric": "metrics",
+    "pro": "pros",
+    "con": "cons",
+    "next_action": "next_actions",
+    "supporting_experiment": "supporting_experiments",
+    "contradicting_experiment": "contradicting_experiments",
+    "supporting_decision": "supporting_decisions",
+    "linked_artifact": "linked_artifacts",
+    "alternative": "alternatives_considered",
+    "alternatives": "alternatives_considered",
+    "alternative_considered": "alternatives_considered",
+    "derived": "derived_from",
+}
+
+
+def supported_field_names() -> list[str]:
+    return sorted([*SCALAR_FIELDS, *LIST_APPEND_FIELDS, "current_best_option", "replace_next_actions"])
 
 
 def _validate_current_best_option(nodes: dict[str, ResearchNode], node: ResearchNode, option_id: str) -> None:
@@ -27,46 +74,161 @@ def _validate_current_best_option(nodes: dict[str, ResearchNode], node: Research
         raise ValueError(f"Current best option {option_id} must be a child option of problem {node.id}")
 
 
+def _as_str_list(value: Any, *, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, tuple):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    raise ValueError(f"{field_name} must be a string or list")
+
+
+def _append_unique(data: dict[str, Any], field_name: str, values: list[str]) -> None:
+    existing = data.get(field_name, []) or []
+    if not isinstance(existing, list):
+        raise ValueError(f"{field_name} must be a list")
+    out = [str(item) for item in existing]
+    seen = set(out)
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        out.append(text)
+        seen.add(text)
+    if out:
+        data[field_name] = out
+    else:
+        data.pop(field_name, None)
+
+
+def field_updates_from_mapping(fields: dict[str, Any] | None) -> dict[str, Any]:
+    fields = fields or {}
+    if not isinstance(fields, dict):
+        raise ValueError("fields must be a mapping")
+
+    scalar_updates: dict[str, str] = {}
+    list_appends: dict[str, list[str]] = {}
+    current_best_option: str | None = None
+    replace_next_actions: list[str] | None = None
+
+    for raw_key, value in fields.items():
+        key = str(raw_key).replace("-", "_")
+        field_name = FIELD_ALIASES.get(key, key)
+        if field_name == "current_best_option":
+            current_best_option = str(value).strip()
+            continue
+        if field_name == "replace_next_actions":
+            replace_next_actions = _as_str_list(value, field_name=field_name)
+            continue
+        if field_name in SCALAR_FIELDS:
+            scalar_updates[field_name] = "" if value is None else str(value)
+            continue
+        if field_name in LIST_APPEND_FIELDS:
+            list_appends.setdefault(field_name, []).extend(_as_str_list(value, field_name=field_name))
+            continue
+        allowed = ", ".join(supported_field_names())
+        raise ValueError(f"Unsupported node field {raw_key!r}; supported fields: {allowed}")
+
+    return {
+        "current_best_option": current_best_option,
+        "replace_next_actions": replace_next_actions,
+        "scalar_updates": scalar_updates,
+        "list_appends": list_appends,
+    }
+
+
+def apply_node_field_updates(
+    nodes: dict[str, ResearchNode],
+    *,
+    node_id: str,
+    data: dict[str, Any],
+    current_best_option: str | None = None,
+    replace_next_actions: list[str] | None = None,
+    scalar_updates: dict[str, Any] | None = None,
+    list_appends: dict[str, list[str]] | None = None,
+) -> list[str]:
+    scalar_updates = scalar_updates or {}
+    list_appends = list_appends or {}
+    if replace_next_actions is not None and list_appends.get("next_actions"):
+        raise ValueError("--next-action cannot be used together with --replace-next-actions")
+
+    for field_name in scalar_updates:
+        if field_name not in SCALAR_FIELDS:
+            raise ValueError(f"Unsupported scalar node field: {field_name}")
+    for field_name in list_appends:
+        if field_name not in LIST_APPEND_FIELDS:
+            raise ValueError(f"Unsupported list node field: {field_name}")
+
+    node = nodes[node_id]
+    touched: list[str] = []
+    if current_best_option is not None:
+        _validate_current_best_option(nodes, node, current_best_option)
+        data["current_best_option"] = current_best_option
+        touched.append("current_best_option")
+    if replace_next_actions is not None:
+        data["next_actions"] = [str(action) for action in replace_next_actions if str(action).strip()]
+        touched.append("next_actions")
+    for field_name, value in scalar_updates.items():
+        data[field_name] = "" if value is None else str(value)
+        touched.append(field_name)
+    for field_name, values in list_appends.items():
+        _append_unique(data, field_name, values)
+        touched.append(field_name)
+    return sorted(set(touched))
+
+
+def _field_snapshot(data: dict[str, Any], field_names: list[str]) -> dict[str, Any]:
+    return {field_name: data.get(field_name) for field_name in field_names}
+
+
 def update_node_fields(
     root: Path,
     *,
     node_id: str,
     current_best_option: str | None = None,
     replace_next_actions: list[str] | None = None,
+    scalar_updates: dict[str, Any] | None = None,
+    list_appends: dict[str, list[str]] | None = None,
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
+    show_diff: bool = False,
 ) -> dict[str, Any]:
-    if current_best_option is None and replace_next_actions is None:
+    scalar_updates = scalar_updates or {}
+    list_appends = list_appends or {}
+    if current_best_option is None and replace_next_actions is None and not scalar_updates and not list_appends:
         raise ValueError("At least one field update is required")
+    if replace_next_actions is not None and list_appends.get("next_actions"):
+        raise ValueError("--next-action cannot be used together with --replace-next-actions")
 
     state = load_validated_state(root)
     nodes = state.nodes
     if node_id not in nodes:
         raise ValueError(f"Node does not exist: {node_id}")
-    node = nodes[node_id]
-    if current_best_option is not None:
-        _validate_current_best_option(nodes, node, current_best_option)
 
     path = find_node_file(root, node_id)
     data = load_yaml(path)
-    before = {
-        "current_best_option": data.get("current_best_option"),
-        "next_actions": list(data.get("next_actions", []) or []),
-    }
-    if current_best_option is not None:
-        data["current_best_option"] = current_best_option
-    if replace_next_actions is not None:
-        data["next_actions"] = [str(action) for action in replace_next_actions]
+    before_data = dict(data)
+    touched_fields = apply_node_field_updates(
+        nodes,
+        node_id=node_id,
+        data=data,
+        current_best_option=current_best_option,
+        replace_next_actions=replace_next_actions,
+        scalar_updates=scalar_updates,
+        list_appends=list_appends,
+    )
     data["updated_at"] = str(date.today())
 
     candidate = dict(nodes)
     candidate[node_id] = ResearchNode.from_dict(data)
     validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
 
-    after = {
-        "current_best_option": data.get("current_best_option"),
-        "next_actions": list(data.get("next_actions", []) or []),
-    }
+    before = _field_snapshot(before_data, touched_fields)
+    after = _field_snapshot(data, touched_fields)
     changed = before != after
     result: dict[str, Any] = {
         "node_id": node_id,
@@ -76,7 +238,10 @@ def update_node_fields(
         "path": str(path),
         "before": before,
         "after": after,
+        "fields": touched_fields,
     }
+    if show_diff:
+        result["diff"] = yaml_change_diff([(path, before_data, data)]) if changed else ""
     if dry_run or not changed:
         return result
 
@@ -93,6 +258,7 @@ def update_node_fields(
             "extra": {
                 "current_best_option": current_best_option,
                 "replaced_next_actions": replace_next_actions is not None,
+                "fields": touched_fields,
             },
         },
         rebuild_dashboard=rebuild_dashboard,
@@ -106,10 +272,61 @@ def main() -> None:
     parser.add_argument("--id", required=True, dest="node_id")
     parser.add_argument("--current-best-option")
     parser.add_argument("--replace-next-actions", action="append", dest="replace_next_actions")
+    parser.add_argument("--title")
+    parser.add_argument("--summary")
+    parser.add_argument("--question")
+    parser.add_argument("--hypothesis")
+    parser.add_argument("--evidence-summary")
+    parser.add_argument("--result-summary")
+    parser.add_argument("--priority")
+    parser.add_argument("--tag", action="append", dest="tags")
+    parser.add_argument("--success-criterion", action="append", dest="success_criteria")
+    parser.add_argument("--metric", action="append", dest="metrics")
+    parser.add_argument("--pro", action="append", dest="pros")
+    parser.add_argument("--con", action="append", dest="cons")
+    parser.add_argument("--next-action", action="append", dest="next_actions")
+    parser.add_argument("--supporting-experiment", action="append", dest="supporting_experiments")
+    parser.add_argument("--contradicting-experiment", action="append", dest="contradicting_experiments")
+    parser.add_argument("--supporting-decision", action="append", dest="supporting_decisions")
+    parser.add_argument("--linked-artifact", action="append", dest="linked_artifacts")
+    parser.add_argument("--alternative", action="append", dest="alternatives_considered")
+    parser.add_argument("--derived-from", action="append", dest="derived_from")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
+    scalar_updates = {
+        key: value
+        for key, value in {
+            "title": args.title,
+            "summary": args.summary,
+            "question": args.question,
+            "hypothesis": args.hypothesis,
+            "evidence_summary": args.evidence_summary,
+            "result_summary": args.result_summary,
+            "priority": args.priority,
+        }.items()
+        if value is not None
+    }
+    list_appends = {
+        key: value
+        for key, value in {
+            "tags": args.tags,
+            "success_criteria": args.success_criteria,
+            "metrics": args.metrics,
+            "pros": args.pros,
+            "cons": args.cons,
+            "next_actions": args.next_actions,
+            "supporting_experiments": args.supporting_experiments,
+            "contradicting_experiments": args.contradicting_experiments,
+            "supporting_decisions": args.supporting_decisions,
+            "linked_artifacts": args.linked_artifacts,
+            "alternatives_considered": args.alternatives_considered,
+            "derived_from": args.derived_from,
+        }.items()
+        if value is not None
+    }
 
     try:
         result = update_node_fields(
@@ -117,8 +334,11 @@ def main() -> None:
             node_id=args.node_id,
             current_best_option=args.current_best_option,
             replace_next_actions=args.replace_next_actions,
+            scalar_updates=scalar_updates,
+            list_appends=list_appends,
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
+            show_diff=args.show_diff,
         )
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))
@@ -129,6 +349,8 @@ def main() -> None:
         return
     if args.dry_run:
         print(f"Would update node fields for {args.node_id}")
+        if args.show_diff and result.get("diff"):
+            print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
         return
     if result["changed"]:
         print(f"Updated node fields for {args.node_id}: {result['path']}")
