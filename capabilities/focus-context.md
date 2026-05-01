@@ -10,7 +10,15 @@ Use this capability at the start of an agent session and before making local res
 research-cockpit bootstrap --root research_cockpit --json
 ```
 
-2. If dashboard files are missing or stale and generated-file writes are allowed:
+2. If a human assigns a specific node id, go straight to compact node handoff:
+
+```sh
+research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
+```
+
+For known-node continuation, bootstrap plus compact `node-context` is normally enough. Do not also read both context packs unless you need global state or generated dashboard context.
+
+3. If dashboard files are missing or stale and generated-file writes are allowed:
 
 ```sh
 research-cockpit build --root research_cockpit
@@ -18,7 +26,7 @@ research-cockpit build --root research_cockpit
 
 Do not run `bootstrap --build` or `build` during read-only onboarding.
 
-3. Read:
+4. Read generated context only for global scans:
    - `research_cockpit/dashboards/agent_context_pack.json`
    - `research_cockpit/dashboards/focus_context_pack.json`
    - `research_cockpit/dashboards/search_index.json` when searching.
@@ -58,3 +66,5 @@ research-cockpit set-focus --root research_cockpit --focus-node problem_id
 ```
 
 Focus changes write `current_state.yaml`, append `interaction_log.yaml`, and rebuild dashboard/context unless `--no-build` is passed.
+
+Passing `--next-action` replaces the current_state `next_actions` list with the repeated values supplied in this command. It does not append.

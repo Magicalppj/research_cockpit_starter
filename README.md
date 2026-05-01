@@ -184,9 +184,9 @@ your-research-repo/
 然后告诉 agent：
 
 ```text
-使用 research-cockpit skill。先运行 `research-cockpit bootstrap --root research_cockpit --json`，
-读取 agent_context_pack 和 focus_context_pack，再通过 `research-cockpit` CLI 写入研究状态。
-如果要从某个节点接手工作，先运行 `research-cockpit node-context --root research_cockpit --id <node_id> --compact --json`。
+使用 research-cockpit skill。先运行 `research-cockpit bootstrap --root research_cockpit --json`。
+如果已知接手节点，再运行 `research-cockpit node-context --root research_cockpit --id <node_id> --compact --json`。
+只有排查全局状态或需要 generated dashboard context 时，再读取 agent_context_pack / focus_context_pack。
 ```
 
 推荐启动命令：
@@ -203,7 +203,7 @@ python -m research_cockpit.cli node-context --root research_cockpit --id <node_i
 
 `node-context` 是只读命令，会直接从 truth-source YAML 实时整理单个节点的 parent chain、blockers、next actions、证据状态、资源、recent interactions 和安全命令草案。新 agent 如果已经拿到目标 node id，通常先跑 `--compact --json` 的短输出，再按返回的 `recommended_next_steps` 选择下一步写入命令；需要完整 relations、resources 或 recent interactions 时再去掉 `--compact`。如果 agent shell 不能直接调用 console script，可加 `--command-style python`，让命令草案使用 `python -m research_cockpit.cli ...`。
 
-所有关键写入都应走 `research-cockpit` CLI，不要让 agent 直接手写 YAML，除非对应 capability 明确允许并说明字段边界。
+所有关键 YAML 写入都应走 `research-cockpit` CLI，不要让 agent 直接手写 YAML，除非对应 capability 明确允许并说明字段边界。Markdown note 可直接编辑，用来补人类可读细节；结构化 finding、status、focus、decision state、`current_best_option` 和 `next_actions` 仍以 CLI/YAML truth 为准。
 
 常见 agent 流程：
 
@@ -214,6 +214,27 @@ research-cockpit suggest-next-actions --root research_cockpit --json
 research-cockpit commands --json
 research-cockpit claim-option --root research_cockpit --option <option_id> --agent <agent_id> --dry-run --json
 research-cockpit validate --root research_cockpit --json
+```
+
+`suggest-next-actions` 默认跑一次即可；只有修改了 `next_actions` 或 suggestion lifecycle 后才需要再跑。
+
+记录实验结论时优先使用保守原子命令：
+
+```sh
+research-cockpit complete-experiment --root research_cockpit --id <experiment_id> --finding "..." --confidence medium --result-summary "..." --next-action "..." --no-build
+```
+
+需要策略切换时显式调用：
+
+```sh
+research-cockpit update-node-fields --root research_cockpit --id <problem_id> --current-best-option <option_id> --no-build
+```
+
+批量写入时，对支持的命令使用 `--no-build`，最后统一：
+
+```sh
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
 ```
 
 如果需要刷新 generated dashboard/context，再显式运行 `research-cockpit build --root research_cockpit`。只读接手场景不要默认加 `--build`。

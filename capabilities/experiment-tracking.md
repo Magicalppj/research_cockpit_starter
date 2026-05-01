@@ -29,13 +29,32 @@ research-cockpit report-option-workstream --root research_cockpit --option optio
 Record experiment findings through `research-cockpit record-finding`:
 
 ```sh
-research-cockpit record-finding --root research_cockpit --experiment experiment_x --statement "..." --confidence medium --outcome positive --summary "..."
+research-cockpit record-finding --root research_cockpit --experiment experiment_x --statement "..." --confidence medium --outcome positive --summary "..." --artifact-id artifact_x
 ```
 
-Successful finding writes append a compact `record_finding` event to `graph/interaction_log.yaml`.
+`--artifact-id` must be an existing artifact node id, not a file path. The older `--artifact` flag remains as a compatibility alias.
+
+Use `complete-experiment` when you want the conservative "record conclusion and mark done" workflow in one command:
+
+```sh
+research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --outcome mixed --result-summary "..." --next-action "Review follow-up" --no-build
+```
+
+`complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, and appends de-duplicated experiment-local `next_actions`. It does not change focus, option status, problem status, or `current_best_option`.
+
+Successful finding and completion writes append compact events to `graph/interaction_log.yaml`.
+
+Treat structured `findings` as truth. Use Markdown notes only for human-readable details that do not need to drive dashboards or decisions.
 
 After findings change, rebuild decision evidence when a decision depends on them:
 
 ```sh
 research-cockpit update-decision-evidence --root research_cockpit --id decision_x
+```
+
+When recording several related updates, use `--no-build` on each supported command and run one final:
+
+```sh
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
 ```

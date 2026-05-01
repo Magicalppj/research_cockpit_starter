@@ -67,9 +67,9 @@ def record_finding(
     artifacts = artifacts or []
     for artifact_id in artifacts:
         if artifact_id not in nodes:
-            raise ValueError(f"Artifact node does not exist: {artifact_id}")
+            raise ValueError(f"Artifact node id does not exist: {artifact_id}")
         if nodes[artifact_id].type != "artifact":
-            raise ValueError(f"Artifact reference {artifact_id} must be artifact, got {nodes[artifact_id].type}")
+            raise ValueError(f"Artifact node id {artifact_id} must be artifact, got {nodes[artifact_id].type}")
 
     path = find_node_file(root, experiment_id)
     data = load_yaml(path)
@@ -137,7 +137,8 @@ def main() -> None:
     parser.add_argument("--confidence", required=True, choices=sorted(VALID_FINDING_CONFIDENCES))
     parser.add_argument("--outcome", choices=sorted(VALID_FINDING_OUTCOMES))
     parser.add_argument("--metric", action="append", dest="metrics")
-    parser.add_argument("--artifact", action="append", dest="artifacts")
+    parser.add_argument("--artifact-id", action="append", dest="artifacts", help="Artifact node id; repeat for multiple artifacts.")
+    parser.add_argument("--artifact", action="append", dest="artifacts", help="Deprecated alias for --artifact-id.")
     parser.add_argument("--summary")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
