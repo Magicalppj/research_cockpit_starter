@@ -25,7 +25,12 @@ from research_cockpit.commands.build_dashboard import build_dashboard
 
 def _find_suggestion(suggestions: list[dict[str, Any]], suggestion_id: str) -> dict[str, Any]:
     for suggestion in suggestions:
-        if suggestion.get("id") == suggestion_id or suggestion.get("key") == suggestion_id:
+        if suggestion_id in {
+            suggestion.get("id"),
+            suggestion.get("key"),
+            suggestion.get("suggestion_id"),
+            suggestion.get("display_id"),
+        }:
             return suggestion
     raise ValueError(f"Suggestion does not exist: {suggestion_id}")
 

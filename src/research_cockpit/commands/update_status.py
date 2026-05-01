@@ -10,12 +10,14 @@ ROOT = default_data_root()
 
 from research_cockpit.model import (
     ResearchNode,
+    load_explicit_edges,
     load_nodes,
     load_yaml,
-    save_yaml,
+    script_command,
     validate_cockpit,
     validate_status,
 )
+from research_cockpit.commands._runtime import finish_mutation
 
 
 def find_node_file(root: Path, node_id: str) -> Path:
@@ -33,6 +35,7 @@ def update_status(
     status: str,
     summary: str | None = None,
     result_summary: str | None = None,
+    rebuild_dashboard: bool = True,
 ) -> Path:
     nodes = load_nodes(root)
     if node_id not in nodes:
@@ -47,6 +50,11 @@ def update_status(
 
     path = find_node_file(root, node_id)
     data = load_yaml(path)
+    before = {
+        "status": data.get("status"),
+        "summary": data.get("summary"),
+        "result_summary": data.get("result_summary"),
+    }
     data["status"] = status
     if summary is not None:
         data["summary"] = summary
@@ -56,9 +64,32 @@ def update_status(
 
     candidate = dict(nodes)
     candidate[node_id] = ResearchNode.from_dict(data)
-    validate_cockpit(root, candidate, load_yaml(root / "current_state.yaml"), raise_on_error=True)
+    current = load_yaml(root / "current_state.yaml")
+    explicit_edges = load_explicit_edges(root)
+    validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
 
-    save_yaml(path, data)
+    after = {
+        "status": data.get("status"),
+        "summary": data.get("summary"),
+        "result_summary": data.get("result_summary"),
+    }
+    finish_mutation(
+        root,
+        [(path, data)],
+        interaction={
+            "kind": "update_status",
+            "actor": "researcher",
+            "node_id": node_id,
+            "command": f"{script_command('update_status.py')} --id {node_id} --status {status}",
+            "before": before,
+            "after": after,
+            "extra": {
+                "node_id": node_id,
+                "status": status,
+            },
+        },
+        rebuild_dashboard=rebuild_dashboard,
+    )
     return path
 
 
@@ -69,6 +100,7 @@ def main() -> None:
     parser.add_argument("--status", required=True)
     parser.add_argument("--summary")
     parser.add_argument("--result-summary", help="Experiment nodes only; rejected for other node types.")
+    parser.add_argument("--no-build", action="store_true", help="Only update YAML; do not rebuild dashboards")
     args = parser.parse_args()
 
     path = update_status(
@@ -77,8 +109,11 @@ def main() -> None:
         status=args.status,
         summary=args.summary,
         result_summary=args.result_summary,
+        rebuild_dashboard=not args.no_build,
     )
     print(f"Updated {path}")
+    if not args.no_build:
+        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 
 if __name__ == "__main__":

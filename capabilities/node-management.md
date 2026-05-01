@@ -19,6 +19,7 @@ research-cockpit update-status --root research_cockpit --id option_x --status ac
 ```
 
 Use only statuses accepted by validation for that node type.
+`update-status` rebuilds dashboards by default; pass `--no-build` when batching several mutations and run one final `validate` + `build`.
 
 Status meanings:
 
@@ -45,6 +46,17 @@ Do not physically remove YAML files unless a human explicitly requests a structu
 
 `--result-summary` is only accepted for `experiment` nodes.
 
+## Narrow Field Updates
+
+Use `update-node-fields` when a supported node field would otherwise require hand-editing YAML:
+
+```sh
+research-cockpit update-node-fields --root research_cockpit --id problem_x --current-best-option option_x --no-build
+research-cockpit update-node-fields --root research_cockpit --id experiment_x --replace-next-actions "Review metrics" --replace-next-actions "Draft decision" --no-build
+```
+
+`--current-best-option` is only valid on `problem` nodes and must point to a child `option`. `--replace-next-actions` replaces the node `next_actions` list with the repeated values supplied in the command.
+
 ## Suggestions
 
 Read suggestions:
@@ -52,6 +64,9 @@ Read suggestions:
 ```sh
 research-cockpit suggest-next-actions --root research_cockpit --json
 ```
+
+Run this once before choosing work. Re-run only after changing `next_actions` or suggestion lifecycle state.
+JSON output includes stable `suggestion_id` (`sg_...`) and human display `display_id` (`next_action_...`). Older fields remain: `key` equals `suggestion_id`, and `id` equals `display_id`.
 
 Apply suggestions through `research-cockpit` commands, not direct YAML edits:
 
@@ -65,3 +80,5 @@ Update suggestion lifecycle:
 ```sh
 research-cockpit update-suggestion-state --root research_cockpit --id sg_x --state dismissed --reason "..."
 ```
+
+Both `apply-suggestion` and `update-suggestion-state` accept either stable `suggestion_id`/`key` or display `display_id`/`id`.

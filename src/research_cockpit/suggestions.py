@@ -140,7 +140,10 @@ def _apply_suggestion_lifecycle(
 
 def _assign_suggestion_ids(suggestions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for index, suggestion in enumerate(suggestions, start=1):
-        suggestion["id"] = f"next_action_{index:03d}"
+        display_id = f"next_action_{index:03d}"
+        suggestion["display_id"] = display_id
+        suggestion["suggestion_id"] = str(suggestion.get("key") or "")
+        suggestion["id"] = display_id
     return suggestions
 
 
