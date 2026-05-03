@@ -65,6 +65,7 @@ Use `create-workstream` for the common `problem -> active option -> planned expe
 ```sh
 research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
+research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --compact
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
 ```
 
@@ -76,17 +77,30 @@ problem:
   title: New research problem
   parent: stage_x
   status: active
+  summary: Scope the next research branch.
   question: What should we optimize next?
+  hypothesis: A narrower branch will reduce command count.
+  tags:
+    - workflow
+  next_actions:
+    - Run the first planned experiment.
 active_option:
   id: option_x
   title: Active route
   status: active
+  summary: Try the shortest route to evidence.
   hypothesis: This route has the shortest path to signal.
 experiments:
   - id: experiment_x1
     title: Run first check
+    success_criteria:
+      - The check produces a comparable metric.
+    metrics:
+      - command_count
   - id: experiment_x2
     title: Run second check
+    success_criteria:
+      - The check can be reviewed without reading full node YAML.
 followup_options:
   - id: option_followup_x
     title: Follow-up route
@@ -95,6 +109,8 @@ followup_options:
 
 It creates the branch, sets the problem `current_best_option`, and adds experiment ids to the active option `supporting_experiments`. It does not change focus or pause old options.
 Use `open` for not-yet-selected follow-up options. File-based graph commands accept option status `planned` as an input alias and write `open` to truth-source YAML because `planned` is not a stored option status.
+`create-workstream --print-schema` shows the short supported example. Common node fields such as `summary`, `question`, `hypothesis`, `tags`, `success_criteria`, `metrics`, and `next_actions` pass through to the created graph nodes.
+After creation, use `option-workstream-context --root research_cockpit --id option_x --compact --json` to verify experiment ids, statuses, success criteria count, metric count, finding count, and linked artifact count. Read per-experiment `node-context` only when exact full text is needed.
 
 ## Update Status
 

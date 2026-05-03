@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from importlib import import_module
+import json
 import os
 from pathlib import Path
 import shutil
@@ -48,6 +49,8 @@ def init_command(argv: list[str]) -> None:
         help="State template to copy into the research repo.",
     )
     parser.add_argument("--force", action="store_true", help="Copy over an existing target directory.")
+    parser.add_argument("--build", action="store_true", help="Build dashboards/context packs after initialization.")
+    parser.add_argument("--json", action="store_true", help="Print machine-readable init result.")
     args = parser.parse_args(argv)
 
     source = plugin_root() / "templates" / "minimal_research_cockpit"
@@ -56,7 +59,22 @@ def init_command(argv: list[str]) -> None:
     if args.root.exists() and any(args.root.iterdir()) and not args.force:
         raise SystemExit(f"Target already exists and is not empty: {args.root}")
     _copytree_contents(source, args.root)
+    if args.build:
+        from research_cockpit.commands.build_dashboard import build_dashboard
+
+        build_dashboard(args.root)
+    payload = {
+        "root": str(args.root),
+        "template": args.template,
+        "built": bool(args.build),
+        "dashboard_path": str(args.root / "dashboards") if args.build else None,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
     print(f"Initialized Research Cockpit state at {args.root}")
+    if args.build:
+        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 
 def ui_command(argv: list[str]) -> None:

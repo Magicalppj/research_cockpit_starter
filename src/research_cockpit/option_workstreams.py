@@ -117,6 +117,7 @@ def build_option_workstream_context(
             **evidence,
             "experiment_count": len(subtree["experiment_ids"]),
         },
+        "focus_next_actions": current.get("next_actions", []) or [],
         "open_next_actions": unique_strings(next_actions),
         "blockers": unique_strings(blockers),
         "suggested_commands": {
@@ -128,7 +129,15 @@ def build_option_workstream_context(
                 "<agent_id>",
                 '--objective "Describe objective"',
             ),
-            "context": _workflow_command("option_workstream_context.py", "--option", option_id, "--json"),
+            "context": _workflow_command("option_workstream_context.py", "--id", option_id, "--compact", "--json"),
+            "context_option_alias": _workflow_command("option_workstream_context.py", "--option", option_id, "--json"),
+            "finalize": _workflow_command(
+                "finalize_workstream.py",
+                "--file",
+                "finalize.yaml",
+                "--json",
+                "--compact",
+            ),
             "report": _workflow_command(
                 "report_option_workstream.py",
                 "--option",

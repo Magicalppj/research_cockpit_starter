@@ -253,6 +253,19 @@ def retrieval_branch_track(skill_path: Path, python: str, destination: Path) -> 
         ),
         _cli(
             python,
+            "update-node-fields",
+            "--root",
+            root,
+            "--id",
+            new_experiment,
+            "--success-criterion",
+            "The compact context reports experiment validation detail.",
+            "--metric",
+            "lookup_hit_rate",
+            "--no-build",
+        ),
+        _cli(
+            python,
             "report-option-workstream",
             "--root",
             root,
@@ -266,24 +279,31 @@ def retrieval_branch_track(skill_path: Path, python: str, destination: Path) -> 
             "Retrieval branch now has a scoped child problem, option, and planned experiment.",
             "--no-build",
         ),
-        _cli(python, "option-workstream-context", "--root", root, "--option", RETRIEVAL_OPTION_ID, "--json"),
+        _cli(python, "option-workstream-context", "--root", root, "--id", RETRIEVAL_OPTION_ID, "--compact", "--json"),
         _cli(python, "validate", "--root", root),
         _cli(python, "build", "--root", root),
     ]
     checks = _run_all(commands, destination, env=env)
-    context = checks[5].get("json") if isinstance(checks[5].get("json"), dict) else {}
+    context = checks[6].get("json") if isinstance(checks[6].get("json"), dict) else {}
     subtree = context.get("subtree", {}) if isinstance(context, dict) else {}
+    summaries = context.get("experiment_summaries", []) if isinstance(context, dict) else []
+    new_experiment_summary = next((item for item in summaries if item.get("id") == new_experiment), {})
     recursive_ok = new_experiment in set(subtree.get("experiment_ids", []))
+    compact_summary_ok = (
+        new_experiment_summary.get("success_criteria_count") == 1
+        and new_experiment_summary.get("metric_count") == 1
+    )
     source_changed = source_before != _file_manifest(skill_path)
     copy_changed = _changed_files(copy_before, _file_manifest(copy_path))
     return _track(
         "track_c_retrieval_branch_agent",
-        all(check["passed"] for check in checks) and recursive_ok and not source_changed and bool(copy_changed),
+        all(check["passed"] for check in checks) and recursive_ok and compact_summary_ok and not source_changed and bool(copy_changed),
         checks=checks,
         summary={
             "copy_path": str(copy_path),
             "new_node_ids": [new_problem, new_option, new_experiment],
             "recursive_context_contains_new_experiment": recursive_ok,
+            "compact_experiment_summary_ok": compact_summary_ok,
             "source_changed": source_changed,
             "copy_changed_files": copy_changed[:60],
             "copy_changed_count": len(copy_changed),
@@ -392,6 +412,89 @@ def portable_skill_track(skill_path: Path, python: str, destination: Path) -> di
     )
 
 
+def third_round_workflow_track(skill_path: Path, python: str, destination: Path) -> dict[str, Any]:
+    dependency = runtime_dependency_track(python)
+    if not dependency["passed"]:
+        return _track("track_f_third_round_workflow", False, checks=[dependency], summary=dependency["summary"], stdout=dependency["stdout"])
+
+    source_before = _file_manifest(skill_path)
+    copy_path = _copy_track_source(skill_path, destination)
+    root = _data_root(copy_path)
+    env = _package_env(copy_path)
+    init_root = destination / "init_build" / "research_cockpit"
+    plan_dir = destination / "finalize_plan"
+    summary_file = plan_dir / "notes" / "option_summary.md"
+    finalize_file = plan_dir / "finalize.yaml"
+    summary_file.parent.mkdir(parents=True, exist_ok=True)
+    summary_file.write_text("Forward check summary from finalize file directory.", encoding="utf-8")
+    finalize_file.write_text(
+        "\n".join(
+            [
+                f"option: {PROMPT_OPTION_ID}",
+                "status: promising",
+                "summary_file: notes/option_summary.md",
+                "summary_target: report",
+                "report: true",
+                "agent: forward_check",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    commands = [
+        _cli(python, "init", "--root", str(init_root), "--build", "--json"),
+        _cli(python, "option-workstream-context", "--root", root, "--id", PROMPT_OPTION_ID, "--compact", "--json"),
+        _cli(
+            python,
+            "finalize-workstream",
+            "--root",
+            root,
+            "--file",
+            str(finalize_file),
+            "--dry-run",
+            "--show-diff",
+            "--json",
+            "--compact",
+        ),
+    ]
+    checks = _run_all(commands, destination, env=env)
+    init_payload = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
+    context_payload = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
+    finalize_payload = checks[2].get("json") if isinstance(checks[2].get("json"), dict) else {}
+    prompt_summary = next(
+        (
+            item
+            for item in context_payload.get("experiment_summaries", [])
+            if item.get("id") == PROMPT_EXPERIMENT_ID
+        ),
+        {},
+    ) if isinstance(context_payload, dict) else {}
+    source_changed = source_before != _file_manifest(skill_path)
+    return _track(
+        "track_f_third_round_workflow",
+        all(check["passed"] for check in checks)
+        and init_payload.get("built") is True
+        and (init_root / "dashboards").exists()
+        and context_payload.get("option", {}).get("id") == PROMPT_OPTION_ID
+        and "subtree_nodes" not in context_payload
+        and int(prompt_summary.get("metric_count") or 0) > 0
+        and finalize_payload.get("resolved_inputs", {}).get("summary_file") == str(summary_file)
+        and finalize_payload.get("diff_included") is True
+        and int(finalize_payload.get("diff_line_count") or 0) > 0
+        and not source_changed,
+        checks=checks,
+        summary={
+            "copy_path": str(copy_path),
+            "init_built": init_payload.get("built"),
+            "context_compact": "subtree_nodes" not in context_payload,
+            "prompt_experiment_metric_count": prompt_summary.get("metric_count"),
+            "resolved_summary_file": finalize_payload.get("resolved_inputs", {}).get("summary_file"),
+            "diff_line_count": finalize_payload.get("diff_line_count"),
+            "source_changed": source_changed,
+        },
+    )
+
+
 def subagent_forward_check_payload(
     skill_path: Path = DEFAULT_SKILL_PATH,
     *,
@@ -416,16 +519,19 @@ def subagent_forward_check_payload(
             tracks.append(_skipped_track("track_c_retrieval_branch_agent", reason))
             tracks.append(_skipped_track("track_d_decision_gate_agent", reason))
             tracks.append(_skipped_track("track_e_portable_skill_agent", reason))
+            tracks.append(_skipped_track("track_f_third_round_workflow", reason))
         else:
             tracks.append(read_only_agent_track(skill_path, python, temp_run))
             if skip_mutating:
                 tracks.append(_skipped_track("track_b_prompt_refinement_workstream", "--skip-mutating was provided"))
                 tracks.append(_skipped_track("track_c_retrieval_branch_agent", "--skip-mutating was provided"))
                 tracks.append(_skipped_track("track_d_decision_gate_agent", "--skip-mutating was provided"))
+                tracks.append(_skipped_track("track_f_third_round_workflow", "--skip-mutating was provided"))
             else:
                 tracks.append(prompt_refinement_workstream_track(skill_path, python, temp_run / "b"))
                 tracks.append(retrieval_branch_track(skill_path, python, temp_run / "c"))
                 tracks.append(decision_gate_workflow_track(skill_path, python, temp_run / "d"))
+                tracks.append(third_round_workflow_track(skill_path, python, temp_run / "f"))
             tracks.append(portable_skill_track(skill_path, python, temp_run / "p"))
 
         source_changed = source_before != _file_manifest(skill_path)

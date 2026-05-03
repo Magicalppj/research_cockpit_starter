@@ -130,6 +130,7 @@ npm run build
 
 ```sh
 research-cockpit init --root research_cockpit
+research-cockpit init --root research_cockpit --build --json
 research-cockpit bootstrap --root research_cockpit --build --json
 research-cockpit validate --root research_cockpit --json
 ```
@@ -275,6 +276,8 @@ research-cockpit create-workstream --root research_cockpit --file workstream.yam
 
 `create-workstream` sets the new problem `current_best_option` and active option `supporting_experiments`, but it does not change focus, pause old options, or delete old branches.
 Use `open` for follow-up option status. File-based graph commands accept option status `planned` only as an input alias and write `open` to YAML.
+`create-workstream --print-schema` includes common passthrough fields such as `question`, `hypothesis`, `summary`, `tags`, `success_criteria`, `metrics`, and `next_actions`.
+After creating a workstream, use `option-workstream-context --root research_cockpit --id <option_id> --compact --json` to verify experiment ids, statuses, success criteria count, metric count, finding count, and linked artifact count. Use per-experiment `node-context` only when you need full field text.
 
 When a focus node already has canonical actions, use:
 
@@ -289,9 +292,10 @@ For a known option or experiment, prefer one compact context read:
 
 ```sh
 research-cockpit context --root research_cockpit --node <node_id> --with-bootstrap --with-artifacts --compact --json
+research-cockpit option-workstream-context --root research_cockpit --id option_x --compact --json
 ```
 
-Use this instead of chaining `bootstrap`, generated context packs, and `node-context` unless you are auditing global dashboard state.
+Use `context` instead of chaining `bootstrap`, generated context packs, and `node-context` unless you are auditing global dashboard state. Use compact `option-workstream-context` when you specifically need the recursive option subtree, short experiment summaries, and evidence counts.
 
 Record evidence artifacts through CLI commands instead of patching artifact YAML:
 
@@ -304,7 +308,7 @@ research-cockpit create-artifact --root research_cockpit --id artifact_x --title
 research-cockpit link-artifact --root research_cockpit --artifact artifact_x --to option_x --no-build
 ```
 
-Use `--file` for artifacts with several `links` or `link_to` targets. Use `commands --json --compact` when choosing commands and run a specific command's `--print-schema` when you need the full file example.
+Use `--file` for artifacts with several `links` or `link_to` targets. Use `commands --json --compact` when choosing commands and run a specific command's `--print-schema` when you need the full file example. Add `--compact` to `--json` on high-level mutation commands when an agent only needs target, changed status, created/updated ids, changed file count, and verify commands.
 
 For experiment sweeps, batch findings from a file:
 
@@ -323,10 +327,14 @@ research-cockpit update-finding --root research_cockpit --experiment experiment_
 Finalize a workstream only when the status changes are explicit:
 
 ```sh
+research-cockpit finalize-workstream --print-schema
+research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --dry-run --json --show-diff
 research-cockpit finalize-workstream --root research_cockpit --option option_x --status accepted --problem-status resolved --summary-file summary.md --summary-target report --artifact artifact_x --sync-focus --report --dry-run --json --show-diff
 ```
 
-`finalize-workstream` does not create artifacts, accept decisions, pause old branches, delete nodes, or invent next actions. Finish batched writes with:
+Use `--file` for longer close-outs; explicit CLI flags override file values. `finalize-workstream` does not create artifacts, accept decisions, pause old branches, delete nodes, or invent next actions.
+
+A relative `summary_file` inside `finalize.yaml` resolves against the finalize file directory, then the data root, then the current working directory. JSON output includes `resolved_inputs.summary_file`. Compact JSON stays short unless `--show-diff` is requested; with `--show-diff`, the payload includes the full diff plus `diff_line_count`. Finish batched writes with:
 
 ```sh
 research-cockpit validate --root research_cockpit --json

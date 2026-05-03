@@ -600,6 +600,87 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["option"]["id"], "option_t5")
         self.assertEqual(payload["upstream_problem"]["id"], "problem_text")
 
+    def test_option_workstream_context_cli_accepts_id_alias(self) -> None:
+        by_option = subprocess.run(
+            [*cli_command("option-workstream-context"), "--root", str(self.root), "--option", "option_t5", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        by_id = subprocess.run(
+            [*cli_command("option-workstream-context"), "--root", str(self.root), "--id", "option_t5", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(by_option.returncode, 0, by_option.stderr or by_option.stdout)
+        self.assertEqual(by_id.returncode, 0, by_id.stderr or by_id.stdout)
+        self.assertEqual(json.loads(by_id.stdout)["option"]["id"], "option_t5")
+        self.assertEqual(json.loads(by_id.stdout), json.loads(by_option.stdout))
+
+    def test_option_workstream_context_cli_compact_json_is_terse(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_context",
+                "type": "artifact",
+                "title": "Context bundle",
+                "status": "done",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["linked_artifacts"] = ["artifact_context"]
+        experiment["success_criteria"] = [
+            "The compact context shows whether planned experiments have enough validation detail.",
+            "The full node context remains available for exact field text.",
+        ]
+        experiment["metrics"] = ["command_count", "extra_context_reads"]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        record_finding(
+            self.root,
+            experiment_id="exp_t5",
+            statement="Compact context can summarize findings.",
+            confidence="medium",
+            outcome="positive",
+            rebuild_dashboard=False,
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("option-workstream-context"),
+                "--root",
+                str(self.root),
+                "--id",
+                "option_t5",
+                "--compact",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        self.assertEqual(payload["option"]["id"], "option_t5")
+        self.assertEqual(payload["upstream_problem"]["id"], "problem_text")
+        self.assertEqual(payload["subtree"]["experiment_ids"], ["exp_t5"])
+        self.assertEqual(payload["evidence_summary"]["experiment_count"], 1)
+        self.assertEqual(payload["evidence_summary"]["finding_count"], 1)
+        self.assertEqual(payload["evidence_summary"]["artifact_count"], 1)
+        self.assertEqual(len(payload["experiment_summaries"]), 1)
+        experiment_summary = payload["experiment_summaries"][0]
+        self.assertEqual(experiment_summary["id"], "exp_t5")
+        self.assertEqual(experiment_summary["success_criteria_count"], 2)
+        self.assertEqual(experiment_summary["first_success_criterion"], "The compact context shows whether planned experiments have enough validation detail.")
+        self.assertEqual(experiment_summary["metric_count"], 2)
+        self.assertEqual(experiment_summary["finding_count"], 1)
+        self.assertEqual(experiment_summary["linked_artifact_count"], 1)
+        self.assertIn("--id option_t5", payload["suggested_commands"]["context"])
+        self.assertNotIn("subtree_nodes", payload)
+        self.assertNotIn("experiments", payload)
+
     def test_node_context_cli_outputs_json_and_manifest_lists_command(self) -> None:
         result = subprocess.run(
             [*cli_command("node-context"), "--root", str(self.root), "--id", "option_t5", "--json"],
@@ -850,12 +931,291 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("diff", payload)
         self.assertEqual(before_option, after_option)
 
+    def test_finalize_workstream_cli_accepts_file_input_and_flag_overrides(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_bundle",
+                "type": "artifact",
+                "title": "Bundle",
+                "status": "done",
+            },
+        )
+        summary_file = self.tmp_root / "report.md"
+        summary_file.write_text("Report summary from file.", encoding="utf-8")
+        finalize_file = self.tmp_root / "finalize.yaml"
+        save_yaml(
+            finalize_file,
+            {
+                "option": "option_t5",
+                "status": "promising",
+                "problem_status": "active",
+                "summary_file": str(summary_file),
+                "summary_target": "report",
+                "artifacts": ["artifact_bundle"],
+                "sync_focus": False,
+                "report": True,
+                "agent": "agent_file",
+            },
+        )
+
+        dry_run = subprocess.run(
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(finalize_file),
+                "--status",
+                "accepted",
+                "--problem-status",
+                "resolved",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        dry_payload = json.loads(dry_run.stdout)
+
+        self.assertEqual(dry_run.returncode, 0, dry_run.stdout + dry_run.stderr)
+        self.assertEqual(dry_payload["after"]["option"]["status"], "accepted")
+        self.assertEqual(dry_payload["after"]["problem"]["status"], "resolved")
+        self.assertFalse((self.root / "dashboards").exists())
+
+        out = subprocess.run(
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(finalize_file),
+                "--status",
+                "accepted",
+                "--problem-status",
+                "resolved",
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(option["status"], "accepted")
+        self.assertEqual(problem["status"], "resolved")
+        self.assertNotIn("summary", option)
+        self.assertEqual(option["workstream_report"]["summary"], "Report summary from file.")
+        self.assertEqual(option["workstream_report"]["linked_artifacts"], ["artifact_bundle"])
+        self.assertFalse((self.root / "dashboards").exists())
+
+    def test_finalize_workstream_file_summary_relative_to_finalize_file(self) -> None:
+        plan_dir = self.tmp_root / "plans"
+        summary_file = plan_dir / "notes" / "report.md"
+        summary_file.parent.mkdir(parents=True)
+        summary_file.write_text("Relative summary from finalize directory.", encoding="utf-8")
+        finalize_file = plan_dir / "finalize.yaml"
+        save_yaml(
+            finalize_file,
+            {
+                "option": "option_t5",
+                "status": "promising",
+                "summary_file": "notes/report.md",
+                "report": True,
+            },
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(finalize_file),
+                "--dry-run",
+                "--show-diff",
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["resolved_inputs"]["summary_file"], str(summary_file))
+        self.assertTrue(payload["diff_included"])
+        self.assertGreater(payload["diff_line_count"], 0)
+        self.assertIn("diff", payload)
+
+    def test_finalize_workstream_file_summary_relative_to_root(self) -> None:
+        summary_file = self.root / "notes" / "report.md"
+        summary_file.parent.mkdir(parents=True)
+        summary_file.write_text("Relative summary from data root.", encoding="utf-8")
+        finalize_file = self.tmp_root / "finalize_root_relative.yaml"
+        save_yaml(
+            finalize_file,
+            {
+                "option": "option_t5",
+                "status": "promising",
+                "summary_file": "notes/report.md",
+                "report": True,
+            },
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(finalize_file),
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["resolved_inputs"]["summary_file"], str(summary_file))
+        self.assertEqual(payload["after"]["option"]["workstream_report"]["summary"], "Relative summary from data root.")
+
+    def test_finalize_workstream_file_summary_relative_to_cwd_fallback(self) -> None:
+        cwd_dir = self.tmp_root / "cwd_summary"
+        cwd_dir.mkdir()
+        summary_file = cwd_dir / "cwd_report.md"
+        summary_file.write_text("Relative summary from cwd fallback.", encoding="utf-8")
+        finalize_file = self.tmp_root / "finalize_cwd_relative.yaml"
+        save_yaml(
+            finalize_file,
+            {
+                "option": "option_t5",
+                "status": "promising",
+                "summary_file": "cwd_report.md",
+                "report": True,
+            },
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(finalize_file),
+                "--dry-run",
+                "--json",
+            ],
+            cwd=cwd_dir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["resolved_inputs"]["summary_file"], str(summary_file))
+        self.assertEqual(payload["after"]["option"]["workstream_report"]["summary"], "Relative summary from cwd fallback.")
+
+    def test_finalize_workstream_file_summary_missing_lists_attempts(self) -> None:
+        finalize_file = self.tmp_root / "missing_summary_finalize.yaml"
+        save_yaml(
+            finalize_file,
+            {
+                "option": "option_t5",
+                "status": "promising",
+                "summary_file": "missing/report.md",
+                "report": True,
+            },
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(finalize_file),
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("Summary file does not exist", out.stdout)
+        self.assertIn("Tried:", out.stdout)
+        self.assertIn(str(finalize_file.parent / "missing" / "report.md"), out.stdout)
+        self.assertIn(str(self.root / "missing" / "report.md"), out.stdout)
+
+    def test_finalize_workstream_rejects_invalid_file_input(self) -> None:
+        finalize_file = self.tmp_root / "bad_finalize.yaml"
+        save_yaml(finalize_file, {"status": "accepted"})
+
+        out = subprocess.run(
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(finalize_file),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("option", out.stdout.lower())
+
+    def test_finalize_workstream_strips_utf8_bom_from_summary_file(self) -> None:
+        summary_file = self.tmp_root / "bom_summary.md"
+        summary_file.write_text("\ufeffReport summary with BOM.", encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--status",
+                "promising",
+                "--summary-file",
+                str(summary_file),
+                "--report",
+                "--dry-run",
+                "--show-diff",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["after"]["option"]["workstream_report"]["summary"], "Report summary with BOM.")
+        self.assertNotIn("\ufeff", payload["diff"])
+
     def test_option_workstream_context_payload_summarizes_option(self) -> None:
         payload = option_workstream_context_payload(self.root, option_id="option_t5")
 
         self.assertEqual(payload["option"]["id"], "option_t5")
         self.assertEqual(payload["subtree"]["experiment_ids"], ["exp_t5"])
         self.assertIn("context", payload["suggested_commands"])
+        self.assertIn("--id option_t5", payload["suggested_commands"]["context"])
 
     def test_context_payload_combines_node_bootstrap_artifacts_and_related_experiments(self) -> None:
         write_node(
@@ -971,6 +1331,33 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(build_payload["context_paths"]["agent_context_pack"]["exists"])
         self.assertTrue((self.root / "dashboards" / "agent_context_pack.json").exists())
 
+    def test_init_cli_json_can_build_dashboards(self) -> None:
+        default_root = self.tmp_root / "init_default"
+        build_root = self.tmp_root / "init_build"
+
+        default_out = subprocess.run(
+            [*cli_command("init"), "--root", str(default_root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        build_out = subprocess.run(
+            [*cli_command("init"), "--root", str(build_root), "--build", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(default_out.returncode, 0, default_out.stdout + default_out.stderr)
+        self.assertEqual(build_out.returncode, 0, build_out.stdout + build_out.stderr)
+        default_payload = json.loads(default_out.stdout)
+        build_payload = json.loads(build_out.stdout)
+        self.assertEqual(default_payload["root"], str(default_root))
+        self.assertFalse(default_payload["built"])
+        self.assertTrue(build_payload["built"])
+        self.assertTrue((build_root / "dashboards" / "agent_context_pack.json").exists())
+        self.assertFalse((default_root / "dashboards" / "agent_context_pack.json").exists())
+
     def test_agent_bootstrap_cli_reports_plugin_path_from_cwd(self) -> None:
         research_repo = self.tmp_root / "research_repo"
         research_repo.mkdir()
@@ -1040,6 +1427,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_name["create-workstream"]["file_schema"], "workstream_v1")
         self.assertIn("followup_options:", by_name["create-workstream"]["example_file"])
         self.assertIn("status: active", by_name["create-workstream"]["example_file"])
+        self.assertIn("hypothesis:", by_name["create-workstream"]["example_file"])
+        self.assertIn("summary:", by_name["create-workstream"]["example_file"])
+        self.assertIn("success_criteria:", by_name["create-workstream"]["example_file"])
+        self.assertIn("metrics:", by_name["create-workstream"]["example_file"])
+        self.assertIn("hypothesis", by_name["create-workstream"]["fields_supported"])
+        self.assertIn("success_criteria", by_name["create-workstream"]["fields_supported"])
+        self.assertIn("metrics", by_name["create-workstream"]["fields_supported"])
         self.assertTrue(by_name["sync-focus-actions"]["supports_dry_run"])
         self.assertTrue(by_name["complete-experiment"]["mutating"])
         self.assertTrue(by_name["complete-experiment"]["supports_json"])
@@ -1051,6 +1445,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("experiments:", by_name["complete-experiments"]["example_file"])
         self.assertTrue(by_name["finalize-workstream"]["supports_json"])
         self.assertTrue(by_name["finalize-workstream"]["supports_dry_run"])
+        self.assertEqual(by_name["finalize-workstream"]["file_schema"], "finalize_workstream_v1")
+        self.assertIn("summary_target:", by_name["finalize-workstream"]["example_file"])
+        self.assertIn("--id", by_name["option-workstream-context"]["target_aliases"])
+        self.assertEqual(by_name["option-workstream-context"]["primary_target"], "--id")
+        self.assertTrue(by_name["option-workstream-context"]["supports_compact"])
+        self.assertIn("finalize file directory", by_name["finalize-workstream"]["path_resolution"])
         self.assertTrue(by_name["update-node-fields"]["mutating"])
         self.assertTrue(by_name["update-node-fields"]["supports_json"])
         self.assertTrue(by_name["update-node-fields"]["supports_dry_run"])
@@ -1122,6 +1522,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "create-workstream": "followup_options:",
             "complete-experiments": "experiments:",
             "create-artifact": "link_to:",
+            "finalize-workstream": "summary_target:",
         }
 
         for command, marker in expectations.items():
@@ -1145,6 +1546,143 @@ class ScriptBehaviorTests(unittest.TestCase):
                 self.assertEqual(schema_out.returncode, 0, schema_out.stderr or schema_out.stdout)
                 self.assertIn(marker, schema_out.stdout)
                 self.assertNotIn("--file", schema_out.stderr)
+
+    def test_high_level_commands_support_compact_json(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_cache",
+                "type": "artifact",
+                "title": "Cache",
+                "status": "done",
+            },
+        )
+        record_finding(
+            self.root,
+            experiment_id="exp_t5",
+            statement="Original finding.",
+            confidence="medium",
+            rebuild_dashboard=False,
+        )
+        graph_plan = self.tmp_root / "graph_plan.yaml"
+        save_yaml(
+            graph_plan,
+            {
+                "nodes": [
+                    {
+                        "id": "problem_compact",
+                        "type": "problem",
+                        "title": "Compact problem",
+                        "status": "active",
+                    }
+                ]
+            },
+        )
+        workstream_plan = self.tmp_root / "workstream.yaml"
+        save_yaml(
+            workstream_plan,
+            {
+                "problem": {"id": "problem_ws_compact", "title": "Compact workstream"},
+                "active_option": {"id": "option_ws_compact", "title": "Compact option"},
+                "experiments": [{"id": "experiment_ws_compact", "title": "Compact experiment"}],
+            },
+        )
+        findings_plan = self.tmp_root / "findings.yaml"
+        save_yaml(
+            findings_plan,
+            {
+                "defaults": {"confidence": "medium"},
+                "experiments": [{"id": "exp_t5", "finding": "Compact batch finding."}],
+            },
+        )
+        commands = [
+            [
+                *cli_command("apply-graph-plan"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(graph_plan),
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            [
+                *cli_command("create-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(workstream_plan),
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            [
+                *cli_command("create-artifact"),
+                "--root",
+                str(self.root),
+                "--id",
+                "artifact_compact",
+                "--title",
+                "Compact artifact",
+                "--link-to",
+                "option_t5",
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            [
+                *cli_command("complete-experiments"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(findings_plan),
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            [
+                *cli_command("update-finding"),
+                "--root",
+                str(self.root),
+                "--experiment",
+                "exp_t5",
+                "--finding-id",
+                "exp_t5_finding_001",
+                "--statement",
+                "Compact finding update.",
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--status",
+                "promising",
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+        ]
+
+        for command in commands:
+            with self.subTest(command=command[3]):
+                out = subprocess.run(command, capture_output=True, text=True, check=False)
+                payload = json.loads(out.stdout)
+
+                self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+                self.assertTrue(payload["ok"])
+                self.assertIn("command", payload)
+                self.assertIn("target", payload)
+                self.assertTrue(payload["dry_run"])
+                self.assertTrue(payload["would_change"])
+                self.assertIn("changed_files_count", payload)
+                self.assertIn("research-cockpit validate", payload["verify_commands"][0])
+                self.assertNotIn("before", payload)
+                self.assertNotIn("after", payload)
 
     def test_skill_smoke_test_payload_runs_read_only_workflow(self) -> None:
         payload = skill_smoke_test_payload(root=self.root, query="t5", python_executable=sys.executable)

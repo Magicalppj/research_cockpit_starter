@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,14 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import (
+    compact_mutation_result,
+    emit_json,
+    finish_mutation,
+    load_validated_state,
+    safe_print,
+    yaml_change_diff,
+)
 from research_cockpit.commands.file_schemas import APPLY_GRAPH_PLAN_EXAMPLE
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.commands.update_node_fields import apply_node_field_updates, field_updates_from_mapping
@@ -277,13 +283,14 @@ def main() -> None:
     parser.add_argument("--print-schema", action="store_true", help="Print the graph plan YAML schema example and exit.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--validate", action="store_true", help="Accepted for readability; validation always runs.")
     parser.add_argument("--build", action="store_true", help="Accepted for readability; build is the default.")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
     if args.print_schema:
-        print(APPLY_GRAPH_PLAN_EXAMPLE)
+        safe_print(APPLY_GRAPH_PLAN_EXAMPLE)
         return
     if args.plan_file is None:
         parser.error("--file is required unless --print-schema is used")
@@ -297,18 +304,25 @@ def main() -> None:
             show_diff=args.show_diff,
         )
     except (ValidationError, ValueError, FileExistsError, FileNotFoundError) as exc:
-        print(str(exc))
+        safe_print(str(exc))
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        emit_json(
+            compact_mutation_result(
+                result,
+                command="apply-graph-plan",
+                target=str(args.plan_file),
+                root=args.root,
+            ) if args.compact else result
+        )
         return
     verb = "Would apply" if args.dry_run else "Applied"
-    print(f"{verb} graph plan {args.plan_file}: {len(result['changed_files'])} file(s)")
+    safe_print(f"{verb} graph plan {args.plan_file}: {len(result['changed_files'])} file(s)")
     if args.show_diff and result.get("diff"):
-        print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
+        safe_print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
     if not args.dry_run and not args.no_build:
-        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
+        safe_print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 
 if __name__ == "__main__":

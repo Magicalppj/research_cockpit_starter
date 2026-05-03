@@ -40,3 +40,5 @@ python dev\scripts\run_subagent_forward_check.py --json --skip-mutating
 ```
 
 This check simulates read-only context understanding, option workstream execution, retrieval branch expansion, decision checklist completion, and portable skill startup. Mutating tracks copy `skills/research-cockpit/` into `.test_tmp/subagent_runs/` and assert the original package is unchanged.
+
+The manual two-subagent cases behind this harness are recorded in `docs/subagent_forward_test_cases.md`.

@@ -38,19 +38,30 @@ problem:
   title: New research problem
   parent: stage_x
   status: active
+  summary: Scope the next research branch.
   question: What should we optimize next?
+  hypothesis: A narrower branch will reduce command count.
+  tags:
+    - workflow
+  next_actions:
+    - Run the first planned experiment.
 active_option:
   id: option_x
   title: Active route
   status: active
+  summary: Try the shortest route to evidence.
   hypothesis: This route has the shortest path to signal.
 experiments:
   - id: experiment_x1
     title: Run first check
     success_criteria:
       - The check produces a comparable metric.
+    metrics:
+      - command_count
   - id: experiment_x2
     title: Run second check
+    success_criteria:
+      - The check can be reviewed without reading full node YAML.
 followup_options:
   - id: option_followup_x
     title: Follow-up route
@@ -99,6 +110,23 @@ experiments:
 """
 
 
+FINALIZE_WORKSTREAM_EXAMPLE = """File schema v1: finalize_workstream_v1
+
+option: option_x
+status: accepted
+problem_status: resolved
+stage_status: done
+summary_file: notes/options/option_x_summary.md
+summary_target: report
+artifacts:
+  - artifact_x
+sync_focus: false
+report: true
+agent: researcher
+locale: en
+"""
+
+
 FILE_SCHEMAS = {
     "apply_graph_plan.py": {
         "file_schema": "graph_plan_v1",
@@ -119,6 +147,11 @@ FILE_SCHEMAS = {
         "file_schema": "experiment_completion_v1",
         "example_file": COMPLETE_EXPERIMENTS_EXAMPLE,
         "schema_command": "research-cockpit complete-experiments --print-schema",
+    },
+    "finalize_workstream.py": {
+        "file_schema": "finalize_workstream_v1",
+        "example_file": FINALIZE_WORKSTREAM_EXAMPLE,
+        "schema_command": "research-cockpit finalize-workstream --print-schema",
     },
 }
 

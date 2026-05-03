@@ -29,6 +29,7 @@ Installed CLI:
 
 ```sh
 research-cockpit init --root research_cockpit
+research-cockpit init --root research_cockpit --build --json
 research-cockpit bootstrap --root research_cockpit --json
 research-cockpit validate --root research_cockpit
 research-cockpit build --root research_cockpit
@@ -36,6 +37,8 @@ research-cockpit ui --root research_cockpit
 ```
 
 Agents should use the installed `research-cockpit` CLI from the research repo root. Do not call files inside the plugin package directly.
+
+Use `init --build --json` for a new data root when the next step needs generated context packs immediately. Plain `init` keeps the old behavior and only copies the template.
 
 If the console script is not on `PATH`, use the same installed Python interpreter as a deterministic fallback:
 

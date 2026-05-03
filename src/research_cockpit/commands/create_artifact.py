@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,14 @@ from research_cockpit.paths import default_data_root
 ROOT = default_data_root()
 
 from research_cockpit.commands._evidence import append_unique, linked_resource_rows, parse_link_values, validate_node_refs
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import (
+    compact_mutation_result,
+    emit_json,
+    finish_mutation,
+    load_validated_state,
+    safe_print,
+    yaml_change_diff,
+)
 from research_cockpit.commands.file_schemas import CREATE_ARTIFACT_EXAMPLE
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import (
@@ -226,11 +232,12 @@ def main() -> None:
     parser.add_argument("--link-to", action="append", dest="link_to", help="Node id that should link this artifact.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
     if args.print_schema:
-        print(CREATE_ARTIFACT_EXAMPLE)
+        safe_print(CREATE_ARTIFACT_EXAMPLE)
         return
 
     try:
@@ -258,18 +265,27 @@ def main() -> None:
             show_diff=args.show_diff,
         )
     except (ValidationError, ValueError, FileExistsError, FileNotFoundError) as exc:
-        print(str(exc))
+        safe_print(str(exc))
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        emit_json(
+            compact_mutation_result(
+                result,
+                command="create-artifact",
+                target=result["artifact_id"],
+                root=args.root,
+                created=[result["artifact_id"]],
+                updated=result.get("linked_to", []),
+            ) if args.compact else result
+        )
         return
     verb = "Would create" if args.dry_run else "Created"
-    print(f"{verb} artifact {result['artifact_id']}: {result['path']}")
+    safe_print(f"{verb} artifact {result['artifact_id']}: {result['path']}")
     if args.show_diff and result.get("diff"):
-        print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
+        safe_print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
     if not args.dry_run and not args.no_build:
-        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
+        safe_print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 
 if __name__ == "__main__":

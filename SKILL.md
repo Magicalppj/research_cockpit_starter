@@ -14,7 +14,7 @@ Research Cockpit 是一个项目本地研究状态插件。插件代码位于本
    - Use an absolute `--root` when the agent shell may not preserve the expected current working directory.
    - If omitted, commands search from the current working directory upward for `research_cockpit/`.
    - In this plugin repo only, commands fall back to `examples/demo_research_cockpit/`.
-   - If the caller repository has no data root yet, initialize one with `research-cockpit init --root research_cockpit` from the caller repository root.
+   - If the caller repository has no data root yet, initialize one with `research-cockpit init --root research_cockpit` from the caller repository root. Use `research-cockpit init --root research_cockpit --build --json` when the next step will read generated context packs.
 2. Run read-only bootstrap before making decisions:
 
 ```sh
@@ -79,7 +79,10 @@ research-cockpit complete-experiment --root research_cockpit --id <experiment_id
 research-cockpit complete-experiments --print-schema
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
 research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --dry-run --json --show-diff
+research-cockpit finalize-workstream --print-schema
+research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --dry-run --json --show-diff
 research-cockpit finalize-workstream --root research_cockpit --option <option_id> --status accepted --problem-status resolved --report --dry-run --json --show-diff
+research-cockpit option-workstream-context --root research_cockpit --id <option_id> --compact --json
 research-cockpit update-node-fields --root research_cockpit --id <node_id> --question "..." --tag <tag> --no-build
 research-cockpit sync-focus-actions --root research_cockpit --from-node <node_id> --dry-run --json --show-diff
 research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
@@ -109,10 +112,13 @@ research-cockpit build --root research_cockpit
 
 Use `create-workstream` for the common `problem -> active option -> experiments + follow-up options` shape. It creates the branch and sets the new problem `current_best_option`, but it does not change focus or pause old options.
 Follow-up options should use status `open`; file-based graph commands accept option status `planned` only as an input alias and write `open` to truth-source YAML.
+After creating a workstream, use `option-workstream-context --id <option_id> --compact --json` to verify experiment ids, statuses, success criteria count, metric count, finding count, and linked artifact count. Read per-experiment `node-context` only when you need the full criterion text or other detailed fields.
 
 Use `complete-experiments` for sweeps or multi-backend experiment sets. Use `create-artifact --file artifact.yaml` for result folders with several links or target nodes, and use `link-artifact` for attaching existing artifacts, so agents do not patch `path`, `links`, or `linked_artifacts` by hand. Use `update-finding` when revising an existing finding statement, confidence, outcome, metrics, or evidence artifacts.
 
-Use `finalize-workstream` only for explicit close-out. It updates the named option/problem/stage statuses and optional report/artifact/focus fields that you pass; it does not accept decisions, pause old options, delete branches, or invent next actions.
+Use `finalize-workstream --file finalize.yaml` when the close-out needs several flags. `--file` supports `option`, `status`, `problem_status`, `stage_status`, `summary_file`, `summary_target`, `artifacts`, `sync_focus`, `report`, `agent`, and `locale`; explicit CLI flags override file values. A relative `summary_file` in `finalize.yaml` resolves against the finalize file directory, then the data root, then the current working directory. Use `finalize-workstream` only for explicit close-out. It updates the named option/problem/stage statuses and optional report/artifact/focus fields that you pass; it does not accept decisions, pause old options, delete branches, or invent next actions.
+
+For terse machine-readable mutation feedback, add `--compact` with `--json` on high-level commands such as `apply-graph-plan`, `create-workstream`, `create-artifact`, `complete-experiments`, `update-finding`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `--show-diff` still includes the full diff; use it only when reviewing write content.
 
 Run `suggest-next-actions` once before choosing work. Re-run it only after you changed `next_actions` or suggestion lifecycle state.
 

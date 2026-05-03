@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import argparse
 import copy
-import json
 from datetime import date
 from pathlib import Path
 from typing import Any
+import yaml
 
 from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
 from research_cockpit.commands._evidence import append_unique, validate_artifact_ids
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import (
+    compact_mutation_result,
+    emit_json,
+    finish_mutation,
+    load_validated_state,
+    safe_print,
+    yaml_change_diff,
+)
+from research_cockpit.commands.file_schemas import FINALIZE_WORKSTREAM_EXAMPLE
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.graph_core import derive_focus_path, node_id_by_type_in_path
 from research_cockpit.model import (
@@ -44,7 +52,110 @@ def _read_summary(path: Path | None) -> str | None:
         return None
     if not path.exists():
         raise FileNotFoundError(f"Summary file does not exist: {path}")
-    return path.read_text(encoding="utf-8").strip()
+    return path.read_text(encoding="utf-8-sig").strip()
+
+
+def _optional_text(data: dict[str, Any], key: str) -> str | None:
+    if key not in data or data.get(key) is None:
+        return None
+    text = str(data.get(key)).strip()
+    return text or None
+
+
+def _string_list(value: Any, field_name: str) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        text = value.strip()
+        return [text] if text else []
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be a string or list")
+    return [str(item) for item in value if str(item).strip()]
+
+
+def load_finalize_spec(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise FileNotFoundError(f"Finalize file does not exist: {path}")
+    data = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
+    if not isinstance(data, dict):
+        raise ValueError("Finalize file must contain a mapping")
+    return data
+
+
+def _unique_resolved_paths(paths: list[Path]) -> list[Path]:
+    out: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        resolved = path.resolve()
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(resolved)
+    return out
+
+
+def _resolve_file_summary_path(root: Path, finalize_file: Path, raw_value: str) -> Path:
+    raw_path = Path(raw_value)
+    if raw_path.is_absolute():
+        attempts = [raw_path.resolve()]
+    else:
+        attempts = _unique_resolved_paths(
+            [
+                finalize_file.resolve().parent / raw_path,
+                root / raw_path,
+                Path.cwd() / raw_path,
+            ]
+        )
+    for attempt in attempts:
+        if attempt.exists():
+            return attempt
+    tried = "; ".join(str(path) for path in attempts)
+    raise FileNotFoundError(f"Summary file does not exist: {raw_value}. Tried: {tried}")
+
+
+def _merge_finalize_inputs(
+    file_spec: dict[str, Any] | None,
+    *,
+    root: Path,
+    finalize_file: Path | None,
+    option_id: str | None,
+    status: str | None,
+    problem_status: str | None,
+    stage_status: str | None,
+    summary_file: Path | None,
+    summary_target: str | None,
+    artifact_ids: list[str] | None,
+    sync_focus: bool,
+    report: bool,
+    agent_id: str | None,
+    locale: str | None,
+) -> dict[str, Any]:
+    data = file_spec or {}
+    file_summary = None
+    if summary_file is None and data.get("summary_file") is not None:
+        if finalize_file is None:
+            file_summary = Path(str(data["summary_file"]))
+        else:
+            file_summary = _resolve_file_summary_path(root, finalize_file, str(data["summary_file"]))
+    merged = {
+        "option_id": option_id or _optional_text(data, "option"),
+        "status": status or _optional_text(data, "status"),
+        "problem_status": problem_status if problem_status is not None else _optional_text(data, "problem_status"),
+        "stage_status": stage_status if stage_status is not None else _optional_text(data, "stage_status"),
+        "summary_file": summary_file if summary_file is not None else file_summary,
+        "summary_target": summary_target or _optional_text(data, "summary_target") or "report",
+        "artifact_ids": artifact_ids if artifact_ids is not None else _string_list(data.get("artifacts"), "artifacts"),
+        "sync_focus": sync_focus or bool(data.get("sync_focus", False)),
+        "report": report or bool(data.get("report", False)),
+        "agent_id": agent_id or _optional_text(data, "agent") or "researcher",
+        "locale": locale or _optional_text(data, "locale"),
+    }
+    if not merged["option_id"]:
+        raise ValueError("finalize option is required; provide --option or file field 'option'")
+    if not merged["status"]:
+        raise ValueError("finalize status is required; provide --status or file field 'status'")
+    return merged
 
 
 def finalize_workstream(
@@ -91,6 +202,9 @@ def finalize_workstream(
     artifact_ids = artifact_ids or []
     validate_artifact_ids(nodes, artifact_ids)
     summary_text = _read_summary(summary_file)
+    resolved_inputs = {
+        "summary_file": str(summary_file.resolve()) if summary_file is not None else None,
+    }
     today = str(date.today())
     candidate = dict(nodes)
     changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any]]] = []
@@ -202,6 +316,7 @@ def finalize_workstream(
         "changed": False if dry_run else changed,
         "would_change": changed,
         "changed_files": [str(item[0]) for item in changes],
+        "resolved_inputs": resolved_inputs,
         "before": {
             "option": {
                 "status": option_before.get("status"),
@@ -261,29 +376,40 @@ def finalize_workstream(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=FINALIZE_WORKSTREAM_EXAMPLE,
+    )
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--option", required=True, dest="option_id")
-    parser.add_argument("--status", required=True)
+    parser.add_argument("--file", type=Path, dest="finalize_file")
+    parser.add_argument("--print-schema", action="store_true", help="Print the finalize YAML schema example and exit.")
+    parser.add_argument("--option", dest="option_id")
+    parser.add_argument("--status")
     parser.add_argument("--problem-status")
     parser.add_argument("--stage-status")
     parser.add_argument("--summary-file", type=Path)
-    parser.add_argument("--summary-target", choices=sorted(SUMMARY_TARGETS), default="report")
+    parser.add_argument("--summary-target", choices=sorted(SUMMARY_TARGETS))
     parser.add_argument("--artifact", action="append", dest="artifact_ids")
     parser.add_argument("--sync-focus", action="store_true")
     parser.add_argument("--report", action="store_true")
-    parser.add_argument("--agent", default="researcher", dest="agent_id")
+    parser.add_argument("--agent", dest="agent_id")
     parser.add_argument("--locale", choices=["en", "zh"])
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--build", action="store_true", help="Accepted for readability; build is the default.")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
+    if args.print_schema:
+        safe_print(FINALIZE_WORKSTREAM_EXAMPLE)
+        return
 
     try:
-        result = finalize_workstream(
-            args.root,
+        merged = _merge_finalize_inputs(
+            load_finalize_spec(args.finalize_file) if args.finalize_file else None,
+            root=args.root,
+            finalize_file=args.finalize_file,
             option_id=args.option_id,
             status=args.status,
             problem_status=args.problem_status,
@@ -295,23 +421,55 @@ def main() -> None:
             report=args.report,
             agent_id=args.agent_id,
             locale=args.locale,
+        )
+        result = finalize_workstream(
+            args.root,
+            option_id=merged["option_id"],
+            status=merged["status"],
+            problem_status=merged["problem_status"],
+            stage_status=merged["stage_status"],
+            summary_file=merged["summary_file"],
+            summary_target=merged["summary_target"],
+            artifact_ids=merged["artifact_ids"],
+            sync_focus=merged["sync_focus"],
+            report=merged["report"],
+            agent_id=merged["agent_id"],
+            locale=merged["locale"],
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
         )
     except (ValidationError, ValueError, FileNotFoundError) as exc:
-        print(str(exc))
+        safe_print(str(exc))
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.compact:
+            updated = [result["option_id"]]
+            if result.get("problem_id"):
+                updated.append(result["problem_id"])
+            if result.get("stage_id"):
+                updated.append(result["stage_id"])
+            if result.get("after", {}).get("focus_next_actions") != result.get("before", {}).get("focus_next_actions"):
+                updated.append("current_state")
+            emit_json(
+                compact_mutation_result(
+                    result,
+                    command="finalize-workstream",
+                    target={"option": result["option_id"], "problem": result.get("problem_id")},
+                    root=args.root,
+                    updated=updated,
+                )
+            )
+        else:
+            emit_json(result)
         return
     verb = "Would finalize" if args.dry_run else "Finalized"
-    print(f"{verb} workstream {args.option_id}")
+    safe_print(f"{verb} workstream {result['option_id']}")
     if args.show_diff and result.get("diff"):
-        print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
+        safe_print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
     if not args.dry_run and not args.no_build:
-        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
+        safe_print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 
 if __name__ == "__main__":

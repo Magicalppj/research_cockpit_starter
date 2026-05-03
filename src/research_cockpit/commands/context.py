@@ -140,7 +140,7 @@ def context_payload(
         "recommended_commands": {
             "complete_experiments": "research-cockpit complete-experiments --root <root> --file findings.yaml --dry-run --json --show-diff",
             "create_artifact": "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path <path> --link-to <node_id> --no-build",
-            "finalize_workstream": "research-cockpit finalize-workstream --root <root> --option <option_id> --status accepted --problem-status resolved --report",
+            "finalize_workstream": "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
         },
     }
     if with_bootstrap:

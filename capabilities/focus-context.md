@@ -24,7 +24,7 @@ For known-node continuation, compact `context` is the preferred one-command hand
 research-cockpit build --root research_cockpit
 ```
 
-Do not run `bootstrap --build` or `build` during read-only onboarding.
+For a brand-new data root, use `research-cockpit init --root research_cockpit --build --json` if the next step will read generated context packs. Do not run `bootstrap --build` or `build` during read-only onboarding.
 
 4. Read generated context only for global scans:
    - `research_cockpit/dashboards/agent_context_pack.json`

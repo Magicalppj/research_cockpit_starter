@@ -26,9 +26,11 @@ Read workstream context:
 ```sh
 research-cockpit context --root research_cockpit --node option_x --with-bootstrap --with-artifacts --compact --json
 research-cockpit option-workstream-context --root research_cockpit --option option_x --json
+research-cockpit option-workstream-context --root research_cockpit --id option_x --compact --json
 ```
 
-Use `context` as the default handoff for a known option or experiment. Use `option-workstream-context` when you specifically need the recursive option subtree report.
+Use `context` as the default handoff for a known option or experiment. Use compact `option-workstream-context` when you specifically need the recursive option subtree report, short experiment summaries, and evidence counts; `--id` is the preferred target flag and `--option` remains compatible for full output.
+The compact payload includes `experiment_summaries` with each experiment id, title, status, result summary, success criteria count, first success criterion, metric count, finding count, and linked artifact count. Use full context or `node-context` only when the exact complete field text matters.
 
 Report a workstream:
 
@@ -40,11 +42,14 @@ research-cockpit report-option-workstream --root research_cockpit --option optio
 Finalize a workstream only when the close-out status changes are explicit:
 
 ```sh
+research-cockpit finalize-workstream --print-schema
+research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --dry-run --json --show-diff
+research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --no-build
 research-cockpit finalize-workstream --root research_cockpit --option option_x --status accepted --problem-status resolved --summary-file summary.md --summary-target report --artifact artifact_x --sync-focus --report --dry-run --json --show-diff
 research-cockpit finalize-workstream --root research_cockpit --option option_x --status accepted --problem-status resolved --summary-file summary.md --summary-target report --artifact artifact_x --sync-focus --report --no-build
 ```
 
-`finalize-workstream` does not create artifacts, accept decisions, pause old branches, delete nodes, or invent next actions. `--summary-file` writes only to the workstream report by default; use `--summary-target option|problem|all` when you explicitly want node summaries replaced.
+Use `--file` to avoid long close-out commands. The file supports `option`, `status`, `problem_status`, `stage_status`, `summary_file`, `summary_target`, `artifacts`, `sync_focus`, `report`, `agent`, and `locale`; CLI flags override file values. A relative `summary_file` in the file resolves against the finalize file directory, then the data root, then cwd, and JSON output reports the resolved path. `finalize-workstream` does not create artifacts, accept decisions, pause old branches, delete nodes, or invent next actions. `--summary-file` writes only to the workstream report by default; use `--summary-target option|problem|all` when you explicitly want node summaries replaced.
 
 ## Artifacts
 
@@ -134,3 +139,5 @@ When recording several related updates, use `--no-build` on each supported comma
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
 ```
+
+For agent-readable success summaries, add `--compact` to `--json` on high-level mutation commands. The compact payload omits bulky `before`/`after` blocks. If you also pass `--show-diff`, the full diff is included and `diff_line_count` tells the agent how large it is.

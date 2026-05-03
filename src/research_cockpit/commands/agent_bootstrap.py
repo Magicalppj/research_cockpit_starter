@@ -94,6 +94,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
         "pause_candidate_options": sorted(pause_candidates),
         "batching": "Use --dry-run --json --show-diff first, then run mutating commands with --no-build and finish with validate --json plus build.",
         "command_skeletons": [
+            "research-cockpit init --root <root> --build --json",
             "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",
             "research-cockpit add-node --root <root> --id <node_id> --type <type> --title \"...\" --parent <parent_id> --no-build",
             "research-cockpit update-node-fields --root <root> --id <node_id> --question \"...\" --tag <tag> --no-build",
@@ -101,6 +102,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
             "research-cockpit create-workstream --root <root> --file workstream.yaml --dry-run --json --show-diff",
             "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path <path> --link-to <node_id> --no-build",
             "research-cockpit complete-experiments --root <root> --file findings.yaml --no-build",
+            "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
             "research-cockpit finalize-workstream --root <root> --option <option_id> --status accepted --problem-status resolved --report --no-build",
         ],
     }

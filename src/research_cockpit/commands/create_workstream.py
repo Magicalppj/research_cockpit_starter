@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import json
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +11,7 @@ ROOT = default_data_root()
 
 from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.file_schemas import CREATE_WORKSTREAM_EXAMPLE
+from research_cockpit.commands._runtime import compact_mutation_result, emit_json, safe_print
 from research_cockpit.model import ValidationError, load_yaml
 
 
@@ -185,11 +185,12 @@ def main() -> None:
     parser.add_argument("--print-schema", action="store_true", help="Print the workstream YAML schema example and exit.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
     if args.print_schema:
-        print(CREATE_WORKSTREAM_EXAMPLE)
+        safe_print(CREATE_WORKSTREAM_EXAMPLE)
         return
     if args.workstream_file is None:
         parser.error("--file is required unless --print-schema is used")
@@ -203,18 +204,32 @@ def main() -> None:
             show_diff=args.show_diff,
         )
     except (ValidationError, ValueError, FileExistsError, FileNotFoundError) as exc:
-        print(str(exc))
+        safe_print(str(exc))
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        emit_json(
+            compact_mutation_result(
+                result,
+                command="create-workstream",
+                target=result["workstream"]["problem_id"],
+                root=args.root,
+                created=[
+                    result["workstream"]["problem_id"],
+                    result["workstream"]["active_option_id"],
+                    *result["workstream"]["experiment_ids"],
+                    *result["workstream"]["followup_option_ids"],
+                ],
+                updated=result.get("updated_nodes", []),
+            ) if args.compact else result
+        )
         return
     verb = "Would create" if args.dry_run else "Created"
-    print(f"{verb} workstream {result['workstream']['problem_id']}: {len(result['changed_files'])} file(s)")
+    safe_print(f"{verb} workstream {result['workstream']['problem_id']}: {len(result['changed_files'])} file(s)")
     if args.show_diff and result.get("diff"):
-        print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
+        safe_print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
     if not args.dry_run and not args.no_build:
-        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
+        safe_print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 
 if __name__ == "__main__":

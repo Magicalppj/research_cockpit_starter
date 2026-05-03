@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -12,7 +11,14 @@ from research_cockpit.paths import default_data_root
 ROOT = default_data_root()
 
 from research_cockpit.commands._evidence import append_unique, validate_artifact_ids
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import (
+    compact_mutation_result,
+    emit_json,
+    finish_mutation,
+    load_validated_state,
+    safe_print,
+    yaml_change_diff,
+)
 from research_cockpit.commands.complete_experiment import TERMINAL_NON_COMPLETABLE_STATUSES
 from research_cockpit.commands.file_schemas import COMPLETE_EXPERIMENTS_EXAMPLE
 from research_cockpit.commands.record_finding import _next_finding_id, find_node_file
@@ -234,11 +240,12 @@ def main() -> None:
     parser.add_argument("--print-schema", action="store_true", help="Print the completion YAML schema example and exit.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
     if args.print_schema:
-        print(COMPLETE_EXPERIMENTS_EXAMPLE)
+        safe_print(COMPLETE_EXPERIMENTS_EXAMPLE)
         return
     if args.plan_file is None:
         parser.error("--file is required unless --print-schema is used")
@@ -252,18 +259,26 @@ def main() -> None:
             show_diff=args.show_diff,
         )
     except (ValidationError, ValueError, FileNotFoundError) as exc:
-        print(str(exc))
+        safe_print(str(exc))
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        emit_json(
+            compact_mutation_result(
+                result,
+                command="complete-experiments",
+                target=str(args.plan_file),
+                root=args.root,
+                updated=result.get("experiment_ids", []),
+            ) if args.compact else result
+        )
         return
     verb = "Would complete" if args.dry_run else "Completed"
-    print(f"{verb} {len(result['completed_experiments'])} experiment(s)")
+    safe_print(f"{verb} {len(result['completed_experiments'])} experiment(s)")
     if args.show_diff and result.get("diff"):
-        print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
+        safe_print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
     if not args.dry_run and not args.no_build:
-        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
+        safe_print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 
 if __name__ == "__main__":
