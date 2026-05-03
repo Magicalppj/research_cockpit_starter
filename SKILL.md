@@ -28,10 +28,10 @@ If the `research-cockpit` console script is unavailable but the package is insta
 3. If the task names a specific node id, run the shortest handoff before broader reads:
 
 ```sh
-research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
+research-cockpit context --root research_cockpit --node <node_id> --with-bootstrap --with-artifacts --compact --json
 ```
 
-For known-node continuation, `bootstrap --json` plus compact `node-context` is normally enough. Read `agent_context_pack.json` or `focus_context_pack.json` only when you need global state, generated dashboard context, or a broader focus scan.
+For known-node continuation, prefer compact `context` when you need node, focus, artifact, and validation context in one payload. Use `bootstrap --json` plus compact `node-context` when you only need the minimal older handoff. Read `agent_context_pack.json` or `focus_context_pack.json` only when you need global state, generated dashboard context, or a broader focus scan.
 4. If generated dashboards are missing or stale and the task allows generated-file writes, run `research-cockpit build --root research_cockpit`. Do not run `bootstrap --build` or `build` for read-only onboarding tasks.
 5. Use `research-cockpit` commands for mutating operations. Do not bypass helpers by hand-editing YAML unless the relevant capability explicitly says YAML repair is the right path.
 
@@ -66,18 +66,30 @@ Read only the capability files needed for the current task.
 ```sh
 research-cockpit validate --root research_cockpit
 research-cockpit add-node --root research_cockpit --id <node_id> --type <type> --title "..." --parent <parent_id> --dry-run --json --show-diff
+research-cockpit apply-graph-plan --print-schema
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
+research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
+research-cockpit context --root research_cockpit --node <node_id> --with-bootstrap --with-artifacts --compact --json
+research-cockpit create-artifact --root research_cockpit --id <artifact_id> --title "..." --path <path> --link-to <node_id> --dry-run --json --show-diff
+research-cockpit create-artifact --print-schema
+research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
+research-cockpit link-artifact --root research_cockpit --artifact <artifact_id> --to <node_id> --dry-run --json --show-diff
 research-cockpit complete-experiment --root research_cockpit --id <experiment_id> --finding "..." --confidence medium --no-build
+research-cockpit complete-experiments --print-schema
+research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
+research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --dry-run --json --show-diff
+research-cockpit finalize-workstream --root research_cockpit --option <option_id> --status accepted --problem-status resolved --report --dry-run --json --show-diff
 research-cockpit update-node-fields --root research_cockpit --id <node_id> --question "..." --tag <tag> --no-build
 research-cockpit sync-focus-actions --root research_cockpit --from-node <node_id> --dry-run --json --show-diff
 research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
 research-cockpit search --root research_cockpit --query "..." --json
 research-cockpit suggest-next-actions --root research_cockpit --json
-research-cockpit commands --json
+research-cockpit commands --json --compact
 ```
 
 `node-context` is read-only and computed from truth-source YAML. Use `--compact --json` as the shortest onboarding path when a human asks you to continue from one node; the full `--json` output remains available when you need parent chain, relations, resources, recent interactions, and type-specific traces. Command drafts include `--root`; add `--command-style python` when the console script is unavailable.
+The combined `context` payload separates `target_context` from `current_global_focus`; use `context_boundary.warning` to notice when a target node differs from the global focus.
 
 When making several related state changes, pass `--no-build` to each supported mutating command, then validate and rebuild once:
 
@@ -96,6 +108,11 @@ research-cockpit build --root research_cockpit
 ```
 
 Use `create-workstream` for the common `problem -> active option -> experiments + follow-up options` shape. It creates the branch and sets the new problem `current_best_option`, but it does not change focus or pause old options.
+Follow-up options should use status `open`; file-based graph commands accept option status `planned` only as an input alias and write `open` to truth-source YAML.
+
+Use `complete-experiments` for sweeps or multi-backend experiment sets. Use `create-artifact --file artifact.yaml` for result folders with several links or target nodes, and use `link-artifact` for attaching existing artifacts, so agents do not patch `path`, `links`, or `linked_artifacts` by hand. Use `update-finding` when revising an existing finding statement, confidence, outcome, metrics, or evidence artifacts.
+
+Use `finalize-workstream` only for explicit close-out. It updates the named option/problem/stage statuses and optional report/artifact/focus fields that you pass; it does not accept decisions, pause old options, delete branches, or invent next actions.
 
 Run `suggest-next-actions` once before choosing work. Re-run it only after you changed `next_actions` or suggestion lifecycle state.
 

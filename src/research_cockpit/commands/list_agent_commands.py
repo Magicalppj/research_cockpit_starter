@@ -4,6 +4,7 @@ import argparse
 import json
 
 from research_cockpit.command_registry import subcommand_for_script
+from research_cockpit.commands.file_schemas import file_schema_for_script
 from research_cockpit.commands.update_node_fields import supported_field_names
 
 
@@ -16,6 +17,7 @@ CAPABILITY_BY_COMMAND = {
     "skill_smoke_test.py": "capabilities/integrations.md",
     "search_knowledge.py": "capabilities/focus-context.md",
     "suggest_next_actions.py": "capabilities/focus-context.md",
+    "context.py": "capabilities/focus-context.md",
     "node_context.py": "capabilities/focus-context.md",
     "option_workstream_context.py": "capabilities/experiment-tracking.md",
     "check_decision_acceptance.py": "capabilities/decision-adr.md",
@@ -27,8 +29,13 @@ CAPABILITY_BY_COMMAND = {
     "sync_focus_actions.py": "capabilities/focus-context.md",
     "claim_option.py": "capabilities/experiment-tracking.md",
     "report_option_workstream.py": "capabilities/experiment-tracking.md",
+    "finalize_workstream.py": "capabilities/experiment-tracking.md",
     "record_finding.py": "capabilities/experiment-tracking.md",
+    "update_finding.py": "capabilities/experiment-tracking.md",
+    "create_artifact.py": "capabilities/experiment-tracking.md",
+    "link_artifact.py": "capabilities/experiment-tracking.md",
     "complete_experiment.py": "capabilities/experiment-tracking.md",
+    "complete_experiments.py": "capabilities/experiment-tracking.md",
     "promote_decision.py": "capabilities/decision-adr.md",
     "update_decision_evidence.py": "capabilities/decision-adr.md",
     "update_decision_checklist.py": "capabilities/decision-adr.md",
@@ -132,6 +139,16 @@ COMMANDS: list[dict[str, object]] = [
         "recommended_when": "Start work from a specific research node id.",
     },
     {
+        "name": "context.py",
+        "purpose": "Read compact combined context for one known node, optionally including bootstrap and artifacts.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "safe_in_plan_mode": True,
+        "recommended_when": "Continue work from a known option or experiment without reading several context packs.",
+    },
+    {
         "name": "option_workstream_context.py",
         "purpose": "Read context for one option workstream, including recursive child problems, options, experiments, and evidence.",
         "mutating": False,
@@ -166,6 +183,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": True,
         "supports_no_build": True,
         "can_batch": True,
+        **file_schema_for_script("apply_graph_plan.py"),
         "recommended_when": "Create or update several nodes without repeated rebuilds.",
     },
     {
@@ -176,24 +194,27 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": True,
         "supports_no_build": True,
         "can_batch": True,
+        **file_schema_for_script("create_workstream.py"),
         "recommended_when": "Start a new research branch from a structured workstream plan.",
     },
     {
         "name": "update_status.py",
         "purpose": "Update a node status and optional summaries.",
         "mutating": True,
-        "supports_json": False,
-        "supports_dry_run": False,
+        "supports_json": True,
+        "supports_dry_run": True,
         "supports_no_build": True,
+        "fields_supported": ["status", "summary", "result_summary"],
         "recommended_when": "Move experiment/problem/option state forward without accepting a decision.",
     },
     {
         "name": "set_focus.py",
         "purpose": "Update current_state focus fields.",
         "mutating": True,
-        "supports_json": False,
-        "supports_dry_run": False,
+        "supports_json": True,
+        "supports_dry_run": True,
         "supports_no_build": True,
+        "fields_supported": ["current_stage", "current_problem", "current_option", "current_focus_node", "current_focus_path", "current_hypothesis", "open_risks", "next_actions"],
         "recommended_when": "Change the current research focus.",
     },
     {
@@ -224,13 +245,55 @@ COMMANDS: list[dict[str, object]] = [
         "recommended_when": "Return findings from an option-following agent to the upstream problem.",
     },
     {
+        "name": "finalize_workstream.py",
+        "purpose": "Finalize one option workstream by explicitly updating option/problem/stage state, report, artifacts, and focus actions.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "fields_supported": ["option.status", "problem.status", "stage.status", "workstream_report", "linked_artifacts", "current_state.next_actions"],
+        "recommended_when": "Close out an option workstream after experiments have been recorded.",
+    },
+    {
         "name": "record_finding.py",
         "purpose": "Append a structured finding to an experiment.",
         "mutating": True,
-        "supports_json": False,
-        "supports_dry_run": False,
+        "supports_json": True,
+        "supports_dry_run": True,
         "supports_no_build": True,
+        "fields_supported": ["statement", "confidence", "outcome", "metrics", "linked_artifacts", "result_summary"],
         "recommended_when": "Record evidence after an experiment finishes.",
+    },
+    {
+        "name": "update_finding.py",
+        "purpose": "Update an existing experiment finding without hand-editing YAML.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "fields_supported": ["statement", "confidence", "outcome", "metrics", "linked_artifacts"],
+        "recommended_when": "Revise a finding statement or attach artifact evidence after initial recording.",
+    },
+    {
+        "name": "create_artifact.py",
+        "purpose": "Create an artifact node with path/links and optionally link it to existing nodes.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "fields_supported": ["title", "status", "summary", "path", "links", "linked_artifacts"],
+        **file_schema_for_script("create_artifact.py"),
+        "recommended_when": "Record experiment result folders, review bundles, metrics directories, or other evidence artifacts.",
+    },
+    {
+        "name": "link_artifact.py",
+        "purpose": "Link an existing artifact to nodes and update artifact path/links.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "fields_supported": ["path", "links", "linked_artifacts"],
+        "recommended_when": "Attach existing artifact evidence to experiments, options, problems, or decisions.",
     },
     {
         "name": "complete_experiment.py",
@@ -240,6 +303,18 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": True,
         "supports_no_build": True,
         "recommended_when": "Conservatively complete an experiment without changing option, problem, or focus state.",
+    },
+    {
+        "name": "complete_experiments.py",
+        "purpose": "Batch complete several experiments from a YAML findings file.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "can_batch": True,
+        "fields_supported": ["defaults", "experiments", "finding", "confidence", "outcome", "metrics", "artifact_ids", "result_summary", "next_actions"],
+        **file_schema_for_script("complete_experiments.py"),
+        "recommended_when": "Close a sweep or multi-backend experiment set without repeated rebuilds.",
     },
     {
         "name": "promote_decision.py",
@@ -318,15 +393,15 @@ COMMANDS: list[dict[str, object]] = [
         "name": "create_note.py",
         "purpose": "Create and link a Markdown note for a supported node.",
         "mutating": True,
-        "supports_json": False,
-        "supports_dry_run": False,
+        "supports_json": True,
+        "supports_dry_run": True,
         "supports_no_build": True,
         "recommended_when": "Create long-form notes for problem, option, experiment, or decision nodes.",
     },
 ]
 
 
-def agent_command_manifest() -> list[dict[str, object]]:
+def agent_command_manifest(*, compact: bool = False) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for command in COMMANDS:
         command_name = str(command["name"])
@@ -352,6 +427,8 @@ def agent_command_manifest() -> list[dict[str, object]]:
             "rebuild_default": rebuild_default,
             "fields_supported": command.get("fields_supported", []),
         }
+        if compact:
+            row.pop("example_file", None)
         rows.append(row)
     return rows
 
@@ -359,9 +436,10 @@ def agent_command_manifest() -> list[dict[str, object]]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true", help="Print machine-readable command manifest")
+    parser.add_argument("--compact", action="store_true", help="Omit long example_file payloads from JSON output.")
     args = parser.parse_args()
 
-    commands = agent_command_manifest()
+    commands = agent_command_manifest(compact=args.compact)
     if args.json:
         print(json.dumps({"commands": commands}, indent=2, ensure_ascii=False))
         return

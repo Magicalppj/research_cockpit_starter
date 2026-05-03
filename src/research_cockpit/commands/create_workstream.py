@@ -11,6 +11,7 @@ from research_cockpit.paths import default_data_root
 ROOT = default_data_root()
 
 from research_cockpit.commands.apply_graph_plan import apply_graph_plan
+from research_cockpit.commands.file_schemas import CREATE_WORKSTREAM_EXAMPLE
 from research_cockpit.model import ValidationError, load_yaml
 
 
@@ -175,14 +176,23 @@ def create_workstream(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=CREATE_WORKSTREAM_EXAMPLE,
+    )
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--file", type=Path, required=True, dest="workstream_file")
+    parser.add_argument("--file", type=Path, dest="workstream_file")
+    parser.add_argument("--print-schema", action="store_true", help="Print the workstream YAML schema example and exit.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
+    if args.print_schema:
+        print(CREATE_WORKSTREAM_EXAMPLE)
+        return
+    if args.workstream_file is None:
+        parser.error("--file is required unless --print-schema is used")
 
     try:
         result = create_workstream(

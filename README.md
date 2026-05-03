@@ -258,6 +258,7 @@ git diff --check
 For batch graph changes, preview first, then write with `--no-build`, then validate and rebuild once:
 
 ```sh
+research-cockpit apply-graph-plan --print-schema
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --no-build
 research-cockpit validate --root research_cockpit --json
@@ -267,15 +268,67 @@ research-cockpit build --root research_cockpit
 Use `create-workstream` for the common `problem -> active option -> experiments + follow-up options` shape:
 
 ```sh
+research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
 ```
 
 `create-workstream` sets the new problem `current_best_option` and active option `supporting_experiments`, but it does not change focus, pause old options, or delete old branches.
+Use `open` for follow-up option status. File-based graph commands accept option status `planned` only as an input alias and write `open` to YAML.
 
 When a focus node already has canonical actions, use:
 
 ```sh
 research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --dry-run --json --show-diff
 research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --no-build
+```
+
+## Agent Evidence Close-Out Workflow
+
+For a known option or experiment, prefer one compact context read:
+
+```sh
+research-cockpit context --root research_cockpit --node <node_id> --with-bootstrap --with-artifacts --compact --json
+```
+
+Use this instead of chaining `bootstrap`, generated context packs, and `node-context` unless you are auditing global dashboard state.
+
+Record evidence artifacts through CLI commands instead of patching artifact YAML:
+
+```sh
+research-cockpit create-artifact --print-schema
+research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
+research-cockpit create-artifact --root research_cockpit --file artifact.yaml --no-build
+research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --dry-run --json --show-diff
+research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --no-build
+research-cockpit link-artifact --root research_cockpit --artifact artifact_x --to option_x --no-build
+```
+
+Use `--file` for artifacts with several `links` or `link_to` targets. Use `commands --json --compact` when choosing commands and run a specific command's `--print-schema` when you need the full file example.
+
+For experiment sweeps, batch findings from a file:
+
+```sh
+research-cockpit complete-experiments --print-schema
+research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
+research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build
+```
+
+Use `update-finding` for later evidence or wording revisions:
+
+```sh
+research-cockpit update-finding --root research_cockpit --experiment experiment_x --finding-id experiment_x_finding_001 --statement "..." --artifact-id artifact_x --dry-run --json --show-diff
+```
+
+Finalize a workstream only when the status changes are explicit:
+
+```sh
+research-cockpit finalize-workstream --root research_cockpit --option option_x --status accepted --problem-status resolved --summary-file summary.md --summary-target report --artifact artifact_x --sync-focus --report --dry-run --json --show-diff
+```
+
+`finalize-workstream` does not create artifacts, accept decisions, pause old branches, delete nodes, or invent next actions. Finish batched writes with:
+
+```sh
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
 ```

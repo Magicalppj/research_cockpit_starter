@@ -12,6 +12,15 @@ from research_cockpit.graph_core import (
 from research_cockpit.option_workstreams import experiment_ids_for_option
 from research_cockpit.types import ResearchNode
 
+VALID_LOCALES = {"en", "zh"}
+
+
+def normalize_locale(locale: str | None = None, current: dict[str, Any] | None = None) -> str:
+    raw = str(locale or (current or {}).get("language") or "en").strip().lower()
+    if raw.startswith("zh"):
+        return "zh"
+    return "en"
+
 
 def has_experiment_evidence(experiment: ResearchNode) -> bool:
     return bool(
@@ -261,6 +270,7 @@ def build_decision_evidence_bundle(
     nodes: dict[str, ResearchNode],
     option_id: str,
     supporting_experiments: list[str] | None = None,
+    locale: str | None = None,
 ) -> dict[str, Any]:
     if option_id not in nodes:
         raise ValueError(f"Option node does not exist: {option_id}")
@@ -302,16 +312,23 @@ def build_decision_evidence_bundle(
             outcome_counts[str(outcome)] = outcome_counts.get(str(outcome), 0) + 1
 
     strength = _evidence_strength_for_counts(findings, outcome_counts, has_result_summary)
-    summary_parts = [
-        f"{len(experiment_ids)} experiment(s)",
-        f"{len(findings)} finding(s)",
-    ]
+    locale = normalize_locale(locale)
+    if locale == "zh":
+        summary_parts = [
+            f"{len(experiment_ids)} 个实验",
+            f"{len(findings)} 条 finding",
+        ]
+    else:
+        summary_parts = [
+            f"{len(experiment_ids)} experiment(s)",
+            f"{len(findings)} finding(s)",
+        ]
     if outcome_counts:
-        summary_parts.append(
-            "outcomes: " + ", ".join(f"{key}={value}" for key, value in sorted(outcome_counts.items()))
-        )
+        label = "结果: " if locale == "zh" else "outcomes: "
+        summary_parts.append(label + ", ".join(f"{key}={value}" for key, value in sorted(outcome_counts.items())))
     if latest_finding:
-        summary_parts.append(f"latest finding: {latest_finding}")
+        label = "最新 finding: " if locale == "zh" else "latest finding: "
+        summary_parts.append(f"{label}{latest_finding}")
     return {
         "supporting_experiments": experiment_ids,
         "evidence_strength": strength,

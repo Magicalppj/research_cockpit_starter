@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from datetime import date
 from pathlib import Path
@@ -10,7 +11,7 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state
+from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import _next_finding_id, find_node_file
 from research_cockpit.model import (
     ResearchNode,
@@ -65,6 +66,7 @@ def complete_experiment(
     next_actions: list[str] | None = None,
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
+    show_diff: bool = False,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
     nodes = state.nodes
@@ -89,6 +91,7 @@ def complete_experiment(
 
     path = find_node_file(root, experiment_id)
     data = load_yaml(path)
+    before_data = copy.deepcopy(data)
     findings = data.get("findings", []) or []
     if not isinstance(findings, list):
         raise ValueError(f"{experiment_id}: findings must be a list")
@@ -142,6 +145,8 @@ def complete_experiment(
         "finding": finding_record,
         "added_next_actions": added_actions,
     }
+    if show_diff:
+        result["diff"] = yaml_change_diff([(path, before_data, data)])
     if dry_run:
         result["changed"] = False
         return result
@@ -184,6 +189,7 @@ def main() -> None:
     parser.add_argument("--next-action", action="append", dest="next_actions")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -200,6 +206,7 @@ def main() -> None:
             next_actions=args.next_actions,
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
+            show_diff=args.show_diff,
         )
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))
@@ -210,6 +217,8 @@ def main() -> None:
         return
     if args.dry_run:
         print(f"Would complete experiment {args.experiment_id}")
+        if args.show_diff and result.get("diff"):
+            print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
         return
     print(f"Completed experiment {args.experiment_id}: {result['path']}")
     if not args.no_build:

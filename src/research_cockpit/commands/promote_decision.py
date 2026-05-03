@@ -22,6 +22,7 @@ from research_cockpit.decisions import (
     build_decision_acceptance_checklist,
     build_decision_evidence_bundle,
     decision_acceptance_failure_message,
+    normalize_locale,
 )
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.record_finding import find_node_file
@@ -58,6 +59,7 @@ def promote_decision(
     next_required_actions: list[str] | None = None,
     evidence_strength: str = "none",
     auto_evidence: bool = False,
+    locale: str | None = None,
     force_accept: bool = False,
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
@@ -85,7 +87,13 @@ def promote_decision(
     _validate_refs(nodes, alternatives, "option", "alternatives")
     evidence_summary = None
     if auto_evidence:
-        evidence_bundle = build_decision_evidence_bundle(nodes, option_id, supporting_experiments)
+        current = load_yaml(root / "current_state.yaml")
+        evidence_bundle = build_decision_evidence_bundle(
+            nodes,
+            option_id,
+            supporting_experiments,
+            locale=normalize_locale(locale, current),
+        )
         supporting_experiments = evidence_bundle["supporting_experiments"]
         if evidence_strength == "none":
             evidence_strength = evidence_bundle["evidence_strength"]
@@ -205,6 +213,7 @@ def main() -> None:
     parser.add_argument("--next-required-action", action="append", dest="next_required_actions")
     parser.add_argument("--evidence-strength", default="none", choices=sorted(VALID_EVIDENCE_STRENGTHS))
     parser.add_argument("--auto-evidence", action="store_true")
+    parser.add_argument("--locale", choices=["en", "zh"])
     parser.add_argument("--force-accept", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -225,6 +234,7 @@ def main() -> None:
             next_required_actions=args.next_required_actions,
             evidence_strength=args.evidence_strength,
             auto_evidence=args.auto_evidence,
+            locale=args.locale,
             force_accept=args.force_accept,
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,

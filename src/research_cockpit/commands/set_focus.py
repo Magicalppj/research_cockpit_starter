@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import json
 from datetime import date
 from pathlib import Path
 
@@ -12,12 +14,10 @@ from research_cockpit.model import (
     derive_focus_fields,
     load_nodes,
     load_yaml,
-    save_yaml,
     script_command,
     validate_cockpit,
 )
-from research_cockpit.interaction_log import append_interaction_log
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
 
 
 def parse_path(value: str) -> list[str]:
@@ -37,15 +37,49 @@ def set_focus(
     next_actions: list[str] | None = None,
     rebuild_dashboard: bool = True,
 ) -> Path:
+    result = set_focus_result(
+        root,
+        stage=stage,
+        problem=problem,
+        option=option,
+        focus_node=focus_node,
+        path=path,
+        hypothesis=hypothesis,
+        open_risks=open_risks,
+        next_actions=next_actions,
+        rebuild_dashboard=rebuild_dashboard,
+        dry_run=False,
+        show_diff=False,
+    )
+    return Path(str(result["path"]))
+
+
+def set_focus_result(
+    root: Path,
+    *,
+    stage: str | None = None,
+    problem: str | None = None,
+    option: str | None = None,
+    focus_node: str | None = None,
+    path: list[str] | None = None,
+    hypothesis: str | None = None,
+    open_risks: list[str] | None = None,
+    next_actions: list[str] | None = None,
+    rebuild_dashboard: bool = True,
+    dry_run: bool = False,
+    show_diff: bool = False,
+) -> dict[str, object]:
     nodes = load_nodes(root)
     current_path = root / "current_state.yaml"
     current = load_yaml(current_path)
+    before_data = copy.deepcopy(current)
     before = {
         "current_stage": current.get("current_stage"),
         "current_problem": current.get("current_problem"),
         "current_option": current.get("current_option"),
         "current_focus_node": current.get("current_focus_node"),
         "current_focus_path": current.get("current_focus_path", []) or [],
+        "next_actions": current.get("next_actions", []) or [],
     }
 
     focus_node = focus_node or problem
@@ -82,26 +116,43 @@ def set_focus(
     current["updated_at"] = str(date.today())
 
     validate_cockpit(root, nodes, current, raise_on_error=True)
-    save_yaml(current_path, current)
     after = {
         "current_stage": current.get("current_stage"),
         "current_problem": current.get("current_problem"),
         "current_option": current.get("current_option"),
         "current_focus_node": current.get("current_focus_node"),
         "current_focus_path": current.get("current_focus_path", []) or [],
+        "next_actions": current.get("next_actions", []) or [],
     }
-    append_interaction_log(
+    changed = before_data != current
+    result: dict[str, object] = {
+        "focus_node": focus_node,
+        "dry_run": dry_run,
+        "changed": False if dry_run else changed,
+        "would_change": changed,
+        "path": str(current_path),
+        "before": before,
+        "after": after,
+    }
+    if show_diff:
+        result["diff"] = yaml_change_diff([(current_path, before_data, current)]) if changed else ""
+    if dry_run or not changed:
+        return result
+
+    finish_mutation(
         root,
-        kind="set_focus",
-        actor="researcher",
-        node_id=focus_node,
-        command=f"{script_command('set_focus.py')} --focus-node {focus_node}",
-        before=before,
-        after=after,
+        [(current_path, current)],
+        interaction={
+            "kind": "set_focus",
+            "actor": "researcher",
+            "node_id": focus_node,
+            "command": f"{script_command('set_focus.py')} --focus-node {focus_node}",
+            "before": before,
+            "after": after,
+        },
+        rebuild_dashboard=rebuild_dashboard,
     )
-    if rebuild_dashboard:
-        build_dashboard(root)
-    return current_path
+    return result
 
 
 def main() -> None:
@@ -115,23 +166,39 @@ def main() -> None:
     parser.add_argument("--hypothesis")
     parser.add_argument("--risk", action="append", dest="open_risks")
     parser.add_argument("--next-action", action="append", dest="next_actions")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true", help="Only update current_state.yaml; do not rebuild dashboards")
     args = parser.parse_args()
 
-    out = set_focus(
-        args.root,
-        stage=args.stage,
-        problem=args.problem,
-        option=args.option,
-        focus_node=args.focus_node,
-        path=parse_path(args.path) if args.path else None,
-        hypothesis=args.hypothesis,
-        open_risks=args.open_risks,
-        next_actions=args.next_actions,
-        rebuild_dashboard=not args.no_build,
-    )
-    print(f"Updated {out}")
-    if not args.no_build:
+    try:
+        result = set_focus_result(
+            args.root,
+            stage=args.stage,
+            problem=args.problem,
+            option=args.option,
+            focus_node=args.focus_node,
+            path=parse_path(args.path) if args.path else None,
+            hypothesis=args.hypothesis,
+            open_risks=args.open_risks,
+            next_actions=args.next_actions,
+            rebuild_dashboard=not args.no_build,
+            dry_run=args.dry_run,
+            show_diff=args.show_diff,
+        )
+    except ValueError as exc:
+        print(str(exc))
+        raise SystemExit(1) from exc
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    verb = "Would update" if args.dry_run else "Updated"
+    print(f"{verb} {result['path']}")
+    if args.show_diff and result.get("diff"):
+        print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
+    if not args.dry_run and not args.no_build and result["changed"]:
         print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 

@@ -88,13 +88,14 @@ def build_option_workstream_context(
     nodes: dict[str, ResearchNode],
     current: dict[str, Any],
     option_id: str,
+    locale: str | None = None,
 ) -> dict[str, Any]:
-    from research_cockpit.decisions import build_decision_evidence_bundle
+    from research_cockpit.decisions import build_decision_evidence_bundle, normalize_locale
 
     subtree = build_option_subtree(nodes, option_id)
     option = nodes[option_id]
     problem_id = upstream_problem_id(nodes, option_id)
-    evidence = build_decision_evidence_bundle(nodes, option_id)
+    evidence = build_decision_evidence_bundle(nodes, option_id, locale=normalize_locale(locale, current))
     next_actions: list[str] = []
     blockers: list[str] = []
     for node_id in subtree["node_ids"]:

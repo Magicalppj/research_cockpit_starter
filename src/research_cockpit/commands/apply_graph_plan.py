@@ -12,6 +12,7 @@ from research_cockpit.paths import default_data_root
 ROOT = default_data_root()
 
 from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands.file_schemas import APPLY_GRAPH_PLAN_EXAMPLE
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.commands.update_node_fields import apply_node_field_updates, field_updates_from_mapping
 from research_cockpit.model import (
@@ -23,6 +24,11 @@ from research_cockpit.model import (
     validate_cockpit,
     validate_status,
 )
+
+
+STATUS_ALIASES_BY_TYPE = {
+    "option": {"planned": "open"},
+}
 
 
 def _as_list(value: Any, field_name: str) -> list[Any]:
@@ -44,6 +50,11 @@ def _node_path(root: Path, node_id: str) -> Path:
     return root / "graph" / "nodes" / f"{node_id}.yaml"
 
 
+def _normalize_input_status(node_type: str, status: str) -> tuple[str, str | None]:
+    normalized = STATUS_ALIASES_BY_TYPE.get(node_type, {}).get(status, status)
+    return normalized, status if normalized != status else None
+
+
 class GraphPlanBuilder:
     def __init__(self, root: Path) -> None:
         self.root = root
@@ -54,6 +65,7 @@ class GraphPlanBuilder:
         self.path_by_id: dict[str, Path] = {}
         self.created_ids: list[str] = []
         self.updated_ids: set[str] = set()
+        self.status_aliases: list[dict[str, str]] = []
 
     def mutable_data(self, node_id: str) -> dict[str, Any]:
         if node_id in self.data_by_id:
@@ -74,8 +86,16 @@ class GraphPlanBuilder:
         title = _required_text(entry, "title", owner)
         if node_id in self.candidate:
             raise FileExistsError(_node_path(self.root, node_id))
-        status = str(entry.get("status") or default_status_for_type(node_type))
+        raw_status = str(entry.get("status") or default_status_for_type(node_type))
+        status, alias_from = _normalize_input_status(node_type, raw_status)
         validate_status(node_type, status)
+        if alias_from:
+            self.status_aliases.append({
+                "node_id": node_id,
+                "type": node_type,
+                "from": alias_from,
+                "to": status,
+            })
         parent = str(entry.get("parent") or "").strip()
         if parent and parent not in self.candidate and parent not in known_new_ids:
             raise ValueError(f"{owner}.parent references missing node {parent!r}")
@@ -213,6 +233,7 @@ def apply_graph_plan(
         "created_nodes": builder.created_ids,
         "updated_nodes": sorted(builder.updated_ids),
         "changed_files": [str(path) for _, path, _, _ in changes],
+        "status_aliases": builder.status_aliases,
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(path, before, after) for _, path, before, after in changes])
@@ -247,9 +268,13 @@ def load_graph_plan(path: Path) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=APPLY_GRAPH_PLAN_EXAMPLE,
+    )
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--file", type=Path, required=True, dest="plan_file")
+    parser.add_argument("--file", type=Path, dest="plan_file")
+    parser.add_argument("--print-schema", action="store_true", help="Print the graph plan YAML schema example and exit.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
@@ -257,6 +282,11 @@ def main() -> None:
     parser.add_argument("--build", action="store_true", help="Accepted for readability; build is the default.")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
+    if args.print_schema:
+        print(APPLY_GRAPH_PLAN_EXAMPLE)
+        return
+    if args.plan_file is None:
+        parser.error("--file is required unless --print-schema is used")
 
     try:
         result = apply_graph_plan(

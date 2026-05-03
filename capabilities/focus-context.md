@@ -13,10 +13,10 @@ research-cockpit bootstrap --root research_cockpit --json
 2. If a human assigns a specific node id, go straight to compact node handoff:
 
 ```sh
-research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
+research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
 ```
 
-For known-node continuation, bootstrap plus compact `node-context` is normally enough. Do not also read both context packs unless you need global state or generated dashboard context.
+For known-node continuation, compact `context` is the preferred one-command handoff when artifact and validation context matter. Bootstrap plus compact `node-context` remains fine for the older minimal flow. Do not also read both context packs unless you need global state or generated dashboard context.
 
 3. If dashboard files are missing or stale and generated-file writes are allowed:
 
@@ -36,12 +36,19 @@ Do not run `bootstrap --build` or `build` during read-only onboarding.
 When a human assigns a specific node id, use the read-only onboarding command before opening raw YAML:
 
 ```sh
-research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
+research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
 ```
 
-The payload is computed from truth-source YAML, not from stale generated dashboards. It includes parent chain, relations, blockers, next actions, relevant suggestions, resources, recent interactions, and type-specific context for options, experiments, and decisions. Command drafts in the payload include `--root` so they can be reused safely from an agent shell.
+The payload is computed from truth-source YAML, not from stale generated dashboards. It includes the current node, compact bootstrap data, validation summary, focus actions, related problem/option/experiments, artifact/resource rows, and command skeletons.
 
-The compact form is the shortest no-context handoff. Use full `--json` without `--compact` when you need complete relations, resources, recent interactions, or type-specific traces.
+Use `node-context --compact --json` only when you need the narrow node onboarding payload without bootstrap/artifact aggregation. Use full `node-context --json` without `--compact` when you need complete relations, resources, recent interactions, or type-specific traces.
+Avoid the old chain `bootstrap` + generated context packs + `node-context` for known-node work unless you are explicitly auditing global dashboard state.
+
+The combined `context` payload names the work target and global focus separately:
+
+- `target_context`: the node this command was asked to inspect.
+- `current_global_focus`: the current `current_state.yaml` focus.
+- `context_boundary.warning`: non-empty when those two differ.
 
 If the console script is unavailable, use:
 

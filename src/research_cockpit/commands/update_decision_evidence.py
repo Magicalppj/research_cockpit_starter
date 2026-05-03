@@ -18,7 +18,7 @@ from research_cockpit.model import (
     save_yaml,
     validate_cockpit,
 )
-from research_cockpit.decisions import build_decision_evidence_bundle
+from research_cockpit.decisions import build_decision_evidence_bundle, normalize_locale
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.record_finding import find_node_file
 
@@ -27,6 +27,7 @@ def update_decision_evidence(
     root: Path,
     *,
     decision_id: str,
+    locale: str | None = None,
     rebuild_dashboard: bool = True,
 ) -> dict[str, Any]:
     nodes = load_nodes(root)
@@ -41,10 +42,12 @@ def update_decision_evidence(
 
     decision_path = find_node_file(root, decision_id)
     decision_data = load_yaml(decision_path)
+    current = load_yaml(root / "current_state.yaml")
     bundle = build_decision_evidence_bundle(
         nodes,
         str(option_id),
         decision_data.get("supporting_experiments", []) or [],
+        locale=normalize_locale(locale, current),
     )
     decision_data["supporting_experiments"] = bundle["supporting_experiments"]
     decision_data["evidence_strength"] = bundle["evidence_strength"]
@@ -53,7 +56,6 @@ def update_decision_evidence(
 
     candidate = dict(nodes)
     candidate[decision_id] = ResearchNode.from_dict(decision_data)
-    current = load_yaml(root / "current_state.yaml")
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
     save_yaml(decision_path, decision_data)
@@ -69,6 +71,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--id", required=True, dest="decision_id")
+    parser.add_argument("--locale", choices=["en", "zh"])
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -76,6 +79,7 @@ def main() -> None:
         result = update_decision_evidence(
             args.root,
             decision_id=args.decision_id,
+            locale=args.locale,
             rebuild_dashboard=not args.no_build,
         )
     except (ValidationError, ValueError) as exc:

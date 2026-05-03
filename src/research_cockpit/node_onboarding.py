@@ -448,6 +448,16 @@ def _recommended_next_steps(node: ResearchNode, type_context: dict[str, Any], dr
             "reason": "Decision acceptance checklist is not ready.",
         }]
     if node.type == "option":
+        workstream = type_context.get("workstream", {})
+        workstream_status = None
+        if isinstance(workstream, dict):
+            option_workstream = workstream.get("workstream")
+            if isinstance(option_workstream, dict):
+                workstream_status = option_workstream.get("status")
+        if node.status in {"accepted", "rejected", "paused", "parked"} or workstream_status in {"reported", "released"}:
+            for action in node.raw.get("next_actions", []) or []:
+                return [{"action": str(action), "command": "", "reason": "Node lists this as its next action."}]
+            return []
         return [{
             "action": "Claim the option workstream before starting agent work.",
             "command": drafts.get("claim_option", ""),

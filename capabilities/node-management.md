@@ -24,6 +24,7 @@ Do not create `artifact` nodes for routine files, configs, JSON outputs, or expe
 Use `apply-graph-plan` when creating or updating several graph nodes. It validates the candidate graph once, writes all YAML only after validation passes, and rebuilds once by default.
 
 ```sh
+research-cockpit apply-graph-plan --print-schema
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --no-build
 research-cockpit validate --root research_cockpit --json
@@ -62,6 +63,7 @@ New nodes with `parent` automatically append themselves to the parent `children`
 Use `create-workstream` for the common `problem -> active option -> planned experiments + follow-up options` shape. It is a thin wrapper over `apply-graph-plan`.
 
 ```sh
+research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
 ```
@@ -73,10 +75,12 @@ problem:
   id: problem_x
   title: New research problem
   parent: stage_x
+  status: active
   question: What should we optimize next?
 active_option:
   id: option_x
   title: Active route
+  status: active
   hypothesis: This route has the shortest path to signal.
 experiments:
   - id: experiment_x1
@@ -86,18 +90,21 @@ experiments:
 followup_options:
   - id: option_followup_x
     title: Follow-up route
+    status: open
 ```
 
 It creates the branch, sets the problem `current_best_option`, and adds experiment ids to the active option `supporting_experiments`. It does not change focus or pause old options.
+Use `open` for not-yet-selected follow-up options. File-based graph commands accept option status `planned` as an input alias and write `open` to truth-source YAML because `planned` is not a stored option status.
 
 ## Update Status
 
 ```sh
-research-cockpit update-status --root research_cockpit --id option_x --status active
+research-cockpit update-status --root research_cockpit --id option_x --status active --dry-run --json --show-diff
+research-cockpit update-status --root research_cockpit --id option_x --status active --no-build
 ```
 
 Use only statuses accepted by validation for that node type.
-`update-status` rebuilds dashboards by default; pass `--no-build` when batching several mutations and run one final `validate` + `build`.
+`update-status` rebuilds dashboards by default; pass `--no-build` when batching several mutations and run one final `validate` + `build`. `--summary` still replaces the node summary for compatibility, so preview with `--dry-run --show-diff` before using it on nodes that already have summaries. For content-only summary changes, prefer `update-node-fields --summary`.
 
 Status meanings:
 
@@ -171,6 +178,7 @@ Both `apply-suggestion` and `update-suggestion-state` accept either stable `sugg
 Add a new problem + active option + experiments:
 
 ```sh
+research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
 research-cockpit validate --root research_cockpit --json

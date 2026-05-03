@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import json
 from datetime import date
 from pathlib import Path
 
@@ -17,7 +19,7 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state
+from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
 
 
 def find_node_file(root: Path, node_id: str) -> Path:
@@ -50,6 +52,36 @@ def record_finding(
     summary: str | None = None,
     rebuild_dashboard: bool = True,
 ) -> Path:
+    result = record_finding_result(
+        root,
+        experiment_id=experiment_id,
+        statement=statement,
+        confidence=confidence,
+        outcome=outcome,
+        metrics=metrics,
+        artifacts=artifacts,
+        summary=summary,
+        rebuild_dashboard=rebuild_dashboard,
+        dry_run=False,
+        show_diff=False,
+    )
+    return Path(str(result["path"]))
+
+
+def record_finding_result(
+    root: Path,
+    *,
+    experiment_id: str,
+    statement: str,
+    confidence: str,
+    outcome: str | None = None,
+    metrics: list[str] | None = None,
+    artifacts: list[str] | None = None,
+    summary: str | None = None,
+    rebuild_dashboard: bool = True,
+    dry_run: bool = False,
+    show_diff: bool = False,
+) -> dict[str, Any]:
     state = load_validated_state(root)
     nodes = state.nodes
     if experiment_id not in nodes:
@@ -73,6 +105,7 @@ def record_finding(
 
     path = find_node_file(root, experiment_id)
     data = load_yaml(path)
+    before_data = copy.deepcopy(data)
     findings = data.get("findings", []) or []
     if not isinstance(findings, list):
         raise ValueError(f"{experiment_id}: findings must be a list")
@@ -101,6 +134,27 @@ def record_finding(
     candidate[experiment_id] = ResearchNode.from_dict(data)
     validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
 
+    after_summary = {
+        "finding_count": len(findings),
+        "result_summary": data.get("result_summary"),
+        "latest_finding_id": finding["id"],
+    }
+    result: dict[str, Any] = {
+        "experiment_id": experiment_id,
+        "finding_id": finding["id"],
+        "dry_run": dry_run,
+        "changed": False if dry_run else True,
+        "would_change": True,
+        "path": str(path),
+        "before": before_summary,
+        "after": after_summary,
+        "finding": finding,
+    }
+    if show_diff:
+        result["diff"] = yaml_change_diff([(path, before_data, data)])
+    if dry_run:
+        return result
+
     finish_mutation(
         root,
         [(path, data)],
@@ -110,11 +164,7 @@ def record_finding(
             "node_id": experiment_id,
             "command": f"{script_command('record_finding.py')} --experiment {experiment_id} --confidence {confidence}",
             "before": before_summary,
-            "after": {
-                "finding_count": len(findings),
-                "result_summary": data.get("result_summary"),
-                "latest_finding_id": finding["id"],
-            },
+            "after": after_summary,
             "extra": {
                 "experiment_id": experiment_id,
                 "finding_id": finding["id"],
@@ -126,7 +176,7 @@ def record_finding(
         },
         rebuild_dashboard=rebuild_dashboard,
     )
-    return path
+    return result
 
 
 def main() -> None:
@@ -140,22 +190,38 @@ def main() -> None:
     parser.add_argument("--artifact-id", action="append", dest="artifacts", help="Artifact node id; repeat for multiple artifacts.")
     parser.add_argument("--artifact", action="append", dest="artifacts", help="Deprecated alias for --artifact-id.")
     parser.add_argument("--summary")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
-    out = record_finding(
-        args.root,
-        experiment_id=args.experiment,
-        statement=args.statement,
-        confidence=args.confidence,
-        outcome=args.outcome,
-        metrics=args.metrics,
-        artifacts=args.artifacts,
-        summary=args.summary,
-        rebuild_dashboard=not args.no_build,
-    )
-    print(f"Updated {out}")
-    if not args.no_build:
+    try:
+        result = record_finding_result(
+            args.root,
+            experiment_id=args.experiment,
+            statement=args.statement,
+            confidence=args.confidence,
+            outcome=args.outcome,
+            metrics=args.metrics,
+            artifacts=args.artifacts,
+            summary=args.summary,
+            rebuild_dashboard=not args.no_build,
+            dry_run=args.dry_run,
+            show_diff=args.show_diff,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        print(str(exc))
+        raise SystemExit(1) from exc
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+    verb = "Would update" if args.dry_run else "Updated"
+    print(f"{verb} {result['path']}")
+    if args.show_diff and result.get("diff"):
+        print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
+    if not args.dry_run and not args.no_build:
         print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 
