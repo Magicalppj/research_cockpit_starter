@@ -40,14 +40,15 @@ The plugin stores reusable code and tools. The research repo stores project-spec
 
 - `cli.py` and `command_registry.py`: public CLI dispatch and command metadata.
 - `commands/`: command implementations. Commands validate input, call domain helpers, and perform controlled writes.
-- `commands/_runtime.py`: shared command runtime for validated state loading and mutation finalization.
+- `commands/_runtime.py`: CLI output helpers plus compatibility wrappers for shared mutation/runtime calls.
+- `mutation_runtime.py` and `mutation_lock.py`: serial mutation lock, preflight, conflict checks, atomic truth-source writes, rollback, and dashboard rebuild handoff.
 - `types.py`: core dataclasses, validation error type, node/status constants, and search constants.
 - `storage.py`: YAML IO and path normalization helpers.
 - `paths.py`: plugin and data-root discovery.
 - `graph_core.py`: node loading, explicit edge loading, graph traversal, focus path derivation, and graph JSON.
 - `resources.py`: node links, linked artifacts, and local resource row extraction.
 - `interaction_log.py` and `graph_views.py`: sidecar state helpers.
-- `decisions.py`, `option_workstreams.py`, and `suggestions.py`: domain logic.
+- `agent_sessions.py`, `decisions.py`, `option_workstreams.py`, and `suggestions.py`: domain logic for parallel agent sessions, decisions, option workstreams, and action suggestions.
 - `search_index.py`: search index construction and query helpers.
 - `node_onboarding.py`: single-node onboarding payloads for new agents.
 - `context_packs.py`: agent/focus/current-state context payload builders and dashboard Markdown writer.

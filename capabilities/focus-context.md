@@ -46,6 +46,14 @@ research-cockpit commands --json --compact --workflow focus
 research-cockpit commands --json --compact --name context
 ```
 
+For a downstream agent launched in a git worktree, start from the canonical root session context instead of global bootstrap:
+
+```sh
+research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
+```
+
+The payload includes `required_root`, `do_not_mutate_worktree_root: true`, the agent session, per-agent focus, compact option context, and handoff commands.
+
 ## Node Handoff
 
 When a human assigns a specific node id, use the read-only onboarding command before opening raw YAML:
@@ -90,6 +98,15 @@ research-cockpit set-focus --root research_cockpit --focus-node problem_id
 Focus changes write `current_state.yaml`, append `interaction_log.yaml`, and rebuild dashboard/context unless `--no-build` is passed.
 
 Passing `--next-action` replaces the current_state `next_actions` list with the repeated values supplied in this command. It does not append.
+
+In multi-agent worktree runs, downstream agents should not use global `set-focus`. Use per-agent focus instead:
+
+```sh
+research-cockpit set-agent-focus --root D:/main_repo/research_cockpit --agent agent_x --node experiment_x --next-action "Run follow-up" --dry-run --json --show-diff
+research-cockpit set-agent-focus --root D:/main_repo/research_cockpit --agent agent_x --node experiment_x --no-build
+```
+
+`set-agent-focus` writes `current_state.agent_focuses[agent_id]` and leaves global `current_focus_node`, `current_focus_path`, and `next_actions` unchanged. Passing one or more `--next-action` values replaces that agent's existing `next_actions`; omitting `--next-action` preserves them. A coordinator or human should own global focus when several agents are active.
 
 ## Sync Focus Actions
 

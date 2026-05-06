@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sys
 import uuid
@@ -148,7 +149,7 @@ def _readability_findings(skill_path: Path) -> list[str]:
         findings.append("decision-adr.md promote-decision example omits required --id/--title/--summary")
 
     focus_text = (skill_path / "capabilities" / "focus-context.md").read_text(encoding="utf-8", errors="ignore")
-    if "set-focus" in focus_text and "--node " in focus_text:
+    if re.search(r"set-focus[^\n]*--node\b", focus_text):
         findings.append("focus-context.md uses outdated set_focus --node flag")
 
     node_text = (skill_path / "capabilities" / "node-management.md").read_text(encoding="utf-8", errors="ignore")

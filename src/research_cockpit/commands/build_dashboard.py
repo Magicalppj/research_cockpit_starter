@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import time
 
 from research_cockpit.paths import default_data_root
 import json
@@ -31,6 +32,32 @@ from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.storage import save_text
 
 
+def _truth_source_files(root: Path) -> list[Path]:
+    files: list[Path] = []
+    current = root / "current_state.yaml"
+    if current.exists():
+        files.append(current)
+    graph = root / "graph"
+    if graph.exists():
+        files.extend(path for path in graph.rglob("*.yaml") if path.is_file())
+    notes = root / "notes"
+    if notes.exists():
+        files.extend(path for path in notes.rglob("*.md") if path.is_file())
+    return sorted(files)
+
+
+def truth_source_signature(root: Path) -> tuple[tuple[str, int, int], ...]:
+    items: list[tuple[str, int, int]] = []
+    for path in _truth_source_files(root):
+        stat = path.stat()
+        try:
+            name = path.relative_to(root).as_posix()
+        except ValueError:
+            name = str(path)
+        items.append((name, stat.st_mtime_ns, stat.st_size))
+    return tuple(items)
+
+
 def build_dashboard(root: Path = ROOT) -> list[Path]:
     nodes = load_nodes(root)
     current = load_yaml(root / "current_state.yaml")
@@ -45,7 +72,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
     action_suggestions = build_action_suggestions(root, nodes, current, linked_resources)
     search_index = build_search_index(root, nodes, current)
     decision_checklists = build_decision_acceptance_checklists(nodes)
-    option_workstreams = build_option_workstream_rows(nodes)
+    option_workstreams = build_option_workstream_rows(nodes, current)
 
     dash = root / "dashboards"
     dash.mkdir(parents=True, exist_ok=True)
@@ -77,31 +104,74 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
     return outputs
 
 
+def build_dashboard_once(root: Path, *, json_output: bool = False) -> dict:
+    with mutation_lock(root):
+        nodes = load_nodes(root)
+        outputs = build_dashboard(root)
+    return {
+        "ok": True,
+        "root": str(root),
+        "node_count": len(nodes),
+        "written_files": [str(output) for output in outputs],
+        "json": json_output,
+    }
+
+
+def watch_dashboard(root: Path, *, interval: float, max_iterations: int | None, json_output: bool) -> None:
+    last_signature: tuple[tuple[str, int, int], ...] | None = None
+    iteration = 0
+    while max_iterations is None or iteration < max_iterations:
+        iteration += 1
+        signature = truth_source_signature(root)
+        if last_signature is None or signature != last_signature:
+            payload = build_dashboard_once(root, json_output=json_output)
+            payload.update({"watch": True, "iteration": iteration, "truth_source_changed": True})
+            last_signature = truth_source_signature(root)
+        else:
+            payload = {
+                "ok": True,
+                "root": str(root),
+                "watch": True,
+                "iteration": iteration,
+                "truth_source_changed": False,
+                "written_files": [],
+            }
+        if json_output:
+            print(json.dumps(payload, ensure_ascii=False))
+        else:
+            if payload["truth_source_changed"]:
+                print(f"[{iteration}] Built dashboard.")
+            else:
+                print(f"[{iteration}] No truth-source changes.")
+        if max_iterations is not None and iteration >= max_iterations:
+            break
+        time.sleep(max(0.0, interval))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="research-cockpit build")
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--watch", action="store_true")
+    parser.add_argument("--interval", type=float, default=5.0)
+    parser.add_argument("--max-iterations", type=int)
     args = parser.parse_args()
 
-    with mutation_lock(args.root):
-        nodes = load_nodes(args.root)
-        outputs = build_dashboard(args.root)
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "ok": True,
-                    "root": str(args.root),
-                    "node_count": len(nodes),
-                    "written_files": [str(output) for output in outputs],
-                },
-                indent=2,
-                ensure_ascii=False,
-            )
+    if args.watch:
+        watch_dashboard(
+            args.root,
+            interval=args.interval,
+            max_iterations=args.max_iterations,
+            json_output=args.json,
         )
         return
-    print(f"Built dashboard for {len(nodes)} nodes.")
-    for output in outputs:
+
+    payload = build_dashboard_once(args.root, json_output=args.json)
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return
+    print(f"Built dashboard for {payload['node_count']} nodes.")
+    for output in payload["written_files"]:
         print(f"Wrote: {output}")
 
 

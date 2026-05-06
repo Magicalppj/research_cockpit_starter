@@ -118,7 +118,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         if n.type == "decision" and n.status in {"accepted", "proposed"}
     ]
     search_index = build_search_index(root, nodes, current)
-    option_workstreams = build_option_workstream_rows(nodes)
+    option_workstreams = build_option_workstream_rows(nodes, current)
     link_rows = build_link_rows(root, nodes)
 
     return {

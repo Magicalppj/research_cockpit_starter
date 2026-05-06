@@ -28,6 +28,7 @@ from research_cockpit.commands.add_node import add_node
 from research_cockpit.commands.agent_bootstrap import agent_bootstrap_payload, format_dependency_error, missing_runtime_dependencies
 from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.apply_suggestion import apply_suggestion
+from research_cockpit.commands.agent_session_context import agent_session_context_payload
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.check_decision_acceptance import decision_acceptance_payload
 from research_cockpit.commands.claim_option import claim_option
@@ -39,6 +40,7 @@ from research_cockpit.commands.create_artifact import create_artifact
 from research_cockpit.commands.create_workstream import create_workstream
 from research_cockpit.commands.create_note import create_note
 from research_cockpit.commands.finalize_workstream import finalize_workstream
+from research_cockpit.commands.import_worktree_findings import import_worktree_findings
 from research_cockpit.commands.link_artifact import link_artifact
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
 from research_cockpit.commands.node_context import node_context_payload
@@ -47,8 +49,10 @@ from research_cockpit.commands.promote_decision import promote_decision
 from research_cockpit.commands.record_finding import record_finding
 from research_cockpit.commands.repair_interaction_log import repair_interaction_log
 from research_cockpit.commands.report_option_workstream import report_option_workstream
+from research_cockpit.commands.set_agent_focus import set_agent_focus
 from research_cockpit.commands.set_focus import set_focus
 from research_cockpit.commands.skill_smoke_test import missing_modules_for_python, skill_smoke_test_payload
+from research_cockpit.commands.start_agent_session import start_agent_session
 from research_cockpit.commands.sync_focus_actions import sync_focus_actions
 from research_cockpit.commands.suggest_next_actions import select_suggestions
 from research_cockpit.commands.update_decision_evidence import update_decision_evidence
@@ -485,6 +489,32 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(len(payload["written_files"]), 11)
         self.assertTrue((self.root / "dashboards" / "graph_view.json").exists())
 
+    def test_build_watch_json_max_iterations_reports_one_iteration(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("build"),
+                "--root",
+                str(self.root),
+                "--watch",
+                "--interval",
+                "0",
+                "--max-iterations",
+                "1",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        payload = json.loads(out.stdout.splitlines()[0])
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["watch"])
+        self.assertEqual(payload["iteration"], 1)
+        self.assertTrue(payload["truth_source_changed"])
+        self.assertEqual(len(payload["written_files"]), 11)
+
     def test_build_cli_respects_root_argument_over_environment(self) -> None:
         env_root = self.tmp_root / "env_research_cockpit"
         shutil.copytree(self.root, env_root)
@@ -720,6 +750,237 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("already claimed", out.stdout)
         self.assertEqual(before, after)
         self.assertEqual(len(interaction_events(self.root)), before_event_count)
+
+    def test_start_agent_session_dry_run_outputs_handoff_without_writing(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        before = option_path.read_text(encoding="utf-8")
+
+        payload = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=worktree,
+            base="main",
+            dry_run=True,
+            show_diff=True,
+        )
+
+        self.assertTrue(payload["dry_run"])
+        self.assertTrue(payload["preflight_ok"])
+        self.assertEqual(payload["session_id"], "session_agent_t5_option_t5")
+        self.assertEqual(payload["root_boundary"]["required_root"], str(self.root.resolve()))
+        self.assertTrue(payload["root_boundary"]["do_not_mutate_worktree_root"])
+        self.assertEqual(payload["handoff"]["launch_env"]["RESEARCH_COCKPIT_ROOT"], str(self.root.resolve()))
+        self.assertIn("git", payload["git_command"][0])
+        self.assertIn("diff", payload)
+        self.assertEqual(before, option_path.read_text(encoding="utf-8"))
+        self.assertFalse((self.root / "graph" / "interaction_log.yaml").exists())
+
+    def test_start_agent_session_resolves_relative_worktree_from_repo_root(self) -> None:
+        expected_worktree = (self.root.resolve().parent / "worktrees" / "agent_t5").resolve()
+
+        payload = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=Path("worktrees") / "agent_t5",
+            dry_run=True,
+        )
+
+        self.assertEqual(payload["root_boundary"]["worktree_path"], str(expected_worktree))
+        self.assertEqual(payload["git_command"][7], str(expected_worktree))
+        self.assertEqual(payload["handoff"]["worktree"], str(expected_worktree))
+
+    def test_start_agent_session_reports_created_worktree_if_yaml_write_fails(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+        failure = MutationError(
+            "conflict",
+            {
+                "ok": False,
+                "partial_success": False,
+                "rolled_back": False,
+                "written_files": [],
+                "error": "conflict",
+                "recovery_commands": ["research-cockpit validate --root research_cockpit --json"],
+            },
+        )
+
+        with patch("research_cockpit.commands.start_agent_session._run_git_worktree_add") as git_add:
+            with patch("research_cockpit.commands.start_agent_session.finish_mutation", side_effect=failure):
+                with self.assertRaises(MutationError) as ctx:
+                    start_agent_session(
+                        self.root,
+                        option_id="option_t5",
+                        agent_id="agent_t5",
+                        objective="Run T5 branch",
+                        branch="agent/option_t5",
+                        worktree=worktree,
+                        create_worktree=True,
+                        rebuild_dashboard=False,
+                    )
+
+        git_add.assert_called_once()
+        payload = ctx.exception.payload
+        self.assertTrue(payload["created_worktree"])
+        self.assertEqual(payload["worktree"], str(worktree))
+        self.assertIn("--worktree", payload["recovery_commands"][0])
+        self.assertNotIn("--create-worktree", payload["recovery_commands"][0])
+
+    def test_start_agent_session_records_session_without_absolute_worktree(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+        worktree.mkdir(parents=True)
+
+        payload = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=worktree,
+            rebuild_dashboard=False,
+        )
+
+        data = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        workstream = data["agent_workstream"]
+        self.assertEqual(payload["changed"], True)
+        self.assertEqual(workstream["owner"], "agent_t5")
+        self.assertEqual(workstream["status"], "in_progress")
+        self.assertEqual(workstream["session_id"], "session_agent_t5_option_t5")
+        self.assertEqual(workstream["git_branch"], "agent/option_t5")
+        self.assertEqual(workstream["worktree_label"], "agent_t5")
+        self.assertNotIn(str(worktree), json.dumps(workstream))
+
+    def test_start_agent_session_can_create_git_worktree(self) -> None:
+        if shutil.which("git") is None:
+            self.skipTest("git is not available")
+        repo_root = self.tmp_root / "repo"
+        data_root = repo_root / "research_cockpit"
+        shutil.copytree(self.root, data_root)
+        for command in (
+            ["git", "init", str(repo_root)],
+            ["git", "-C", str(repo_root), "config", "user.email", "test@example.com"],
+            ["git", "-C", str(repo_root), "config", "user.name", "Test"],
+            ["git", "-C", str(repo_root), "add", "."],
+            ["git", "-C", str(repo_root), "commit", "-m", "initial"],
+        ):
+            completed = subprocess.run(command, capture_output=True, text=True, check=False)
+            if completed.returncode != 0:
+                self.skipTest(f"git worktree setup failed: {completed.stderr or completed.stdout}")
+        worktree = self.tmp_root / "created_worktree"
+
+        payload = start_agent_session(
+            data_root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=worktree,
+            base="HEAD",
+            create_worktree=True,
+            rebuild_dashboard=False,
+        )
+
+        self.assertTrue(payload["created_worktree"])
+        self.assertTrue(worktree.exists())
+        workstream = load_yaml(data_root / "graph" / "nodes" / "option_t5.yaml")["agent_workstream"]
+        self.assertEqual(workstream["git_branch"], "agent/option_t5")
+        self.assertEqual(workstream["worktree_label"], "created_worktree")
+        self.assertNotIn(str(worktree), json.dumps(workstream))
+
+    def test_start_agent_session_rejects_worktree_local_cockpit(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+        (worktree / "research_cockpit").mkdir(parents=True)
+
+        with self.assertRaises(ValueError) as ctx:
+            start_agent_session(
+                self.root,
+                option_id="option_t5",
+                agent_id="agent_t5",
+                objective="Run T5 branch",
+                branch="agent/option_t5",
+                worktree=worktree,
+                dry_run=True,
+            )
+
+        self.assertIn("worktree contains research_cockpit", str(ctx.exception))
+
+    def test_set_agent_focus_does_not_change_global_focus_and_context_reads_it(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+        worktree.mkdir(parents=True)
+        start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=worktree,
+            rebuild_dashboard=False,
+        )
+        before_global = load_yaml(self.root / "current_state.yaml").get("current_focus_path")
+
+        result = set_agent_focus(
+            self.root,
+            agent_id="agent_t5",
+            node_id="exp_t5",
+            next_actions=["Run downstream test"],
+            rebuild_dashboard=False,
+        )
+        current = load_yaml(self.root / "current_state.yaml")
+        payload = agent_session_context_payload(self.root, agent_id="agent_t5", compact=True)
+
+        self.assertEqual(result["after"]["agent_focus"]["current_focus_node"], "exp_t5")
+        self.assertEqual(current["current_focus_path"], before_global)
+        self.assertEqual(current["agent_focuses"]["agent_t5"]["current_option"], "option_t5")
+        self.assertEqual(payload["required_root"], str(self.root.resolve()))
+        self.assertTrue(payload["do_not_mutate_worktree_root"])
+        self.assertEqual(payload["agent_focus"]["current_focus_node"], "exp_t5")
+
+    def test_agent_session_context_json_error_is_structured(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("agent-session-context"),
+                "--root",
+                str(self.root),
+                "--agent",
+                "missing_agent",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1)
+        self.assertFalse(payload["ok"])
+        self.assertIn("No active agent session", payload["error"])
+
+    def test_build_dashboard_rows_include_agent_session_fields(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+        worktree.mkdir(parents=True)
+        start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=worktree,
+            rebuild_dashboard=False,
+        )
+        set_agent_focus(self.root, agent_id="agent_t5", node_id="exp_t5", rebuild_dashboard=False)
+
+        build_dashboard(self.root)
+        rows = json.loads((self.root / "dashboards" / "option_workstreams.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(rows[0]["session_id"], "session_agent_t5_option_t5")
+        self.assertEqual(rows[0]["git_branch"], "agent/option_t5")
+        self.assertEqual(rows[0]["worktree_label"], "agent_t5")
+        self.assertEqual(rows[0]["agent_focus_node"], "exp_t5")
 
     def test_option_workstream_context_cli_outputs_json(self) -> None:
         command = "option-workstream-context"
@@ -1585,6 +1846,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["update-status"]["supports_dry_run"])
         self.assertTrue(by_name["set-focus"]["supports_json"])
         self.assertTrue(by_name["set-focus"]["supports_dry_run"])
+        self.assertTrue(by_name["set-agent-focus"]["supports_dry_run"])
+        self.assertIn("agent_focuses", by_name["set-agent-focus"]["fields_supported"])
         self.assertTrue(by_name["apply-graph-plan"]["supports_json"])
         self.assertTrue(by_name["apply-graph-plan"]["supports_dry_run"])
         self.assertTrue(by_name["apply-graph-plan"]["supports_no_build"])
@@ -1622,6 +1885,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--id", by_name["option-workstream-context"]["target_aliases"])
         self.assertEqual(by_name["option-workstream-context"]["primary_target"], "--id")
         self.assertTrue(by_name["option-workstream-context"]["supports_compact"])
+        self.assertTrue(by_name["agent-session-context"]["supports_compact"])
+        self.assertEqual(by_name["agent-session-context"]["primary_target"], "--agent")
         self.assertIn("finalize file directory", by_name["finalize-workstream"]["path_resolution"])
         self.assertTrue(by_name["update-node-fields"]["mutating"])
         self.assertTrue(by_name["update-node-fields"]["supports_json"])
@@ -1631,8 +1896,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("supporting_experiments", by_name["update-node-fields"]["fields_supported"])
         self.assertTrue(by_name["claim-option"]["supports_json"])
         self.assertTrue(by_name["claim-option"]["supports_dry_run"])
+        self.assertTrue(by_name["claim-workstream"]["supports_dry_run"])
+        self.assertTrue(by_name["start-agent-session"]["supports_dry_run"])
+        self.assertIn("git_branch", by_name["start-agent-session"]["fields_supported"])
         self.assertTrue(by_name["report-option-workstream"]["supports_json"])
         self.assertTrue(by_name["report-option-workstream"]["supports_dry_run"])
+        self.assertTrue(by_name["import-worktree-findings"]["supports_dry_run"])
+        self.assertIn("workstream_report", by_name["import-worktree-findings"]["fields_supported"])
         self.assertTrue(by_name["promote-decision"]["supports_json"])
         self.assertTrue(by_name["promote-decision"]["supports_dry_run"])
         self.assertTrue(by_name["accept-decision"]["supports_json"])
@@ -1652,6 +1922,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["update-suggestion-state"]["supports_dry_run"])
         self.assertTrue(by_name["build"]["mutating"])
         self.assertTrue(by_name["build"]["supports_json"])
+        self.assertTrue(by_name["build"]["supports_watch"])
         self.assertTrue(by_name["build"]["writes_generated_files"])
         self.assertFalse(by_name["build"]["writes_truth_source"])
         self.assertTrue(by_name["validate"]["safe_in_plan_mode"])
@@ -1685,6 +1956,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("apply-graph-plan", {item["name"] for item in payload["commands"]})
         self.assertIn("create-workstream", {item["name"] for item in payload["commands"]})
         self.assertIn("sync-focus-actions", {item["name"] for item in payload["commands"]})
+        self.assertIn("start-agent-session", {item["name"] for item in payload["commands"]})
+        self.assertIn("agent-session-context", {item["name"] for item in payload["commands"]})
 
     def test_list_agent_commands_filters_by_name_and_workflow(self) -> None:
         by_name_out = subprocess.run(
@@ -1708,6 +1981,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(workflow_out.returncode, 0, workflow_out.stderr or workflow_out.stdout)
         self.assertIn("complete-experiments", {item["name"] for item in workflow_payload["commands"]})
         self.assertIn("create-artifact", {item["name"] for item in workflow_payload["commands"]})
+        self.assertIn("start-agent-session", {item["name"] for item in workflow_payload["commands"]})
         self.assertTrue(all("evidence" in item["workflow_tags"] for item in workflow_payload["commands"]))
 
     def test_workflow_metrics_detects_manual_truth_patch_even_after_build(self) -> None:
@@ -2922,6 +3196,98 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(artifact["links"]["review"], "notes/review.md")
         self.assertEqual(experiment["linked_artifacts"], ["artifact_results"])
         self.assertEqual(option["linked_artifacts"], ["artifact_results"])
+
+    def test_import_worktree_findings_imports_artifacts_and_experiment_evidence(self) -> None:
+        start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
+        source_root = self.tmp_root / "worktree_research_cockpit"
+        shutil.copytree(self.root, source_root)
+        source_exp = load_yaml(source_root / "graph" / "nodes" / "exp_t5.yaml")
+        source_exp["result_summary"] = "Imported result."
+        source_exp["next_actions"] = ["Review imported result."]
+        source_exp["linked_artifacts"] = ["artifact_imported_results"]
+        source_exp["findings"] = [
+            {
+                "id": "exp_t5_finding_imported",
+                "statement": "Imported finding.",
+                "confidence": "medium",
+                "outcome": "positive",
+                "linked_artifacts": ["artifact_imported_results"],
+            }
+        ]
+        save_yaml(source_root / "graph" / "nodes" / "exp_t5.yaml", source_exp)
+        write_node(
+            source_root,
+            {
+                "id": "artifact_imported_results",
+                "type": "artifact",
+                "title": "Imported results",
+                "status": "done",
+                "path": "outputs/imported",
+            },
+        )
+
+        dry = import_worktree_findings(
+            self.root,
+            from_root=source_root,
+            agent_id="agent_t5",
+            option_id="option_t5",
+            dry_run=True,
+            show_diff=True,
+        )
+        result = import_worktree_findings(
+            self.root,
+            from_root=source_root,
+            agent_id="agent_t5",
+            option_id="option_t5",
+            rebuild_dashboard=False,
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        artifact = load_yaml(self.root / "graph" / "nodes" / "artifact_imported_results.yaml")
+
+        self.assertTrue(dry["preflight_ok"])
+        self.assertIn("diff", dry)
+        self.assertTrue(result["changed"])
+        self.assertIn("artifact_imported_results", result["imported_artifacts"])
+        self.assertEqual(experiment["result_summary"], "Imported result.")
+        self.assertEqual(experiment["findings"][0]["statement"], "Imported finding.")
+        self.assertEqual(artifact["path"], "outputs/imported")
+        self.assertEqual(interaction_events(self.root)[-1]["kind"], "import_worktree_findings")
+
+    def test_import_worktree_findings_allows_stale_source_without_session_metadata(self) -> None:
+        source_root = self.tmp_root / "stale_worktree_research_cockpit"
+        shutil.copytree(self.root, source_root)
+        start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
+        source_exp = load_yaml(source_root / "graph" / "nodes" / "exp_t5.yaml")
+        source_exp["result_summary"] = "Imported from stale source."
+        save_yaml(source_root / "graph" / "nodes" / "exp_t5.yaml", source_exp)
+
+        result = import_worktree_findings(
+            self.root,
+            from_root=source_root,
+            agent_id="agent_t5",
+            option_id="option_t5",
+            rebuild_dashboard=False,
+        )
+
+        self.assertTrue(result["changed"])
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        self.assertEqual(experiment["result_summary"], "Imported from stale source.")
 
     def test_create_artifact_cli_dry_run_diff_and_bad_link_target(self) -> None:
         (self.tmp_root / "outputs" / "preview").mkdir(parents=True)

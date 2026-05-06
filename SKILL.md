@@ -101,6 +101,11 @@ research-cockpit finalize-workstream --root research_cockpit --file finalize.yam
 research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --json --compact
 research-cockpit finalize-workstream --root research_cockpit --option <option_id> --status accepted --problem-status resolved --report --dry-run --json --show-diff
 research-cockpit option-workstream-context --root research_cockpit --id <option_id> --compact --json
+research-cockpit start-agent-session --root <canonical_root> --option <option_id> --agent <agent_id> --objective "..." --branch agent/<option_id> --worktree ../worktrees/<agent_id> --dry-run --json --show-diff
+research-cockpit agent-session-context --root <canonical_root> --agent <agent_id> --compact --json
+research-cockpit set-agent-focus --root <canonical_root> --agent <agent_id> --node <node_id> --no-build
+research-cockpit import-worktree-findings --root <canonical_root> --from-root <worktree>/research_cockpit --agent <agent_id> --option <option_id> --dry-run --json --show-diff
+research-cockpit build --root <canonical_root> --watch --interval 5 --json
 research-cockpit update-node-fields --root research_cockpit --id <node_id> --question "..." --tag <tag> --no-build
 research-cockpit sync-focus-actions --root research_cockpit --from-node <node_id> --dry-run --json --show-diff
 research-cockpit update-suggestion-state --root research_cockpit --id <suggestion_id> --state dismissed --reason "..." --dry-run --json --show-diff
@@ -139,6 +144,29 @@ After creating a workstream, use `option-workstream-context --id <option_id> --c
 Use `complete-experiments` for sweeps or multi-backend experiment sets. Use `create-artifact --file artifact.yaml` for result folders with several links or target nodes, and use `link-artifact` for attaching existing artifacts, so agents do not patch `path`, `links`, or `linked_artifacts` by hand. Artifact paths are stored exactly as provided; JSON resource rows report `resolved_target`, `resolution_base`, `resolution_attempts`, and `exists` using root parent, data root, then cwd for relative paths. Use `update-finding` when revising an existing finding statement, confidence, outcome, metrics, or evidence artifacts.
 
 Use `finalize-workstream --file finalize.yaml` when the close-out needs several flags. `--file` supports `option`, `status`, `problem_status`, `stage_status`, `summary_file`, `summary_target`, `artifacts`, `sync_focus`, `report`, `agent`, and `locale`; explicit CLI flags override file values. A relative `summary_file` in `finalize.yaml` resolves against the finalize file directory, then the data root, then the current working directory. Use `finalize-workstream` only for explicit close-out. It updates the named option/problem/stage statuses and optional report/artifact/focus fields that you pass; it does not accept decisions, pause old options, delete branches, or invent next actions.
+
+## Parallel Agents With Git Worktrees
+
+Use git worktrees for code and experiment isolation, not for separate Research Cockpit truth sources. The canonical data root stays in the main repository and every downstream agent writes only that root:
+
+```sh
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run downstream experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --dry-run --json --show-diff
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run downstream experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --no-build
+```
+
+Send the JSON `handoff` to the downstream agent. Relative `--worktree` values resolve against the canonical repo root (`--root` parent). In the worktree, set `RESEARCH_COCKPIT_ROOT` to the canonical root or pass the same absolute `--root` on every command. The downstream agent starts with:
+
+```sh
+research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
+```
+
+Do not run `init`, `set-focus`, or any mutation against a worktree-local `research_cockpit/`. Use `set-agent-focus` for per-agent progress; reserve global `set-focus` for a coordinator or human. Keep all canonical root mutations sequential and usually `--no-build`; run one main-root dashboard watcher when you want the panel to refresh:
+
+```sh
+research-cockpit build --root D:/main_repo/research_cockpit --watch --interval 5 --json
+```
+
+`build --watch --json` prints one JSON object per iteration. `import-worktree-findings` is only a recovery tool for evidence accidentally written in a worktree-local cockpit root. It imports artifact nodes, experiment findings, result summaries, experiment-local `next_actions`, and workstream reports; it refuses structural graph changes, global/per-agent focus changes, and decision acceptance.
 
 For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `create-artifact`, `complete-experiment`, `complete-experiments`, `update-finding`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `--show-diff` still includes the full diff; use it only when reviewing write content.
 For legacy mutation commands without `--compact`, use `--dry-run --json --show-diff` to preview writes and keep the JSON payload focused on `changed/would_change`, affected path, before/after summary, and optional diff. Dry-run also performs mutation preflight; if `interaction_log.yaml` is malformed, it fails before showing a misleading successful preview.

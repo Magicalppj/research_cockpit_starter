@@ -19,7 +19,18 @@ Claim an option branch:
 ```sh
 research-cockpit claim-option --root research_cockpit --option option_x --agent agent_id --objective "..." --dry-run --json
 research-cockpit claim-option --root research_cockpit --option option_x --agent agent_id --objective "..."
+research-cockpit claim-workstream --root research_cockpit --option option_x --agent agent_id --objective "..." --dry-run --json
 ```
+
+For parallel agents that run code in git worktrees, prefer `start-agent-session` over plain claim. It can create the worktree and records portable session metadata on the option while keeping the canonical Research Cockpit root in the main repo:
+
+```sh
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --dry-run --json --show-diff
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --no-build
+research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
+```
+
+Relative `--worktree` values resolve against the canonical repository root (`--root` parent), matching `git -C <repo> worktree add`. Do not store local absolute worktree paths in YAML. `start-agent-session` writes `session_id`, `owner`, `status`, `objective`, `git_branch`, `worktree_label`, `report_to_problem`, `started_at`, and `updated_at`; absolute paths appear only in JSON `handoff`/`launch_env`. `--create-worktree` expects a new branch/worktree path; for an already-created worktree, rerun without `--create-worktree`.
 
 Read workstream context:
 
@@ -51,6 +62,15 @@ research-cockpit finalize-workstream --root research_cockpit --option option_x -
 ```
 
 Use `--file` to avoid long close-out commands. The file supports `option`, `status`, `problem_status`, `stage_status`, `summary_file`, `summary_target`, `artifacts`, `sync_focus`, `report`, `agent`, and `locale`; CLI flags override file values. A relative `summary_file` in the file resolves against the finalize file directory, then the data root, then cwd, and JSON output reports the resolved path. `finalize-workstream` does not create artifacts, accept decisions, pause old branches, delete nodes, or invent next actions. `--summary-file` writes only to the workstream report by default; use `--summary-target option|problem|all` when you explicitly want node summaries replaced.
+
+If an agent accidentally wrote evidence to a worktree-local `research_cockpit/`, use the import command as a recovery step, not as the normal workflow:
+
+```sh
+research-cockpit import-worktree-findings --root D:/main_repo/research_cockpit --from-root ../worktrees/agent_option_x/research_cockpit --agent agent_x --option option_x --dry-run --json --show-diff
+research-cockpit import-worktree-findings --root D:/main_repo/research_cockpit --from-root ../worktrees/agent_option_x/research_cockpit --agent agent_x --option option_x --no-build
+```
+
+The importer only accepts artifact nodes, experiment findings, result summaries, experiment-local `next_actions`, and option workstream reports. It rejects structural node changes, global focus changes, per-agent focus changes, and decision acceptance.
 
 ## Artifacts
 

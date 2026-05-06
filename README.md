@@ -147,9 +147,10 @@ Build generated files from YAML truth source:
 ```sh
 research-cockpit build --root research_cockpit
 research-cockpit build --root research_cockpit --json
+research-cockpit build --root research_cockpit --watch --interval 5 --json
 ```
 
-`build` writes generated dashboard/context files only and does not append an interaction log event.
+`build` writes generated dashboard/context files only and does not append an interaction log event. `--watch` polls truth-source YAML/notes and rebuilds only when they change; tests can bound it with `--max-iterations`. With `--watch --json`, output is one JSON object per iteration (JSONL-style), not one final JSON document.
 
 Launch the Streamlit UI:
 
@@ -203,6 +204,50 @@ When a focus node already has canonical actions, use:
 research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --dry-run --json --show-diff
 research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --no-build
 ```
+
+## Parallel Agents With Git Worktrees
+
+Use git worktrees to isolate code and experiments while keeping one canonical Research Cockpit root in the main repository. The main dashboard reads that shared root, so every downstream agent must write state there, not inside its worktree.
+
+Coordinator launch:
+
+```sh
+research-cockpit start-agent-session \
+  --root D:/main_repo/research_cockpit \
+  --option option_x \
+  --agent agent_x \
+  --objective "Run downstream experiments for option_x" \
+  --branch agent/option_x \
+  --worktree ../worktrees/agent_option_x \
+  --base main \
+  --create-worktree \
+  --dry-run --json --show-diff
+```
+
+Execute the same command without `--dry-run` after review, then pass the JSON `handoff` to the downstream agent. Relative `--worktree` values resolve against the canonical repository root (`--root` parent), matching `git -C <repo> worktree add`. YAML records only portable session metadata such as `session_id`, `owner`, `objective`, `git_branch`, and `worktree_label`; local absolute worktree paths stay in JSON output only. `--create-worktree` expects a new branch/worktree path; for an already-created worktree, rerun without `--create-worktree`.
+
+Downstream agent startup inside the worktree, shown in PowerShell syntax:
+
+```sh
+$env:RESEARCH_COCKPIT_ROOT="D:/main_repo/research_cockpit"
+research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
+```
+
+Rules for parallel agents:
+
+- Worktree: code changes, experiments, local outputs.
+- Canonical root: all `research-cockpit` mutations.
+- Do not run `research-cockpit init` or mutate `worktree/research_cockpit/`.
+- Use `set-agent-focus`, not global `set-focus`, for downstream progress.
+- Keep canonical mutations sequential; use `--no-build` and let the main repo run `build --watch`.
+
+Recovery only:
+
+```sh
+research-cockpit import-worktree-findings --root D:/main_repo/research_cockpit --from-root ../worktrees/agent_option_x/research_cockpit --agent agent_x --option option_x --dry-run --json --show-diff
+```
+
+`import-worktree-findings` imports safe evidence records only: artifact nodes, experiment findings, experiment-local `next_actions`, result summaries, and option workstream reports. It refuses structural graph changes, global focus changes, per-agent focus changes, and decision acceptance.
 
 ## Agent Evidence Close-Out Workflow
 

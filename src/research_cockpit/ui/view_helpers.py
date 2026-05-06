@@ -437,7 +437,19 @@ def format_option_workstream_rows(rows: list[dict]) -> list[dict]:
     formatted = []
     for row in rows:
         item = dict(row)
-        for key in ("owner", "workstream_status", "objective", "recommendation", "report_summary", "latest_finding"):
+        for key in (
+            "owner",
+            "session_id",
+            "git_branch",
+            "worktree_label",
+            "agent_focus_node",
+            "workstream_status",
+            "objective",
+            "recommendation",
+            "report_summary",
+            "latest_finding",
+            "last_update",
+        ):
             item[key] = item.get(key) or ""
         formatted.append(item)
     return formatted

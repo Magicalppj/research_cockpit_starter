@@ -153,9 +153,14 @@ def build_option_workstream_context(
     }
 
 
-def build_option_workstream_rows(nodes: dict[str, ResearchNode]) -> list[dict[str, Any]]:
+def build_option_workstream_rows(
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     from research_cockpit.decisions import build_decision_evidence_bundle
 
+    current = current or {}
+    agent_focuses = current.get("agent_focuses") if isinstance(current.get("agent_focuses"), dict) else {}
     rows: list[dict[str, Any]] = []
 
     def option_sort_key(node: ResearchNode) -> tuple[int, str]:
@@ -170,18 +175,26 @@ def build_option_workstream_rows(nodes: dict[str, ResearchNode]) -> list[dict[st
         problem_id = upstream_problem_id(nodes, option.id)
         workstream = option.raw.get("agent_workstream") if isinstance(option.raw.get("agent_workstream"), dict) else {}
         report = option.raw.get("workstream_report") if isinstance(option.raw.get("workstream_report"), dict) else {}
+        owner = workstream.get("owner")
+        focus = agent_focuses.get(str(owner)) if owner and isinstance(agent_focuses.get(str(owner)), dict) else {}
+        last_update = workstream.get("updated_at") or report.get("reported_at")
         rows.append({
             "option_id": option.id,
             "option_title": option.title,
             "option_status": option.status,
             "upstream_problem_id": problem_id,
             "upstream_problem_title": node_title(nodes, problem_id),
-            "owner": workstream.get("owner"),
+            "owner": owner,
+            "session_id": workstream.get("session_id"),
+            "git_branch": workstream.get("git_branch"),
+            "worktree_label": workstream.get("worktree_label"),
+            "agent_focus_node": focus.get("current_focus_node"),
             "workstream_status": workstream.get("status"),
             "objective": workstream.get("objective"),
             "report_to_problem": workstream.get("report_to_problem") or problem_id,
             "started_at": workstream.get("started_at"),
             "updated_at": workstream.get("updated_at"),
+            "last_update": last_update,
             "recommendation": report.get("recommendation"),
             "report_summary": report.get("summary"),
             "evidence_summary": report.get("evidence_summary") or evidence.get("evidence_summary"),
@@ -229,7 +242,10 @@ def build_branch_comparison(
     return rows
 
 
-def active_option_workstream_rows(nodes: dict[str, ResearchNode]) -> list[dict[str, Any]]:
+def active_option_workstream_rows(
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     return [
-        row for row in build_option_workstream_rows(nodes) if row.get("workstream_status") in ACTIVE_WORKSTREAM_STATUSES
+        row for row in build_option_workstream_rows(nodes, current) if row.get("workstream_status") in ACTIVE_WORKSTREAM_STATUSES
     ]

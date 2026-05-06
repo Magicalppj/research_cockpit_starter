@@ -18,9 +18,12 @@ The main research graph should stay focused on `stage -> problem -> option -> ex
 research-cockpit validate --root research_cockpit --json
 research-cockpit repair-interaction-log --root research_cockpit --dry-run --json --show-diff
 research-cockpit build --root research_cockpit --json
+research-cockpit build --root research_cockpit --watch --interval 5 --json
 ```
 
-`validate` and `repair-interaction-log --dry-run` are read-only. `build --json` reports generated dashboard files and node count; it writes generated files only and does not append an interaction log event.
+`validate` and `repair-interaction-log --dry-run` are read-only. `build --json` reports generated dashboard files and node count; it writes generated files only and does not append an interaction log event. `build --watch` polls truth-source YAML/notes and rebuilds dashboards only after changes; use `--max-iterations` in tests. `build --watch --json` prints one JSON object per iteration (JSONL-style), not one final JSON document.
+
+In multi-agent worktree runs, run `build --watch` from the main repository against the canonical shared `research_cockpit/` root. Downstream agents should not rebuild or mutate worktree-local cockpit roots.
 
 ## Saved Views
 

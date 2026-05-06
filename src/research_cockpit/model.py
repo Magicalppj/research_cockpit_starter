@@ -469,15 +469,23 @@ def _graph_interaction_metadata(
         problem_id = _node_id_by_type_in_path(nodes, path, "problem", nearest=True)
         option_id = _node_id_by_type_in_path(nodes, path, "option", nearest=True)
         upstream_problem_id = None
+        agent_owner = None
+        agent_session_id = None
         if option_id and option_id in nodes:
             option_path = _safe_node_path(nodes, option_id)
             upstream_problem_id = _node_id_by_type_in_path(nodes, option_path, "problem", nearest=True)
+            workstream = nodes[option_id].raw.get("agent_workstream")
+            if isinstance(workstream, dict):
+                agent_owner = workstream.get("owner")
+                agent_session_id = workstream.get("session_id")
 
         metadata[node.id] = {
             "stage_id": stage_id,
             "problem_id": problem_id,
             "option_workstream_id": option_id,
             "option_workstream_upstream_problem_id": upstream_problem_id,
+            "agent_owner": agent_owner,
+            "agent_session_id": agent_session_id,
             "in_current_branch": node.id in current_branch_ids,
             "has_blockers": bool(node.raw.get("blockers")),
             "has_next_actions": bool(node.raw.get("next_actions")),
@@ -494,6 +502,7 @@ def _graph_available_filters(nodes: list[dict[str, Any]]) -> dict[str, list[str]
         "problems": "problem_id",
         "focus_roles": "focus_role",
         "workstreams": "option_workstream_id",
+        "agents": "agent_owner",
         "priorities": "priority",
     }
     out: dict[str, list[str]] = {}
@@ -885,6 +894,42 @@ def validate_current_state(
                     if value is not None and not isinstance(value, str):
                         errors.append(f"{prefix}.{field} must be a string")
 
+    agent_focuses = current.get("agent_focuses")
+    if agent_focuses is not None:
+        if not isinstance(agent_focuses, dict):
+            errors.append("current_state.agent_focuses must be a mapping")
+        else:
+            for agent_id, focus in agent_focuses.items():
+                prefix = f"current_state.agent_focuses[{agent_id!r}]"
+                if not str(agent_id).strip():
+                    errors.append("current_state.agent_focuses contains an empty agent id")
+                    continue
+                if not isinstance(focus, dict):
+                    errors.append(f"{prefix} must be a mapping")
+                    continue
+                focus_node = focus.get("current_focus_node")
+                if focus_node and str(focus_node) not in nodes:
+                    errors.append(f"{prefix}.current_focus_node references missing node {focus_node!r}")
+                current_option = focus.get("current_option")
+                if current_option:
+                    if str(current_option) not in nodes:
+                        errors.append(f"{prefix}.current_option references missing node {current_option!r}")
+                    elif nodes[str(current_option)].type != "option":
+                        errors.append(f"{prefix}.current_option must reference an option node")
+                focus_path_value = focus.get("current_focus_path", []) or []
+                if not isinstance(focus_path_value, list):
+                    errors.append(f"{prefix}.current_focus_path must be a list")
+                else:
+                    for node_id in focus_path_value:
+                        if node_id not in nodes:
+                            errors.append(f"{prefix}.current_focus_path references missing node {node_id!r}")
+                next_actions = focus.get("next_actions")
+                if next_actions is not None and not isinstance(next_actions, list):
+                    errors.append(f"{prefix}.next_actions must be a list")
+                updated_at = focus.get("updated_at")
+                if updated_at is not None and not isinstance(updated_at, str):
+                    errors.append(f"{prefix}.updated_at must be a string")
+
     focus_path = current.get("current_focus_path", []) or []
     if not isinstance(focus_path, list):
         errors.append("current_state.current_focus_path must be a list")
@@ -897,6 +942,19 @@ def validate_current_state(
     for parent, child in zip(focus_path, focus_path[1:]):
         if parent in nodes and child in nodes and (parent, child) not in edge_pairs:
             errors.append(f"current_state.current_focus_path has disconnected step {parent!r} -> {child!r}")
+    if isinstance(agent_focuses, dict):
+        for agent_id, focus in agent_focuses.items():
+            if not isinstance(focus, dict):
+                continue
+            focus_path_value = focus.get("current_focus_path", []) or []
+            if not isinstance(focus_path_value, list):
+                continue
+            for parent, child in zip(focus_path_value, focus_path_value[1:]):
+                if parent in nodes and child in nodes and (parent, child) not in edge_pairs:
+                    errors.append(
+                        f"current_state.agent_focuses[{agent_id!r}].current_focus_path "
+                        f"has disconnected step {parent!r} -> {child!r}"
+                    )
     return errors
 
 

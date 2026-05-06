@@ -104,7 +104,7 @@ def load_graph_data():
     context = build_agent_context(RESEARCH_ROOT, nodes)
     link_rows = build_link_rows(RESEARCH_ROOT, nodes)
     search_index = build_search_index(RESEARCH_ROOT, nodes, current)
-    option_workstreams = build_option_workstream_rows(nodes)
+    option_workstreams = build_option_workstream_rows(nodes, current)
     saved_graph_views = load_graph_views(RESEARCH_ROOT)
     action_suggestions = build_action_suggestions(RESEARCH_ROOT, nodes, current, link_rows)
     all_action_suggestions = build_action_suggestions(
