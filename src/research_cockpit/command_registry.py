@@ -4,6 +4,7 @@ from __future__ import annotations
 COMMAND_MODULES: dict[str, str] = {
     "bootstrap": "agent_bootstrap",
     "validate": "validate_cockpit",
+    "repair-interaction-log": "repair_interaction_log",
     "build": "build_dashboard",
     "commands": "list_agent_commands",
     "smoke": "skill_smoke_test",

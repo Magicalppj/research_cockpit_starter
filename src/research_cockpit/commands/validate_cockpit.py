@@ -13,7 +13,7 @@ from research_cockpit.model import load_nodes, validate_cockpit
 
 def validation_payload(root: Path) -> dict:
     nodes = load_nodes(root)
-    errors = validate_cockpit(root, nodes)
+    errors = validate_cockpit(root, nodes, include_interaction_log=True)
     ok = not errors
     return {
         "root": str(root),

@@ -25,8 +25,10 @@ from research_cockpit.model import (
 )
 from research_cockpit.resources import build_link_rows
 from research_cockpit.decisions import build_decision_acceptance_checklists
+from research_cockpit.mutation_lock import mutation_lock
 from research_cockpit.option_workstreams import build_option_workstream_rows
 from research_cockpit.suggestions import build_action_suggestions
+from research_cockpit.storage import save_text
 
 
 def build_dashboard(root: Path = ROOT) -> list[Path]:
@@ -61,27 +63,43 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
         dash / "decision_acceptance_checklists.json",
         dash / "option_workstreams.json",
     ]
-    outputs[0].write_text(json.dumps(graph_json, indent=2, ensure_ascii=False), encoding="utf-8")
-    outputs[1].write_text(json.dumps(context, indent=2, ensure_ascii=False), encoding="utf-8")
-    outputs[2].write_text(json.dumps(focus_context, indent=2, ensure_ascii=False), encoding="utf-8")
+    save_text(outputs[0], json.dumps(graph_json, indent=2, ensure_ascii=False))
+    save_text(outputs[1], json.dumps(context, indent=2, ensure_ascii=False))
+    save_text(outputs[2], json.dumps(focus_context, indent=2, ensure_ascii=False))
     write_dashboard_markdown(root, context)
-    outputs[4].write_text(json.dumps(current_payload, indent=2, ensure_ascii=False), encoding="utf-8")
-    outputs[5].write_text(json.dumps(experiment_matrix, indent=2, ensure_ascii=False), encoding="utf-8")
-    outputs[6].write_text(json.dumps(linked_resources, indent=2, ensure_ascii=False), encoding="utf-8")
-    outputs[7].write_text(json.dumps(action_suggestions, indent=2, ensure_ascii=False), encoding="utf-8")
-    outputs[8].write_text(json.dumps(search_index, indent=2, ensure_ascii=False), encoding="utf-8")
-    outputs[9].write_text(json.dumps(decision_checklists, indent=2, ensure_ascii=False), encoding="utf-8")
-    outputs[10].write_text(json.dumps(option_workstreams, indent=2, ensure_ascii=False), encoding="utf-8")
+    save_text(outputs[4], json.dumps(current_payload, indent=2, ensure_ascii=False))
+    save_text(outputs[5], json.dumps(experiment_matrix, indent=2, ensure_ascii=False))
+    save_text(outputs[6], json.dumps(linked_resources, indent=2, ensure_ascii=False))
+    save_text(outputs[7], json.dumps(action_suggestions, indent=2, ensure_ascii=False))
+    save_text(outputs[8], json.dumps(search_index, indent=2, ensure_ascii=False))
+    save_text(outputs[9], json.dumps(decision_checklists, indent=2, ensure_ascii=False))
+    save_text(outputs[10], json.dumps(option_workstreams, indent=2, ensure_ascii=False))
     return outputs
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="research-cockpit build")
     parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
-    nodes = load_nodes(args.root)
-    outputs = build_dashboard(args.root)
+    with mutation_lock(args.root):
+        nodes = load_nodes(args.root)
+        outputs = build_dashboard(args.root)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "ok": True,
+                    "root": str(args.root),
+                    "node_count": len(nodes),
+                    "written_files": [str(output) for output in outputs],
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return
     print(f"Built dashboard for {len(nodes)} nodes.")
     for output in outputs:
         print(f"Wrote: {output}")

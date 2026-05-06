@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import json
 from datetime import date
 from pathlib import Path
 
@@ -15,11 +17,11 @@ from research_cockpit.model import (
     load_explicit_edges,
     load_nodes,
     load_yaml,
-    save_yaml,
+    script_command,
     validate_cockpit,
 )
 from research_cockpit.decisions import build_decision_evidence_bundle, normalize_locale
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -29,6 +31,8 @@ def update_decision_evidence(
     decision_id: str,
     locale: str | None = None,
     rebuild_dashboard: bool = True,
+    dry_run: bool = False,
+    show_diff: bool = False,
 ) -> dict[str, Any]:
     nodes = load_nodes(root)
     if decision_id not in nodes:
@@ -42,6 +46,7 @@ def update_decision_evidence(
 
     decision_path = find_node_file(root, decision_id)
     decision_data = load_yaml(decision_path)
+    before_data = copy.deepcopy(decision_data)
     current = load_yaml(root / "current_state.yaml")
     bundle = build_decision_evidence_bundle(
         nodes,
@@ -58,13 +63,50 @@ def update_decision_evidence(
     candidate[decision_id] = ResearchNode.from_dict(decision_data)
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
-    save_yaml(decision_path, decision_data)
-    if rebuild_dashboard:
-        build_dashboard(root)
-    return {
+    changed = before_data != decision_data
+    if changed and not dry_run:
+        finish_mutation(
+            root,
+            [(decision_path, decision_data)],
+            interaction={
+                "kind": "update_decision_evidence",
+                "actor": "researcher",
+                "node_id": decision_id,
+                "command": f"{script_command('update_decision_evidence.py')} --id {decision_id}",
+                "before": {
+                    "decision_id": decision_id,
+                    "evidence_strength": before_data.get("evidence_strength"),
+                    "supporting_experiments": before_data.get("supporting_experiments"),
+                },
+                "after": {
+                    "decision_id": decision_id,
+                    "evidence_strength": bundle["evidence_strength"],
+                    "supporting_experiments": bundle["supporting_experiments"],
+                },
+            },
+            rebuild_dashboard=rebuild_dashboard,
+        )
+    result: dict[str, Any] = {
         "decision_id": decision_id,
+        "path": str(decision_path),
+        "dry_run": dry_run,
+        "changed": False if dry_run else changed,
+        "would_change": changed,
+        "before": {
+            "supporting_experiments": before_data.get("supporting_experiments"),
+            "evidence_strength": before_data.get("evidence_strength"),
+            "evidence_summary": before_data.get("evidence_summary"),
+        },
+        "after": {
+            "supporting_experiments": decision_data.get("supporting_experiments"),
+            "evidence_strength": decision_data.get("evidence_strength"),
+            "evidence_summary": decision_data.get("evidence_summary"),
+        },
         "bundle": bundle,
     }
+    if show_diff:
+        result["diff"] = yaml_change_diff([(decision_path, before_data, decision_data)])
+    return result
 
 
 def main() -> None:
@@ -72,6 +114,9 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--id", required=True, dest="decision_id")
     parser.add_argument("--locale", choices=["en", "zh"])
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -81,16 +126,25 @@ def main() -> None:
             decision_id=args.decision_id,
             locale=args.locale,
             rebuild_dashboard=not args.no_build,
+            dry_run=args.dry_run,
+            show_diff=args.show_diff,
         )
     except (ValidationError, ValueError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc
 
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    verb = "Would update" if args.dry_run else "Updated"
     print(
-        f"Updated evidence for {result['decision_id']}: "
+        f"{verb} evidence for {result['decision_id']}: "
         f"{result['bundle']['evidence_strength']}"
     )
-    if not args.no_build:
+    if args.show_diff and result.get("diff"):
+        print(result["diff"], end="" if str(result["diff"]).endswith("\n") else "\n")
+    if not args.dry_run and not args.no_build and result["changed"]:
         print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 

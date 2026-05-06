@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import copy
-import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -11,7 +10,14 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import (
+    MutationError,
+    compact_mutation_result,
+    emit_json,
+    finish_mutation,
+    load_validated_state,
+    yaml_change_diff,
+)
 from research_cockpit.commands.record_finding import _next_finding_id, find_node_file
 from research_cockpit.model import (
     ResearchNode,
@@ -189,6 +195,7 @@ def main() -> None:
     parser.add_argument("--next-action", action="append", dest="next_actions")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
@@ -208,12 +215,26 @@ def main() -> None:
             dry_run=args.dry_run,
             show_diff=args.show_diff,
         )
+    except MutationError as exc:
+        if args.json:
+            emit_json(exc.payload)
+        else:
+            print(str(exc))
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        emit_json(
+            compact_mutation_result(
+                result,
+                command="complete-experiment",
+                target=result["experiment_id"],
+                root=args.root,
+                updated=[result["experiment_id"]],
+            ) if args.compact else result
+        )
         return
     if args.dry_run:
         print(f"Would complete experiment {args.experiment_id}")

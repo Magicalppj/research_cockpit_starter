@@ -112,6 +112,7 @@ def context_payload(
 
     payload: dict[str, Any] = {
         "root": str(root),
+        "warnings": list(node_payload.get("warnings", [])),
         "node": node_payload["node"],
         "node_context": node_payload,
         "validation": {

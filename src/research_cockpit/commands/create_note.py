@@ -150,8 +150,6 @@ def create_note_result(
     if dry_run or not changed:
         return result
 
-    note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text(note_text, encoding="utf-8")
     finish_mutation(
         root,
         [(node_path, data)],
@@ -164,6 +162,7 @@ def create_note_result(
             "after": result["after"],
         },
         rebuild_dashboard=rebuild_dashboard,
+        text_changes=[(note_path, note_text)],
     )
     return result
 

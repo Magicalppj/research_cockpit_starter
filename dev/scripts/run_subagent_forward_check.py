@@ -25,12 +25,22 @@ from run_skill_release_check import (
     public_scan_track,
     runtime_dependency_track,
 )
+from workflow_metrics import workflow_metrics
 
 
 DECISION_ID = "decision_demo_prompt_refinement"
 PROMPT_OPTION_ID = "option_demo_prompt_refinement"
 RETRIEVAL_OPTION_ID = "option_demo_retrieval_branch"
 PROMPT_EXPERIMENT_ID = "experiment_demo_prompt_refinement"
+
+
+def _attach_track_metrics(tracks: list[dict[str, Any]]) -> None:
+    for track in tracks:
+        summary = track.get("summary", {}) if isinstance(track.get("summary"), dict) else {}
+        changed_files = summary.get("copy_changed_files", [])
+        if not isinstance(changed_files, list):
+            changed_files = []
+        track["metrics"] = workflow_metrics(track.get("checks", []), files_changed=changed_files)
 
 
 def _copy_track_source(skill_path: Path, destination: Path) -> Path:
@@ -535,6 +545,7 @@ def subagent_forward_check_payload(
             tracks.append(portable_skill_track(skill_path, python, temp_run / "p"))
 
         source_changed = source_before != _file_manifest(skill_path)
+        _attach_track_metrics(tracks)
         return {
             "ok": all(track["passed"] for track in tracks) and not source_changed,
             "skill_path": str(skill_path),
@@ -564,6 +575,8 @@ def _print_text(payload: dict[str, Any]) -> None:
         print(f"- {track['name']}: {marker}")
         if track["summary"]:
             print(f"  summary: {track['summary']}")
+        if track.get("metrics"):
+            print(f"  metrics: {track['metrics']}")
 
 
 def main() -> None:

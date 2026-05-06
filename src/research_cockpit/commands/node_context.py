@@ -16,6 +16,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.node_onboarding import build_node_onboarding_context
+from research_cockpit.interaction_log import interaction_log_warnings
 
 
 def node_context_payload(
@@ -29,7 +30,7 @@ def node_context_payload(
     current = load_yaml(root / "current_state.yaml")
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
-    return build_node_onboarding_context(
+    payload = build_node_onboarding_context(
         root,
         nodes,
         current,
@@ -37,6 +38,8 @@ def node_context_payload(
         compact=compact,
         command_style=command_style,
     )
+    payload["warnings"] = interaction_log_warnings(root)
+    return payload
 
 
 def _print_human(payload: dict) -> None:

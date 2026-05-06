@@ -10,7 +10,7 @@ research-cockpit add-node --root research_cockpit --id problem_x --type problem 
 
 Prefer explicit parent links. Keep IDs stable ASCII identifiers.
 
-`add-node` supports `--dry-run --json --show-diff` for previewing one node and `--no-build` for batching. It rebuilds dashboards by default.
+`add-node` supports `--dry-run --json --show-diff` for previewing one node and `--no-build` for batching. It rebuilds dashboards by default. Batching means serial command execution; do not parallelize mutating commands against the same data root.
 
 ```sh
 research-cockpit add-node --root research_cockpit --id experiment_x --type experiment --title "..." --parent option_x --dry-run --json --show-diff
@@ -22,6 +22,7 @@ Do not create `artifact` nodes for routine files, configs, JSON outputs, or expe
 ## Batch Graph Plans
 
 Use `apply-graph-plan` when creating or updating several graph nodes. It validates the candidate graph once, writes all YAML only after validation passes, and rebuilds once by default.
+Use one batch command or run smaller mutating commands sequentially. Mutating commands share `graph/interaction_log.yaml` and use `graph/.mutation.lock`.
 
 ```sh
 research-cockpit apply-graph-plan --print-schema
@@ -184,10 +185,12 @@ research-cockpit apply-suggestion --root research_cockpit --id sg_x --target cur
 Update suggestion lifecycle:
 
 ```sh
-research-cockpit update-suggestion-state --root research_cockpit --id sg_x --state dismissed --reason "..."
+research-cockpit update-suggestion-state --root research_cockpit --id sg_x --state dismissed --reason "..." --dry-run --json --show-diff
+research-cockpit update-suggestion-state --root research_cockpit --id sg_x --state dismissed --reason "..." --no-build
 ```
 
 Both `apply-suggestion` and `update-suggestion-state` accept either stable `suggestion_id`/`key` or display `display_id`/`id`.
+`update-suggestion-state` and `cleanup-suggestion-lifecycle` support JSON/dry-run preview; add `--show-diff` only when reviewing the exact `current_state.yaml` change.
 
 ## Recipes
 

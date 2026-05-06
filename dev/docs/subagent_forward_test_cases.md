@@ -143,3 +143,17 @@ finalization, portable startup, and package hygiene. Run it with:
 ```powershell
 python dev\scripts\run_subagent_forward_check.py --json
 ```
+
+Each track now includes a `metrics` block so future workflow changes can be
+compared against a stable baseline. The current baseline from this harness is:
+
+| Track | Commands | Failed | Context reads | Mutations | Dry runs | Build | Validate | High-level commands |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `track_a_read_only_agent` | 4 | 0 | 4 | 0 | 0 | 0 | 0 | none |
+| `track_b_prompt_refinement_workstream` | 7 | 0 | 0 | 6 | 0 | 1 | 1 | none |
+| `track_c_retrieval_branch_agent` | 9 | 0 | 1 | 7 | 0 | 1 | 1 | `option-workstream-context` |
+| `track_d_decision_gate_agent` | 8 | 0 | 2 | 5 | 0 | 1 | 1 | none |
+| `track_f_third_round_workflow` | 3 | 0 | 1 | 2 | 1 | 1 | 0 | `finalize-workstream`, `option-workstream-context` |
+| `track_e_portable_skill_agent` | 3 | 0 | 3 | 0 | 0 | 0 | 0 | none |
+
+`manual_yaml_patch_detected` should stay `false` for every automated track.

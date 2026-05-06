@@ -231,7 +231,7 @@ research-cockpit complete-experiment --root research_cockpit --id <experiment_id
 research-cockpit update-node-fields --root research_cockpit --id <problem_id> --current-best-option <option_id> --no-build
 ```
 
-批量写入时，对支持的命令使用 `--no-build`，最后统一：
+批量写入时，对支持的命令使用 `--no-build`，但同一个 data root 上的 mutating commands 必须串行执行，不要并行跑多个写入命令；它们共享 `graph/interaction_log.yaml` 并由 mutation lock 保护。最后统一：
 
 ```sh
 research-cockpit validate --root research_cockpit --json
@@ -251,12 +251,13 @@ python -m unittest discover -s tests
 research-cockpit smoke --root examples/demo_research_cockpit --json
 python dev/scripts/run_skill_release_check.py --json --skip-mutating
 python dev/scripts/run_agent_usability_check.py --json
+python dev/scripts/run_subagent_forward_check.py --json
 git diff --check
 ```
 
 ## Agent Graph Update Workflow
 
-For batch graph changes, preview first, then write with `--no-build`, then validate and rebuild once:
+For batch graph changes, preview first, then write sequentially with `--no-build`, then validate and rebuild once. `can_batch` means serial batching, not parallel execution:
 
 ```sh
 research-cockpit apply-graph-plan --print-schema
@@ -308,7 +309,7 @@ research-cockpit create-artifact --root research_cockpit --id artifact_x --title
 research-cockpit link-artifact --root research_cockpit --artifact artifact_x --to option_x --no-build
 ```
 
-Use `--file` for artifacts with several `links` or `link_to` targets. Use `commands --json --compact` when choosing commands and run a specific command's `--print-schema` when you need the full file example. Add `--compact` to `--json` on high-level mutation commands when an agent only needs target, changed status, created/updated ids, changed file count, and verify commands.
+Use `--file` for artifacts with several `links` or `link_to` targets. Artifact `path` and `links` are stored exactly as provided; JSON resource rows include `resolved_target`, `resolution_base`, `resolution_attempts`, and `exists`. Relative paths are checked against the root parent, then the data root, then cwd. Use `commands --json --compact --workflow evidence` or `commands --json --compact --name <command>` when choosing commands, and run a specific command's `--print-schema` when you need the full file example. Add `--compact` to `--json` on high-level mutation commands when an agent only needs target, changed status, created/updated ids, changed file count, and verify commands.
 
 For experiment sweeps, batch findings from a file:
 
@@ -316,6 +317,7 @@ For experiment sweeps, batch findings from a file:
 research-cockpit complete-experiments --print-schema
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build
+research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --json --compact
 ```
 
 Use `update-finding` for later evidence or wording revisions:
@@ -340,3 +342,25 @@ A relative `summary_file` inside `finalize.yaml` resolves against the finalize f
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
 ```
+
+For older single-purpose mutation commands, preview with JSON and diff rather than guessing the write shape:
+
+```sh
+research-cockpit update-suggestion-state --root research_cockpit --id sg_x --state dismissed --reason "..." --dry-run --json --show-diff
+research-cockpit update-decision-evidence --root research_cockpit --id decision_x --dry-run --json --show-diff
+research-cockpit update-decision-checklist --root research_cockpit --id decision_x --alternative option_x --consequence "..." --next-required-action "..." --dry-run --json --show-diff
+```
+
+These commands do not use `--compact`; their JSON output stays short by default and only includes a full diff when `--show-diff` is present. `research-cockpit build --root research_cockpit --json` reports generated files without writing an audit event.
+
+If `validate` reports schema-damaged interaction log events, preview and repair the log explicitly:
+
+```sh
+research-cockpit repair-interaction-log --root research_cockpit --dry-run --json --show-diff
+research-cockpit repair-interaction-log --root research_cockpit --json --show-diff --backup
+research-cockpit validate --root research_cockpit --json
+```
+
+`repair-interaction-log` only drops invalid non-mapping event items or replaces invalid `events` containers with an empty list. It refuses YAML scanner errors instead of guessing a repair, and execution writes a backup before changing `graph/interaction_log.yaml`.
+
+Dev forward checks now report a `metrics` block per track/case: `command_count`, `failed_command_count`, `context_read_count`, `mutating_count`, `dry_run_count`, `build_count`, `validate_count`, `manual_yaml_patch_detected`, and `high_level_commands_used`. Use these as trend signals, not hard pass/fail gates.

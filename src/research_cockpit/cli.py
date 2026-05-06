@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from research_cockpit.command_registry import COMMAND_MODULES
+from research_cockpit.mutation_lock import MutationError
 from research_cockpit.paths import default_data_root, plugin_root
 
 COMMAND_CHOICES = [*COMMAND_MODULES.keys(), "init", "ui"]
@@ -22,6 +23,12 @@ def _run_module(command_name: str, argv: list[str]) -> None:
     sys.argv = [f"research-cockpit {command_name}", *argv]
     try:
         module.main()
+    except MutationError as exc:
+        if "--json" in argv:
+            print(json.dumps(exc.payload or {"ok": False, "error": str(exc)}, indent=2, ensure_ascii=False))
+        else:
+            print(str(exc))
+        raise SystemExit(1) from None
     except (ValueError, FileNotFoundError, FileExistsError) as exc:
         print(str(exc))
         raise SystemExit(1) from None

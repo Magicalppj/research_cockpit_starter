@@ -32,6 +32,17 @@ Common causes:
 - A parent's `children` list does not include the child node.
 - A node status is not valid for its type.
 - Decision checklist fields are missing or reference invalid option IDs.
+- `graph/interaction_log.yaml` has invalid `events` shape or malformed YAML.
+
+For interaction log schema damage, preview the repair before writing:
+
+```sh
+research-cockpit repair-interaction-log --root research_cockpit --dry-run --json --show-diff
+research-cockpit repair-interaction-log --root research_cockpit --json --show-diff --backup
+research-cockpit validate --root research_cockpit --json
+```
+
+The repair command only handles YAML that can be parsed. If the file has a scanner error, fix the YAML structure manually or restore from backup before running `validate` again.
 
 ## Release Checks
 
@@ -41,6 +52,7 @@ From the plugin repo root:
 python -m unittest discover -s tests
 research-cockpit smoke --root examples/demo_research_cockpit --json
 python dev/scripts/run_skill_release_check.py --json --skip-mutating
+python dev/scripts/run_subagent_forward_check.py --json
 git diff --check
 ```
 

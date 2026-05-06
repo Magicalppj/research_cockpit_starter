@@ -16,14 +16,12 @@ from research_cockpit.model import (
     load_explicit_edges,
     load_nodes,
     load_yaml,
-    save_yaml,
     script_command,
     validate_cockpit,
 )
-from research_cockpit.interaction_log import append_interaction_log
 from research_cockpit.resources import build_link_rows
 from research_cockpit.suggestions import build_action_suggestions
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands._runtime import finish_mutation
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -77,24 +75,23 @@ def apply_suggestion(
     source_node_id = str(suggestion.get("source_node_id") or "")
 
     if target == "current":
+        target_path = root / "current_state.yaml"
+        target_data = current
         before_actions = list(current.get("next_actions", []) or [])
         changed = _append_action(current, action, "current_state")
         validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
         after_actions = list(current.get("next_actions", []) or [])
-        if not dry_run:
-            save_yaml(root / "current_state.yaml", current)
     else:
         node_id = source_node_id
-        node_path = find_node_file(root, node_id)
-        node_data = load_yaml(node_path)
+        target_path = find_node_file(root, node_id)
+        node_data = load_yaml(target_path)
+        target_data = node_data
         before_actions = list(node_data.get("next_actions", []) or [])
         changed = _append_action(node_data, action, node_id)
         candidate = dict(nodes)
         candidate[node_id] = ResearchNode.from_dict(node_data)
         validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
         after_actions = list(node_data.get("next_actions", []) or [])
-        if not dry_run:
-            save_yaml(node_path, node_data)
 
     result = {
         "suggestion": suggestion,
@@ -111,24 +108,26 @@ def apply_suggestion(
     if dry_run:
         return result
 
-    append_interaction_log(
+    finish_mutation(
         root,
-        kind="apply_suggestion",
-        actor="researcher",
-        node_id=source_node_id or None,
-        command=f"{script_command('apply_suggestion.py')} --id {suggestion_id} --target {target}",
-        before={"target": target, "next_actions": before_actions},
-        after={"target": target, "next_actions": after_actions},
-        extra={
-            "suggestion_id": suggestion_id,
-            "target": target,
-            "changed": changed,
-            "source_node_id": source_node_id,
-            "action": action,
+        [(target_path, target_data)],
+        interaction={
+            "kind": "apply_suggestion",
+            "actor": "researcher",
+            "node_id": source_node_id or None,
+            "command": f"{script_command('apply_suggestion.py')} --id {suggestion_id} --target {target}",
+            "before": {"target": target, "next_actions": before_actions},
+            "after": {"target": target, "next_actions": after_actions},
+            "extra": {
+                "suggestion_id": suggestion_id,
+                "target": target,
+                "changed": changed,
+                "source_node_id": source_node_id,
+                "action": action,
+            },
         },
+        rebuild_dashboard=rebuild_dashboard,
     )
-    if rebuild_dashboard:
-        build_dashboard(root)
     return result
 
 

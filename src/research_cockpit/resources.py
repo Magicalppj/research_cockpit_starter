@@ -28,15 +28,62 @@ def _is_external_target(target: str) -> bool:
     return bool(parsed.scheme and parsed.scheme not in {"", "file"})
 
 
-def _target_exists(root: Path, kind: str, target: str, nodes: dict[str, ResearchNode]) -> bool | None:
+def _unique_paths(paths: list[tuple[str, Path]]) -> list[tuple[str, Path]]:
+    seen: set[str] = set()
+    out: list[tuple[str, Path]] = []
+    for label, path in paths:
+        key = str(path.resolve(strict=False))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((label, path))
+    return out
+
+
+def _target_resolution(root: Path, kind: str, target: str, nodes: dict[str, ResearchNode]) -> dict[str, Any]:
     if kind == "run_id" or _is_external_target(target):
-        return None
+        return {
+            "exists": None,
+            "resolved_target": None,
+            "resolution_base": None,
+            "resolution_attempts": [],
+        }
     if kind == "linked_artifact":
-        return target in nodes
+        return {
+            "exists": target in nodes,
+            "resolved_target": target,
+            "resolution_base": "graph",
+            "resolution_attempts": [target],
+        }
     path = Path(target)
     if path.is_absolute():
-        return None
-    return (root / target).exists()
+        return {
+            "exists": path.exists(),
+            "resolved_target": path.as_posix(),
+            "resolution_base": "absolute",
+            "resolution_attempts": [path.as_posix()],
+        }
+    attempts = _unique_paths(
+        [
+            ("root_parent", root.parent / target),
+            ("root", root / target),
+            ("cwd", Path.cwd() / target),
+        ]
+    )
+    for label, candidate in attempts:
+        if candidate.exists():
+            return {
+                "exists": True,
+                "resolved_target": candidate.as_posix(),
+                "resolution_base": label,
+                "resolution_attempts": [item.as_posix() for _, item in attempts],
+            }
+    return {
+        "exists": False,
+        "resolved_target": attempts[0][1].as_posix() if attempts else target,
+        "resolution_base": None,
+        "resolution_attempts": [item.as_posix() for _, item in attempts],
+    }
 
 
 def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str, Any]]:
@@ -49,6 +96,7 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
         for entry in entries:
             target = entry["target"]
             kind = entry["kind"]
+            resolution = _target_resolution(root, kind, target, nodes)
             rows.append({
                 "node_id": node.id,
                 "node_title": node.title,
@@ -56,6 +104,6 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
                 "kind": kind,
                 "label": entry["label"],
                 "target": target,
-                "exists": _target_exists(root, kind, target, nodes),
+                **resolution,
             })
     return rows

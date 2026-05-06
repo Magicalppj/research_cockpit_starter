@@ -24,7 +24,7 @@ from research_cockpit.decisions import (
 )
 from research_cockpit.graph_views import graph_view_id_from_title, load_graph_views, upsert_graph_view
 from research_cockpit.graph_core import unique_strings
-from research_cockpit.interaction_log import append_interaction_log, load_interaction_log, recent_interactions
+from research_cockpit.interaction_log import append_interaction_log, load_interaction_log, recent_interactions, validate_interaction_log
 from research_cockpit.option_workstreams import (
     build_branch_comparison,
     build_option_subtree,
@@ -906,6 +906,7 @@ def validate_cockpit(
     current: dict[str, Any] | None = None,
     explicit_edges: list[dict[str, Any]] | None = None,
     *,
+    include_interaction_log: bool = False,
     raise_on_error: bool = False,
 ) -> list[str]:
     nodes = nodes if nodes is not None else load_nodes(root)
@@ -914,6 +915,8 @@ def validate_cockpit(
     errors = validate_nodes(nodes)
     errors.extend(validate_explicit_edges(nodes, explicit_edges))
     errors.extend(validate_current_state(current, nodes, explicit_edges))
+    if include_interaction_log:
+        errors.extend(validate_interaction_log(root))
     if errors and raise_on_error:
         raise ValidationError(errors)
     return errors

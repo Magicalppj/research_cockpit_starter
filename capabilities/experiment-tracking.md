@@ -66,7 +66,7 @@ research-cockpit link-artifact --root research_cockpit --artifact artifact_x --t
 
 Use `--file` when an artifact has several `links` or `link_to` targets; it is shorter and easier to review than a long repeated-flag command.
 
-`create-artifact` and `link-artifact` update artifact `path`/`links` and reverse `linked_artifacts` references. They do not require local resource paths to exist, but JSON output includes resource existence rows where possible.
+`create-artifact` and `link-artifact` update artifact `path`/`links` and reverse `linked_artifacts` references. They do not require local resource paths to exist. YAML stores paths exactly as provided; JSON resource rows include `resolved_target`, `resolution_base`, `resolution_attempts`, and `exists`. Relative paths are checked against the root parent, then the data root, then cwd.
 
 ## Findings
 
@@ -82,6 +82,7 @@ Use `complete-experiment` when you want the conservative "record conclusion and 
 
 ```sh
 research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --outcome mixed --result-summary "..." --next-action "Review follow-up" --no-build
+research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --json --compact
 ```
 
 `complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, and appends de-duplicated experiment-local `next_actions`. It does not change focus, option status, problem status, or `current_best_option`.
@@ -133,11 +134,11 @@ After findings change, rebuild decision evidence when a decision depends on them
 research-cockpit update-decision-evidence --root research_cockpit --id decision_x
 ```
 
-When recording several related updates, use `--no-build` on each supported command and run one final:
+When recording several related updates, run mutating commands sequentially. Do not parallelize writes against the same data root; mutating commands share `graph/interaction_log.yaml` and use a mutation lock. Use `--no-build` on each supported command and run one final:
 
 ```sh
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
 ```
 
-For agent-readable success summaries, add `--compact` to `--json` on high-level mutation commands. The compact payload omits bulky `before`/`after` blocks. If you also pass `--show-diff`, the full diff is included and `diff_line_count` tells the agent how large it is.
+For agent-readable success summaries, add `--compact` to `--json` on supported high-level mutation commands. Check `commands --json` for `supports_compact`; `complete-experiment` and `complete-experiments` both support it. The compact payload omits bulky `before`/`after` blocks. If you also pass `--show-diff`, the full diff is included and `diff_line_count` tells the agent how large it is.

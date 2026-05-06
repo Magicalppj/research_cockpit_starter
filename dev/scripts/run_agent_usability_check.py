@@ -20,6 +20,7 @@ from run_skill_release_check import (
     _run_command,
     runtime_dependency_track,
 )
+from workflow_metrics import workflow_metrics
 
 
 DEMO_DECISION_ID = "decision_demo_prompt_refinement"
@@ -65,6 +66,7 @@ def _case(
         "passed": passed,
         "commands_run": _commands_run(checks),
         "files_changed": files_changed or [],
+        "metrics": workflow_metrics(checks, files_changed=files_changed or []),
         "agent_observations": agent_observations or {},
         "readability_findings": readability_findings or [],
         "unexpected_writes": unexpected_writes or [],
@@ -521,6 +523,8 @@ def _print_text(payload: dict[str, Any]) -> None:
     for case in payload["cases"]:
         marker = "OK" if case["passed"] else "FAILED"
         print(f"- {case['case']}: {marker}")
+        if case.get("metrics"):
+            print(f"  metrics: {case['metrics']}")
         if case["readability_findings"]:
             print(f"  findings: {case['readability_findings']}")
         if case["unexpected_writes"]:

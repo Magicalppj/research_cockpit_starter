@@ -15,7 +15,7 @@ from research_cockpit.model import (
     ValidationError,
     load_nodes,
     load_yaml,
-    save_yaml,
+    script_command,
     validate_cockpit,
 )
 from research_cockpit.decisions import (
@@ -24,7 +24,7 @@ from research_cockpit.decisions import (
     decision_acceptance_failure_message,
     normalize_locale,
 )
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands._runtime import finish_mutation
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -189,13 +189,27 @@ def promote_decision(
         preview["changed"] = False
         return preview
 
-    save_yaml(out, decision_data)
+    changes = [(out, decision_data)]
     if option_data is not None:
-        save_yaml(find_node_file(root, option_id), option_data)
+        changes.append((find_node_file(root, option_id), option_data))
     if problem_data is not None and problem_id:
-        save_yaml(find_node_file(root, str(problem_id)), problem_data)
-    if rebuild_dashboard:
-        build_dashboard(root)
+        changes.append((find_node_file(root, str(problem_id)), problem_data))
+    finish_mutation(
+        root,
+        changes,
+        interaction={
+            "kind": "promote_decision",
+            "actor": "researcher",
+            "node_id": decision_id,
+            "command": f"{script_command('promote_decision.py')} --id {decision_id} --option {option_id}",
+            "after": {
+                "decision_id": decision_id,
+                "option_id": option_id,
+                "status": status,
+            },
+        },
+        rebuild_dashboard=rebuild_dashboard,
+    )
     return out
 
 

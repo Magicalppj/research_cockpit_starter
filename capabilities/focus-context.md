@@ -31,6 +31,13 @@ For a brand-new data root, use `research-cockpit init --root research_cockpit --
    - `research_cockpit/dashboards/focus_context_pack.json`
    - `research_cockpit/dashboards/search_index.json` when searching.
 
+Use filtered command discovery when you only need one workflow surface:
+
+```sh
+research-cockpit commands --json --compact --workflow focus
+research-cockpit commands --json --compact --name context
+```
+
 ## Node Handoff
 
 When a human assigns a specific node id, use the read-only onboarding command before opening raw YAML:

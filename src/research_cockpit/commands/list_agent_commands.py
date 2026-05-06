@@ -7,16 +7,85 @@ from research_cockpit.command_registry import subcommand_for_script
 from research_cockpit.commands.file_schemas import file_schema_for_script
 from research_cockpit.commands.update_node_fields import supported_field_names
 
+WORKFLOW_CHOICES = ("graph", "evidence", "decision", "focus", "maintenance", "read")
+
+WORKFLOW_TAGS_BY_COMMAND = {
+    "init": ["maintenance"],
+    "ui": ["read"],
+    "bootstrap": ["read", "focus"],
+    "validate": ["read", "maintenance", "graph"],
+    "repair-interaction-log": ["maintenance"],
+    "build": ["maintenance", "graph"],
+    "smoke": ["read", "maintenance"],
+    "search": ["read", "focus"],
+    "suggest-next-actions": ["read", "focus"],
+    "commands": ["read", "maintenance"],
+    "node-context": ["read", "focus"],
+    "context": ["read", "focus", "evidence"],
+    "option-workstream-context": ["read", "evidence"],
+    "check-decision-acceptance": ["read", "decision"],
+    "add-node": ["graph"],
+    "apply-graph-plan": ["graph"],
+    "create-workstream": ["graph"],
+    "update-status": ["graph"],
+    "set-focus": ["focus"],
+    "sync-focus-actions": ["focus"],
+    "claim-option": ["evidence", "focus"],
+    "report-option-workstream": ["evidence"],
+    "finalize-workstream": ["evidence", "focus"],
+    "record-finding": ["evidence"],
+    "update-finding": ["evidence"],
+    "create-artifact": ["evidence"],
+    "link-artifact": ["evidence"],
+    "complete-experiment": ["evidence"],
+    "complete-experiments": ["evidence"],
+    "promote-decision": ["decision"],
+    "update-decision-evidence": ["decision", "evidence"],
+    "update-decision-checklist": ["decision"],
+    "accept-decision": ["decision"],
+    "update-node-fields": ["graph"],
+    "apply-suggestion": ["focus"],
+    "update-suggestion-state": ["focus", "maintenance"],
+    "cleanup-suggestion-lifecycle": ["focus", "maintenance"],
+    "create-note": ["graph"],
+}
+
+SHOW_DIFF_COMMANDS = {
+    "add-node",
+    "apply-graph-plan",
+    "cleanup-suggestion-lifecycle",
+    "complete-experiment",
+    "complete-experiments",
+    "create-artifact",
+    "create-note",
+    "create-workstream",
+    "finalize-workstream",
+    "link-artifact",
+    "record-finding",
+    "report-option-workstream",
+    "set-focus",
+    "sync-focus-actions",
+    "update-decision-checklist",
+    "update-decision-evidence",
+    "update-finding",
+    "update-node-fields",
+    "update-suggestion-state",
+    "update-status",
+    "repair-interaction-log",
+}
+
 
 CAPABILITY_BY_COMMAND = {
     "init": "capabilities/integrations.md",
     "ui": "capabilities/ui-dashboard.md",
     "agent_bootstrap.py": "capabilities/focus-context.md",
     "validate_cockpit.py": "capabilities/troubleshooting.md",
+    "repair_interaction_log.py": "capabilities/troubleshooting.md",
     "build_dashboard.py": "capabilities/graph-state.md",
     "skill_smoke_test.py": "capabilities/integrations.md",
     "search_knowledge.py": "capabilities/focus-context.md",
     "suggest_next_actions.py": "capabilities/focus-context.md",
+    "list_agent_commands.py": "capabilities/focus-context.md",
     "context.py": "capabilities/focus-context.md",
     "node_context.py": "capabilities/focus-context.md",
     "option_workstream_context.py": "capabilities/experiment-tracking.md",
@@ -90,6 +159,18 @@ COMMANDS: list[dict[str, object]] = [
         "recommended_when": "Run before and after mutating cockpit data.",
     },
     {
+        "name": "repair_interaction_log.py",
+        "purpose": "Repair schema-damaged interaction log events after validation reports audit log damage.",
+        "mutating": True,
+        "writes_truth_source": False,
+        "writes_generated_files": False,
+        "rebuild_default": False,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": False,
+        "recommended_when": "Recover from non-mapping interaction log events without hand-editing YAML.",
+    },
+    {
         "name": "build_dashboard.py",
         "purpose": "Regenerate dashboard and context JSON from YAML truth source.",
         "mutating": True,
@@ -97,7 +178,7 @@ COMMANDS: list[dict[str, object]] = [
         "writes_dashboard": True,
         "writes_generated_files": True,
         "rebuild_default": True,
-        "supports_json": False,
+        "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
         "recommended_when": "Refresh generated context after YAML changes.",
@@ -131,12 +212,23 @@ COMMANDS: list[dict[str, object]] = [
         "recommended_when": "Decide what work should happen next.",
     },
     {
+        "name": "list_agent_commands.py",
+        "purpose": "List command capabilities and workflow tags for agent command selection.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "supports_compact": True,
+        "recommended_when": "Choose the shortest safe command for a workflow.",
+    },
+    {
         "name": "node_context.py",
         "purpose": "Read a single node onboarding context with parent chain, blockers, evidence, and safe next commands.",
         "mutating": False,
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
+        "supports_compact": True,
         "recommended_when": "Start work from a specific research node id.",
     },
     {
@@ -146,6 +238,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
+        "supports_compact": True,
         "safe_in_plan_mode": True,
         "recommended_when": "Continue work from a known option or experiment without reading several context packs.",
     },
@@ -315,6 +408,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "supports_compact": True,
         "recommended_when": "Conservatively complete an experiment without changing option, problem, or focus state.",
     },
     {
@@ -343,18 +437,20 @@ COMMANDS: list[dict[str, object]] = [
         "name": "update_decision_evidence.py",
         "purpose": "Refresh structured evidence fields for an existing decision.",
         "mutating": True,
-        "supports_json": False,
-        "supports_dry_run": False,
+        "supports_json": True,
+        "supports_dry_run": True,
         "supports_no_build": True,
+        "fields_supported": ["supporting_experiments", "evidence_strength", "evidence_summary"],
         "recommended_when": "Update evidence before reviewing a proposed decision.",
     },
     {
         "name": "update_decision_checklist.py",
         "purpose": "Append checklist metadata for an existing decision without changing decision status.",
         "mutating": True,
-        "supports_json": False,
-        "supports_dry_run": False,
+        "supports_json": True,
+        "supports_dry_run": True,
         "supports_no_build": True,
+        "fields_supported": ["alternatives_considered", "consequences", "next_required_actions", "evidence_summary"],
         "recommended_when": "Fill alternatives, consequences, and next actions before accepting a decision.",
     },
     {
@@ -389,9 +485,10 @@ COMMANDS: list[dict[str, object]] = [
         "name": "update_suggestion_state.py",
         "purpose": "Mark a suggestion active, dismissed, or completed.",
         "mutating": True,
-        "supports_json": False,
-        "supports_dry_run": False,
+        "supports_json": True,
+        "supports_dry_run": True,
         "supports_no_build": True,
+        "fields_supported": ["suggestion_lifecycle"],
         "recommended_when": "Hide or restore action suggestions.",
     },
     {
@@ -415,11 +512,18 @@ COMMANDS: list[dict[str, object]] = [
 ]
 
 
-def agent_command_manifest(*, compact: bool = False) -> list[dict[str, object]]:
+def agent_command_manifest(
+    *,
+    compact: bool = False,
+    name: str | None = None,
+    workflow: str | None = None,
+) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for command in COMMANDS:
         command_name = str(command["name"])
         subcommand = subcommand_for_script(command_name) if command_name.endswith(".py") else command_name
+        if name and subcommand != name:
+            continue
         mutating = bool(command["mutating"])
         supports_no_build = bool(command.get("supports_no_build"))
         rebuild_default = bool(command.get("rebuild_default", mutating and supports_no_build))
@@ -437,10 +541,15 @@ def agent_command_manifest(*, compact: bool = False) -> list[dict[str, object]]:
             "writes_truth_source": writes_truth_source,
             "writes_generated_files": writes_generated_files,
             "can_batch": bool(command.get("can_batch", supports_no_build)),
+            "requires_serial_mutation": mutating,
             "safe_in_plan_mode": bool(command.get("safe_in_plan_mode", not mutating)),
             "rebuild_default": rebuild_default,
             "fields_supported": command.get("fields_supported", []),
+            "workflow_tags": WORKFLOW_TAGS_BY_COMMAND.get(subcommand, []),
+            "supports_show_diff": subcommand in SHOW_DIFF_COMMANDS,
         }
+        if workflow and workflow not in row["workflow_tags"]:
+            continue
         if compact:
             row.pop("example_file", None)
         rows.append(row)
@@ -451,9 +560,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true", help="Print machine-readable command manifest")
     parser.add_argument("--compact", action="store_true", help="Omit long example_file payloads from JSON output.")
+    parser.add_argument("--name", help="Return only one command by subcommand name.")
+    parser.add_argument("--workflow", choices=WORKFLOW_CHOICES, help="Return commands tagged for one workflow.")
     args = parser.parse_args()
 
-    commands = agent_command_manifest(compact=args.compact)
+    commands = agent_command_manifest(compact=args.compact, name=args.name, workflow=args.workflow)
     if args.json:
         print(json.dumps({"commands": commands}, indent=2, ensure_ascii=False))
         return

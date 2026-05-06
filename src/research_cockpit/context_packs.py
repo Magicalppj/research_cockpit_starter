@@ -16,11 +16,11 @@ from research_cockpit.graph_core import (
     unique_strings,
 )
 from research_cockpit.graph_views import load_graph_views
-from research_cockpit.interaction_log import recent_interactions
+from research_cockpit.interaction_log import interaction_log_warnings, recent_interactions
 from research_cockpit.option_workstreams import build_option_workstream_context, build_option_workstream_rows
 from research_cockpit.resources import build_link_rows, node_link_entries
 from research_cockpit.search_index import build_search_index, build_search_index_summary
-from research_cockpit.storage import load_yaml
+from research_cockpit.storage import load_yaml, save_text
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.types import ACTIVE_WORKSTREAM_STATUSES, CONTEXT_SCHEMA_VERSION, ResearchNode
 
@@ -177,6 +177,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         ],
         "saved_graph_views": load_graph_views(root),
         "recent_interactions": recent_interactions(root),
+        "warnings": interaction_log_warnings(root),
         "suggested_next_actions": build_action_suggestions(root, nodes, current, link_rows),
         "search_index_summary": build_search_index_summary(search_index),
     }
@@ -328,6 +329,7 @@ def build_focus_context(
         "option_workstream_context": option_workstream_context,
         "saved_graph_views": load_graph_views(root),
         "recent_interactions": recent_interactions(root),
+        "warnings": interaction_log_warnings(root),
     }
 
 
@@ -355,6 +357,7 @@ def build_current_state_payload(
         "updated_at": current.get("updated_at"),
         "saved_graph_views": load_graph_views(root),
         "recent_interactions": recent_interactions(root),
+        "warnings": interaction_log_warnings(root),
         "linked_nodes": [
             node_context(nodes[node_id])
             for node_id in current.get("current_focus_path", []) or []
@@ -390,4 +393,4 @@ def write_dashboard_markdown(root: Path, context: dict[str, Any]) -> None:
     for decision in context.get("recent_decisions", []):
         lines.append(f"- **{decision['title']}** (`{decision['status']}`): {decision.get('summary','')}")
     (root / "dashboards").mkdir(parents=True, exist_ok=True)
-    (root / "dashboards" / "current_state.md").write_text("\n".join(lines), encoding="utf-8")
+    save_text(root / "dashboards" / "current_state.md", "\n".join(lines))

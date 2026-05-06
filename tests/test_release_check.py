@@ -120,6 +120,8 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertTrue(by_name["track_a_read_only_agent"]["passed"], by_name["track_a_read_only_agent"])
         self.assertTrue(by_name["track_e_portable_skill_agent"]["passed"], by_name["track_e_portable_skill_agent"])
         self.assertEqual(by_name["track_b_prompt_refinement_workstream"]["skipped"], True)
+        self.assertIn("metrics", by_name["track_a_read_only_agent"])
+        self.assertGreaterEqual(by_name["track_a_read_only_agent"]["metrics"]["context_read_count"], 1)
 
     def test_subagent_forward_check_mutating_tracks_only_change_copies(self) -> None:
         payload = subagent_forward_check_payload(
@@ -137,6 +139,8 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertTrue(by_name["track_c_retrieval_branch_agent"]["passed"], by_name["track_c_retrieval_branch_agent"])
         self.assertTrue(by_name["track_d_decision_gate_agent"]["passed"], by_name["track_d_decision_gate_agent"])
         self.assertGreater(by_name["track_d_decision_gate_agent"]["summary"]["copy_changed_count"], 0)
+        self.assertGreater(by_name["track_d_decision_gate_agent"]["metrics"]["mutating_count"], 0)
+        self.assertGreaterEqual(by_name["track_d_decision_gate_agent"]["metrics"]["validate_count"], 1)
 
     def test_agent_usability_check_exercises_vendored_research_repo(self) -> None:
         payload = agent_usability_check_payload(
@@ -161,8 +165,11 @@ class SkillReleaseCheckTests(unittest.TestCase):
         for case in by_case.values():
             self.assertTrue(case["passed"], case)
             self.assertEqual(case["unexpected_writes"], [], case)
+            self.assertIn("metrics", case)
+            self.assertIn("command_count", case["metrics"])
         self.assertTrue(by_case["agent_c_safe_option_workstream"]["agent_observations"]["dry_run_preserved_files"])
         self.assertIn("claim_option", by_case["agent_c_safe_option_workstream"]["agent_observations"]["interaction_kinds"])
+        self.assertGreater(by_case["agent_c_safe_option_workstream"]["metrics"]["dry_run_count"], 0)
 
 
 if __name__ == "__main__":

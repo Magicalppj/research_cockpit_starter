@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Any
 import re
 
-from research_cockpit.interaction_log import append_interaction_log, utc_timestamp
-from research_cockpit.storage import load_yaml, save_yaml
+from research_cockpit.commands._runtime import finish_mutation
+from research_cockpit.interaction_log import utc_timestamp
+from research_cockpit.storage import load_yaml
 from research_cockpit.types import (
     GRAPH_VIEW_FILTER_BOOL_KEYS,
     GRAPH_VIEW_FILTER_LIST_KEYS,
@@ -132,17 +133,20 @@ def upsert_graph_view(root: Path, view: dict[str, Any]) -> dict[str, Any]:
         normalized["updated_at"] = timestamp
         next_views.append(normalized)
 
-    save_yaml(root / "graph" / "graph_views.yaml", {"version": 1, "views": next_views})
-    append_interaction_log(
+    finish_mutation(
         root,
-        kind="save_graph_view",
-        before=before,
-        after=normalized,
-        extra={
-            "view_id": normalized["id"],
-            "title": normalized["title"],
-            "scope": normalized["scope"],
-            "filters": normalized["filters"],
+        [(root / "graph" / "graph_views.yaml", {"version": 1, "views": next_views})],
+        interaction={
+            "kind": "save_graph_view",
+            "before": before,
+            "after": normalized,
+            "extra": {
+                "view_id": normalized["id"],
+                "title": normalized["title"],
+                "scope": normalized["scope"],
+                "filters": normalized["filters"],
+            },
         },
+        rebuild_dashboard=False,
     )
     return normalized

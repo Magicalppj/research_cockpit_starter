@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from datetime import date
 from pathlib import Path
@@ -15,12 +16,12 @@ from research_cockpit.model import (
     load_explicit_edges,
     load_nodes,
     load_yaml,
-    save_yaml,
+    script_command,
     validate_cockpit,
 )
 from research_cockpit.resources import build_link_rows
 from research_cockpit.suggestions import build_action_suggestions, build_suggestion_lifecycle_rows
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
 
 
 VALID_CLEANUP_STATES = {"dismissed", "completed", "all"}
@@ -44,6 +45,7 @@ def cleanup_suggestion_lifecycle(
     older_than_days: int | None = None,
     dry_run: bool = False,
     rebuild_dashboard: bool = True,
+    show_diff: bool = False,
 ) -> dict[str, Any]:
     if state not in VALID_CLEANUP_STATES:
         allowed = ", ".join(sorted(VALID_CLEANUP_STATES))
@@ -53,6 +55,7 @@ def cleanup_suggestion_lifecycle(
 
     nodes = load_nodes(root)
     current = load_yaml(root / "current_state.yaml")
+    before_current = copy.deepcopy(current)
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
 
@@ -72,7 +75,7 @@ def cleanup_suggestion_lifecycle(
 
     changed = False
     removed_count = 0
-    if candidates and not dry_run:
+    if candidates:
         lifecycle = dict(current.get("suggestion_lifecycle") or {})
         for row in candidates:
             if lifecycle.pop(str(row["key"]), None) is not None:
@@ -84,20 +87,43 @@ def cleanup_suggestion_lifecycle(
                 current.pop("suggestion_lifecycle", None)
             current["updated_at"] = str(date.today())
             validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
-            save_yaml(root / "current_state.yaml", current)
             changed = True
-            if rebuild_dashboard:
-                build_dashboard(root)
+            if not dry_run:
+                finish_mutation(
+                    root,
+                    [(root / "current_state.yaml", current)],
+                    interaction={
+                        "kind": "cleanup_suggestion_lifecycle",
+                        "actor": "researcher",
+                        "command": f"{script_command('cleanup_suggestion_lifecycle.py')} --state {state}",
+                        "before": {
+                            "candidate_count": len(candidates),
+                        },
+                        "after": {
+                            "removed_count": removed_count,
+                        },
+                        "extra": {
+                            "state": state,
+                            "older_than_days": older_than_days,
+                        },
+                    },
+                    rebuild_dashboard=rebuild_dashboard,
+                )
 
-    return {
+    result: dict[str, Any] = {
         "dry_run": dry_run,
         "state": state,
         "older_than_days": older_than_days,
         "candidate_count": len(candidates),
-        "removed_count": removed_count,
-        "changed": changed,
+        "removed_count": 0 if dry_run else removed_count,
+        "would_remove_count": removed_count,
+        "changed": False if dry_run else changed,
+        "would_change": changed,
         "candidates": candidates,
     }
+    if show_diff:
+        result["diff"] = yaml_change_diff([(root / "current_state.yaml", before_current, current)])
+    return result
 
 
 def main() -> None:
@@ -107,6 +133,7 @@ def main() -> None:
     parser.add_argument("--state", choices=sorted(VALID_CLEANUP_STATES), default="all")
     parser.add_argument("--older-than-days", type=int, default=None)
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
 
@@ -117,6 +144,7 @@ def main() -> None:
             older_than_days=args.older_than_days,
             dry_run=args.dry_run,
             rebuild_dashboard=not args.no_build,
+            show_diff=args.show_diff,
         )
     except (ValidationError, ValueError) as exc:
         print(str(exc))
