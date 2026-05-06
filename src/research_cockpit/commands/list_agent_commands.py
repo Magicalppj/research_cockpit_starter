@@ -8,6 +8,28 @@ from research_cockpit.commands.file_schemas import file_schema_for_script
 from research_cockpit.commands.update_node_fields import supported_field_names
 
 WORKFLOW_CHOICES = ("graph", "evidence", "decision", "focus", "maintenance", "read")
+STATUS_ALIASES = {"option": {"planned": "open"}}
+CONFLICT_POLICY = "Truth-source mutation fails without writing if target files changed after command planning; reread context and retry."
+COMPACT_COMMAND_KEYS = {
+    "name",
+    "purpose",
+    "command",
+    "workflow_tags",
+    "mutating",
+    "supports_json",
+    "supports_dry_run",
+    "supports_no_build",
+    "supports_compact",
+    "supports_build",
+    "supports_show_diff",
+    "can_batch",
+    "requires_serial_mutation",
+    "conflict_policy",
+    "schema_command",
+    "primary_target",
+    "target_aliases",
+    "status_aliases",
+}
 
 WORKFLOW_TAGS_BY_COMMAND = {
     "init": ["maintenance"],
@@ -282,6 +304,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_no_build": True,
         "supports_compact": True,
         "can_batch": True,
+        "status_aliases": STATUS_ALIASES,
         **file_schema_for_script("apply_graph_plan.py"),
         "recommended_when": "Create or update several nodes without repeated rebuilds.",
     },
@@ -295,6 +318,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_compact": True,
         "can_batch": True,
         "fields_supported": ["question", "hypothesis", "summary", "tags", "success_criteria", "metrics", "next_actions"],
+        "status_aliases": STATUS_ALIASES,
         **file_schema_for_script("create_workstream.py"),
         "recommended_when": "Start a new research branch from a structured workstream plan.",
     },
@@ -542,6 +566,7 @@ def agent_command_manifest(
             "writes_generated_files": writes_generated_files,
             "can_batch": bool(command.get("can_batch", supports_no_build)),
             "requires_serial_mutation": mutating,
+            "conflict_policy": CONFLICT_POLICY if mutating else "",
             "safe_in_plan_mode": bool(command.get("safe_in_plan_mode", not mutating)),
             "rebuild_default": rebuild_default,
             "fields_supported": command.get("fields_supported", []),
@@ -551,7 +576,7 @@ def agent_command_manifest(
         if workflow and workflow not in row["workflow_tags"]:
             continue
         if compact:
-            row.pop("example_file", None)
+            row = {key: value for key, value in row.items() if key in COMPACT_COMMAND_KEYS}
         rows.append(row)
     return rows
 
@@ -559,7 +584,7 @@ def agent_command_manifest(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true", help="Print machine-readable command manifest")
-    parser.add_argument("--compact", action="store_true", help="Omit long example_file payloads from JSON output.")
+    parser.add_argument("--compact", action="store_true", help="Print a short agent discovery payload.")
     parser.add_argument("--name", help="Return only one command by subcommand name.")
     parser.add_argument("--workflow", choices=WORKFLOW_CHOICES, help="Return commands tagged for one workflow.")
     args = parser.parse_args()

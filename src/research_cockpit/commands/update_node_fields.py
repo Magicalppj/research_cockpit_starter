@@ -10,7 +10,7 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import ResearchNode, ValidationError, load_yaml, script_command, validate_cockpit
 
@@ -242,12 +242,14 @@ def update_node_fields(
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(path, before_data, data)]) if changed else ""
-    if dry_run or not changed:
+    if dry_run:
+        return dry_run_preflight_result(root, result)
+    if not changed:
         return result
 
     finish_mutation(
         root,
-        [(path, data)],
+        [(path, before_data, data)],
         interaction={
             "kind": "update_node_fields",
             "actor": "researcher",

@@ -19,7 +19,7 @@ from research_cockpit.model import (
     validate_cockpit,
     validate_status,
 )
-from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 
 
 def find_node_file(root: Path, node_id: str) -> Path:
@@ -113,12 +113,14 @@ def update_status_result(
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(path, before_data, data)]) if changed else ""
-    if dry_run or not changed:
+    if dry_run:
+        return dry_run_preflight_result(root, result)
+    if not changed:
         return result
 
     finish_mutation(
         root,
-        [(path, data)],
+        [(path, before_data, data)],
         interaction={
             "kind": "update_status",
             "actor": "researcher",

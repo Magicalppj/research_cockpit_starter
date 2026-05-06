@@ -435,6 +435,8 @@ def third_round_workflow_track(skill_path: Path, python: str, destination: Path)
     plan_dir = destination / "finalize_plan"
     summary_file = plan_dir / "notes" / "option_summary.md"
     finalize_file = plan_dir / "finalize.yaml"
+    alias_file = plan_dir / "workstream_alias.yaml"
+    bad_root = destination / "badlog" / "research_cockpit"
     summary_file.parent.mkdir(parents=True, exist_ok=True)
     summary_file.write_text("Forward check summary from finalize file directory.", encoding="utf-8")
     finalize_file.write_text(
@@ -451,8 +453,34 @@ def third_round_workflow_track(skill_path: Path, python: str, destination: Path)
         ),
         encoding="utf-8",
     )
+    alias_file.write_text(
+        "\n".join(
+            [
+                "problem:",
+                "  id: problem_forward_alias_preview",
+                "  title: Forward alias preview",
+                "active_option:",
+                "  id: option_forward_alias_active",
+                "  title: Forward alias active",
+                "followup_options:",
+                "  - id: option_forward_alias_follow",
+                "    title: Forward alias follow-up",
+                "    status: planned",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    setup_checks = _run_all(
+        [_cli(python, "init", "--root", str(bad_root), "--json")],
+        destination,
+        env=env,
+    )
+    (bad_root / "graph" / "interaction_log.yaml").write_text("events:\n- kind: broken\n  command: [\n", encoding="utf-8")
     commands = [
         _cli(python, "init", "--root", str(init_root), "--build", "--json"),
+        _cli(python, "commands", "--json", "--compact", "--name", "create-workstream"),
+        _cli(python, "create-workstream", "--root", root, "--file", str(alias_file), "--dry-run", "--json", "--compact"),
         _cli(python, "option-workstream-context", "--root", root, "--id", PROMPT_OPTION_ID, "--compact", "--json"),
         _cli(
             python,
@@ -466,11 +494,32 @@ def third_round_workflow_track(skill_path: Path, python: str, destination: Path)
             "--json",
             "--compact",
         ),
+        _cli(
+            python,
+            "update-status",
+            "--root",
+            str(bad_root),
+            "--id",
+            "option_baseline",
+            "--status",
+            "active",
+            "--dry-run",
+            "--json",
+            "--show-diff",
+        ),
     ]
-    checks = _run_all(commands, destination, env=env)
+    checks = [
+        *setup_checks,
+        *_run_all(commands, destination, allowed_returncodes=[{0}, {0}, {0}, {0}, {0}, {1}], env=env),
+    ]
     init_payload = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
-    context_payload = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
-    finalize_payload = checks[2].get("json") if isinstance(checks[2].get("json"), dict) else {}
+    init_build_payload = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
+    compact_manifest_payload = checks[2].get("json") if isinstance(checks[2].get("json"), dict) else {}
+    alias_payload = checks[3].get("json") if isinstance(checks[3].get("json"), dict) else {}
+    context_payload = checks[4].get("json") if isinstance(checks[4].get("json"), dict) else {}
+    finalize_payload = checks[5].get("json") if isinstance(checks[5].get("json"), dict) else {}
+    bad_dry_run_payload = checks[6].get("json") if isinstance(checks[6].get("json"), dict) else {}
+    compact_row = (compact_manifest_payload.get("commands") or [{}])[0] if isinstance(compact_manifest_payload, dict) else {}
     prompt_summary = next(
         (
             item
@@ -479,27 +528,54 @@ def third_round_workflow_track(skill_path: Path, python: str, destination: Path)
         ),
         {},
     ) if isinstance(context_payload, dict) else {}
+    compact_manifest_ok = (
+        compact_row.get("name") == "create-workstream"
+        and "example_file" not in compact_row
+        and "python_module_command" not in compact_row
+        and "cwd" not in compact_row
+        and compact_row.get("status_aliases") == {"option": {"planned": "open"}}
+    )
+    normalized_status_ok = alias_payload.get("normalized_statuses") == [
+        {
+            "node_id": "option_forward_alias_follow",
+            "node_type": "option",
+            "input_status": "planned",
+            "stored_status": "open",
+        }
+    ]
+    dry_run_preflight_failed = (
+        checks[6].get("returncode") == 1
+        and bad_dry_run_payload.get("written_files") == []
+        and "interaction_log.yaml" in str(bad_dry_run_payload.get("error", ""))
+    )
     source_changed = source_before != _file_manifest(skill_path)
     return _track(
         "track_f_third_round_workflow",
         all(check["passed"] for check in checks)
-        and init_payload.get("built") is True
+        and init_build_payload.get("built") is True
         and (init_root / "dashboards").exists()
+        and compact_manifest_ok
+        and normalized_status_ok
         and context_payload.get("option", {}).get("id") == PROMPT_OPTION_ID
         and "subtree_nodes" not in context_payload
         and int(prompt_summary.get("metric_count") or 0) > 0
         and finalize_payload.get("resolved_inputs", {}).get("summary_file") == str(summary_file)
         and finalize_payload.get("diff_included") is True
         and int(finalize_payload.get("diff_line_count") or 0) > 0
+        and dry_run_preflight_failed
         and not source_changed,
         checks=checks,
         summary={
             "copy_path": str(copy_path),
-            "init_built": init_payload.get("built"),
+            "bad_root_initialized": init_payload.get("root") == str(bad_root),
+            "init_built": init_build_payload.get("built"),
+            "compact_manifest_ok": compact_manifest_ok,
+            "normalized_status_ok": normalized_status_ok,
             "context_compact": "subtree_nodes" not in context_payload,
             "prompt_experiment_metric_count": prompt_summary.get("metric_count"),
             "resolved_summary_file": finalize_payload.get("resolved_inputs", {}).get("summary_file"),
             "diff_line_count": finalize_payload.get("diff_line_count"),
+            "dry_run_preflight_failed": dry_run_preflight_failed,
             "source_changed": source_changed,
         },
     )

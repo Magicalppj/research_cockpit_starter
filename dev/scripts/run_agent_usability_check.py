@@ -431,7 +431,6 @@ def agent_e_ui_collaboration_docs(skill_path: Path, python: str, parent: Path) -
         "React Flow": readme + "\n" + ui_doc,
         "Dagre": readme + "\n" + ui_doc,
         "Refresh": readme,
-        "刷新图谱": readme + "\n" + ui_doc,
         "PyVis": readme,
         "Temporary dragging is visual only": ui_doc,
         "without rebuilding the React bundle": ui_doc,

@@ -21,7 +21,7 @@ from research_cockpit.model import (
 )
 from research_cockpit.resources import build_link_rows
 from research_cockpit.suggestions import build_action_suggestions, build_suggestion_lifecycle_rows
-from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 
 
 VALID_CLEANUP_STATES = {"dismissed", "completed", "all"}
@@ -91,7 +91,7 @@ def cleanup_suggestion_lifecycle(
             if not dry_run:
                 finish_mutation(
                     root,
-                    [(root / "current_state.yaml", current)],
+                    [(root / "current_state.yaml", before_current, current)],
                     interaction={
                         "kind": "cleanup_suggestion_lifecycle",
                         "actor": "researcher",
@@ -123,6 +123,8 @@ def cleanup_suggestion_lifecycle(
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(root / "current_state.yaml", before_current, current)])
+    if dry_run:
+        return dry_run_preflight_result(root, result)
     return result
 
 

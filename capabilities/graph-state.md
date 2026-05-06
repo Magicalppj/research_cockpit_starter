@@ -12,15 +12,15 @@ Use this capability when reading or changing the research graph shape, saved gra
 
 The main research graph should stay focused on `stage -> problem -> option -> experiment -> decision`. `artifact` is still a valid node type, but it is supporting material by default and is hidden from the Streamlit graph unless the researcher explicitly enables it.
 
-## Read Commands
+## Validation And Generated Context
 
 ```sh
 research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit --json
 research-cockpit repair-interaction-log --root research_cockpit --dry-run --json --show-diff
+research-cockpit build --root research_cockpit --json
 ```
 
-`build --json` reports generated dashboard files and node count. It writes generated files only and does not append an interaction log event.
+`validate` and `repair-interaction-log --dry-run` are read-only. `build --json` reports generated dashboard files and node count; it writes generated files only and does not append an interaction log event.
 
 ## Saved Views
 
@@ -32,6 +32,6 @@ The Streamlit UI writes saved views through model helpers. Agents should treat `
 
 Key mutating commands append compact events to `interaction_log.yaml`, including focus changes, experiment findings, option claims/reports, suggestion application, decision acceptance, and saved graph views. Do not treat the log as the source of truth; use graph nodes and current state for current facts.
 
-Read-only context commands tolerate malformed log events by skipping them and returning warnings. `research-cockpit validate` treats malformed `interaction_log.yaml` as a data health error. Mutating commands must run sequentially for one data root; they use `graph/.mutation.lock` and refuse to write when the interaction log cannot be parsed safely. Lock timeout JSON includes the lock path, owner pid, creation timestamp, and wait time.
+Read-only context commands tolerate malformed log events by skipping them and returning warnings. `research-cockpit validate` treats malformed `interaction_log.yaml` as a data health error. Mutating commands, including dry-runs, strict-parse the log before returning success. Mutations must run sequentially for one data root; they use `graph/.mutation.lock`, refuse to write when the interaction log cannot be parsed safely, and fail without writing if a target truth-source file changed after command planning. Lock timeout JSON includes the lock path, owner pid, creation timestamp, wait time, and error text.
 
-Use `repair-interaction-log` only after validation reports interaction log schema damage. It preserves valid mapping events, drops invalid non-mapping event items, writes a backup on execution, and refuses YAML scanner errors instead of guessing a repair.
+Use `repair-interaction-log` only after validation or a mutating dry-run reports interaction log schema damage. It preserves valid mapping events, drops invalid non-mapping event items, writes a backup on execution, and refuses YAML scanner errors instead of guessing a repair.

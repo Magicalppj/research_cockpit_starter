@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from datetime import date
 from pathlib import Path
@@ -18,7 +19,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.decisions import build_decision_acceptance_checklist, decision_acceptance_failure_message
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -63,6 +64,9 @@ def accept_decision(
     decision_data = load_yaml(decision_path)
     option_data = load_yaml(option_path)
     problem_data = load_yaml(problem_path)
+    decision_before_data = copy.deepcopy(decision_data)
+    option_before_data = copy.deepcopy(option_data)
+    problem_before_data = copy.deepcopy(problem_data)
     before = {
         "decision_status": decision_data.get("status"),
         "option_status": option_data.get("status"),
@@ -110,7 +114,7 @@ def accept_decision(
     }
     if dry_run:
         result["changed"] = False
-        return result
+        return dry_run_preflight_result(root, result)
 
     command = f"{script_command('accept_decision.py')} --id {decision_id}"
     if force_accept:
@@ -118,9 +122,9 @@ def accept_decision(
     finish_mutation(
         root,
         [
-            (decision_path, decision_data),
-            (option_path, option_data),
-            (problem_path, problem_data),
+            (decision_path, decision_before_data, decision_data),
+            (option_path, option_before_data, option_data),
+            (problem_path, problem_before_data, problem_data),
         ],
         interaction={
             "kind": "accept_decision",

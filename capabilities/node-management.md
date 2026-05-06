@@ -10,7 +10,7 @@ research-cockpit add-node --root research_cockpit --id problem_x --type problem 
 
 Prefer explicit parent links. Keep IDs stable ASCII identifiers.
 
-`add-node` supports `--dry-run --json --show-diff` for previewing one node and `--no-build` for batching. It rebuilds dashboards by default. Batching means serial command execution; do not parallelize mutating commands against the same data root.
+`add-node` supports `--dry-run --json --show-diff` for previewing one node and `--no-build` for batching. It rebuilds dashboards by default. Batching means serial command execution; do not parallelize mutating commands against the same data root. If a mutation conflict is reported, another write changed the target truth-source file after this command planned its write; reread context and retry.
 
 ```sh
 research-cockpit add-node --root research_cockpit --id experiment_x --type experiment --title "..." --parent option_x --dry-run --json --show-diff
@@ -22,7 +22,7 @@ Do not create `artifact` nodes for routine files, configs, JSON outputs, or expe
 ## Batch Graph Plans
 
 Use `apply-graph-plan` when creating or updating several graph nodes. It validates the candidate graph once, writes all YAML only after validation passes, and rebuilds once by default.
-Use one batch command or run smaller mutating commands sequentially. Mutating commands share `graph/interaction_log.yaml` and use `graph/.mutation.lock`.
+Use one batch command or run smaller mutating commands sequentially. Mutating commands share `graph/interaction_log.yaml`, use `graph/.mutation.lock`, and refuse stale writes when target files changed after planning.
 
 ```sh
 research-cockpit apply-graph-plan --print-schema
@@ -109,7 +109,7 @@ followup_options:
 ```
 
 It creates the branch, sets the problem `current_best_option`, and adds experiment ids to the active option `supporting_experiments`. It does not change focus or pause old options.
-Use `open` for not-yet-selected follow-up options. File-based graph commands accept option status `planned` as an input alias and write `open` to truth-source YAML because `planned` is not a stored option status.
+Use `open` for not-yet-selected follow-up options. File-based graph commands accept option status `planned` as an input alias and write `open` to truth-source YAML because `planned` is not a stored option status. JSON results include `normalized_statuses` when this happens.
 `create-workstream --print-schema` shows the short supported example. Common node fields such as `summary`, `question`, `hypothesis`, `tags`, `success_criteria`, `metrics`, and `next_actions` pass through to the created graph nodes.
 After creation, use `option-workstream-context --root research_cockpit --id option_x --compact --json` to verify experiment ids, statuses, success criteria count, metric count, finding count, and linked artifact count. Read per-experiment `node-context` only when exact full text is needed.
 
@@ -121,7 +121,7 @@ research-cockpit update-status --root research_cockpit --id option_x --status ac
 ```
 
 Use only statuses accepted by validation for that node type.
-`update-status` rebuilds dashboards by default; pass `--no-build` when batching several mutations and run one final `validate` + `build`. `--summary` still replaces the node summary for compatibility, so preview with `--dry-run --show-diff` before using it on nodes that already have summaries. For content-only summary changes, prefer `update-node-fields --summary`.
+`update-status` rebuilds dashboards by default; pass `--no-build` when batching several mutations and run one final `validate` + `build`. `--summary` still replaces the node summary for compatibility, so preview with `--dry-run --show-diff` before using it on nodes that already have summaries. Dry-run strict-parses `interaction_log.yaml`, so a bad log fails before a misleading preview. For content-only summary changes, prefer `update-node-fields --summary`.
 
 Status meanings:
 

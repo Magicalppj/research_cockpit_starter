@@ -43,7 +43,7 @@ Required graph:
 - Follow-up option under the same problem:
   - `option_agent_flow_context_command`
   - `status: planned` input is acceptable when the CLI normalizes to stored
-    `open`
+    `open`; JSON should report the alias in `normalized_statuses`
 
 Expected short path:
 
@@ -63,6 +63,8 @@ Pass signals:
   `supporting_experiments`.
 - Compact option context includes experiment summaries with criteria and metric
   counts, so per-experiment `node-context` is not needed for quick verification.
+- `commands --json --compact --name create-workstream` returns a short command
+  discovery row without long examples or Python/cwd metadata.
 
 ## Case B: Evidence Close-Out
 
@@ -157,3 +159,10 @@ compared against a stable baseline. The current baseline from this harness is:
 | `track_e_portable_skill_agent` | 3 | 0 | 3 | 0 | 0 | 0 | 0 | none |
 
 `manual_yaml_patch_detected` should stay `false` for every automated track.
+`truth_source_changed_files` and `explained_truth_source_changes` show which
+YAML/Markdown truth-source writes were observed and whether they were explained
+by a Research Cockpit truth-source mutation command. A dashboard-only rebuild
+does not explain truth-source changes.
+Forward check also asserts that mutating `--dry-run --json` fails against a
+malformed `interaction_log.yaml` with `written_files: []`, instead of producing
+a successful preview that would later fail on actual execution.

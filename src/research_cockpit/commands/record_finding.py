@@ -19,7 +19,7 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 
 
 def find_node_file(root: Path, node_id: str) -> Path:
@@ -153,11 +153,11 @@ def record_finding_result(
     if show_diff:
         result["diff"] = yaml_change_diff([(path, before_data, data)])
     if dry_run:
-        return result
+        return dry_run_preflight_result(root, result)
 
     finish_mutation(
         root,
-        [(path, data)],
+        [(path, before_data, data)],
         interaction={
             "kind": "record_finding",
             "actor": "researcher",

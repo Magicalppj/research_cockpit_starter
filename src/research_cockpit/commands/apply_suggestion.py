@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from datetime import date
 from pathlib import Path
@@ -21,7 +22,7 @@ from research_cockpit.model import (
 )
 from research_cockpit.resources import build_link_rows
 from research_cockpit.suggestions import build_action_suggestions
-from research_cockpit.commands._runtime import finish_mutation
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -77,6 +78,7 @@ def apply_suggestion(
     if target == "current":
         target_path = root / "current_state.yaml"
         target_data = current
+        before_target_data = copy.deepcopy(current)
         before_actions = list(current.get("next_actions", []) or [])
         changed = _append_action(current, action, "current_state")
         validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
@@ -86,6 +88,7 @@ def apply_suggestion(
         target_path = find_node_file(root, node_id)
         node_data = load_yaml(target_path)
         target_data = node_data
+        before_target_data = copy.deepcopy(node_data)
         before_actions = list(node_data.get("next_actions", []) or [])
         changed = _append_action(node_data, action, node_id)
         candidate = dict(nodes)
@@ -106,11 +109,11 @@ def apply_suggestion(
         "after": {"target": target, "next_actions": after_actions},
     }
     if dry_run:
-        return result
+        return dry_run_preflight_result(root, result)
 
     finish_mutation(
         root,
-        [(target_path, target_data)],
+        [(target_path, before_target_data, target_data)],
         interaction={
             "kind": "apply_suggestion",
             "actor": "researcher",

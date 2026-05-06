@@ -13,6 +13,7 @@ ROOT = default_data_root()
 from research_cockpit.commands._evidence import append_unique, linked_resource_rows, parse_link_values, validate_node_refs
 from research_cockpit.commands._runtime import (
     compact_mutation_result,
+    dry_run_preflight_result,
     emit_json,
     finish_mutation,
     load_validated_state,
@@ -192,11 +193,11 @@ def create_artifact(
     if show_diff:
         result["diff"] = yaml_change_diff(changes)
     if dry_run:
-        return result
+        return dry_run_preflight_result(root, result)
 
     finish_mutation(
         root,
-        [(change_path, after) for change_path, _, after in changes],
+        changes,
         interaction={
             "kind": "create_artifact",
             "actor": "researcher",

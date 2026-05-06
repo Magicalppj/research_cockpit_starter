@@ -17,7 +17,7 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
-from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 
 
 def parse_path(value: str) -> list[str]:
@@ -136,12 +136,14 @@ def set_focus_result(
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(current_path, before_data, current)]) if changed else ""
-    if dry_run or not changed:
+    if dry_run:
+        return dry_run_preflight_result(root, result)
+    if not changed:
         return result
 
     finish_mutation(
         root,
-        [(current_path, current)],
+        [(current_path, before_data, current)],
         interaction={
             "kind": "set_focus",
             "actor": "researcher",

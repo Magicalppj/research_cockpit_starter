@@ -44,6 +44,7 @@ Finalize a workstream only when the close-out status changes are explicit:
 ```sh
 research-cockpit finalize-workstream --print-schema
 research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --dry-run --json --show-diff
+research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --json --compact
 research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --no-build
 research-cockpit finalize-workstream --root research_cockpit --option option_x --status accepted --problem-status resolved --summary-file summary.md --summary-target report --artifact artifact_x --sync-focus --report --dry-run --json --show-diff
 research-cockpit finalize-workstream --root research_cockpit --option option_x --status accepted --problem-status resolved --summary-file summary.md --summary-target report --artifact artifact_x --sync-focus --report --no-build
@@ -58,6 +59,7 @@ Use artifact commands for result folders, review bundles, metrics directories, a
 ```sh
 research-cockpit create-artifact --print-schema
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
+research-cockpit create-artifact --root research_cockpit --file artifact.yaml --json --compact
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --no-build
 research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --dry-run --json --show-diff
 research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --no-build
@@ -92,6 +94,7 @@ Use `complete-experiments` for sweeps or repeated backend/ablation runs:
 ```sh
 research-cockpit complete-experiments --print-schema
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
+research-cockpit complete-experiments --root research_cockpit --file findings.yaml --json --compact
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build
 ```
 
@@ -119,6 +122,7 @@ Revise an existing finding without patching YAML:
 
 ```sh
 research-cockpit update-finding --root research_cockpit --experiment experiment_x --finding-id experiment_x_finding_001 --statement "Updated finding" --artifact-id artifact_x --dry-run --json --show-diff
+research-cockpit update-finding --root research_cockpit --experiment experiment_x --finding-id experiment_x_finding_001 --statement "Updated finding" --artifact-id artifact_x --json --compact
 research-cockpit update-finding --root research_cockpit --experiment experiment_x --finding-id experiment_x_finding_001 --statement "Updated finding" --artifact-id artifact_x --no-build
 ```
 
@@ -134,7 +138,7 @@ After findings change, rebuild decision evidence when a decision depends on them
 research-cockpit update-decision-evidence --root research_cockpit --id decision_x
 ```
 
-When recording several related updates, run mutating commands sequentially. Do not parallelize writes against the same data root; mutating commands share `graph/interaction_log.yaml` and use a mutation lock. Use `--no-build` on each supported command and run one final:
+When recording several related updates, run mutating commands sequentially. Do not parallelize writes against the same data root; mutating commands share `graph/interaction_log.yaml`, use a mutation lock, and fail without writing if target truth-source files changed after command planning. On conflict, reread context and retry the stale command. Use `--no-build` on each supported command and run one final:
 
 ```sh
 research-cockpit validate --root research_cockpit --json

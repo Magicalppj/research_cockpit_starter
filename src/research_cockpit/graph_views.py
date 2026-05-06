@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Any
 import re
 
-from research_cockpit.commands._runtime import finish_mutation
 from research_cockpit.interaction_log import utc_timestamp
+from research_cockpit.mutation_runtime import finish_mutation
 from research_cockpit.storage import load_yaml
 from research_cockpit.types import (
     GRAPH_VIEW_FILTER_BOOL_KEYS,
@@ -114,6 +114,8 @@ def upsert_graph_view(root: Path, view: dict[str, Any]) -> dict[str, Any]:
     if not normalized:
         raise ValueError("graph view must be a mapping")
 
+    view_path = root / "graph" / "graph_views.yaml"
+    before_data = load_yaml(view_path) if view_path.exists() else None
     existing_views = load_graph_views(root)
     next_views: list[dict[str, Any]] = []
     replaced = False
@@ -135,7 +137,7 @@ def upsert_graph_view(root: Path, view: dict[str, Any]) -> dict[str, Any]:
 
     finish_mutation(
         root,
-        [(root / "graph" / "graph_views.yaml", {"version": 1, "views": next_views})],
+        [(view_path, before_data, {"version": 1, "views": next_views})],
         interaction={
             "kind": "save_graph_view",
             "before": before,

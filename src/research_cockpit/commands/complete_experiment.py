@@ -13,6 +13,7 @@ ROOT = default_data_root()
 from research_cockpit.commands._runtime import (
     MutationError,
     compact_mutation_result,
+    dry_run_preflight_result,
     emit_json,
     finish_mutation,
     load_validated_state,
@@ -155,11 +156,11 @@ def complete_experiment(
         result["diff"] = yaml_change_diff([(path, before_data, data)])
     if dry_run:
         result["changed"] = False
-        return result
+        return dry_run_preflight_result(root, result)
 
     finish_mutation(
         root,
-        [(path, data)],
+        [(path, before_data, data)],
         interaction={
             "kind": "complete_experiment",
             "actor": "researcher",

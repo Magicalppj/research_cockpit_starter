@@ -1,150 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import difflib
 import json
-import os
 from pathlib import Path
 import sys
-import tempfile
 from typing import Any
 import yaml
 
-from research_cockpit.interaction_log import append_interaction_log, load_interaction_log
-from research_cockpit.mutation_lock import MutationError, mutation_lock
-from research_cockpit.storage import save_text
-
-
-@dataclass(frozen=True)
-class CommandState:
-    nodes: dict[str, ResearchNode]
-    current: dict[str, Any]
-    explicit_edges: list[dict[str, Any]]
-
-
-def load_validated_state(root: Path) -> CommandState:
-    from research_cockpit.model import load_explicit_edges, load_nodes, load_yaml, validate_cockpit
-
-    nodes = load_nodes(root)
-    current = load_yaml(root / "current_state.yaml")
-    explicit_edges = load_explicit_edges(root)
-    validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
-    try:
-        load_interaction_log(root, strict=True)
-    except ValueError as exc:
-        raise MutationError(
-            str(exc),
-            {
-                "ok": False,
-                "partial_success": False,
-                "rolled_back": False,
-                "written_files": [],
-                "recovery_commands": [f"research-cockpit validate --root {root} --json"],
-            },
-        ) from exc
-    return CommandState(nodes=nodes, current=current, explicit_edges=explicit_edges)
-
-
-def _atomic_save_yaml(path: Path, data: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=".tmp-", suffix=".yaml", dir=path.parent)
-    temp_path = Path(temp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
-        temp_path.replace(path)
-    finally:
-        try:
-            temp_path.unlink()
-        except FileNotFoundError:
-            pass
-
-
-def _atomic_write_text(path: Path, text: str) -> None:
-    save_text(path, text)
-
-
-def _restore_files(backups: dict[Path, bytes | None]) -> list[str]:
-    errors: list[str] = []
-    for path, content in reversed(list(backups.items())):
-        try:
-            if content is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(content)
-        except OSError as exc:
-            errors.append(f"{path}: {exc}")
-    return errors
-
-
-def finish_mutation(
-    root: Path,
-    yaml_changes: list[tuple[Path, dict[str, Any]]],
-    *,
-    interaction: dict[str, Any],
-    rebuild_dashboard: bool,
-    text_changes: list[tuple[Path, str]] | None = None,
-) -> None:
-    written_files: list[str] = []
-    backups: dict[Path, bytes | None] = {}
-    text_changes = text_changes or []
-    with mutation_lock(root):
-        try:
-            load_interaction_log(root, strict=True)
-        except ValueError as exc:
-            raise MutationError(
-                str(exc),
-                {
-                    "ok": False,
-                    "partial_success": False,
-                    "rolled_back": False,
-                    "written_files": [],
-                    "recovery_commands": [f"research-cockpit validate --root {root} --json"],
-                },
-            ) from exc
-        for path, _ in [*yaml_changes, *text_changes]:
-            backups[path] = path.read_bytes() if path.exists() else None
-        try:
-            for path, data in yaml_changes:
-                _atomic_save_yaml(path, data)
-                written_files.append(str(path))
-            for path, text in text_changes:
-                _atomic_write_text(path, text)
-                written_files.append(str(path))
-            append_interaction_log(root, **interaction)
-        except Exception as exc:
-            rollback_errors = _restore_files(backups)
-            rolled_back = not rollback_errors
-            payload = {
-                "ok": False,
-                "partial_success": bool(written_files) and not rolled_back,
-                "rolled_back": rolled_back,
-                "written_files": written_files,
-                "recovery_commands": [
-                    f"research-cockpit validate --root {root} --json",
-                    f"research-cockpit build --root {root}",
-                ],
-            }
-            if rollback_errors:
-                payload["rollback_errors"] = rollback_errors
-            raise MutationError(f"Mutation failed while writing audit log; rolled_back={rolled_back}: {exc}", payload) from exc
-        if rebuild_dashboard:
-            try:
-                from research_cockpit.commands.build_dashboard import build_dashboard
-
-                build_dashboard(root)
-            except Exception as exc:
-                raise MutationError(
-                    f"Mutation succeeded but dashboard build failed: {exc}",
-                    {
-                        "ok": False,
-                        "partial_success": True,
-                        "rolled_back": False,
-                        "written_files": written_files,
-                        "recovery_commands": [f"research-cockpit build --root {root}"],
-                    },
-                ) from exc
+from research_cockpit.mutation_lock import MutationError
+from research_cockpit.mutation_runtime import CommandState, finish_mutation, load_validated_state, preflight_mutation
 
 
 def yaml_preview(data: dict[str, Any] | None) -> str:
@@ -224,4 +88,13 @@ def compact_mutation_result(
         payload["diff"] = diff
     if "resolved_inputs" in result:
         payload["resolved_inputs"] = result["resolved_inputs"]
+    if "preflight_ok" in result:
+        payload["preflight_ok"] = result["preflight_ok"]
+    if "normalized_statuses" in result:
+        payload["normalized_statuses"] = result["normalized_statuses"]
     return payload
+
+
+def dry_run_preflight_result(root: Path, result: dict[str, Any]) -> dict[str, Any]:
+    result.update(preflight_mutation(root))
+    return result

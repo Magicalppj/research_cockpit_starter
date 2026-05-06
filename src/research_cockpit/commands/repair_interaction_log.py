@@ -67,15 +67,22 @@ def repair_interaction_log(
     candidate, dropped_count, warnings = _candidate_document(data)
     before_for_diff = data if isinstance(data, dict) else {"invalid_document": data}
     changed = before_for_diff != candidate
-    diff = yaml_change_diff([(path, before_for_diff, candidate)]) if show_diff and changed else ""
-    backup_path = _backup_path(path) if changed and not dry_run else None
 
     if changed and not dry_run:
         with mutation_lock(root):
-            if path.exists():
-                backup_path = _backup_path(path)
-                backup_path.write_bytes(path.read_bytes())
-            save_yaml(path, candidate)
+            data = _load_interaction_log_document(path)
+            candidate, dropped_count, warnings = _candidate_document(data)
+            before_for_diff = data if isinstance(data, dict) else {"invalid_document": data}
+            changed = before_for_diff != candidate
+            backup_path = None
+            if changed:
+                if path.exists():
+                    backup_path = _backup_path(path)
+                    backup_path.write_bytes(path.read_bytes())
+                save_yaml(path, candidate)
+    else:
+        backup_path = None
+    diff = yaml_change_diff([(path, before_for_diff, candidate)]) if show_diff and changed else ""
 
     payload: dict[str, Any] = {
         "ok": True,

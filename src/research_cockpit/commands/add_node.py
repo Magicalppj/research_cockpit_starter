@@ -10,7 +10,7 @@ from typing import Any
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 from research_cockpit.model import (
     VALID_NODE_TYPES,
     ResearchNode,
@@ -102,11 +102,11 @@ def add_node_result(
     if show_diff:
         result["diff"] = yaml_change_diff([(out, None, data)])
     if dry_run:
-        return result
+        return dry_run_preflight_result(root, result)
 
     finish_mutation(
         root,
-        [(out, data)],
+        [(out, None, data)],
         interaction={
             "kind": "add_node",
             "actor": "researcher",

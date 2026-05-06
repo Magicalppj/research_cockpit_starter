@@ -10,7 +10,7 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.graph_core import unique_strings
 from research_cockpit.model import ValidationError, load_yaml, script_command, validate_cockpit
 
@@ -68,12 +68,14 @@ def sync_focus_actions(
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(current_path, before_data, current)]) if changed else ""
-    if dry_run or not changed:
+    if dry_run:
+        return dry_run_preflight_result(root, result)
+    if not changed:
         return result
 
     finish_mutation(
         root,
-        [(current_path, current)],
+        [(current_path, before_data, current)],
         interaction={
             "kind": "sync_focus_actions",
             "actor": "researcher",

@@ -24,7 +24,9 @@ The graph uses React Flow with Dagre layout. Node clicks return a selected node 
 
 The graph hides `artifact` nodes by default so the first view stays focused on research reasoning. Researchers can show artifact nodes from Graph Controls when they need to inspect supporting materials in the graph.
 
-Use `刷新图谱 / Refresh` when a background agent has changed YAML. Refresh reruns Streamlit and reloads the current graph data without rebuilding the React bundle.
+React Flow is the default graph renderer. PyVis remains available as a legacy fallback when the React Flow production build is missing.
+
+Use `Refresh` when a background agent has changed YAML. Refresh reruns Streamlit and reloads the current graph data without rebuilding the React bundle.
 
 ## Frontend Build
 

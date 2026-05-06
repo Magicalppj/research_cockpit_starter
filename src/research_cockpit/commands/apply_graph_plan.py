@@ -12,6 +12,7 @@ ROOT = default_data_root()
 
 from research_cockpit.commands._runtime import (
     compact_mutation_result,
+    dry_run_preflight_result,
     emit_json,
     finish_mutation,
     load_validated_state,
@@ -72,6 +73,7 @@ class GraphPlanBuilder:
         self.created_ids: list[str] = []
         self.updated_ids: set[str] = set()
         self.status_aliases: list[dict[str, str]] = []
+        self.normalized_statuses: list[dict[str, str]] = []
 
     def mutable_data(self, node_id: str) -> dict[str, Any]:
         if node_id in self.data_by_id:
@@ -96,6 +98,12 @@ class GraphPlanBuilder:
         status, alias_from = _normalize_input_status(node_type, raw_status)
         validate_status(node_type, status)
         if alias_from:
+            self.normalized_statuses.append({
+                "node_id": node_id,
+                "node_type": node_type,
+                "input_status": alias_from,
+                "stored_status": status,
+            })
             self.status_aliases.append({
                 "node_id": node_id,
                 "type": node_type,
@@ -230,7 +238,7 @@ def apply_graph_plan(
     validate_cockpit(root, builder.candidate, builder.state.current, builder.state.explicit_edges, raise_on_error=True)
 
     changes = builder.changes()
-    yaml_changes = [(path, after) for _, path, _, after in changes]
+    yaml_changes = [(path, before, after) for _, path, before, after in changes]
     changed = bool(changes)
     result: dict[str, Any] = {
         "dry_run": dry_run,
@@ -240,10 +248,13 @@ def apply_graph_plan(
         "updated_nodes": sorted(builder.updated_ids),
         "changed_files": [str(path) for _, path, _, _ in changes],
         "status_aliases": builder.status_aliases,
+        "normalized_statuses": builder.normalized_statuses,
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(path, before, after) for _, path, before, after in changes])
-    if dry_run or not changed:
+    if dry_run:
+        return dry_run_preflight_result(root, result)
+    if not changed:
         return result
 
     finish_mutation(

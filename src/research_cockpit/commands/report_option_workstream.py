@@ -21,7 +21,7 @@ from research_cockpit.model import (
 )
 from research_cockpit.option_workstreams import build_option_workstream_context
 from research_cockpit.decisions import normalize_locale
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -107,11 +107,11 @@ def report_option_workstream(
         preview["diff"] = yaml_change_diff([(option_path, before_data, data)])
     if dry_run:
         preview["changed"] = False
-        return preview
+        return dry_run_preflight_result(root, preview)
 
     finish_mutation(
         root,
-        [(option_path, data)],
+        [(option_path, before_data, data)],
         interaction={
             "kind": "report_option",
             "actor": agent_id,

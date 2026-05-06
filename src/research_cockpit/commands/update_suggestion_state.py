@@ -22,7 +22,7 @@ from research_cockpit.model import (
 )
 from research_cockpit.resources import build_link_rows
 from research_cockpit.suggestions import build_action_suggestions
-from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 
 
 def _find_suggestion(suggestions: list[dict[str, Any]], suggestion_id: str) -> dict[str, Any]:
@@ -93,7 +93,7 @@ def update_suggestion_state(
         if not dry_run:
             finish_mutation(
                 root,
-                [(root / "current_state.yaml", current)],
+                [(root / "current_state.yaml", before_current, current)],
                 interaction={
                     "kind": "update_suggestion_state",
                     "actor": "researcher",
@@ -130,6 +130,8 @@ def update_suggestion_state(
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(root / "current_state.yaml", before_current, current)])
+    if dry_run:
+        return dry_run_preflight_result(root, result)
     return result
 
 

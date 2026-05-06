@@ -4,21 +4,29 @@ Use this capability at the start of an agent session and before making local res
 
 ## Startup Read Order
 
-1. Bootstrap:
+Choose one startup path. Do not run both bootstrap and `context --with-bootstrap` for normal known-node work.
 
-```sh
-research-cockpit bootstrap --root research_cockpit --json
-```
-
-2. If a human assigns a specific node id, go straight to compact node handoff:
+1. Known node id:
 
 ```sh
 research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
 ```
 
+2. Unknown target or global triage:
+
+```sh
+research-cockpit bootstrap --root research_cockpit --json
+```
+
+3. Older minimal known-node handoff:
+
+```sh
+research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
+```
+
 For known-node continuation, compact `context` is the preferred one-command handoff when artifact and validation context matter. Bootstrap plus compact `node-context` remains fine for the older minimal flow. Do not also read both context packs unless you need global state or generated dashboard context.
 
-3. If dashboard files are missing or stale and generated-file writes are allowed:
+4. If dashboard files are missing or stale and generated-file writes are allowed:
 
 ```sh
 research-cockpit build --root research_cockpit
@@ -26,7 +34,7 @@ research-cockpit build --root research_cockpit
 
 For a brand-new data root, use `research-cockpit init --root research_cockpit --build --json` if the next step will read generated context packs. Do not run `bootstrap --build` or `build` during read-only onboarding.
 
-4. Read generated context only for global scans:
+5. Read generated context only for global scans:
    - `research_cockpit/dashboards/agent_context_pack.json`
    - `research_cockpit/dashboards/focus_context_pack.json`
    - `research_cockpit/dashboards/search_index.json` when searching.

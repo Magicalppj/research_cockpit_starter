@@ -12,7 +12,7 @@ from research_cockpit.paths import default_data_root
 ROOT = default_data_root()
 
 from research_cockpit.model import ResearchNode, load_nodes, load_yaml, validate_cockpit, script_command
-from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 
 
 NOTE_DIR_BY_TYPE = {
@@ -147,12 +147,14 @@ def create_note_result(
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(node_path, before_data, data)]) + _text_diff(note_path, note_before, note_text)
-    if dry_run or not changed:
+    if dry_run:
+        return dry_run_preflight_result(root, result)
+    if not changed:
         return result
 
     finish_mutation(
         root,
-        [(node_path, data)],
+        [(node_path, before_data, data)],
         interaction={
             "kind": "create_note",
             "actor": "researcher",
@@ -162,7 +164,7 @@ def create_note_result(
             "after": result["after"],
         },
         rebuild_dashboard=rebuild_dashboard,
-        text_changes=[(note_path, note_text)],
+        text_changes=[(note_path, note_before, note_text)],
     )
     return result
 

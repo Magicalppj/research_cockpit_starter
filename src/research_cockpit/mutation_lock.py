@@ -44,18 +44,20 @@ class mutation_lock:
             except FileExistsError as exc:
                 if time.monotonic() >= deadline:
                     metadata = self._metadata()
+                    message = f"Timed out waiting for mutation lock: {self.path}"
                     payload = {
                         "ok": False,
                         "partial_success": False,
                         "rolled_back": False,
                         "written_files": [],
+                        "error": message,
                         "recovery_commands": [],
                         "lock_path": str(self.path),
                         "owner_pid": metadata.get("pid"),
                         "created_at": metadata.get("created_at"),
                         "waited_seconds": round(time.monotonic() - start, 3),
                     }
-                    raise MutationError(f"Timed out waiting for mutation lock: {self.path}", payload) from exc
+                    raise MutationError(message, payload) from exc
                 time.sleep(0.1)
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:

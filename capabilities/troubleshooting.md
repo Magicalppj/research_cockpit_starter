@@ -34,7 +34,7 @@ Common causes:
 - Decision checklist fields are missing or reference invalid option IDs.
 - `graph/interaction_log.yaml` has invalid `events` shape or malformed YAML.
 
-For interaction log schema damage, preview the repair before writing:
+For interaction log schema damage reported by `validate` or by a mutating dry-run, preview the repair before writing:
 
 ```sh
 research-cockpit repair-interaction-log --root research_cockpit --dry-run --json --show-diff

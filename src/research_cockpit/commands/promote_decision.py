@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from datetime import date
 from pathlib import Path
@@ -24,7 +25,7 @@ from research_cockpit.decisions import (
     decision_acceptance_failure_message,
     normalize_locale,
 )
-from research_cockpit.commands._runtime import finish_mutation
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -127,6 +128,8 @@ def promote_decision(
     problem_data = None
     option_before = None
     problem_before = None
+    option_before_data = None
+    problem_before_data = None
     problem_id = option.parent
     if status == "accepted":
         checklist = build_decision_acceptance_checklist(candidate, decision_id)
@@ -135,6 +138,7 @@ def promote_decision(
 
         option_path = find_node_file(root, option_id)
         option_data = load_yaml(option_path)
+        option_before_data = copy.deepcopy(option_data)
         option_before = {
             "status": option_data.get("status"),
             "decision_state": option_data.get("decision_state"),
@@ -147,6 +151,7 @@ def promote_decision(
         if problem_id and problem_id in nodes and nodes[problem_id].type == "problem":
             problem_path = find_node_file(root, str(problem_id))
             problem_data = load_yaml(problem_path)
+            problem_before_data = copy.deepcopy(problem_data)
             problem_before = {
                 "status": problem_data.get("status"),
                 "resolved_by": problem_data.get("resolved_by"),
@@ -187,13 +192,13 @@ def promote_decision(
     }
     if dry_run:
         preview["changed"] = False
-        return preview
+        return dry_run_preflight_result(root, preview)
 
-    changes = [(out, decision_data)]
+    changes = [(out, None, decision_data)]
     if option_data is not None:
-        changes.append((find_node_file(root, option_id), option_data))
+        changes.append((find_node_file(root, option_id), option_before_data, option_data))
     if problem_data is not None and problem_id:
-        changes.append((find_node_file(root, str(problem_id)), problem_data))
+        changes.append((find_node_file(root, str(problem_id)), problem_before_data, problem_data))
     finish_mutation(
         root,
         changes,

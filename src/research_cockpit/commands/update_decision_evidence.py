@@ -21,7 +21,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.decisions import build_decision_evidence_bundle, normalize_locale
-from research_cockpit.commands._runtime import finish_mutation, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -67,7 +67,7 @@ def update_decision_evidence(
     if changed and not dry_run:
         finish_mutation(
             root,
-            [(decision_path, decision_data)],
+            [(decision_path, before_data, decision_data)],
             interaction={
                 "kind": "update_decision_evidence",
                 "actor": "researcher",
@@ -106,6 +106,8 @@ def update_decision_evidence(
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(decision_path, before_data, decision_data)])
+    if dry_run:
+        return dry_run_preflight_result(root, result)
     return result
 
 

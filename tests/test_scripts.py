@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import unittest
 import uuid
 from datetime import date
@@ -16,6 +17,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT_DIR
 SRC_DIR = ROOT_DIR / "src"
 sys.path.insert(0, str(SRC_DIR))
+DEV_SCRIPTS_DIR = ROOT_DIR / "dev" / "scripts"
+sys.path.insert(0, str(DEV_SCRIPTS_DIR))
 existing_pythonpath = os.environ.get("PYTHONPATH", "")
 os.environ["PYTHONPATH"] = str(SRC_DIR) if not existing_pythonpath else str(SRC_DIR) + os.pathsep + existing_pythonpath
 
@@ -56,6 +59,8 @@ from research_cockpit.commands.update_suggestion_state import update_suggestion_
 from research_cockpit.commands.update_status import update_status
 from research_cockpit.graph_views import upsert_graph_view
 from research_cockpit.mutation_lock import MutationError, mutation_lock
+from research_cockpit.mutation_runtime import finish_mutation
+from workflow_metrics import workflow_metrics
 
 
 def write_node(root: Path, data: dict) -> None:
@@ -64,6 +69,16 @@ def write_node(root: Path, data: dict) -> None:
 
 def interaction_events(root: Path) -> list[dict]:
     return load_yaml(root / "graph" / "interaction_log.yaml").get("events", [])
+
+
+def write_malformed_interaction_log(root: Path) -> None:
+    (root / "graph" / "interaction_log.yaml").write_text("events:\n- kind: broken\n  command: [\n", encoding="utf-8")
+
+
+def assert_mutation_json_failed_without_writes(testcase: unittest.TestCase, payload: dict) -> None:
+    testcase.assertFalse(payload["partial_success"])
+    testcase.assertEqual(payload["written_files"], [])
+    testcase.assertIn("interaction_log.yaml", payload["error"])
 
 
 def cli_command(command: str, *args: str) -> list[str]:
@@ -489,7 +504,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse((env_root / "dashboards").exists())
 
     def test_upsert_graph_view_rejects_malformed_interaction_log_without_write(self) -> None:
-        (self.root / "graph" / "interaction_log.yaml").write_text("events:\n- kind: broken\n  command: [\n", encoding="utf-8")
+        write_malformed_interaction_log(self.root)
 
         with self.assertRaises(MutationError):
             upsert_graph_view(self.root, {"title": "Broken log view"})
@@ -507,6 +522,88 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["owner_pid"], str(os.getpid()))
         self.assertIn("created_at", payload)
         self.assertGreaterEqual(payload["waited_seconds"], 0)
+        self.assertIn("error", payload)
+
+    def test_finish_mutation_rejects_stale_yaml_before_without_write(self) -> None:
+        current_path = self.root / "current_state.yaml"
+        before = load_yaml(current_path)
+        stale_after = dict(before)
+        stale_after["next_actions"] = ["stale write"]
+        newer_current = dict(before)
+        newer_current["current_hypothesis"] = "newer concurrent write"
+        save_yaml(current_path, newer_current)
+
+        with self.assertRaises(MutationError) as ctx:
+            finish_mutation(
+                self.root,
+                [(current_path, before, stale_after)],
+                interaction={"kind": "test_stale_conflict"},
+                rebuild_dashboard=False,
+            )
+
+        payload = ctx.exception.payload
+        self.assertFalse(payload["partial_success"])
+        self.assertFalse(payload["rolled_back"])
+        self.assertEqual(payload["conflict_files"], [str(current_path)])
+        self.assertEqual(load_yaml(current_path), newer_current)
+
+    def test_parallel_complete_experiment_writes_different_nodes_serially(self) -> None:
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        option = load_yaml(option_path)
+        option["children"] = [*option.get("children", []), "exp_t6"]
+        save_yaml(option_path, option)
+        write_node(
+            self.root,
+            {
+                "id": "exp_t6",
+                "type": "experiment",
+                "title": "T6 ablation",
+                "status": "planned",
+                "parent": "option_t5",
+            },
+        )
+        commands = [
+            [
+                *cli_command("complete-experiment"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_t5",
+                "--finding",
+                "T5 completed.",
+                "--confidence",
+                "medium",
+                "--no-build",
+                "--json",
+            ],
+            [
+                *cli_command("complete-experiment"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_t6",
+                "--finding",
+                "T6 completed.",
+                "--confidence",
+                "medium",
+                "--no-build",
+                "--json",
+            ],
+        ]
+
+        procs = [
+            subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            for command in commands
+        ]
+        results = [proc.communicate(timeout=20) for proc in procs]
+
+        for proc, (stdout, stderr) in zip(procs, results):
+            self.assertEqual(proc.returncode, 0, stderr or stdout)
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")["status"], "done")
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "exp_t6.yaml")["status"], "done")
+        events = interaction_events(self.root)
+        self.assertEqual(len(events), 2)
+        self.assertTrue(all(isinstance(event, dict) for event in events))
 
     def test_cli_delegates_subcommand_help(self) -> None:
         out = subprocess.run(
@@ -1495,6 +1592,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_name["apply-graph-plan"]["file_schema"], "graph_plan_v1")
         self.assertIn("nodes:", by_name["apply-graph-plan"]["example_file"])
         self.assertIn("--print-schema", by_name["apply-graph-plan"]["schema_command"])
+        self.assertEqual(by_name["apply-graph-plan"]["status_aliases"], {"option": {"planned": "open"}})
         self.assertTrue(by_name["create-workstream"]["supports_json"])
         self.assertEqual(by_name["create-workstream"]["file_schema"], "workstream_v1")
         self.assertIn("followup_options:", by_name["create-workstream"]["example_file"])
@@ -1506,6 +1604,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("hypothesis", by_name["create-workstream"]["fields_supported"])
         self.assertIn("success_criteria", by_name["create-workstream"]["fields_supported"])
         self.assertIn("metrics", by_name["create-workstream"]["fields_supported"])
+        self.assertEqual(by_name["create-workstream"]["status_aliases"], {"option": {"planned": "open"}})
         self.assertTrue(by_name["sync-focus-actions"]["supports_dry_run"])
         self.assertTrue(by_name["complete-experiment"]["mutating"])
         self.assertTrue(by_name["complete-experiment"]["supports_json"])
@@ -1560,6 +1659,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         for command in manifest:
             if command["mutating"]:
                 self.assertTrue(command["requires_serial_mutation"], command["name"])
+                self.assertIn("changed after command planning", command["conflict_policy"])
         self.assertTrue(all(item["command"].startswith("research-cockpit ") for item in manifest))
         self.assertTrue(all("plugin_command" not in item for item in manifest))
 
@@ -1610,6 +1710,28 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("create-artifact", {item["name"] for item in workflow_payload["commands"]})
         self.assertTrue(all("evidence" in item["workflow_tags"] for item in workflow_payload["commands"]))
 
+    def test_workflow_metrics_detects_manual_truth_patch_even_after_build(self) -> None:
+        metrics = workflow_metrics(
+            [{"command": cli_command("build"), "passed": True}],
+            files_changed=[
+                "research_cockpit/graph/nodes/problem_x.yaml",
+                "research_cockpit/dashboards/graph_view.json",
+            ],
+        )
+
+        self.assertTrue(metrics["manual_yaml_patch_detected"])
+        self.assertEqual(metrics["truth_source_changed_files"], ["research_cockpit/graph/nodes/problem_x.yaml"])
+        self.assertEqual(metrics["explained_truth_source_changes"], [])
+
+    def test_workflow_metrics_treats_truth_mutation_as_explained_change(self) -> None:
+        metrics = workflow_metrics(
+            [{"command": cli_command("update-status"), "passed": True}],
+            files_changed=["research_cockpit/graph/nodes/problem_x.yaml"],
+        )
+
+        self.assertFalse(metrics["manual_yaml_patch_detected"])
+        self.assertEqual(metrics["explained_truth_source_changes"], ["research_cockpit/graph/nodes/problem_x.yaml"])
+
     def test_documented_flags_match_help_and_manifest(self) -> None:
         flag_fields = {
             "--compact": "supports_compact",
@@ -1645,7 +1767,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                     self.assertIn(flag, help_out.stdout)
                     self.assertTrue(manifest[command].get(flag_fields[flag]), f"{command} missing {flag_fields[flag]}")
 
-    def test_list_agent_commands_compact_json_omits_long_examples(self) -> None:
+    def test_list_agent_commands_compact_json_returns_short_discovery_payload(self) -> None:
         out = subprocess.run(
             [*cli_command("commands"), "--json", "--compact"],
             capture_output=True,
@@ -1656,9 +1778,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         by_name = {item["name"]: item for item in payload["commands"]}
 
         self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
-        self.assertEqual(by_name["create-workstream"]["file_schema"], "workstream_v1")
         self.assertIn("--print-schema", by_name["create-workstream"]["schema_command"])
+        self.assertEqual(by_name["create-workstream"]["status_aliases"], {"option": {"planned": "open"}})
         self.assertNotIn("example_file", by_name["create-workstream"])
+        self.assertNotIn("python_module_command", by_name["create-workstream"])
+        self.assertNotIn("cwd", by_name["create-workstream"])
+        self.assertNotIn("fields_supported", by_name["create-workstream"])
         self.assertNotIn("example_file", by_name["complete-experiments"])
 
     def test_file_commands_expose_schema_help_and_print_schema(self) -> None:
@@ -1945,7 +2070,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(bad_log_payload["ok"])
         self.assertTrue(any("interaction_log.yaml" in error and "events[1]" in error for error in bad_log_payload["errors"]))
 
-        (self.root / "graph" / "interaction_log.yaml").write_text("events:\n- kind: broken\n  command: [\n", encoding="utf-8")
+        write_malformed_interaction_log(self.root)
         malformed_log = subprocess.run(
             [*cli_command(command), "--root", str(self.root), "--json"],
             capture_output=True,
@@ -2001,6 +2126,30 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertIn("cannot be repaired automatically", payload["error"])
         self.assertEqual(before, log_path.read_text(encoding="utf-8"))
+
+    def test_repair_interaction_log_rereads_after_waiting_for_lock(self) -> None:
+        log_path = self.root / "graph" / "interaction_log.yaml"
+        save_yaml(log_path, {"events": [{"kind": "ok"}, "bad event"]})
+
+        with mutation_lock(self.root):
+            proc = subprocess.Popen(
+                [*cli_command("repair-interaction-log"), "--root", str(self.root), "--json"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            time.sleep(0.5)
+            log = load_yaml(log_path)
+            log["events"].append({"kind": "while_waiting"})
+            save_yaml(log_path, log)
+
+        stdout, stderr = proc.communicate(timeout=10)
+        payload = json.loads(stdout)
+        repaired = load_yaml(log_path)
+
+        self.assertEqual(proc.returncode, 0, stderr or stdout)
+        self.assertTrue(payload["changed"])
+        self.assertEqual([event["kind"] for event in repaired["events"]], ["ok", "while_waiting"])
 
     def test_cli_help_documents_status_and_decision_checklist_constraints(self) -> None:
         status_help = subprocess.run(
@@ -2518,7 +2667,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
     def test_update_suggestion_state_rejects_malformed_interaction_log_without_write(self) -> None:
         before = (self.root / "current_state.yaml").read_text(encoding="utf-8")
-        (self.root / "graph" / "interaction_log.yaml").write_text("events:\n- kind: broken\n  command: [\n", encoding="utf-8")
+        write_malformed_interaction_log(self.root)
 
         with self.assertRaises(MutationError):
             update_suggestion_state(
@@ -3263,7 +3412,7 @@ class ScriptBehaviorTests(unittest.TestCase):
     def test_complete_experiment_rejects_malformed_interaction_log_without_partial_write(self) -> None:
         experiment_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
         before = experiment_path.read_text(encoding="utf-8")
-        (self.root / "graph" / "interaction_log.yaml").write_text("events:\n- kind: broken\n  command: [\n", encoding="utf-8")
+        write_malformed_interaction_log(self.root)
 
         with self.assertRaises(MutationError) as ctx:
             complete_experiment(
@@ -3298,6 +3447,65 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(payload["partial_success"])
         self.assertFalse(payload["rolled_back"])
         self.assertEqual(before, experiment_path.read_text(encoding="utf-8"))
+
+    def test_update_status_dry_run_rejects_malformed_interaction_log_without_write(self) -> None:
+        node_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        before = node_path.read_text(encoding="utf-8")
+        write_malformed_interaction_log(self.root)
+
+        out = subprocess.run(
+            [
+                *cli_command("update-status"),
+                "--root",
+                str(self.root),
+                "--id",
+                "option_t5",
+                "--status",
+                "promising",
+                "--dry-run",
+                "--show-diff",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1)
+        assert_mutation_json_failed_without_writes(self, payload)
+        self.assertEqual(before, node_path.read_text(encoding="utf-8"))
+
+    def test_create_workstream_dry_run_rejects_malformed_interaction_log_without_write(self) -> None:
+        plan_path = self.tmp_root / "workstream_bad_log.yaml"
+        save_yaml(
+            plan_path,
+            {
+                "problem": {"id": "problem_bad_log_preview", "title": "Bad log preview"},
+                "active_option": {"id": "option_bad_log_preview", "title": "Bad log option"},
+            },
+        )
+        write_malformed_interaction_log(self.root)
+
+        out = subprocess.run(
+            [
+                *cli_command("create-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(plan_path),
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1)
+        assert_mutation_json_failed_without_writes(self, payload)
+        self.assertFalse((self.root / "graph" / "nodes" / "problem_bad_log_preview.yaml").exists())
 
     def test_complete_experiment_reports_partial_success_when_build_fails(self) -> None:
         with patch("research_cockpit.commands.build_dashboard.build_dashboard", side_effect=RuntimeError("build exploded")):
@@ -3774,6 +3982,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertTrue(dry_run["would_change"])
         self.assertFalse(dry_run["changed"])
+        self.assertTrue(dry_run["preflight_ok"])
         self.assertFalse((self.root / "graph" / "nodes" / "problem_preview.yaml").exists())
 
         with self.assertRaises(ValueError):
@@ -3866,6 +4075,46 @@ class ScriptBehaviorTests(unittest.TestCase):
                     "type": "option",
                     "from": "planned",
                     "to": "open",
+                }
+            ],
+        )
+        self.assertEqual(
+            result["normalized_statuses"],
+            [
+                {
+                    "node_id": "option_planned_alias_follow",
+                    "node_type": "option",
+                    "input_status": "planned",
+                    "stored_status": "open",
+                }
+            ],
+        )
+
+    def test_apply_graph_plan_reports_normalized_statuses_for_option_alias(self) -> None:
+        result = apply_graph_plan(
+            self.root,
+            plan={
+                "nodes": [
+                    {
+                        "id": "option_plan_alias",
+                        "type": "option",
+                        "title": "Alias option",
+                        "parent": "problem_text",
+                        "status": "planned",
+                    }
+                ]
+            },
+            dry_run=True,
+        )
+
+        self.assertEqual(
+            result["normalized_statuses"],
+            [
+                {
+                    "node_id": "option_plan_alias",
+                    "node_type": "option",
+                    "input_status": "planned",
+                    "stored_status": "open",
                 }
             ],
         )
@@ -4194,7 +4443,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             },
         )
         before = (self.root / "graph" / "nodes" / "decision_t5.yaml").read_text(encoding="utf-8")
-        (self.root / "graph" / "interaction_log.yaml").write_text("events:\n- kind: broken\n  command: [\n", encoding="utf-8")
+        write_malformed_interaction_log(self.root)
 
         with self.assertRaises(MutationError):
             update_decision_evidence(self.root, decision_id="decision_t5", rebuild_dashboard=False)
@@ -4420,7 +4669,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             },
         )
         before = (self.root / "graph" / "nodes" / "decision_t5.yaml").read_text(encoding="utf-8")
-        (self.root / "graph" / "interaction_log.yaml").write_text("events:\n- kind: broken\n  command: [\n", encoding="utf-8")
+        write_malformed_interaction_log(self.root)
 
         with self.assertRaises(MutationError):
             update_decision_checklist(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 from datetime import date
 from pathlib import Path
@@ -19,7 +20,7 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state
 from research_cockpit.commands.record_finding import find_node_file
 
 
@@ -58,6 +59,7 @@ def claim_option(
 
     option_path = find_node_file(root, option_id)
     data = load_yaml(option_path)
+    before_data = copy.deepcopy(data)
     existing = data.get("agent_workstream") if isinstance(data.get("agent_workstream"), dict) else {}
     before_workstream = dict(existing) if existing else None
     existing_owner = str(existing.get("owner") or "")
@@ -101,14 +103,14 @@ def claim_option(
     }
     if dry_run:
         preview["changed"] = False
-        return preview
+        return dry_run_preflight_result(root, preview)
 
     command = f"{script_command('claim_option.py')} --option {option_id} --agent {agent_id} --status {status}"
     if force:
         command += " --force"
     finish_mutation(
         root,
-        [(option_path, data)],
+        [(option_path, before_data, data)],
         interaction={
             "kind": "claim_option",
             "actor": agent_id,

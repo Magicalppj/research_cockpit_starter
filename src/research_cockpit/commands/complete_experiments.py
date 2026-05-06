@@ -13,6 +13,7 @@ ROOT = default_data_root()
 from research_cockpit.commands._evidence import append_unique, validate_artifact_ids
 from research_cockpit.commands._runtime import (
     compact_mutation_result,
+    dry_run_preflight_result,
     emit_json,
     finish_mutation,
     load_validated_state,
@@ -209,12 +210,14 @@ def complete_experiments(
     }
     if show_diff:
         result["diff"] = yaml_change_diff(changes) if changed else ""
-    if dry_run or not changed:
+    if dry_run:
+        return dry_run_preflight_result(root, result)
+    if not changed:
         return result
 
     finish_mutation(
         root,
-        [(path, after) for path, _, after in changes],
+        changes,
         interaction={
             "kind": "complete_experiments",
             "actor": "researcher",

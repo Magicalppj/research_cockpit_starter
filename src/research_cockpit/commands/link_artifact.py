@@ -18,7 +18,7 @@ from research_cockpit.commands._evidence import (
     validate_artifact_ids,
     validate_node_refs,
 )
-from research_cockpit.commands._runtime import finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import ResearchNode, ValidationError, load_yaml, script_command, validate_cockpit
 
@@ -92,12 +92,14 @@ def link_artifact(
     }
     if show_diff:
         result["diff"] = yaml_change_diff(changes) if changed else ""
-    if dry_run or not changed:
+    if dry_run:
+        return dry_run_preflight_result(root, result)
+    if not changed:
         return result
 
     finish_mutation(
         root,
-        [(change_path, after) for change_path, _, after in changes],
+        changes,
         interaction={
             "kind": "link_artifact",
             "actor": "researcher",

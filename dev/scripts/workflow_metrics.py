@@ -57,6 +57,10 @@ MUTATING_COMMANDS = {
     "update-suggestion-state",
 }
 
+TRUTH_SOURCE_MUTATION_COMMANDS = MUTATING_COMMANDS - {
+    "build",
+}
+
 TRUTH_SOURCE_SUFFIXES = (".yaml", ".yml", ".md")
 
 
@@ -76,11 +80,11 @@ def workflow_metrics(
     *,
     files_changed: list[str] | None = None,
 ) -> dict[str, Any]:
-    command_rows = [
-        (command_name(check.get("command", [])), check)
-        for check in checks
-        if command_name(check.get("command", []))
-    ]
+    command_rows: list[tuple[str, dict[str, Any]]] = []
+    for check in checks:
+        name = command_name(check.get("command", []))
+        if name:
+            command_rows.append((name, check))
     commands = [name for name, _ in command_rows if name]
     failed = [name for name, check in command_rows if name and not check.get("passed", False)]
     high_level = sorted({name for name in commands if name in HIGH_LEVEL_COMMANDS})
@@ -93,6 +97,8 @@ def workflow_metrics(
         and not path.startswith("research_cockpit/dashboards/")
         and path.endswith(TRUTH_SOURCE_SUFFIXES)
     ]
+    has_truth_mutation = any(name in TRUTH_SOURCE_MUTATION_COMMANDS for name in commands)
+    explained_truth_source_changes = truth_changes if has_truth_mutation else []
     return {
         "command_count": len(commands),
         "failed_command_count": len(failed),
@@ -101,6 +107,8 @@ def workflow_metrics(
         "dry_run_count": sum(1 for _, check in command_rows if "--dry-run" in check.get("command", [])),
         "build_count": sum(1 for name, check in command_rows if name == "build" or "--build" in check.get("command", [])),
         "validate_count": sum(1 for name in commands if name == "validate"),
-        "manual_yaml_patch_detected": bool(truth_changes and mutating_count == 0),
+        "manual_yaml_patch_detected": bool(truth_changes and not has_truth_mutation),
+        "truth_source_changed_files": truth_changes,
+        "explained_truth_source_changes": explained_truth_source_changes,
         "high_level_commands_used": high_level,
     }
