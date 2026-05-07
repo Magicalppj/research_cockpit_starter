@@ -18,7 +18,7 @@ from research_cockpit.graph_core import (
 from research_cockpit.graph_views import load_graph_views
 from research_cockpit.interaction_log import interaction_log_warnings, recent_interactions
 from research_cockpit.option_workstreams import build_option_workstream_context, build_option_workstream_rows
-from research_cockpit.resources import build_link_rows, node_link_entries
+from research_cockpit.resources import build_link_rows, node_artifact_ids, node_link_entries
 from research_cockpit.search_index import build_search_index, build_search_index_summary
 from research_cockpit.storage import load_yaml, save_text
 from research_cockpit.suggestions import build_action_suggestions
@@ -239,7 +239,7 @@ def build_focus_context(
             node = nodes.get(node_id)
             if not node:
                 continue
-            for artifact_id in node.raw.get("linked_artifacts", []) or []:
+            for artifact_id in node_artifact_ids(node):
                 if artifact_id in nodes and nodes[artifact_id].type == "artifact":
                     artifact_ids.append(str(artifact_id))
             dataset_id = node.raw.get("dataset")

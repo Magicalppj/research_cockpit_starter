@@ -101,6 +101,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
             "research-cockpit apply-graph-plan --root <root> --file graph_update.yaml --dry-run --json --show-diff",
             "research-cockpit create-workstream --root <root> --file workstream.yaml --dry-run --json --show-diff",
             "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path <path> --link-to <node_id> --no-build",
+            "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json --no-build",
             "research-cockpit complete-experiments --root <root> --file findings.yaml --no-build",
             "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
             "research-cockpit finalize-workstream --root <root> --option <option_id> --status accepted --problem-status resolved --report --no-build",

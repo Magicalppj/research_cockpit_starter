@@ -99,6 +99,10 @@ experiments:
   - id: experiment_a
     finding: First finding.
     result_summary: First summary.
+    evidence:
+      path: outputs/experiment_a
+      links:
+        metrics: outputs/experiment_a/metrics.json
     next_actions:
       - Review aggregate result.
   - id: experiment_b

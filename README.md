@@ -281,8 +281,10 @@ research-cockpit complete-experiments --print-schema
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --json --compact
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build
-research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --json --compact
+research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json --json --compact
 ```
+
+When the conclusion depends on a result directory, plot, report, or metrics JSON, pass it inline with `--evidence-path` and repeated `--evidence-link key=value`. `record-finding`, `complete-experiment`, and `complete-experiments` create the artifact and link it from both the finding and experiment. Existing artifacts still use `--artifact-id`. If no artifact is linked, the command succeeds with a `missing_evidence_artifact` warning.
 
 Use `update-finding` for later evidence or wording revisions:
 

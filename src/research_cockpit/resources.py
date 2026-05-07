@@ -23,6 +23,29 @@ def node_link_entries(node: ResearchNode) -> list[dict[str, str]]:
     return entries
 
 
+def node_artifact_ids(node: ResearchNode) -> list[str]:
+    artifact_ids: list[str] = []
+    artifact_ids.extend(str(item) for item in node.raw.get("linked_artifacts", []) or [] if str(item).strip())
+    findings = node.raw.get("findings")
+    if isinstance(findings, list):
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            artifact_ids.extend(
+                str(item)
+                for item in finding.get("linked_artifacts", []) or []
+                if str(item).strip()
+            )
+    seen: set[str] = set()
+    out: list[str] = []
+    for artifact_id in artifact_ids:
+        if artifact_id in seen:
+            continue
+        seen.add(artifact_id)
+        out.append(artifact_id)
+    return out
+
+
 def _is_external_target(target: str) -> bool:
     parsed = urlparse(target)
     return bool(parsed.scheme and parsed.scheme not in {"", "file"})
@@ -90,7 +113,7 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
     rows: list[dict[str, Any]] = []
     for node in sorted(nodes.values(), key=lambda item: item.id):
         entries = node_link_entries(node)
-        for artifact_id in node.raw.get("linked_artifacts", []) or []:
+        for artifact_id in node_artifact_ids(node):
             entries.append({"kind": "linked_artifact", "label": "linked_artifact", "target": str(artifact_id)})
 
         for entry in entries:
@@ -106,4 +129,22 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
                 "target": target,
                 **resolution,
             })
+            if kind == "linked_artifact" and target in nodes and nodes[target].type == "artifact":
+                for artifact_entry in node_link_entries(nodes[target]):
+                    artifact_resolution = _target_resolution(
+                        root,
+                        artifact_entry["kind"],
+                        artifact_entry["target"],
+                        nodes,
+                    )
+                    rows.append({
+                        "node_id": node.id,
+                        "node_title": node.title,
+                        "node_type": node.type,
+                        "artifact_id": target,
+                        "kind": artifact_entry["kind"],
+                        "label": f"{target}:{artifact_entry['label']}",
+                        "target": artifact_entry["target"],
+                        **artifact_resolution,
+                    })
     return rows

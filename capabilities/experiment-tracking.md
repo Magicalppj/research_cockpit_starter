@@ -95,19 +95,22 @@ Use `--file` when an artifact has several `links` or `link_to` targets; it is sh
 Record experiment findings through `research-cockpit record-finding`:
 
 ```sh
-research-cockpit record-finding --root research_cockpit --experiment experiment_x --statement "..." --confidence medium --outcome positive --summary "..." --artifact-id artifact_x
+research-cockpit record-finding --root research_cockpit --experiment experiment_x --statement "..." --confidence medium --outcome positive --summary "..." --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json
+research-cockpit record-finding --root research_cockpit --experiment experiment_x --statement "..." --confidence medium --artifact-id artifact_x
 ```
 
-`--artifact-id` must be an existing artifact node id, not a file path. The older `--artifact` flag remains as a compatibility alias.
+Use `--evidence-path` and repeated `--evidence-link key=value` when the result directory, image, report, or metrics JSON should be recorded with the finding. The command creates an `artifact_<finding_id>` artifact, links it from the finding, and mirrors it on the experiment top-level `linked_artifacts` field so context, resource tables, and dashboards can show where the conclusion came from. Use `create-artifact` plus `--artifact-id` when you need custom artifact metadata.
+
+`--artifact-id` must be an existing artifact node id, not a file path. A finding can be recorded without any artifact; the command succeeds but JSON output includes `warnings: ["missing_evidence_artifact"]`.
 
 Use `complete-experiment` when you want the conservative "record conclusion and mark done" workflow in one command:
 
 ```sh
-research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --outcome mixed --result-summary "..." --next-action "Review follow-up" --no-build
-research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --json --compact
+research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --outcome mixed --result-summary "..." --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json --next-action "Review follow-up" --no-build
+research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json --json --compact
 ```
 
-`complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, and appends de-duplicated experiment-local `next_actions`. It does not change focus, option status, problem status, or `current_best_option`.
+`complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, creates inline evidence artifacts when evidence fields are present, and appends de-duplicated experiment-local `next_actions`. It does not change focus, option status, problem status, or `current_best_option`.
 
 Use `complete-experiments` for sweeps or repeated backend/ablation runs:
 
@@ -130,13 +133,17 @@ experiments:
   - id: experiment_a
     finding: First finding.
     result_summary: First summary.
+    evidence:
+      path: outputs/experiment_a
+      links:
+        metrics: outputs/experiment_a/metrics.json
   - id: experiment_b
     finding: Second finding.
     confidence: strong
     outcome: positive
 ```
 
-The batch command validates every experiment and artifact before writing any YAML. It writes one interaction event and rebuilds once by default.
+The batch command validates every experiment, existing artifact reference, and inline evidence artifact before writing any YAML. It writes one interaction event and rebuilds once by default.
 
 Revise an existing finding without patching YAML:
 

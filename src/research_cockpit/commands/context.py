@@ -20,7 +20,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.option_workstreams import experiment_ids_for_option, upstream_problem_id
-from research_cockpit.resources import build_link_rows
+from research_cockpit.resources import build_link_rows, node_artifact_ids
 
 
 def _related_option_id(nodes: dict[str, Any], node_id: str) -> str | None:
@@ -53,7 +53,7 @@ def _artifact_ids_for(nodes: dict[str, Any], node_ids: list[str]) -> list[str]:
     for node_id in node_ids:
         if node_id not in nodes:
             continue
-        for artifact_id in nodes[node_id].raw.get("linked_artifacts", []) or []:
+        for artifact_id in node_artifact_ids(nodes[node_id]):
             artifact_id = str(artifact_id)
             if artifact_id in nodes and nodes[artifact_id].type == "artifact" and artifact_id not in seen:
                 out.append(artifact_id)
@@ -139,6 +139,7 @@ def context_payload(
             "experiments": ordered_node_contexts(nodes, related_experiment_ids),
         },
         "recommended_commands": {
+            "complete_experiment": "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json --dry-run --json --show-diff",
             "complete_experiments": "research-cockpit complete-experiments --root <root> --file findings.yaml --dry-run --json --show-diff",
             "create_artifact": "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path <path> --link-to <node_id> --no-build",
             "finalize_workstream": "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",

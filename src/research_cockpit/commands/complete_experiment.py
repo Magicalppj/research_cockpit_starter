@@ -19,6 +19,13 @@ from research_cockpit.commands._runtime import (
     load_validated_state,
     yaml_change_diff,
 )
+from research_cockpit.commands._evidence import (
+    append_unique,
+    evidence_warnings,
+    inline_evidence_artifact,
+    parse_link_values,
+    validate_artifact_ids,
+)
 from research_cockpit.commands.record_finding import _next_finding_id, find_node_file
 from research_cockpit.model import (
     ResearchNode,
@@ -52,14 +59,6 @@ def _append_unique_actions(existing: Any, additions: list[str]) -> tuple[list[st
     return actions, added
 
 
-def _validate_artifact_ids(nodes: dict[str, ResearchNode], artifact_ids: list[str]) -> None:
-    for artifact_id in artifact_ids:
-        if artifact_id not in nodes:
-            raise ValueError(f"Artifact node id does not exist: {artifact_id}")
-        if nodes[artifact_id].type != "artifact":
-            raise ValueError(f"Artifact node id {artifact_id} must be artifact, got {nodes[artifact_id].type}")
-
-
 def complete_experiment(
     root: Path,
     *,
@@ -69,6 +68,8 @@ def complete_experiment(
     outcome: str | None = None,
     metrics: list[str] | None = None,
     artifact_ids: list[str] | None = None,
+    evidence_path: str | None = None,
+    evidence_links: dict[str, str] | None = None,
     result_summary: str | None = None,
     next_actions: list[str] | None = None,
     rebuild_dashboard: bool = True,
@@ -93,8 +94,9 @@ def complete_experiment(
 
     metrics = metrics or []
     artifact_ids = artifact_ids or []
+    evidence_links = evidence_links or {}
     next_actions = next_actions or []
-    _validate_artifact_ids(nodes, artifact_ids)
+    validate_artifact_ids(nodes, artifact_ids)
 
     path = find_node_file(root, experiment_id)
     data = load_yaml(path)
@@ -110,14 +112,23 @@ def complete_experiment(
         "next_actions": list(data.get("next_actions", []) or []),
     }
     today = str(date.today())
+    finding_id = _next_finding_id(experiment_id, findings)
+    created_artifact_id, evidence_artifact = inline_evidence_artifact(
+        existing_node_ids=set(nodes),
+        finding_id=finding_id,
+        path=evidence_path,
+        links=evidence_links,
+        today=today,
+    )
+    all_artifact_ids = [*artifact_ids, *([created_artifact_id] if created_artifact_id else [])]
     finding_record = {
-        "id": _next_finding_id(experiment_id, findings),
+        "id": finding_id,
         "statement": finding,
         "confidence": confidence,
         "evidence": [experiment_id],
         "outcome": outcome,
         "metrics": metrics,
-        "linked_artifacts": artifact_ids,
+        "linked_artifacts": all_artifact_ids,
         "created_at": today,
     }
     findings.append(finding_record)
@@ -128,10 +139,18 @@ def complete_experiment(
     data["next_actions"], added_actions = _append_unique_actions(data.get("next_actions"), next_actions)
     if not data["next_actions"]:
         data.pop("next_actions", None)
+    data["linked_artifacts"], added_artifacts = append_unique(data.get("linked_artifacts"), all_artifact_ids, "linked_artifacts")
+    if not data["linked_artifacts"]:
+        data.pop("linked_artifacts", None)
     data["updated_at"] = today
 
     candidate = dict(nodes)
     candidate[experiment_id] = ResearchNode.from_dict(data)
+    changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any]]] = [(path, before_data, data)]
+    if evidence_artifact:
+        artifact_path = root / "graph" / "nodes" / f"{evidence_artifact['id']}.yaml"
+        candidate[str(evidence_artifact["id"])] = ResearchNode.from_dict(evidence_artifact)
+        changes.append((artifact_path, None, evidence_artifact))
     validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
 
     after = {
@@ -151,16 +170,20 @@ def complete_experiment(
         "after": after,
         "finding": finding_record,
         "added_next_actions": added_actions,
+        "created_artifacts": [created_artifact_id] if created_artifact_id else [],
+        "linked_artifacts": all_artifact_ids,
+        "added_experiment_artifacts": added_artifacts,
+        "warnings": evidence_warnings(all_artifact_ids),
     }
     if show_diff:
-        result["diff"] = yaml_change_diff([(path, before_data, data)])
+        result["diff"] = yaml_change_diff(changes)
     if dry_run:
         result["changed"] = False
         return dry_run_preflight_result(root, result)
 
     finish_mutation(
         root,
-        [(path, before_data, data)],
+        changes,
         interaction={
             "kind": "complete_experiment",
             "actor": "researcher",
@@ -174,7 +197,8 @@ def complete_experiment(
                 "confidence": confidence,
                 "outcome": outcome,
                 "metric_count": len(metrics),
-                "linked_artifacts": artifact_ids,
+                "linked_artifacts": all_artifact_ids,
+                "created_artifacts": result["created_artifacts"],
                 "added_next_actions": added_actions,
             },
         },
@@ -184,7 +208,7 @@ def complete_experiment(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--id", required=True, dest="experiment_id")
     parser.add_argument("--finding", required=True)
@@ -192,6 +216,8 @@ def main() -> None:
     parser.add_argument("--outcome", choices=sorted(VALID_FINDING_OUTCOMES))
     parser.add_argument("--metric", action="append", dest="metrics")
     parser.add_argument("--artifact-id", action="append", dest="artifact_ids", help="Artifact node id; repeat for multiple artifacts.")
+    parser.add_argument("--evidence-path", help="Result directory or primary evidence path; creates and links an artifact.")
+    parser.add_argument("--evidence-link", action="append", dest="evidence_links", help="Evidence link in key=value form; repeat for metrics, plots, reports.")
     parser.add_argument("--result-summary")
     parser.add_argument("--next-action", action="append", dest="next_actions")
     parser.add_argument("--dry-run", action="store_true")
@@ -210,6 +236,8 @@ def main() -> None:
             outcome=args.outcome,
             metrics=args.metrics,
             artifact_ids=args.artifact_ids,
+            evidence_path=args.evidence_path,
+            evidence_links=parse_link_values(args.evidence_links, flag_name="--evidence-link"),
             result_summary=args.result_summary,
             next_actions=args.next_actions,
             rebuild_dashboard=not args.no_build,

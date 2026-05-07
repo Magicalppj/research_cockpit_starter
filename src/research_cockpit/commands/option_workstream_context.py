@@ -17,6 +17,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.option_workstreams import build_option_workstream_context
+from research_cockpit.resources import node_artifact_ids
 
 
 def option_workstream_context_payload(root: Path, *, option_id: str) -> dict:
@@ -85,6 +86,11 @@ def _experiment_summaries(payload: dict[str, Any], raw_nodes: dict[str, Any] | N
         raw = getattr(raw_node, "raw", {}) if raw_node is not None else {}
         metrics = raw.get("metrics") if isinstance(raw, dict) else None
         success_criteria = node.get("success_criteria", []) or []
+        linked_artifact_count = (
+            _list_count(node_artifact_ids(raw_node))
+            if raw_node is not None
+            else _list_count(node.get("linked_artifacts", []))
+        )
         summaries.append({
             "id": node.get("id"),
             "title": node.get("title"),
@@ -94,7 +100,7 @@ def _experiment_summaries(payload: dict[str, Any], raw_nodes: dict[str, Any] | N
             "first_success_criterion": _first_text(success_criteria),
             "metric_count": _list_count(metrics),
             "finding_count": _list_count(node.get("findings", [])),
-            "linked_artifact_count": _list_count(node.get("linked_artifacts", [])),
+            "linked_artifact_count": linked_artifact_count,
         })
     return summaries
 
@@ -104,7 +110,11 @@ def compact_option_workstream_context(payload: dict[str, Any], raw_nodes: dict[s
     subtree_nodes = payload.get("subtree_nodes", [])
     linked_artifacts: list[str] = []
     for node in subtree_nodes:
-        linked_artifacts.extend(str(item) for item in node.get("linked_artifacts", []) or [] if str(item).strip())
+        raw_node = raw_nodes.get(str(node.get("id"))) if raw_nodes else None
+        if raw_node is not None:
+            linked_artifacts.extend(node_artifact_ids(raw_node))
+        else:
+            linked_artifacts.extend(str(item) for item in node.get("linked_artifacts", []) or [] if str(item).strip())
     artifact_ids = sorted(set([*subtree.get("artifact_ids", []), *linked_artifacts]))
     evidence = payload["evidence_summary"]
     return {

@@ -92,6 +92,8 @@ def compact_mutation_result(
         payload["preflight_ok"] = result["preflight_ok"]
     if "normalized_statuses" in result:
         payload["normalized_statuses"] = result["normalized_statuses"]
+    if "warnings" in result:
+        payload["warnings"] = result["warnings"]
     return payload
 
 

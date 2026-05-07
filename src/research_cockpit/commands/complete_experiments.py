@@ -10,7 +10,7 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._evidence import append_unique, validate_artifact_ids
+from research_cockpit.commands._evidence import append_unique, evidence_warnings, inline_evidence_artifact, validate_artifact_ids
 from research_cockpit.commands._runtime import (
     compact_mutation_result,
     dry_run_preflight_result,
@@ -51,6 +51,21 @@ def _as_str_list(value: Any, field_name: str) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value if str(item).strip()]
     raise ValueError(f"{field_name} must be a string or list")
+
+
+def _as_str_mapping(value: Any, field_name: str) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a mapping")
+    out: dict[str, str] = {}
+    for key, item in value.items():
+        key_text = str(key).strip()
+        item_text = str(item).strip()
+        if not key_text or not item_text:
+            raise ValueError(f"{field_name} must contain non-empty keys and values")
+        out[key_text] = item_text
+    return out
 
 
 def _text(value: Any, field_name: str, *, required: bool = False) -> str | None:
@@ -100,6 +115,8 @@ def complete_experiments(
     path_by_id: dict[str, Path] = {}
     completed: list[dict[str, Any]] = []
     experiment_order: list[str] = []
+    artifact_changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any]]] = []
+    known_node_ids = set(nodes)
 
     default_artifact_ids = _as_str_list(defaults.get("artifact_ids", defaults.get("artifacts")), "defaults.artifact_ids")
     default_metrics = _as_str_list(defaults.get("metrics"), "defaults.metrics")
@@ -139,6 +156,13 @@ def complete_experiments(
             *default_artifact_ids,
             *_as_str_list(entry.get("artifact_ids", entry.get("artifacts")), f"{owner}.artifact_ids"),
         ]
+        evidence = entry.get("evidence") or {}
+        if not isinstance(evidence, dict):
+            raise ValueError(f"{owner}.evidence must be a mapping")
+        unsupported_evidence_fields = sorted(set(evidence) - {"path", "links"})
+        if unsupported_evidence_fields:
+            fields = ", ".join(unsupported_evidence_fields)
+            raise ValueError(f"{owner}.evidence unsupported evidence field(s): {fields}")
         metrics = [*default_metrics, *_as_str_list(entry.get("metrics"), f"{owner}.metrics")]
         next_actions = [
             *default_next_actions,
@@ -152,14 +176,28 @@ def complete_experiments(
         findings = data.get("findings", []) or []
         if not isinstance(findings, list):
             raise ValueError(f"{experiment_id}: findings must be a list")
+        finding_id = _next_finding_id(experiment_id, findings)
+        created_artifact_id, evidence_artifact = inline_evidence_artifact(
+            existing_node_ids=known_node_ids,
+            finding_id=finding_id,
+            path=_text(evidence.get("path"), f"{owner}.evidence.path"),
+            links=_as_str_mapping(evidence.get("links"), f"{owner}.evidence.links"),
+            today=today,
+        )
+        if evidence_artifact:
+            artifact_path = root / "graph" / "nodes" / f"{evidence_artifact['id']}.yaml"
+            candidate[str(evidence_artifact["id"])] = ResearchNode.from_dict(evidence_artifact)
+            artifact_changes.append((artifact_path, None, evidence_artifact))
+            known_node_ids.add(str(evidence_artifact["id"]))
+        all_artifact_ids = [*artifact_ids, *([created_artifact_id] if created_artifact_id else [])]
         finding_record = {
-            "id": _next_finding_id(experiment_id, findings),
+            "id": finding_id,
             "statement": statement,
             "confidence": confidence,
             "evidence": [experiment_id],
             "outcome": outcome,
             "metrics": metrics,
-            "linked_artifacts": artifact_ids,
+            "linked_artifacts": all_artifact_ids,
             "created_at": today,
         }
         findings.append(finding_record)
@@ -170,6 +208,9 @@ def complete_experiments(
         data["next_actions"], added_actions = append_unique(data.get("next_actions"), next_actions, "next_actions")
         if not data["next_actions"]:
             data.pop("next_actions", None)
+        data["linked_artifacts"], added_artifacts = append_unique(data.get("linked_artifacts"), all_artifact_ids, "linked_artifacts")
+        if not data["linked_artifacts"]:
+            data.pop("linked_artifacts", None)
         data["updated_at"] = today
         candidate[experiment_id] = ResearchNode.from_dict(data)
         before_by_id[experiment_id] = before
@@ -191,14 +232,19 @@ def complete_experiments(
             },
             "finding": finding_record,
             "added_next_actions": added_actions,
+            "created_artifacts": [created_artifact_id] if created_artifact_id else [],
+            "linked_artifacts": all_artifact_ids,
+            "added_experiment_artifacts": added_artifacts,
+            "warnings": evidence_warnings(all_artifact_ids),
         })
 
     validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
-    changes = [
+    experiment_changes = [
         (path_by_id[experiment_id], before_by_id[experiment_id], data_by_id[experiment_id])
         for experiment_id in experiment_order
         if before_by_id[experiment_id] != data_by_id[experiment_id]
     ]
+    changes = [*artifact_changes, *experiment_changes]
     changed = bool(changes)
     result: dict[str, Any] = {
         "dry_run": dry_run,
@@ -207,6 +253,8 @@ def complete_experiments(
         "completed_experiments": completed,
         "experiment_ids": [item["experiment_id"] for item in completed],
         "changed_files": [str(path) for path, _, _ in changes],
+        "created_artifacts": [artifact_id for item in completed for artifact_id in item["created_artifacts"]],
+        "warnings": sorted({warning for item in completed for warning in item["warnings"]}),
     }
     if show_diff:
         result["diff"] = yaml_change_diff(changes) if changed else ""

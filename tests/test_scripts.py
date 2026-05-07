@@ -44,7 +44,7 @@ from research_cockpit.commands.import_worktree_findings import import_worktree_f
 from research_cockpit.commands.link_artifact import link_artifact
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
 from research_cockpit.commands.node_context import node_context_payload
-from research_cockpit.commands.option_workstream_context import option_workstream_context_payload
+from research_cockpit.commands.option_workstream_context import compact_option_workstream_context, option_workstream_context_payload
 from research_cockpit.commands.promote_decision import promote_decision
 from research_cockpit.commands.record_finding import record_finding
 from research_cockpit.commands.repair_interaction_log import repair_interaction_log
@@ -64,6 +64,7 @@ from research_cockpit.commands.update_status import update_status
 from research_cockpit.graph_views import upsert_graph_view
 from research_cockpit.mutation_lock import MutationError, mutation_lock
 from research_cockpit.mutation_runtime import finish_mutation
+from research_cockpit.resources import build_link_rows
 from workflow_metrics import workflow_metrics
 
 
@@ -1078,6 +1079,50 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("subtree_nodes", payload)
         self.assertNotIn("experiments", payload)
 
+    def test_finding_linked_artifacts_are_visible_in_context_resources(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_finding_only",
+                "type": "artifact",
+                "title": "Finding-only bundle",
+                "status": "done",
+                "path": "outputs/finding_only",
+                "links": {"metrics": "outputs/finding_only/metrics.json"},
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["findings"] = [
+            {
+                "id": "exp_t5_finding_001",
+                "statement": "Old data linked the artifact only from the finding.",
+                "confidence": "medium",
+                "outcome": "positive",
+                "linked_artifacts": ["artifact_finding_only"],
+            }
+        ]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+
+        payload = context_payload(
+            self.root,
+            node_id="exp_t5",
+            with_artifacts=True,
+            compact=True,
+        )
+        rows = build_link_rows(self.root, load_nodes(self.root))
+        experiment_rows = [row for row in rows if row.get("node_id") == "exp_t5"]
+
+        self.assertEqual(payload["artifacts"]["artifact_ids"], ["artifact_finding_only"])
+        self.assertIn("outputs/finding_only", {row["target"] for row in experiment_rows})
+        self.assertIn("outputs/finding_only/metrics.json", {row["target"] for row in experiment_rows})
+
+        compact = compact_option_workstream_context(
+            option_workstream_context_payload(self.root, option_id="option_t5"),
+            load_nodes(self.root),
+        )
+        self.assertEqual(compact["evidence_summary"]["artifact_count"], 1)
+        self.assertEqual(compact["experiment_summaries"][0]["linked_artifact_count"], 1)
+
     def test_node_context_cli_outputs_json_and_manifest_lists_command(self) -> None:
         result = subprocess.run(
             [*cli_command("node-context"), "--root", str(self.root), "--id", "option_t5", "--json"],
@@ -1820,6 +1865,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["record-finding"]["supports_json"])
         self.assertTrue(by_name["record-finding"]["supports_dry_run"])
         self.assertTrue(by_name["record-finding"]["supports_no_build"])
+        self.assertIn("evidence_path", by_name["record-finding"]["fields_supported"])
+        self.assertIn("evidence_links", by_name["record-finding"]["fields_supported"])
+        self.assertNotIn("evidence_artifact_id", by_name["record-finding"]["fields_supported"])
         self.assertTrue(by_name["update-finding"]["supports_json"])
         self.assertTrue(by_name["create-artifact"]["supports_dry_run"])
         self.assertIn("evidence", by_name["create-artifact"]["workflow_tags"])
@@ -1874,10 +1922,17 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["complete-experiment"]["supports_dry_run"])
         self.assertTrue(by_name["complete-experiment"]["supports_no_build"])
         self.assertTrue(by_name["complete-experiment"]["supports_compact"])
+        self.assertIn("evidence_path", by_name["complete-experiment"]["fields_supported"])
+        self.assertNotIn("evidence_artifact_id", by_name["complete-experiment"]["fields_supported"])
         self.assertTrue(by_name["complete-experiments"]["can_batch"])
         self.assertTrue(by_name["complete-experiments"]["supports_dry_run"])
         self.assertEqual(by_name["complete-experiments"]["file_schema"], "experiment_completion_v1")
         self.assertIn("experiments:", by_name["complete-experiments"]["example_file"])
+        self.assertIn("evidence.links", by_name["complete-experiments"]["fields_supported"])
+        self.assertNotIn("evidence.artifact_id", by_name["complete-experiments"]["fields_supported"])
+        self.assertNotIn("evidence.title", by_name["complete-experiments"]["fields_supported"])
+        self.assertIn("evidence:", by_name["complete-experiments"]["example_file"])
+        self.assertNotIn("title: First result bundle", by_name["complete-experiments"]["example_file"])
         self.assertTrue(by_name["finalize-workstream"]["supports_json"])
         self.assertTrue(by_name["finalize-workstream"]["supports_dry_run"])
         self.assertEqual(by_name["finalize-workstream"]["file_schema"], "finalize_workstream_v1")
@@ -3434,7 +3489,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             )
         self.assertIn("missing_artifact", str(missing_artifact.exception))
 
-    def test_record_finding_cli_accepts_artifact_id_alias_and_legacy_artifact(self) -> None:
+    def test_record_finding_cli_accepts_artifact_id_and_rejects_legacy_artifact(self) -> None:
         write_node(
             self.root,
             {
@@ -3505,11 +3560,49 @@ class ScriptBehaviorTests(unittest.TestCase):
         data = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
 
         self.assertEqual(artifact_id.returncode, 0, artifact_id.stdout + artifact_id.stderr)
-        self.assertEqual(legacy.returncode, 0, legacy.stdout + legacy.stderr)
+        self.assertNotEqual(legacy.returncode, 0)
+        self.assertIn("unrecognized arguments", legacy.stderr)
         self.assertEqual(data["findings"][0]["linked_artifacts"], ["artifact_cache"])
-        self.assertEqual(data["findings"][1]["linked_artifacts"], ["artifact_cache"])
+        self.assertEqual(len(data["findings"]), 1)
         self.assertEqual(failed.returncode, 1)
         self.assertIn("artifact node id", failed.stdout.lower())
+
+    def test_record_finding_cli_creates_inline_evidence_artifact(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("record-finding"),
+                "--root",
+                str(self.root),
+                "--experiment",
+                "exp_t5",
+                "--statement",
+                "Inline evidence can be recorded in one command.",
+                "--confidence",
+                "medium",
+                "--evidence-path",
+                "outputs/record_finding",
+                "--evidence-link",
+                "metrics=outputs/record_finding/metrics.json",
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        artifact = load_yaml(self.root / "graph" / "nodes" / "artifact_exp_t5_finding_001.yaml")
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["created_artifacts"], ["artifact_exp_t5_finding_001"])
+        self.assertEqual(payload["warnings"], [])
+        self.assertEqual(experiment["linked_artifacts"], ["artifact_exp_t5_finding_001"])
+        self.assertEqual(experiment["findings"][0]["linked_artifacts"], ["artifact_exp_t5_finding_001"])
+        self.assertEqual(artifact["title"], "Evidence for exp_t5_finding_001")
+        self.assertEqual(artifact["status"], "done")
+        self.assertEqual(artifact["path"], "outputs/record_finding")
+        self.assertEqual(artifact["links"]["metrics"], "outputs/record_finding/metrics.json")
 
     def test_update_finding_rewrites_statement_and_links_artifact(self) -> None:
         write_node(
@@ -3552,6 +3645,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(finding["outcome"], "positive")
         self.assertEqual(finding["metrics"], ["new_metric"])
         self.assertEqual(finding["linked_artifacts"], ["artifact_cache"])
+        self.assertEqual(experiment["linked_artifacts"], ["artifact_cache"])
+        self.assertEqual(result["added_experiment_artifacts"], ["artifact_cache"])
         self.assertIn("created_at", finding)
         self.assertIn("updated_at", finding)
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "update_finding")
@@ -3643,12 +3738,73 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(experiment["result_summary"], "Improved edit following.")
         self.assertEqual(experiment["findings"][0]["statement"], "T5 improves replace following.")
         self.assertEqual(experiment["findings"][0]["linked_artifacts"], ["artifact_cache"])
+        self.assertEqual(experiment["linked_artifacts"], ["artifact_cache"])
         self.assertEqual(experiment["next_actions"], ["Compare cache footprint."])
         self.assertEqual(option["status"], "active")
         self.assertEqual(problem["status"], "active")
         self.assertNotIn("current_best_option", problem)
         self.assertTrue((self.root / "dashboards" / "focus_context_pack.json").exists())
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "complete_experiment")
+
+    def test_complete_experiment_creates_inline_evidence_artifact(self) -> None:
+        result = complete_experiment(
+            self.root,
+            experiment_id="exp_t5",
+            finding="Inline evidence supports the conclusion.",
+            confidence="strong",
+            outcome="positive",
+            evidence_path="outputs/run_inline",
+            evidence_links={"metrics": "outputs/run_inline/metrics.json", "plot": "outputs/run_inline/loss.png"},
+            rebuild_dashboard=False,
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        artifact = load_yaml(self.root / "graph" / "nodes" / f"{result['created_artifacts'][0]}.yaml")
+
+        self.assertEqual(result["warnings"], [])
+        self.assertEqual(result["created_artifacts"], ["artifact_exp_t5_finding_001"])
+        self.assertEqual(experiment["linked_artifacts"], ["artifact_exp_t5_finding_001"])
+        self.assertEqual(experiment["findings"][0]["linked_artifacts"], ["artifact_exp_t5_finding_001"])
+        self.assertEqual(artifact["title"], "Evidence for exp_t5_finding_001")
+        self.assertEqual(artifact["status"], "done")
+        self.assertEqual(artifact["path"], "outputs/run_inline")
+        self.assertEqual(artifact["links"]["metrics"], "outputs/run_inline/metrics.json")
+
+    def test_complete_experiment_warns_without_evidence_artifact(self) -> None:
+        result = complete_experiment(
+            self.root,
+            experiment_id="exp_t5",
+            finding="Conclusion without linked evidence.",
+            confidence="medium",
+            rebuild_dashboard=False,
+        )
+
+        self.assertEqual(result["warnings"], ["missing_evidence_artifact"])
+
+    def test_complete_experiment_links_existing_and_inline_evidence(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_existing",
+                "type": "artifact",
+                "title": "Existing bundle",
+                "status": "done",
+            },
+        )
+
+        result = complete_experiment(
+            self.root,
+            experiment_id="exp_t5",
+            finding="Both evidence records are relevant.",
+            confidence="medium",
+            artifact_ids=["artifact_existing"],
+            evidence_path="outputs/new_bundle",
+            rebuild_dashboard=False,
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+
+        self.assertEqual(result["linked_artifacts"], ["artifact_existing", "artifact_exp_t5_finding_001"])
+        self.assertEqual(experiment["linked_artifacts"], ["artifact_existing", "artifact_exp_t5_finding_001"])
+        self.assertEqual(experiment["findings"][0]["linked_artifacts"], ["artifact_existing", "artifact_exp_t5_finding_001"])
 
     def test_complete_experiment_dry_run_no_build_and_rejects_invalid_inputs(self) -> None:
         before = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
@@ -3996,6 +4152,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(exp_a["status"], "done")
         self.assertEqual(exp_b["status"], "done")
         self.assertEqual(exp_a["findings"][0]["linked_artifacts"], ["artifact_bundle"])
+        self.assertEqual(exp_a["linked_artifacts"], ["artifact_bundle"])
         self.assertEqual(exp_b["findings"][0]["confidence"], "strong")
         self.assertEqual(exp_b["findings"][0]["outcome"], "positive")
         self.assertEqual(exp_a["next_actions"], ["Review aggregate."])
@@ -4017,6 +4174,143 @@ class ScriptBehaviorTests(unittest.TestCase):
         after = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
         self.assertIn("missing_exp", str(missing.exception))
         self.assertEqual(before, after)
+
+    def test_complete_experiments_creates_inline_evidence_artifacts(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "exp_t5_b",
+                "type": "experiment",
+                "title": "Second ablation",
+                "status": "queued",
+                "parent": "option_t5",
+            },
+        )
+
+        result = complete_experiments(
+            self.root,
+            plan={
+                "defaults": {"confidence": "medium"},
+                "experiments": [
+                    {
+                        "id": "exp_t5",
+                        "finding": "First finding with evidence.",
+                        "evidence": {
+                            "path": "outputs/exp_t5",
+                            "links": {"metrics": "outputs/exp_t5/metrics.json"},
+                        },
+                    },
+                    {
+                        "id": "exp_t5_b",
+                        "finding": "Second finding with evidence.",
+                        "evidence": {
+                            "path": "outputs/exp_t5_b",
+                        },
+                    },
+                ],
+            },
+            rebuild_dashboard=False,
+        )
+        exp_a = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        exp_b = load_yaml(self.root / "graph" / "nodes" / "exp_t5_b.yaml")
+        artifact_a = load_yaml(self.root / "graph" / "nodes" / "artifact_exp_t5_finding_001.yaml")
+        artifact_b = load_yaml(self.root / "graph" / "nodes" / "artifact_exp_t5_b_finding_001.yaml")
+
+        self.assertEqual(result["warnings"], [])
+        self.assertEqual(result["created_artifacts"], ["artifact_exp_t5_finding_001", "artifact_exp_t5_b_finding_001"])
+        self.assertEqual(exp_a["linked_artifacts"], ["artifact_exp_t5_finding_001"])
+        self.assertEqual(exp_b["linked_artifacts"], ["artifact_exp_t5_b_finding_001"])
+        self.assertEqual(exp_a["findings"][0]["linked_artifacts"], ["artifact_exp_t5_finding_001"])
+        self.assertEqual(artifact_a["links"]["metrics"], "outputs/exp_t5/metrics.json")
+        self.assertEqual(artifact_b["title"], "Evidence for exp_t5_b_finding_001")
+
+    def test_complete_experiments_rejects_duplicate_evidence_artifact_without_partial_write(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_exp_t5_finding_001",
+                "type": "artifact",
+                "title": "Existing evidence bundle",
+                "status": "done",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_t5_b",
+                "type": "experiment",
+                "title": "Second ablation",
+                "status": "queued",
+                "parent": "option_t5",
+            },
+        )
+        before = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
+
+        with self.assertRaises(ValueError) as duplicate:
+            complete_experiments(
+                self.root,
+                plan={
+                    "defaults": {"confidence": "medium"},
+                    "experiments": [
+                        {
+                            "id": "exp_t5",
+                            "finding": "First finding.",
+                            "evidence": {"path": "outputs/a"},
+                        },
+                        {
+                            "id": "exp_t5_b",
+                            "finding": "Second finding.",
+                            "evidence": {"path": "outputs/b"},
+                        },
+                    ],
+                },
+                rebuild_dashboard=False,
+            )
+
+        self.assertIn("already exists", str(duplicate.exception))
+        self.assertEqual(before, (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8"))
+        self.assertFalse((self.root / "graph" / "nodes" / "artifact_exp_t5_b_finding_001.yaml").exists())
+
+    def test_complete_experiments_rejects_invalid_evidence_links_schema(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            complete_experiments(
+                self.root,
+                plan={
+                    "experiments": [
+                        {
+                            "id": "exp_t5",
+                            "finding": "Finding with invalid evidence links.",
+                            "confidence": "medium",
+                            "evidence": {"links": ["metrics=outputs/run/metrics.json"]},
+                        }
+                    ]
+                },
+                rebuild_dashboard=False,
+            )
+
+        self.assertIn("evidence.links must be a mapping", str(ctx.exception))
+        self.assertNotIn("findings", load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml"))
+
+    def test_complete_experiments_rejects_removed_evidence_metadata_fields(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            complete_experiments(
+                self.root,
+                plan={
+                    "experiments": [
+                        {
+                            "id": "exp_t5",
+                            "finding": "Finding with custom artifact metadata.",
+                            "confidence": "medium",
+                            "evidence": {"artifact_id": "artifact_manual", "path": "outputs/run"},
+                        }
+                    ]
+                },
+                rebuild_dashboard=False,
+            )
+
+        self.assertIn("unsupported evidence field", str(ctx.exception))
+        self.assertIn("artifact_id", str(ctx.exception))
+        self.assertNotIn("findings", load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml"))
 
     def test_complete_experiments_cli_dry_run_diff_no_build(self) -> None:
         plan_path = self.tmp_root / "findings.yaml"

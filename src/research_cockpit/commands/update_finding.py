@@ -109,6 +109,13 @@ def update_finding(
             artifact_ids,
             "linked_artifacts",
         )
+    added_experiment_artifacts: list[str] = []
+    if artifact_ids:
+        data["linked_artifacts"], added_experiment_artifacts = append_unique(
+            data.get("linked_artifacts"),
+            artifact_ids,
+            "linked_artifacts",
+        )
     finding["updated_at"] = str(date.today())
     findings[finding_index] = finding
     data["findings"] = findings
@@ -128,6 +135,7 @@ def update_finding(
         "path": str(path),
         "before": before_finding,
         "after": finding,
+        "added_experiment_artifacts": added_experiment_artifacts,
     }
     if show_diff:
         result["diff"] = yaml_change_diff([(path, before_data, data)]) if changed else ""
