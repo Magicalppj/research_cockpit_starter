@@ -797,18 +797,27 @@ def reset_global_graph_filter_state(
     skip_reset = bool(session_state.pop("graph_skip_global_filter_reset", False))
     previous_view_mode = session_state.get("graph_previous_view_mode")
     session_state["graph_previous_view_mode"] = view_mode
-    if view_mode != "global" or previous_view_mode == "global" or skip_reset:
+    if skip_reset:
         return False
 
-    session_state["graph_node_types"] = default_selected_node_types(all_types)
-    session_state["graph_statuses"] = list(all_statuses)
-    session_state["graph_stages"] = list(all_stages)
-    session_state["graph_focus_roles"] = list(all_focus_roles)
-    session_state["graph_workstreams"] = []
-    session_state["graph_only_blocking"] = False
-    session_state["graph_only_next_actions"] = False
-    session_state["graph_only_missing_evidence"] = False
-    return True
+    changed = False
+    if previous_view_mode == "option_workstream" and view_mode != "option_workstream":
+        if session_state.get("graph_workstreams"):
+            session_state["graph_workstreams"] = []
+            changed = True
+
+    if view_mode == "global" and previous_view_mode != "global":
+        session_state["graph_node_types"] = default_selected_node_types(all_types)
+        session_state["graph_statuses"] = list(all_statuses)
+        session_state["graph_stages"] = list(all_stages)
+        session_state["graph_focus_roles"] = list(all_focus_roles)
+        session_state["graph_workstreams"] = []
+        session_state["graph_only_blocking"] = False
+        session_state["graph_only_next_actions"] = False
+        session_state["graph_only_missing_evidence"] = False
+        changed = True
+
+    return changed
 
 
 def filter_graph_for_view(

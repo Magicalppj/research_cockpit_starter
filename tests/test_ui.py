@@ -212,6 +212,25 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(state["graph_statuses"], ["active"])
         self.assertEqual(state["graph_focus_roles"], ["current"])
 
+    def test_leaving_option_workstream_clears_stale_workstream_filter(self) -> None:
+        state = {
+            "graph_previous_view_mode": "option_workstream",
+            "graph_workstreams": ["option_t5"],
+        }
+
+        changed = reset_global_graph_filter_state(
+            state,
+            "focus_depth_1",
+            all_types=["experiment", "option", "problem", "stage"],
+            all_statuses=["active", "open", "planned"],
+            all_stages=["stage_demo"],
+            all_focus_roles=["child", "current", "parent"],
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(state["graph_previous_view_mode"], "focus_depth_1")
+        self.assertEqual(state["graph_workstreams"], [])
+
     def test_saved_global_view_can_keep_saved_filters(self) -> None:
         state = {
             "graph_previous_view_mode": "focus_depth_2",
@@ -582,6 +601,17 @@ class UiRenderingTests(unittest.TestCase):
         self.assertNotIn("st.rerun()", source[click_index:controls_index])
         self.assertGreater(selection_rerun_index, detail_index)
         self.assertGreater(selection_rerun_index, controls_index)
+
+    def test_graph_view_mode_radio_clears_stale_workstream_before_rerun(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+        callback_index = source.find("def sync_graph_view_mode_filters")
+        radio_index = source.find('key="graph_view_mode"')
+        callback_arg_index = source.find("on_change=sync_graph_view_mode_filters", radio_index)
+
+        self.assertNotEqual(callback_index, -1)
+        self.assertNotEqual(radio_index, -1)
+        self.assertNotEqual(callback_arg_index, -1)
+        self.assertLess(callback_index, radio_index)
 
     def test_graph_component_build_availability_detects_missing_assets(self) -> None:
         temp_root = ROOT_DIR / ".test_tmp" / "ui"

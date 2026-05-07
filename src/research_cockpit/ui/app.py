@@ -429,6 +429,18 @@ def render_graph_tab(
     mode_value_to_label = {value: label for label, value in mode_label_to_value.items()}
     renderer_options = ["React Flow", "PyVis legacy"]
 
+    def sync_graph_view_mode_filters() -> None:
+        next_view_label = st.session_state.get("graph_view_mode", text["focus_depth_2"])
+        next_view_mode = mode_label_to_value.get(next_view_label, "focus_depth_2")
+        reset_global_graph_filter_state(
+            st.session_state,
+            next_view_mode,
+            all_types=all_types,
+            all_statuses=all_statuses,
+            all_stages=all_stages,
+            all_focus_roles=all_focus_roles,
+        )
+
     def selected_values(key: str, available: list[str], default: list[str]) -> list[str]:
         raw = st.session_state[key] if key in st.session_state else default
         raw_values = {raw} if isinstance(raw, str) else set(raw or [])
@@ -554,6 +566,7 @@ def render_graph_tab(
                 index=list(mode_label_to_value).index(view_label),
                 horizontal=True,
                 key="graph_view_mode",
+                on_change=sync_graph_view_mode_filters,
             )
             view_mode = mode_label_to_value.get(view_label or text["focus_depth_2"], "focus_depth_2")
             filter_left, filter_right = st.columns(2)
