@@ -106,6 +106,18 @@ class UiRenderingTests(unittest.TestCase):
         self.assertNotEqual(controls_index, -1)
         self.assertLess(graph_index, controls_index)
 
+    def test_graph_controls_stay_inside_graph_column(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+        graph_area_index = source.find("with graph_area:")
+        controls_index = source.find("Graph Controls", graph_area_index)
+        detail_index = source.find("with detail:", graph_area_index)
+
+        self.assertNotEqual(graph_area_index, -1)
+        self.assertNotEqual(controls_index, -1)
+        self.assertNotEqual(detail_index, -1)
+        self.assertLess(graph_area_index, controls_index)
+        self.assertLess(controls_index, detail_index)
+
     def test_set_focus_resets_stale_graph_filters(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
         set_focus_index = source.find("save_current_focus(RESEARCH_ROOT, focus_node=node_id)")
@@ -560,14 +572,15 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn('st.session_state["graph_detail_node"] = clicked_node_id', source)
         self.assertIn("selection_changed = True", source)
         click_index = source.find("new_component_click")
-        saved_view_index = source.find("saved_view_by_id")
         controls_index = source.find("Graph Controls")
+        detail_index = source.find("with detail:", controls_index)
         selection_rerun_index = source.find("if selection_changed:")
         self.assertNotEqual(click_index, -1)
-        self.assertNotEqual(saved_view_index, -1)
         self.assertNotEqual(controls_index, -1)
+        self.assertNotEqual(detail_index, -1)
         self.assertNotEqual(selection_rerun_index, -1)
-        self.assertNotIn("st.rerun()", source[click_index:saved_view_index])
+        self.assertNotIn("st.rerun()", source[click_index:controls_index])
+        self.assertGreater(selection_rerun_index, detail_index)
         self.assertGreater(selection_rerun_index, controls_index)
 
     def test_graph_component_build_availability_detects_missing_assets(self) -> None:

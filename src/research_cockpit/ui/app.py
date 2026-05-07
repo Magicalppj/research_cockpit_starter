@@ -546,6 +546,110 @@ def render_graph_tab(
                 st.caption("React Flow build missing; using PyVis fallback.")
             render_pyvis_graph(filtered_graph, set(), set(), current_detail_node or graph.get("current_focus_node"))
 
+        controls = st.expander("图谱控制 / Graph Controls", expanded=False)
+        with controls:
+            view_label = st.radio(
+                text["view_mode"],
+                list(mode_label_to_value),
+                index=list(mode_label_to_value).index(view_label),
+                horizontal=True,
+                key="graph_view_mode",
+            )
+            view_mode = mode_label_to_value.get(view_label or text["focus_depth_2"], "focus_depth_2")
+            filter_left, filter_right = st.columns(2)
+            selected_types = set(filter_left.multiselect(
+                text["node_types"],
+                all_types,
+                default=[value for value in all_types if value in selected_types],
+                key="graph_node_types",
+            ))
+            selected_statuses = set(
+                filter_right.multiselect(
+                    text["statuses"],
+                    all_statuses,
+                    default=[value for value in all_statuses if value in selected_statuses],
+                    key="graph_statuses",
+                )
+            )
+            advanced_left, advanced_mid, advanced_right = st.columns(3)
+            selected_stages = set(advanced_left.multiselect(
+                text["stages"],
+                all_stages,
+                default=[value for value in all_stages if value in selected_stages],
+                key="graph_stages",
+            ))
+            selected_focus_roles = set(advanced_mid.multiselect(
+                text["focus_roles"],
+                all_focus_roles,
+                default=[value for value in all_focus_roles if value in selected_focus_roles],
+                key="graph_focus_roles",
+            ))
+            selected_workstreams = set(advanced_right.multiselect(
+                text["workstreams_filter"],
+                all_workstreams,
+                default=[value for value in all_workstreams if value in selected_workstreams],
+                key="graph_workstreams",
+            ))
+            flag_left, flag_mid, flag_right = st.columns(3)
+            only_blocking = flag_left.checkbox(text["only_blocking"], value=only_blocking, key="graph_only_blocking")
+            only_next_actions = flag_mid.checkbox(
+                text["only_next_actions"],
+                value=only_next_actions,
+                key="graph_only_next_actions",
+            )
+            only_missing_evidence = flag_right.checkbox(
+                text["only_missing_evidence"],
+                value=only_missing_evidence,
+                key="graph_only_missing_evidence",
+            )
+            renderer_label = st.radio(
+                "Graph Renderer",
+                renderer_options,
+                index=renderer_options.index(renderer_label),
+                horizontal=True,
+                key="graph_renderer",
+            )
+            save_left, save_right = st.columns([3, 1])
+            view_title = save_left.text_input(
+                text["graph_view_title"],
+                value="",
+                placeholder=text["graph_view_title_placeholder"],
+                key="graph_view_save_title",
+            )
+            if save_right.button(text["save_current_view"], key="graph_save_current_view", use_container_width=True):
+                if not view_title.strip():
+                    st.warning(text["graph_view_title_required"])
+                else:
+                    view = {
+                        "title": view_title.strip(),
+                        "scope": view_mode,
+                        "filters": {
+                            "node_types": [value for value in all_types if value in selected_types],
+                            "statuses": [value for value in all_statuses if value in selected_statuses],
+                            "stages": [value for value in all_stages if value in selected_stages],
+                            "focus_roles": [value for value in all_focus_roles if value in selected_focus_roles],
+                            "workstreams": [value for value in all_workstreams if value in selected_workstreams],
+                            "only_blocking": only_blocking,
+                            "only_next_actions": only_next_actions,
+                            "only_missing_evidence": only_missing_evidence,
+                        },
+                        "saved_focus_node_id": graph.get("current_focus_node"),
+                        "saved_focus_path": current.get("current_focus_path", []) or [],
+                    }
+                    try:
+                        upsert_graph_view(RESEARCH_ROOT, view)
+                        build_dashboard(RESEARCH_ROOT)
+                        st.session_state["graph_view_message"] = text["graph_view_saved"]
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"{text['graph_view_save_failed']} {exc}")
+            st.write(f"**{text['legend']}**")
+            legend_left, legend_right = st.columns(2)
+            legend_left.write(text["legend_current"])
+            legend_left.write(text["legend_path"])
+            legend_right.write(text["legend_depth_1"])
+            legend_right.write(text["legend_depth_2"])
+
     with detail:
         search_query = st.text_input(text["search_nodes"], value="", key="graph_node_search")
         search_scope = {node_id: nodes[node_id] for node_id in (visible_node_ids or sorted(nodes.keys()))}
@@ -600,110 +704,6 @@ def render_graph_tab(
             st.rerun()
     else:
         st.caption(text["no_saved_graph_views"])
-
-    controls = st.expander("图谱控制 / Graph Controls", expanded=False)
-    with controls:
-        view_label = st.radio(
-            text["view_mode"],
-            list(mode_label_to_value),
-            index=list(mode_label_to_value).index(view_label),
-            horizontal=True,
-            key="graph_view_mode",
-        )
-        view_mode = mode_label_to_value.get(view_label or text["focus_depth_2"], "focus_depth_2")
-        filter_left, filter_right = st.columns(2)
-        selected_types = set(filter_left.multiselect(
-            text["node_types"],
-            all_types,
-            default=[value for value in all_types if value in selected_types],
-            key="graph_node_types",
-        ))
-        selected_statuses = set(
-            filter_right.multiselect(
-                text["statuses"],
-                all_statuses,
-                default=[value for value in all_statuses if value in selected_statuses],
-                key="graph_statuses",
-            )
-        )
-        advanced_left, advanced_mid, advanced_right = st.columns(3)
-        selected_stages = set(advanced_left.multiselect(
-            text["stages"],
-            all_stages,
-            default=[value for value in all_stages if value in selected_stages],
-            key="graph_stages",
-        ))
-        selected_focus_roles = set(advanced_mid.multiselect(
-            text["focus_roles"],
-            all_focus_roles,
-            default=[value for value in all_focus_roles if value in selected_focus_roles],
-            key="graph_focus_roles",
-        ))
-        selected_workstreams = set(advanced_right.multiselect(
-            text["workstreams_filter"],
-            all_workstreams,
-            default=[value for value in all_workstreams if value in selected_workstreams],
-            key="graph_workstreams",
-        ))
-        flag_left, flag_mid, flag_right = st.columns(3)
-        only_blocking = flag_left.checkbox(text["only_blocking"], value=only_blocking, key="graph_only_blocking")
-        only_next_actions = flag_mid.checkbox(
-            text["only_next_actions"],
-            value=only_next_actions,
-            key="graph_only_next_actions",
-        )
-        only_missing_evidence = flag_right.checkbox(
-            text["only_missing_evidence"],
-            value=only_missing_evidence,
-            key="graph_only_missing_evidence",
-        )
-        renderer_label = st.radio(
-            "Graph Renderer",
-            renderer_options,
-            index=renderer_options.index(renderer_label),
-            horizontal=True,
-            key="graph_renderer",
-        )
-        save_left, save_right = st.columns([3, 1])
-        view_title = save_left.text_input(
-            text["graph_view_title"],
-            value="",
-            placeholder=text["graph_view_title_placeholder"],
-            key="graph_view_save_title",
-        )
-        if save_right.button(text["save_current_view"], key="graph_save_current_view", use_container_width=True):
-            if not view_title.strip():
-                st.warning(text["graph_view_title_required"])
-            else:
-                view = {
-                    "title": view_title.strip(),
-                    "scope": view_mode,
-                    "filters": {
-                        "node_types": [value for value in all_types if value in selected_types],
-                        "statuses": [value for value in all_statuses if value in selected_statuses],
-                        "stages": [value for value in all_stages if value in selected_stages],
-                        "focus_roles": [value for value in all_focus_roles if value in selected_focus_roles],
-                        "workstreams": [value for value in all_workstreams if value in selected_workstreams],
-                        "only_blocking": only_blocking,
-                        "only_next_actions": only_next_actions,
-                        "only_missing_evidence": only_missing_evidence,
-                    },
-                    "saved_focus_node_id": graph.get("current_focus_node"),
-                    "saved_focus_path": current.get("current_focus_path", []) or [],
-                }
-                try:
-                    upsert_graph_view(RESEARCH_ROOT, view)
-                    build_dashboard(RESEARCH_ROOT)
-                    st.session_state["graph_view_message"] = text["graph_view_saved"]
-                    st.rerun()
-                except Exception as exc:
-                    st.error(f"{text['graph_view_save_failed']} {exc}")
-        st.write(f"**{text['legend']}**")
-        legend_left, legend_right = st.columns(2)
-        legend_left.write(text["legend_current"])
-        legend_left.write(text["legend_path"])
-        legend_right.write(text["legend_depth_1"])
-        legend_right.write(text["legend_depth_2"])
 
     if selection_changed:
         st.rerun()
