@@ -1,44 +1,253 @@
 # Research Cockpit
 
-Research Cockpit is a repo-native research state system for humans and coding agents. It stores the research graph in YAML, supporting notes in Markdown, and generated dashboards/context packs in JSON.
+![Research Cockpit poster](assets/research-cockpit-poster.png)
 
-The core graph model is:
+一张速览图：Research Cockpit 将 YAML/Markdown truth source、CLI、Streamlit UI 和 Agent Context 串成同一条研究状态工作流。
+
+Research Cockpit 是一个 repo-native 的研究状态管理工具。它把研究问题、方案、实验、证据和决策记录在仓库里的 YAML/Markdown 文件中，并提供 CLI、Streamlit UI 和 agent 友好的上下文接口。
+
+它适合这些场景：
+
+- 你在一个代码仓库里同时推进多个 research problem、方案分支和实验。
+- 你需要让人类和 coding agent 共享同一份研究状态，而不是依赖聊天记录或散落的笔记。
+- 你想快速看到“当前焦点是什么、有哪些备选方案、实验证据在哪里、下一步该做什么”。
+
+核心图谱模型是：
 
 ```text
 stage -> problem -> option -> experiment -> decision
 ```
 
-`artifact` is also a valid node type, but it is supporting evidence by default: result folders, review bundles, metrics directories, or other long-lived research deliverables that need their own status and links.
+`artifact` 也是合法节点类型，但默认作为支持证据使用，例如结果目录、指标 JSON、review bundle、报告或其它需要独立追踪的研究产物。
 
-This repository is the reusable plugin/skill package. Project-specific research state should live in the caller repository's `research_cockpit/` directory, not in this plugin directory.
+![Research Cockpit UI](assets/ui.jpg)
 
-## Quick Start
+## 5 分钟跑通 Demo
 
-Install from the plugin root:
+前置条件：
+
+- Python 3.10+
+- 在本仓库根目录执行命令
+
+安装本地开发包：
 
 ```sh
 python -m pip install -e .
 ```
 
-Initialize a project data root from the caller repository:
+验证内置 demo 数据：
 
 ```sh
-research-cockpit init --root research_cockpit
+research-cockpit validate --root examples/demo_research_cockpit --json
+research-cockpit build --root examples/demo_research_cockpit
+research-cockpit smoke --root examples/demo_research_cockpit --json
+```
+
+启动 UI：
+
+```sh
+research-cockpit ui --root examples/demo_research_cockpit --server.port 8501
+```
+
+打开浏览器访问：
+
+```text
+http://localhost:8501
+```
+
+如果 `research-cockpit` 命令不可用，但 Python 包可以 import，可以用模块入口：
+
+```sh
+python -m research_cockpit.cli validate --root examples/demo_research_cockpit --json
+python -m research_cockpit.cli ui --root examples/demo_research_cockpit --server.port 8501
+```
+
+## 用自己的仓库开始
+
+这个仓库本身是可复用插件包。真实项目的研究状态应该放在调用方仓库的 `research_cockpit/` 目录里，而不是写进插件目录。
+
+在你的项目仓库根目录运行：
+
+```sh
 research-cockpit init --root research_cockpit --build --json
 research-cockpit validate --root research_cockpit --json
+research-cockpit ui --root research_cockpit --server.port 8501
 ```
 
-If the console script is unavailable but the package imports, use the module entry point:
+如果你想从更完整的示例状态开始：
 
 ```sh
-python -m research_cockpit.cli validate --root /absolute/path/to/research_cockpit --json
+research-cockpit init --template demo --root research_cockpit --build --json
 ```
 
-Use absolute `--root` paths when the working directory may be unreliable.
+推荐日常循环：
 
-## Data Model
+```sh
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
+research-cockpit ui --root research_cockpit --server.port 8501
+```
 
-Status values are type-specific:
+## 你会得到什么
+
+Research Cockpit 提供三层能力：
+
+| 能力 | 面向谁 | 用来做什么 |
+| --- | --- | --- |
+| YAML/Markdown 状态文件 | 人类和 agent | 保存研究图谱、节点详情、笔记和证据引用 |
+| CLI | 人类和 agent | 初始化、验证、构建 dashboard、更新状态、记录实验证据 |
+| Streamlit UI | 人类 | 浏览研究图谱、筛选节点、查看详情、资源、证据和行动建议 |
+
+关键原则：
+
+- `research_cockpit/current_state.yaml` 和 `research_cockpit/graph/nodes/*.yaml` 是 truth source。
+- `research_cockpit/dashboards/*` 是生成文件，用 `research-cockpit build --root <root>` 生成。
+- 日常修改优先用 CLI 命令，避免直接手改 YAML 后破坏图谱关系。
+- 同一个 data root 的写操作要顺序执行，不要并发写。
+
+## UI 怎么用
+
+启动后默认进入 Research Graph 页面。这里可以：
+
+- 用 Focus 深度、当前分支、方案工作流、全局图谱切换视图范围。
+- 按 node type、status、stage、focus role、workstream、blocking、missing evidence 筛选节点。
+- 点击图谱节点，在右侧查看概览、证据、资源、关系、行动和 agent 上下文。
+- 保存常用 graph view，后续一键恢复筛选条件。
+
+图谱默认使用 React Flow 和 Dagre layout。PyVis 是 legacy fallback。后台 agent 或手动命令改了 YAML 后，先运行 `research-cockpit build --root research_cockpit`，再在 UI 中点击 `Refresh`。普通数据变化不需要重建 React bundle。
+
+前端组件开发才需要 Node 依赖：
+
+```sh
+cd src/research_cockpit/ui/graph_component/frontend
+npm install
+npm run build
+```
+
+## 常用命令
+
+| 目标 | 命令 |
+| --- | --- |
+| 初始化最小状态 | `research-cockpit init --root research_cockpit --build --json` |
+| 初始化 demo 状态 | `research-cockpit init --template demo --root research_cockpit --build --json` |
+| 校验数据 | `research-cockpit validate --root research_cockpit --json` |
+| 生成 dashboard/context | `research-cockpit build --root research_cockpit` |
+| 启动 UI | `research-cockpit ui --root research_cockpit --server.port 8501` |
+| 查看可用命令 | `research-cockpit commands --json --compact` |
+| 全局启动上下文 | `research-cockpit bootstrap --root research_cockpit --json` |
+| 单节点上下文 | `research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json` |
+| 搜索知识 | `research-cockpit search --root research_cockpit --query "keyword" --json` |
+| 冒烟测试 | `research-cockpit smoke --root research_cockpit --json` |
+
+## 常见工作流
+
+### 1. 创建一个新研究分支
+
+适合从一个 problem 开始，创建 active option、planned experiments 和 follow-up options：
+
+```sh
+research-cockpit create-workstream --print-schema
+research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
+research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
+```
+
+`create-workstream` 不会自动改变全局 focus、暂停旧方案或删除旧分支。follow-up option 应使用 `open` 状态；文件输入里的 option `planned` 会被规范化为 `open`。
+
+### 2. 记录实验结论和证据
+
+单个实验：
+
+```sh
+research-cockpit complete-experiment \
+  --root research_cockpit \
+  --id experiment_x \
+  --finding "..." \
+  --confidence medium \
+  --evidence-path outputs/run_x \
+  --evidence-link metrics=outputs/run_x/metrics.json \
+  --json --compact
+```
+
+批量实验：
+
+```sh
+research-cockpit complete-experiments --print-schema
+research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
+research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build
+```
+
+inline evidence 只负责用 `path` 和 `links` 快速创建并关联 evidence artifact。复杂 artifact 元数据请先用 `create-artifact` 创建，再通过 `--artifact-id` 关联。
+
+### 3. 显式创建或关联 artifact
+
+```sh
+research-cockpit create-artifact --print-schema
+research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
+research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --no-build
+research-cockpit link-artifact --root research_cockpit --artifact artifact_x --to option_x --no-build
+```
+
+Artifact 的 `path` 和 `links` 会按原样存储。生成的 resource rows 会包含解析路径、解析基准和文件是否存在等信息。
+
+### 4. 收尾一个方案工作流
+
+只有当 close-out 状态明确时再 finalize：
+
+```sh
+research-cockpit finalize-workstream --print-schema
+research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --dry-run --json --show-diff
+research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --json --compact
+```
+
+`finalize-workstream` 不会创建 artifact、接受 decision、暂停旧分支、删除节点或编造 next actions。
+
+## 给 Agent 的最短上下文路径
+
+已知节点 id 时，优先用一个命令完成 handoff：
+
+```sh
+research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
+```
+
+不知道节点 id、需要全局 triage 时：
+
+```sh
+research-cockpit bootstrap --root research_cockpit --json
+```
+
+需要完整方案子树、实验摘要和证据计数时：
+
+```sh
+research-cockpit option-workstream-context --root research_cockpit --id <option_id> --compact --json
+```
+
+选择命令面时用 compact command discovery：
+
+```sh
+research-cockpit commands --json --compact --workflow evidence
+research-cockpit commands --json --compact --name create-workstream
+```
+
+不要在已知节点任务里重复串联 `bootstrap`、生成 context packs 和 `node-context`。直接用 `context` 更短、更稳定。
+
+## 数据结构
+
+项目 data root 结构：
+
+```text
+research_cockpit/
+  current_state.yaml
+  graph/nodes/
+  graph/edges.yaml
+  graph/graph_views.yaml
+  graph/interaction_log.yaml
+  notes/
+  dashboards/               # build 生成
+```
+
+节点状态按类型校验：
 
 | Node type | Valid statuses |
 | --- | --- |
@@ -49,16 +258,18 @@ Status values are type-specific:
 | `decision` | `proposed`, `accepted`, `superseded`, `rejected` |
 | `artifact` | `draft`, `planned`, `active`, `done`, `superseded`, `deprecated`, `archived` |
 
-Use `promising` only for an `option` that has positive signal but still needs comparison, experiment results, or a decision gate. Do not set decisions to `accepted` by editing YAML; use `research-cockpit accept-decision`.
+注意：
 
-## Repository Layout
+- `promising` 只用于已有正向信号但还没完成比较、实验或 decision gate 的 `option`。
+- 不要直接手改 YAML 把 decision 设置为 `accepted`，请用 `research-cockpit accept-decision`。
+- 如果 dry-run 或 validate 报告 `interaction_log.yaml` 损坏，先用 `repair-interaction-log` 预览和修复。
 
-Plugin source:
+## 仓库结构
 
 ```text
 src/research_cockpit/       # Python runtime, CLI, model, Streamlit UI
 capabilities/               # Agent-facing workflow docs
-templates/                  # Data-root templates
+templates/                  # data-root templates
 examples/demo_research_cockpit/
 schemas/
 docs/
@@ -66,269 +277,33 @@ tests/
 SKILL.md
 ```
 
-Project data root:
+推荐阅读：
 
-```text
-research_cockpit/
-  current_state.yaml
-  graph/nodes/
-  graph/edges.yaml
-  graph/graph_views.yaml
-  graph/interaction_log.yaml
-  notes/
-  dashboards/               # Generated by build
-```
+- `docs/repo-layout.md`: 仓库布局和模块地图。
+- `docs/internal-architecture.md`: 内部模块边界和依赖规则。
+- `docs/decisions/0001-layered-plugin-architecture.md`: layered plugin architecture rationale。
+- `capabilities/ui-dashboard.md`: Streamlit UI、React Flow 图谱和刷新行为。
+- `capabilities/graph-state.md`: 图谱状态、saved views 和 interaction log。
+- `capabilities/experiment-tracking.md`: experiment、finding、artifact 和 workstream 流程。
+- `capabilities/node-management.md`: 节点创建、批量图谱计划和 lifecycle cleanup。
 
-Maintainer docs:
+## 并行 Agent 和 Worktree
 
-- `docs/repo-layout.md`: repository layout and source module map.
-- `docs/internal-architecture.md`: internal module boundaries and dependency rules.
-- `docs/decisions/0001-layered-plugin-architecture.md`: layered plugin architecture rationale.
+并行 agent 可以用 git worktrees 隔离代码和实验输出，但 Research Cockpit 状态仍应写入主仓库的 canonical `research_cockpit/` root。
 
-## Agent Startup
+规则：
 
-Choose one startup path:
+- Worktree 里做代码改动、运行实验、保存本地输出。
+- Canonical root 里写所有 `research-cockpit` 状态变更。
+- 不要在 worktree 里重新 `research-cockpit init`。
+- 下游 agent 用 `set-agent-focus` 汇报进展，不要随意改全局 `set-focus`。
+- 多个写操作顺序执行；可在每个命令加 `--no-build`，最后由主仓库统一 `validate` 和 `build`。
 
-1. Known node id: use the one-command handoff.
+更多细节见 `capabilities/experiment-tracking.md` 和 `capabilities/graph-state.md`。
 
-```sh
-research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
-```
+## 开发者验证
 
-2. No known node id or global triage: bootstrap first.
-
-```sh
-research-cockpit bootstrap --root research_cockpit --json
-```
-
-3. Older minimal handoff: use compact `node-context`.
-
-```sh
-research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
-```
-
-Do not chain `bootstrap`, generated context packs, and `node-context` for normal known-node work. Read generated context packs only when auditing global dashboard state or broader focus context.
-
-Use filtered command discovery when choosing a workflow surface:
-
-```sh
-research-cockpit commands --json --compact --workflow evidence
-research-cockpit commands --json --compact --name create-workstream
-```
-
-`commands --json --compact` is a short agent discovery payload. Use full `commands --json` only when you need the complete command contract and long examples.
-
-## Mutation Safety
-
-Prefer CLI mutation commands over direct YAML edits. Mutating commands for the same data root must run sequentially; `can_batch` means serial batching with `--no-build`, not parallel execution.
-
-Mutation commands:
-
-- Use `graph/.mutation.lock`.
-- Strict-parse `graph/interaction_log.yaml` before success, including dry-runs.
-- Refuse stale writes if a target truth-source file changed after command planning.
-- Append compact interaction log events after successful truth-source writes.
-
-If a command reports a mutation conflict, reread compact context and retry the stale command. If a dry-run reports malformed `interaction_log.yaml`, repair or restore the log before attempting the real mutation.
-
-For batched writes:
-
-```sh
-research-cockpit <mutating-command> --root research_cockpit ... --dry-run --json --show-diff
-research-cockpit <mutating-command> --root research_cockpit ... --no-build
-research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit
-```
-
-## Generated Dashboards And UI
-
-Build generated files from YAML truth source:
-
-```sh
-research-cockpit build --root research_cockpit
-research-cockpit build --root research_cockpit --json
-research-cockpit build --root research_cockpit --watch --interval 5 --json
-```
-
-`build` writes generated dashboard/context files only and does not append an interaction log event. `--watch` polls truth-source YAML/notes and rebuilds only when they change; tests can bound it with `--max-iterations`. With `--watch --json`, output is one JSON object per iteration (JSONL-style), not one final JSON document.
-
-Launch the Streamlit UI:
-
-```sh
-research-cockpit ui --root research_cockpit --server.port 8501
-```
-
-The Research Graph uses React Flow with Dagre layout by default. PyVis remains a legacy fallback when the React Flow production build is unavailable.
-Use the graph `Refresh` button after a background agent changes YAML or after `research-cockpit build`; it reloads graph data without rebuilding the React bundle.
-
-Frontend component development requires Node dependencies under:
-
-```sh
-cd src/research_cockpit/ui/graph_component/frontend
-npm install
-npm run build
-```
-
-Normal YAML/data changes do not require a frontend rebuild; run `research-cockpit build` and use `Refresh` in the UI.
-
-## Agent Graph Update Workflow
-
-For batch graph changes, preview first, then write sequentially with `--no-build`, then validate and rebuild once. `can_batch` means serial batching, not parallel execution. If a mutation returns a conflict, the target truth-source file changed after the command planned its write; reread context and retry instead of forcing the stale write:
-
-```sh
-research-cockpit apply-graph-plan --print-schema
-research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
-research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --no-build
-research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit
-```
-
-Use `create-workstream` for the common `problem -> active option -> experiments + follow-up options` shape:
-
-```sh
-research-cockpit create-workstream --print-schema
-research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
-research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --compact
-research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
-```
-
-`create-workstream` sets the new problem `current_best_option` and active option `supporting_experiments`, but it does not change focus, pause old options, or delete old branches.
-Use `open` for follow-up option status. File-based graph commands accept option status `planned` only as an input alias and write `open` to YAML.
-Dry-run and JSON output report these aliases under `normalized_statuses`, so agents do not need an extra context read just to confirm `planned -> open`.
-`create-workstream --print-schema` includes common passthrough fields such as `question`, `hypothesis`, `summary`, `tags`, `success_criteria`, `metrics`, and `next_actions`.
-After creating a workstream, use `option-workstream-context --root research_cockpit --id <option_id> --compact --json` to verify experiment ids, statuses, success criteria count, metric count, finding count, and linked artifact count. Use per-experiment `node-context` only when you need full field text.
-
-When a focus node already has canonical actions, use:
-
-```sh
-research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --dry-run --json --show-diff
-research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --no-build
-```
-
-## Parallel Agents With Git Worktrees
-
-Use git worktrees to isolate code and experiments while keeping one canonical Research Cockpit root in the main repository. The main dashboard reads that shared root, so every downstream agent must write state there, not inside its worktree.
-
-Coordinator launch:
-
-```sh
-research-cockpit start-agent-session \
-  --root D:/main_repo/research_cockpit \
-  --option option_x \
-  --agent agent_x \
-  --objective "Run downstream experiments for option_x" \
-  --branch agent/option_x \
-  --worktree ../worktrees/agent_option_x \
-  --base main \
-  --create-worktree \
-  --dry-run --json --show-diff
-```
-
-Execute the same command without `--dry-run` after review, then pass the JSON `handoff` to the downstream agent. Relative `--worktree` values resolve against the canonical repository root (`--root` parent), matching `git -C <repo> worktree add`. YAML records only portable session metadata such as `session_id`, `owner`, `objective`, `git_branch`, and `worktree_label`; local absolute worktree paths stay in JSON output only. `--create-worktree` expects a new branch/worktree path; for an already-created worktree, rerun without `--create-worktree`.
-
-Downstream agent startup inside the worktree, shown in PowerShell syntax:
-
-```sh
-$env:RESEARCH_COCKPIT_ROOT="D:/main_repo/research_cockpit"
-research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
-```
-
-Rules for parallel agents:
-
-- Worktree: code changes, experiments, local outputs.
-- Canonical root: all `research-cockpit` mutations.
-- Do not run `research-cockpit init` or mutate `worktree/research_cockpit/`.
-- Use `set-agent-focus`, not global `set-focus`, for downstream progress.
-- Keep canonical mutations sequential; use `--no-build` and let the main repo run `build --watch`.
-
-Recovery only:
-
-```sh
-research-cockpit import-worktree-findings --root D:/main_repo/research_cockpit --from-root ../worktrees/agent_option_x/research_cockpit --agent agent_x --option option_x --dry-run --json --show-diff
-```
-
-`import-worktree-findings` imports safe evidence records only: artifact nodes, experiment findings, experiment-local `next_actions`, result summaries, and option workstream reports. It refuses structural graph changes, global focus changes, per-agent focus changes, and decision acceptance.
-
-## Agent Evidence Close-Out Workflow
-
-For a known option or experiment, prefer one compact context read:
-
-```sh
-research-cockpit context --root research_cockpit --node <node_id> --with-bootstrap --with-artifacts --compact --json
-research-cockpit option-workstream-context --root research_cockpit --id option_x --compact --json
-```
-
-Use `context` instead of chaining `bootstrap`, generated context packs, and `node-context` unless you are auditing global dashboard state. Use compact `option-workstream-context` when you specifically need the recursive option subtree, short experiment summaries, and evidence counts.
-
-Record evidence artifacts through CLI commands instead of patching artifact YAML:
-
-```sh
-research-cockpit create-artifact --print-schema
-research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
-research-cockpit create-artifact --root research_cockpit --file artifact.yaml --json --compact
-research-cockpit create-artifact --root research_cockpit --file artifact.yaml --no-build
-research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --dry-run --json --show-diff
-research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --no-build
-research-cockpit link-artifact --root research_cockpit --artifact artifact_x --to option_x --no-build
-```
-
-Use `--file` for artifacts with several `links` or `link_to` targets. Artifact `path` and `links` are stored exactly as provided; JSON resource rows include `resolved_target`, `resolution_base`, `resolution_attempts`, and `exists`. Relative paths are checked against the root parent, then the data root, then cwd.
-
-For experiment sweeps, batch findings from a file:
-
-```sh
-research-cockpit complete-experiments --print-schema
-research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
-research-cockpit complete-experiments --root research_cockpit --file findings.yaml --json --compact
-research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build
-research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json --json --compact
-```
-
-When the conclusion depends on a result directory, plot, report, or metrics JSON, pass it inline with `--evidence-path` and repeated `--evidence-link key=value`. `record-finding`, `complete-experiment`, and `complete-experiments` create the artifact and link it from both the finding and experiment. Existing artifacts still use `--artifact-id`. If no artifact is linked, the command succeeds with a `missing_evidence_artifact` warning.
-
-Use `update-finding` for later evidence or wording revisions:
-
-```sh
-research-cockpit update-finding --root research_cockpit --experiment experiment_x --finding-id experiment_x_finding_001 --statement "..." --artifact-id artifact_x --dry-run --json --show-diff
-research-cockpit update-finding --root research_cockpit --experiment experiment_x --finding-id experiment_x_finding_001 --statement "..." --artifact-id artifact_x --json --compact
-```
-
-Finalize a workstream only when the status changes are explicit:
-
-```sh
-research-cockpit finalize-workstream --print-schema
-research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --dry-run --json --show-diff
-research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --json --compact
-research-cockpit finalize-workstream --root research_cockpit --option option_x --status accepted --problem-status resolved --summary-file summary.md --summary-target report --artifact artifact_x --sync-focus --report --dry-run --json --show-diff
-```
-
-Use `--file` for longer close-outs; explicit CLI flags override file values. `finalize-workstream` does not create artifacts, accept decisions, pause old branches, delete nodes, or invent next actions.
-
-A relative `summary_file` inside `finalize.yaml` resolves against the finalize file directory, then the data root, then the current working directory. JSON output includes `resolved_inputs.summary_file`. Compact JSON stays short unless `--show-diff` is requested; with `--show-diff`, the payload includes the full diff plus `diff_line_count`.
-
-For older single-purpose mutation commands, preview with JSON and diff rather than guessing the write shape:
-
-```sh
-research-cockpit update-suggestion-state --root research_cockpit --id sg_x --state dismissed --reason "..." --dry-run --json --show-diff
-research-cockpit update-decision-evidence --root research_cockpit --id decision_x --dry-run --json --show-diff
-research-cockpit update-decision-checklist --root research_cockpit --id decision_x --alternative option_x --consequence "..." --next-required-action "..." --dry-run --json --show-diff
-```
-
-These commands do not use `--compact`; their JSON output stays short by default and only includes a full diff when `--show-diff` is present.
-
-If `validate` or a mutating dry-run reports interaction log damage, preview and repair the log explicitly:
-
-```sh
-research-cockpit repair-interaction-log --root research_cockpit --dry-run --json --show-diff
-research-cockpit repair-interaction-log --root research_cockpit --json --show-diff --backup
-research-cockpit validate --root research_cockpit --json
-```
-
-`repair-interaction-log` only drops invalid non-mapping event items or replaces invalid `events` containers with an empty list. It refuses YAML scanner errors instead of guessing a repair, and execution writes a backup before changing `graph/interaction_log.yaml`.
-
-## Development Verification
-
-From the plugin root:
+从插件根目录运行：
 
 ```sh
 python -m unittest discover -s tests
@@ -339,4 +314,9 @@ python dev/scripts/run_subagent_forward_check.py --json
 git diff --check
 ```
 
-Dev forward/usability checks report a `metrics` block per track/case: `command_count`, `failed_command_count`, `context_read_count`, `mutating_count`, `dry_run_count`, `build_count`, `validate_count`, `manual_yaml_patch_detected`, `truth_source_changed_files`, `explained_truth_source_changes`, and `high_level_commands_used`. Use these as trend signals, not hard pass/fail gates.
+如果只改文档，至少运行：
+
+```sh
+git diff --check
+python dev/scripts/run_skill_release_check.py --json --skip-mutating
+```
