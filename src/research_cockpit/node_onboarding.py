@@ -13,6 +13,7 @@ from research_cockpit.graph_core import (
     ordered_node_contexts,
 )
 from research_cockpit.decisions import build_decision_acceptance_checklist, build_decision_trace
+from research_cockpit.baselines import resolve_effective_baseline
 from research_cockpit.interaction_log import recent_interactions
 from research_cockpit.option_workstreams import build_option_workstream_context
 from research_cockpit.suggestions import build_action_suggestions
@@ -535,6 +536,7 @@ def _compact_node_onboarding_context(payload: dict[str, Any]) -> dict[str, Any]:
         "node": _compact_node_summary(payload.get("node")) or {},
         "parent_path": parent_path,
         "core_problem": _compact_core_problem(parent_path),
+        "effective_baseline": payload.get("effective_baseline") or {},
         "blockers": payload.get("blockers", []) or [],
         "next_actions": payload.get("next_actions", []) or [],
         "evidence_summary": _compact_evidence_summary(payload),
@@ -581,6 +583,7 @@ def build_node_onboarding_context(
     payload = {
         "node": node_context(node),
         "parent_chain": ordered_node_contexts(nodes, path_ids),
+        "effective_baseline": resolve_effective_baseline(nodes, node_id, current),
         "relations": {
             "parents": ordered_node_contexts(nodes, path_ids[:-1]),
             "children": ordered_node_contexts(nodes, child_ids_for_node),

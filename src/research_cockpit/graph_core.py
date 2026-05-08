@@ -305,6 +305,7 @@ def node_context(node: ResearchNode) -> dict[str, Any]:
         "evidence_strength": node.raw.get("evidence_strength"),
         "evidence_summary": node.raw.get("evidence_summary"),
         "current_best_option": node.raw.get("current_best_option"),
+        "baseline": node.raw.get("baseline"),
         "decision_state": node.raw.get("decision_state"),
         "outcome": node.raw.get("outcome"),
         "result_summary": node.raw.get("result_summary"),

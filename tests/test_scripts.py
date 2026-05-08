@@ -23,6 +23,13 @@ existing_pythonpath = os.environ.get("PYTHONPATH", "")
 os.environ["PYTHONPATH"] = str(SRC_DIR) if not existing_pythonpath else str(SRC_DIR) + os.pathsep + existing_pythonpath
 
 from research_cockpit.model import load_nodes, load_yaml, save_yaml
+from research_cockpit.baselines import (
+    build_accepted_decision_rows,
+    build_accepted_option_rows,
+    build_baseline_overview_rows,
+    build_set_baseline_command,
+    resolve_effective_baseline,
+)
 from research_cockpit.commands.accept_decision import accept_decision
 from research_cockpit.commands.add_node import add_node
 from research_cockpit.commands.agent_bootstrap import agent_bootstrap_payload, format_dependency_error, missing_runtime_dependencies
@@ -50,6 +57,7 @@ from research_cockpit.commands.record_finding import record_finding
 from research_cockpit.commands.repair_interaction_log import repair_interaction_log
 from research_cockpit.commands.report_option_workstream import report_option_workstream
 from research_cockpit.commands.set_agent_focus import set_agent_focus
+from research_cockpit.commands.set_baseline import set_baseline
 from research_cockpit.commands.set_focus import set_focus
 from research_cockpit.commands.skill_smoke_test import missing_modules_for_python, skill_smoke_test_payload
 from research_cockpit.commands.start_agent_session import start_agent_session
@@ -61,6 +69,7 @@ from research_cockpit.commands.update_node_fields import update_node_fields
 from research_cockpit.commands.update_finding import update_finding
 from research_cockpit.commands.update_suggestion_state import update_suggestion_state
 from research_cockpit.commands.update_status import update_status
+from research_cockpit.context_packs import build_agent_context
 from research_cockpit.graph_views import upsert_graph_view
 from research_cockpit.mutation_lock import MutationError, mutation_lock
 from research_cockpit.mutation_runtime import finish_mutation
@@ -4370,6 +4379,477 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         self.assertEqual(written["status"], "done")
         self.assertFalse((self.root / "dashboards").exists())
+
+    def test_set_baseline_writes_dry_run_clear_and_manifest(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_baseline",
+                "type": "artifact",
+                "title": "Baseline bundle",
+                "status": "done",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "accepted",
+                "parent": "option_t5",
+            },
+        )
+
+        dry_run = set_baseline(
+            self.root,
+            node_id="problem_text",
+            option_id="option_t5",
+            decision_id="decision_t5",
+            artifacts=["artifact_baseline"],
+            reason="Default baseline for follow-up agents.",
+            dry_run=True,
+            show_diff=True,
+        )
+        after_dry_run = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+
+        self.assertTrue(dry_run["would_change"])
+        self.assertFalse(dry_run["changed"])
+        self.assertIn("diff", dry_run)
+        self.assertNotIn("baseline", after_dry_run)
+
+        result = set_baseline(
+            self.root,
+            node_id="problem_text",
+            option_id="option_t5",
+            decision_id="decision_t5",
+            artifacts=["artifact_baseline"],
+            reason="Default baseline for follow-up agents.",
+            rebuild_dashboard=False,
+        )
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        manifest = agent_command_manifest()
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(problem["baseline"]["option"], "option_t5")
+        self.assertEqual(problem["baseline"]["decision"], "decision_t5")
+        self.assertEqual(problem["baseline"]["artifacts"], ["artifact_baseline"])
+        self.assertEqual(interaction_events(self.root)[-1]["kind"], "set_baseline")
+        command = [item for item in manifest if item["name"] == "set-baseline"][0]
+        self.assertEqual(
+            command["fields_supported"],
+            ["baseline.option", "baseline.decision", "baseline.artifacts", "baseline.reason"],
+        )
+
+        clear = set_baseline(self.root, node_id="problem_text", clear=True, rebuild_dashboard=False)
+        cleared = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        self.assertTrue(clear["changed"])
+        self.assertNotIn("baseline", cleared)
+
+        cli_out = subprocess.run(
+            [
+                *cli_command("set-baseline"),
+                "--root",
+                str(self.root),
+                "--node",
+                "problem_text",
+                "--option",
+                "option_t5",
+                "--decision",
+                "decision_t5",
+                "--artifact",
+                "artifact_baseline",
+                "--reason",
+                "CLI baseline.",
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        cli_problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        cli_payload = json.loads(cli_out.stdout)
+
+        self.assertEqual(cli_out.returncode, 0, cli_out.stderr or cli_out.stdout)
+        self.assertTrue(cli_payload["changed"])
+        self.assertEqual(cli_problem["baseline"]["reason"], "CLI baseline.")
+
+    def test_set_baseline_rejects_bad_refs_and_cross_problem_option(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "problem_other",
+                "type": "problem",
+                "title": "Other problem",
+                "status": "active",
+                "parent": "stage_text",
+                "children": ["option_other"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_other",
+                "type": "option",
+                "title": "Other option",
+                "status": "open",
+                "parent": "problem_other",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "decision_other",
+                "type": "decision",
+                "title": "Use other option",
+                "status": "accepted",
+                "parent": "option_other",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_orphan",
+                "type": "option",
+                "title": "Orphan option",
+                "status": "open",
+            },
+        )
+
+        with self.assertRaises(ValueError) as missing_option:
+            set_baseline(self.root, node_id="problem_text", option_id="missing_option", rebuild_dashboard=False)
+        self.assertIn("missing_option", str(missing_option.exception))
+
+        with self.assertRaises(ValueError) as wrong_type:
+            set_baseline(self.root, node_id="problem_text", option_id="exp_t5", rebuild_dashboard=False)
+        self.assertIn("must be option", str(wrong_type.exception))
+
+        with self.assertRaises(ValueError) as wrong_branch:
+            set_baseline(self.root, node_id="problem_text", option_id="option_other", rebuild_dashboard=False)
+        self.assertIn("same problem", str(wrong_branch.exception))
+
+        with self.assertRaises(ValueError) as orphan_problem_branch:
+            set_baseline(self.root, node_id="problem_text", option_id="option_orphan", rebuild_dashboard=False)
+        self.assertIn("same problem", str(orphan_problem_branch.exception))
+
+        with self.assertRaises(ValueError) as orphan_stage_branch:
+            set_baseline(self.root, node_id="stage_text", option_id="option_orphan", rebuild_dashboard=False)
+        self.assertIn("stage", str(orphan_stage_branch.exception))
+
+        with self.assertRaises(ValueError) as missing_artifact:
+            set_baseline(
+                self.root,
+                node_id="problem_text",
+                option_id="option_t5",
+                artifacts=["missing_artifact"],
+                rebuild_dashboard=False,
+            )
+        self.assertIn("missing_artifact", str(missing_artifact.exception))
+
+        with self.assertRaises(ValueError) as wrong_decision_type:
+            set_baseline(
+                self.root,
+                node_id="problem_text",
+                option_id="option_t5",
+                decision_id="option_t5",
+                rebuild_dashboard=False,
+            )
+        self.assertIn("expected 'decision'", str(wrong_decision_type.exception))
+
+        with self.assertRaises(ValueError) as wrong_artifact_type:
+            set_baseline(
+                self.root,
+                node_id="problem_text",
+                option_id="option_t5",
+                artifacts=["option_t5"],
+                rebuild_dashboard=False,
+            )
+        self.assertIn("expected 'artifact'", str(wrong_artifact_type.exception))
+
+        before = (self.root / "graph" / "nodes" / "problem_text.yaml").read_text(encoding="utf-8")
+        with self.assertRaises(ValueError) as wrong_decision_branch:
+            set_baseline(
+                self.root,
+                node_id="problem_text",
+                option_id="option_t5",
+                decision_id="decision_other",
+                rebuild_dashboard=False,
+            )
+        after = (self.root / "graph" / "nodes" / "problem_text.yaml").read_text(encoding="utf-8")
+        self.assertIn("baseline.decision must belong to baseline.option", str(wrong_decision_branch.exception))
+        self.assertEqual(before, after)
+
+    def test_validate_rejects_non_list_baseline_artifacts(self) -> None:
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        problem = load_yaml(problem_path)
+        problem["baseline"] = {"option": "option_t5", "artifacts": ""}
+        save_yaml(problem_path, problem)
+
+        failed = subprocess.run(
+            [*cli_command("validate"), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(failed.stdout)
+
+        self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
+        self.assertFalse(payload["valid"])
+        self.assertTrue(any("baseline.artifacts must be a list" in error for error in payload["errors"]))
+
+    def test_effective_baseline_prefers_explicit_then_inherited_then_problem_fallback(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_baseline",
+                "type": "artifact",
+                "title": "Baseline bundle",
+                "status": "done",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "accepted",
+                "parent": "option_t5",
+            },
+        )
+        current_fallback = resolve_effective_baseline(
+            load_nodes(self.root),
+            "exp_t5",
+            load_yaml(self.root / "current_state.yaml"),
+        )
+        self.assertEqual(current_fallback["source_kind"], "current_state_fallback")
+        self.assertEqual(current_fallback["option"]["id"], "option_t5")
+
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        problem = load_yaml(problem_path)
+        problem["current_best_option"] = "option_t5"
+        problem["resolved_by"] = "decision_t5"
+        save_yaml(problem_path, problem)
+
+        fallback = resolve_effective_baseline(load_nodes(self.root), "exp_t5", load_yaml(self.root / "current_state.yaml"))
+
+        self.assertEqual(fallback["source_kind"], "problem_fallback")
+        self.assertEqual(fallback["option"]["id"], "option_t5")
+        self.assertEqual(fallback["decision"]["id"], "decision_t5")
+
+        set_baseline(
+            self.root,
+            node_id="problem_text",
+            option_id="option_t5",
+            decision_id="decision_t5",
+            artifacts=["artifact_baseline"],
+            reason="Inherited by experiments.",
+            rebuild_dashboard=False,
+        )
+        inherited = resolve_effective_baseline(load_nodes(self.root), "exp_t5", load_yaml(self.root / "current_state.yaml"))
+
+        self.assertEqual(inherited["source_kind"], "inherited")
+        self.assertEqual(inherited["source_node_id"], "problem_text")
+        self.assertEqual(inherited["artifacts"][0]["id"], "artifact_baseline")
+
+        set_baseline(
+            self.root,
+            node_id="exp_t5",
+            option_id="option_t5",
+            reason="Experiment override.",
+            rebuild_dashboard=False,
+        )
+        explicit = resolve_effective_baseline(load_nodes(self.root), "exp_t5", load_yaml(self.root / "current_state.yaml"))
+
+        self.assertEqual(explicit["source_kind"], "explicit")
+        self.assertEqual(explicit["source_node_id"], "exp_t5")
+        self.assertEqual(explicit["reason"], "Experiment override.")
+
+    def test_context_and_node_context_include_effective_baseline_without_accepted_history(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_baseline",
+                "type": "artifact",
+                "title": "Baseline bundle",
+                "status": "done",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "accepted",
+                "parent": "option_t5",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "decision_old",
+                "type": "decision",
+                "title": "Old accepted branch",
+                "status": "accepted",
+                "parent": "option_t5",
+            },
+        )
+        set_baseline(
+            self.root,
+            node_id="problem_text",
+            option_id="option_t5",
+            decision_id="decision_t5",
+            artifacts=["artifact_baseline"],
+            reason="Use this baseline.",
+            rebuild_dashboard=False,
+        )
+
+        payload = context_payload(self.root, node_id="exp_t5", with_artifacts=True, compact=True)
+        node_payload = node_context_payload(self.root, node_id="exp_t5", compact=True)
+
+        self.assertEqual(payload["effective_baseline"]["option"]["id"], "option_t5")
+        self.assertEqual(payload["effective_baseline"]["decision"]["id"], "decision_t5")
+        self.assertIn("artifact_baseline", payload["artifacts"]["artifact_ids"])
+        self.assertEqual(node_payload["effective_baseline"]["option"]["id"], "option_t5")
+        self.assertNotIn("accepted_decisions", payload)
+        self.assertNotIn("decision_old", json.dumps(payload["effective_baseline"]))
+
+    def test_global_context_keeps_current_state_baseline_fallback(self) -> None:
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        context = build_agent_context(self.root, nodes)
+        bootstrap = agent_bootstrap_payload(self.root, build=False)
+
+        self.assertEqual(context["effective_baseline"]["source_kind"], "current_state_fallback")
+        self.assertEqual(context["effective_baseline"]["option"]["id"], current["current_option"])
+        self.assertEqual(bootstrap["focus"]["effective_baseline"]["source_kind"], "current_state_fallback")
+        self.assertEqual(bootstrap["focus"]["effective_baseline"]["option"]["id"], current["current_option"])
+
+    def test_context_for_stage_does_not_use_current_problem_fallback(self) -> None:
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        problem = load_yaml(problem_path)
+        problem["current_best_option"] = "option_t5"
+        save_yaml(problem_path, problem)
+
+        payload = context_payload(self.root, node_id="stage_text", compact=True)
+        node_payload = node_context_payload(self.root, node_id="stage_text", compact=True)
+
+        self.assertEqual(payload["effective_baseline"]["source_kind"], "current_state_fallback")
+        self.assertEqual(payload["effective_baseline"]["source_node_id"], "current_state")
+        self.assertEqual(node_payload["effective_baseline"]["source_kind"], "current_state_fallback")
+        self.assertEqual(node_payload["effective_baseline"]["source_node_id"], "current_state")
+
+    def test_baseline_overview_and_accepted_rows_are_compact(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "accepted",
+                "parent": "option_t5",
+                "supporting_experiments": ["exp_t5"],
+                "evidence_strength": "medium",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_missing_for_row_count",
+                "type": "artifact",
+                "title": "Row count artifact",
+                "status": "done",
+            },
+        )
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        option = load_yaml(option_path)
+        option["status"] = "accepted"
+        option["linked_artifacts"] = ["artifact_missing_for_row_count"]
+        save_yaml(option_path, option)
+        set_baseline(
+            self.root,
+            node_id="problem_text",
+            option_id="option_t5",
+            decision_id="decision_t5",
+            reason="Default accepted branch.",
+            rebuild_dashboard=False,
+        )
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        baseline_rows = build_baseline_overview_rows(nodes, current)
+        option_rows = build_accepted_option_rows(nodes, current)
+        decision_rows = build_accepted_decision_rows(nodes)
+
+        self.assertEqual(baseline_rows[0]["problem_id"], "problem_text")
+        self.assertEqual(baseline_rows[0]["baseline_option_id"], "option_t5")
+        self.assertEqual(option_rows, [row for row in option_rows if row["status"] == "accepted"])
+        self.assertEqual(option_rows[0]["finding_count"], 0)
+        self.assertFalse(option_rows[0]["is_current_best"])
+        self.assertTrue(option_rows[0]["is_current_option"])
+        self.assertEqual(decision_rows, [row for row in decision_rows if row["status"] == "accepted"])
+        self.assertEqual(decision_rows[0]["supporting_experiment_count"], 1)
+        self.assertIn("--option option_t5", build_set_baseline_command("problem_text", "option_t5"))
+
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["current_best_option"] = "option_t5"
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        option_rows = build_accepted_option_rows(load_nodes(self.root), current)
+        self.assertTrue(option_rows[0]["is_current_best"])
+
+    def test_build_set_baseline_command_shell_quotes_values(self) -> None:
+        command = build_set_baseline_command(
+            "problem weird",
+            "option;rm",
+            decision_id="decision$HOME",
+            artifacts=["artifact one"],
+            reason='Use $BASE; echo "bad"',
+        )
+
+        self.assertEqual(
+            command,
+            "research-cockpit set-baseline --node 'problem weird' "
+            "--option 'option;rm' --decision 'decision$HOME' "
+            "--artifact 'artifact one' --reason 'Use $BASE; echo \"bad\"'",
+        )
+
+    def test_baseline_overview_does_not_use_global_current_option_for_every_problem(self) -> None:
+        stage = load_yaml(self.root / "graph" / "nodes" / "stage_text.yaml")
+        stage["children"] = ["problem_text", "problem_other"]
+        save_yaml(self.root / "graph" / "nodes" / "stage_text.yaml", stage)
+        write_node(
+            self.root,
+            {
+                "id": "problem_other",
+                "type": "problem",
+                "title": "Other problem",
+                "status": "active",
+                "parent": "stage_text",
+                "children": ["option_other"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_other",
+                "type": "option",
+                "title": "Other option",
+                "status": "open",
+                "parent": "problem_other",
+            },
+        )
+        rows = {
+            row["problem_id"]: row
+            for row in build_baseline_overview_rows(load_nodes(self.root), load_yaml(self.root / "current_state.yaml"))
+        }
+
+        self.assertEqual(rows["problem_text"]["source_kind"], "none")
+        self.assertEqual(rows["problem_text"]["baseline_option_id"], "")
+        self.assertEqual(rows["problem_other"]["source_kind"], "none")
+        self.assertEqual(rows["problem_other"]["baseline_option_id"], "")
 
     def test_update_node_fields_updates_problem_fields_and_rebuilds_dashboard(self) -> None:
         write_node(

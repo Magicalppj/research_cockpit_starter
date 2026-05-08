@@ -11,7 +11,14 @@ SKILL_ROOT = ROOT_DIR
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
 from research_cockpit.ui.app import build_pyvis_html, get_text
+from research_cockpit.baselines import (
+    build_accepted_decision_rows,
+    build_accepted_option_rows,
+    build_baseline_overview_rows,
+    build_set_baseline_command,
+)
 from research_cockpit.ui.view_helpers import (
+    baseline_command_problem_ids,
     build_accept_decision_command,
     build_apply_suggestion_command,
     build_check_decision_acceptance_command,
@@ -96,6 +103,184 @@ class UiRenderingTests(unittest.TestCase):
 
         self.assertIn('key="main_page"', source)
         self.assertNotIn("tabs = st.tabs(tab_labels)", source)
+
+    def test_baselines_page_is_in_main_navigation(self) -> None:
+        text = get_text("中文")
+
+        self.assertIn("baselines", ordered_tab_keys(text))
+        self.assertIn("基线 / Accepted", ordered_tab_labels(text))
+
+    def test_baseline_command_empty_state_only_requires_problem(self) -> None:
+        zh_text = get_text("中文")
+        en_text = get_text("English")
+
+        self.assertEqual(zh_text["no_baseline_command_targets"], "需要至少一个 problem 才能生成 baseline 命令。")
+        self.assertEqual(
+            en_text["no_baseline_command_targets"],
+            "At least one problem is required to generate a baseline command.",
+        )
+
+    def test_baselines_page_generates_commands_without_direct_mutation(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn("def render_baselines", source)
+        self.assertIn("build_set_baseline_command", source)
+        self.assertIn("set-baseline", build_set_baseline_command("problem_t5", "option_t5"))
+        self.assertNotIn("from research_cockpit.commands.set_baseline import", source)
+
+    def test_baseline_and_accepted_rows_stay_compact(self) -> None:
+        nodes = {
+            "stage_t5": SimpleNamespace(
+                id="stage_t5",
+                type="stage",
+                title="Stage",
+                status="active",
+                parent=None,
+                children=["problem_t5"],
+                priority=None,
+                summary="",
+                raw={},
+            ),
+            "problem_t5": SimpleNamespace(
+                id="problem_t5",
+                type="problem",
+                title="Problem",
+                status="active",
+                parent="stage_t5",
+                children=["option_t5", "option_old"],
+                priority=None,
+                summary="",
+                raw={
+                    "baseline": {
+                        "option": "option_t5",
+                        "decision": "decision_t5",
+                        "reason": "Default branch.",
+                    }
+                },
+            ),
+            "option_t5": SimpleNamespace(
+                id="option_t5",
+                type="option",
+                title="T5",
+                status="accepted",
+                parent="problem_t5",
+                children=["exp_t5", "decision_t5"],
+                priority=None,
+                summary="Accepted branch.",
+                raw={"decision_state": "accepted", "linked_artifacts": ["artifact_t5"]},
+            ),
+            "option_old": SimpleNamespace(
+                id="option_old",
+                type="option",
+                title="Old",
+                status="rejected",
+                parent="problem_t5",
+                children=[],
+                priority=None,
+                summary="Rejected branch.",
+                raw={},
+            ),
+            "exp_t5": SimpleNamespace(
+                id="exp_t5",
+                type="experiment",
+                title="Experiment",
+                status="done",
+                parent="option_t5",
+                children=[],
+                priority=None,
+                summary="",
+                raw={"findings": [{"statement": "Positive.", "outcome": "positive"}]},
+            ),
+            "decision_t5": SimpleNamespace(
+                id="decision_t5",
+                type="decision",
+                title="Accept T5",
+                status="accepted",
+                parent="option_t5",
+                children=[],
+                priority=None,
+                summary="Accepted.",
+                raw={"supporting_experiments": ["exp_t5"], "evidence_strength": "medium"},
+            ),
+            "decision_draft": SimpleNamespace(
+                id="decision_draft",
+                type="decision",
+                title="Draft",
+                status="proposed",
+                parent="option_t5",
+                children=[],
+                priority=None,
+                summary="Draft.",
+                raw={},
+            ),
+            "artifact_t5": SimpleNamespace(
+                id="artifact_t5",
+                type="artifact",
+                title="Bundle",
+                status="done",
+                parent=None,
+                children=[],
+                priority=None,
+                summary="",
+                raw={},
+            ),
+        }
+        current = {"current_problem": "problem_t5", "current_option": "option_t5"}
+
+        baseline_rows = build_baseline_overview_rows(nodes, current)
+        accepted_options = build_accepted_option_rows(nodes, current)
+        accepted_decisions = build_accepted_decision_rows(nodes)
+
+        self.assertEqual(baseline_rows[0]["baseline_option_id"], "option_t5")
+        self.assertEqual([row["id"] for row in accepted_options], ["option_t5"])
+        self.assertEqual(accepted_options[0]["finding_count"], 1)
+        self.assertEqual([row["id"] for row in accepted_decisions], ["decision_t5"])
+        self.assertEqual(accepted_decisions[0]["supporting_experiment_count"], 1)
+
+    def test_baseline_command_targets_include_problems_without_accepted_options(self) -> None:
+        nodes = {
+            "stage_t5": SimpleNamespace(
+                id="stage_t5",
+                type="stage",
+                title="Stage",
+                status="active",
+                parent=None,
+                children=["problem_t5"],
+                priority=None,
+                summary="",
+                raw={},
+            ),
+            "problem_t5": SimpleNamespace(
+                id="problem_t5",
+                type="problem",
+                title="Problem",
+                status="active",
+                parent="stage_t5",
+                children=["option_t5"],
+                priority=None,
+                summary="",
+                raw={"baseline": {"option": "option_t5", "reason": "Keep this baseline."}},
+            ),
+            "option_t5": SimpleNamespace(
+                id="option_t5",
+                type="option",
+                title="T5",
+                status="active",
+                parent="problem_t5",
+                children=[],
+                priority=None,
+                summary="Active baseline.",
+                raw={},
+            ),
+        }
+
+        baseline_rows = build_baseline_overview_rows(nodes, {})
+        accepted_options = build_accepted_option_rows(nodes, {})
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+
+        self.assertEqual(accepted_options, [])
+        self.assertEqual(baseline_command_problem_ids(baseline_rows), ["problem_t5"])
+        self.assertIn("baseline_command_problem_ids(baseline_rows)", source)
 
     def test_graph_renders_before_control_panel(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")

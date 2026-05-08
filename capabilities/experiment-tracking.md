@@ -63,6 +63,18 @@ research-cockpit finalize-workstream --root research_cockpit --option option_x -
 
 Use `--file` to avoid long close-out commands. The file supports `option`, `status`, `problem_status`, `stage_status`, `summary_file`, `summary_target`, `artifacts`, `sync_focus`, `report`, `agent`, and `locale`; CLI flags override file values. A relative `summary_file` in the file resolves against the finalize file directory, then the data root, then cwd, and JSON output reports the resolved path. `finalize-workstream` does not create artifacts, accept decisions, pause old branches, delete nodes, or invent next actions. `--summary-file` writes only to the workstream report by default; use `--summary-target option|problem|all` when you explicitly want node summaries replaced.
 
+## Baseline Selection
+
+Treat findings as raw evidence, promising/accepted options as evaluated branches, and `baseline` as the default branch a downstream agent should inherit. Do not put every accepted option or decision into a known-node handoff. Set the default explicitly:
+
+```sh
+research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --artifact artifact_bundle_x --dry-run --json --show-diff
+research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --artifact artifact_bundle_x --no-build
+research-cockpit set-baseline --root research_cockpit --node problem_x --clear --no-build
+```
+
+`context` and `node-context` return `effective_baseline`, resolved from the target node, inherited parents, problem `current_best_option` / `resolved_by`, then `current_state.current_option`. Use the UI Baselines / Accepted page to review accepted history and generate these commands. The overview table is per problem: it uses that problem's baseline or current best, not the global `current_state.current_option`.
+
 If an agent accidentally wrote evidence to a worktree-local `research_cockpit/`, use the import command as a recovery step, not as the normal workflow:
 
 ```sh

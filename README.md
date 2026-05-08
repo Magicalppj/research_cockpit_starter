@@ -203,6 +203,17 @@ research-cockpit finalize-workstream --root research_cockpit --file finalize.yam
 
 `finalize-workstream` 不会创建 artifact、接受 decision、暂停旧分支、删除节点或编造 next actions。
 
+### 5. 把已采纳成果设为默认 baseline
+
+`accepted option/decision` 是历史事实，`baseline` 是某个节点及其下游 agent 默认继承的工作前提。多个方案都被接受后，不要把全部 accepted history 塞进每个 agent 上下文；由上游节点或用户显式选择默认 baseline：
+
+```sh
+research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --artifact artifact_bundle_x --reason "Default for follow-up experiments." --dry-run --json --show-diff
+research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --artifact artifact_bundle_x --no-build
+```
+
+`context` 和 `node-context` 会解析并输出 `effective_baseline`：当前节点显式 baseline 优先，其次继承上游 baseline，再 fallback 到 problem 的 `current_best_option` / `resolved_by`，最后在当前焦点上下文中 fallback 到 `current_state.current_option`。UI 的“基线 / Accepted”页面用于集中查看默认 baselines、accepted options 和 accepted decisions，并生成设置 baseline 的命令；该页面按每个 problem 自己的 baseline 或 current best 展示，不把全局 `current_option` 当作所有 problem 的默认 baseline。
+
 ## 给 Agent 的最短上下文路径
 
 已知节点 id 时，优先用一个命令完成 handoff：
@@ -262,6 +273,7 @@ research_cockpit/
 
 - `promising` 只用于已有正向信号但还没完成比较、实验或 decision gate 的 `option`。
 - 不要直接手改 YAML 把 decision 设置为 `accepted`，请用 `research-cockpit accept-decision`。
+- `baseline` 不是节点类型；它是写在 stage/problem/option/experiment 上的默认引用，用 `set-baseline` 维护。
 - 如果 dry-run 或 validate 报告 `interaction_log.yaml` 损坏，先用 `repair-interaction-log` 预览和修复。
 
 ## 仓库结构

@@ -34,6 +34,7 @@ def format_dependency_error(missing: list[str]) -> str:
 _MISSING_DEPENDENCIES = missing_runtime_dependencies()
 
 if not _MISSING_DEPENDENCIES:
+    from research_cockpit.baselines import resolve_current_effective_baseline
     from research_cockpit.context_packs import build_context_metadata
     from research_cockpit.model import (
         build_search_index,
@@ -101,6 +102,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
             "research-cockpit apply-graph-plan --root <root> --file graph_update.yaml --dry-run --json --show-diff",
             "research-cockpit create-workstream --root <root> --file workstream.yaml --dry-run --json --show-diff",
             "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path <path> --link-to <node_id> --no-build",
+            "research-cockpit set-baseline --root <root> --node <node_id> --option <option_id> --decision <decision_id> --no-build",
             "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json --no-build",
             "research-cockpit complete-experiments --root <root> --file findings.yaml --no-build",
             "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
@@ -123,6 +125,7 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
     suggestions = build_action_suggestions(root, nodes, current, link_rows)
     search_index = build_search_index(root, nodes, current)
     focus_node_id = focus_node_id_from_current(current, nodes)
+    effective_baseline = resolve_current_effective_baseline(nodes, current)
     metadata = build_context_metadata(root, current)
 
     return {
@@ -138,6 +141,7 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
             "current_option": current.get("current_option"),
             "current_focus_node": focus_node_id,
             "current_focus_path": current.get("current_focus_path", []) or [],
+            "effective_baseline": effective_baseline,
         },
         "context_paths": _context_paths(root),
         "skill": {

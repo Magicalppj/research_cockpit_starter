@@ -38,6 +38,7 @@ COMMAND_MODULES: dict[str, str] = {
     "update-decision-evidence": "update_decision_evidence",
     "update-decision-checklist": "update_decision_checklist",
     "accept-decision": "accept_decision",
+    "set-baseline": "set_baseline",
     "update-node-fields": "update_node_fields",
     "apply-suggestion": "apply_suggestion",
     "update-suggestion-state": "update_suggestion_state",

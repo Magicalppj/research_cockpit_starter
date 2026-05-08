@@ -13,6 +13,7 @@ def ordered_tab_keys(text: dict[str, str]) -> list[str]:
     keys = [
         "research_graph",
         "dashboard",
+        "baselines",
         "branch_comparison",
         "decision_trace",
         "action_guidance",
@@ -30,6 +31,17 @@ def ordered_tab_keys(text: dict[str, str]) -> list[str]:
 def ordered_tab_labels(text: dict[str, str]) -> list[str]:
     keys = ordered_tab_keys(text)
     return [text[key] for key in keys if key in text]
+
+
+def baseline_command_problem_ids(baseline_rows: list[dict[str, Any]]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for row in baseline_rows:
+        problem_id = str(row.get("problem_id") or "")
+        if problem_id and problem_id not in seen:
+            out.append(problem_id)
+            seen.add(problem_id)
+    return out
 
 
 def default_detail_node_id(graph: dict, node_ids: list[str]) -> str:

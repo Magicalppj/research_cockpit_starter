@@ -11,7 +11,14 @@ ROOT = default_data_root()
 
 from research_cockpit.commands.agent_bootstrap import agent_bootstrap_payload
 from research_cockpit.commands.node_context import node_context_payload
-from research_cockpit.graph_core import derive_focus_path, node_context, node_id_by_type_in_path, ordered_node_contexts
+from research_cockpit.baselines import baseline_artifact_ids, resolve_effective_baseline
+from research_cockpit.graph_core import (
+    derive_focus_path,
+    node_context,
+    node_id_by_type_in_path,
+    ordered_node_contexts,
+    unique_strings,
+)
 from research_cockpit.model import (
     ValidationError,
     load_explicit_edges,
@@ -105,7 +112,9 @@ def context_payload(
     problem_id = upstream_problem_id(nodes, option_id) if option_id else None
     related_experiment_ids = _related_experiment_ids(nodes, node_id)
     related_ids = [node_id, *related_experiment_ids]
+    effective_baseline = resolve_effective_baseline(nodes, node_id, current)
     artifact_ids = _artifact_ids_for(nodes, related_ids)
+    artifact_ids = unique_strings([*artifact_ids, *baseline_artifact_ids(effective_baseline)])
     global_focus = _compact_focus_payload(current)
     target_context = _target_context_payload(nodes, node_id, global_focus)
     target_differs_from_global_focus = not target_context["is_current_global_focus"]
@@ -123,6 +132,7 @@ def context_payload(
         "focus": global_focus,
         "current_global_focus": global_focus,
         "target_context": target_context,
+        "effective_baseline": effective_baseline,
         "context_boundary": {
             "target_node_id": node_id,
             "global_focus_node_id": global_focus.get("current_focus_node"),

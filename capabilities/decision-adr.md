@@ -33,3 +33,10 @@ research-cockpit promote-decision --root research_cockpit --id decision_x --opti
 ```
 
 Decision acceptance writes compact events to `interaction_log.yaml`.
+
+Accepted decisions are historical adoption records. They do not automatically become the default context for every downstream agent. After acceptance, set the default baseline on the relevant problem, option, experiment, or stage when future work should inherit it:
+
+```sh
+research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --dry-run --json --show-diff
+research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --no-build
+```

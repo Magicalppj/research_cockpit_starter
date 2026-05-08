@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 import subprocess
 
+from research_cockpit.baselines import resolve_current_effective_baseline
 from research_cockpit.graph_core import (
     child_ids,
     derive_focus_path,
@@ -104,6 +105,8 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
     current = load_yaml(root / "current_state.yaml")
     path = current.get("current_focus_path", []) or []
     linked_nodes = [node_context(nodes[node_id]) for node_id in path if node_id in nodes]
+    current_focus_node = focus_node_id_from_current(current, nodes)
+    effective_baseline = resolve_current_effective_baseline(nodes, current)
 
     active_problems = [
         n for n in nodes.values()
@@ -115,7 +118,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
     ]
     recent_decisions = [
         n for n in nodes.values()
-        if n.type == "decision" and n.status in {"accepted", "proposed"}
+        if n.type == "decision" and n.status == "proposed"
     ]
     search_index = build_search_index(root, nodes, current)
     option_workstreams = build_option_workstream_rows(nodes, current)
@@ -130,8 +133,9 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         "current_problem_title": node_title(nodes, current.get("current_problem")),
         "current_option": current.get("current_option"),
         "current_option_title": node_title(nodes, current.get("current_option")),
-        "current_focus_node": focus_node_id_from_current(current, nodes),
-        "current_focus_node_title": node_title(nodes, focus_node_id_from_current(current, nodes)),
+        "current_focus_node": current_focus_node,
+        "current_focus_node_title": node_title(nodes, current_focus_node),
+        "effective_baseline": effective_baseline,
         "focus_mode": focus_mode_from_current(current),
         "current_hypothesis": current.get("current_hypothesis"),
         "current_focus_path": path,
@@ -191,6 +195,7 @@ def build_focus_context(
     current = current if current is not None else load_yaml(root / "current_state.yaml")
     focus_node_id = focus_node_id_from_current(current, nodes)
     focus_node = nodes.get(focus_node_id) if focus_node_id else None
+    effective_baseline = resolve_current_effective_baseline(nodes, current)
     path_ids = [
         str(node_id)
         for node_id in current.get("current_focus_path", []) or []
@@ -321,6 +326,7 @@ def build_focus_context(
             "blockers": blockers,
         },
         "current_best_option": current_best_option,
+        "effective_baseline": effective_baseline,
         "blockers": blockers,
         "next_actions": next_actions,
         "knowledge_index": _knowledge_index(nodes, knowledge_node_ids),
@@ -340,6 +346,7 @@ def build_current_state_payload(
 ) -> dict[str, Any]:
     current = current if current is not None else load_yaml(root / "current_state.yaml")
     focus_node_id = focus_node_id_from_current(current, nodes)
+    effective_baseline = resolve_current_effective_baseline(nodes, current)
     return {
         "current_stage": current.get("current_stage"),
         "current_stage_title": node_title(nodes, current.get("current_stage")),
@@ -349,6 +356,7 @@ def build_current_state_payload(
         "current_option_title": node_title(nodes, current.get("current_option")),
         "current_focus_node": focus_node_id,
         "current_focus_node_title": node_title(nodes, focus_node_id),
+        "effective_baseline": effective_baseline,
         "focus_mode": focus_mode_from_current(current),
         "current_focus_path": current.get("current_focus_path", []) or [],
         "current_hypothesis": current.get("current_hypothesis"),
@@ -376,6 +384,14 @@ def write_dashboard_markdown(root: Path, context: dict[str, Any]) -> None:
     lines.append("")
     lines.append("## Current Hypothesis\n")
     lines.append(str(context.get("current_hypothesis") or ""))
+    lines.append("")
+    baseline = context.get("effective_baseline") or {}
+    option = baseline.get("option") or {}
+    decision = baseline.get("decision") or {}
+    lines.append("## Effective Baseline\n")
+    lines.append(f"- **Option:** `{option.get('id') or ''}`")
+    lines.append(f"- **Decision:** `{decision.get('id') or ''}`")
+    lines.append(f"- **Source:** `{baseline.get('source_kind') or ''}` from `{baseline.get('source_node_id') or ''}`")
     lines.append("")
     lines.append("## Open Risks\n")
     for item in context.get("open_risks", []):

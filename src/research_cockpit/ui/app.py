@@ -16,6 +16,12 @@ RESEARCH_ROOT = default_data_root()
 COMMAND_LANGUAGE = "bash"
 
 from research_cockpit.context_packs import build_agent_context
+from research_cockpit.baselines import (
+    build_accepted_decision_rows,
+    build_accepted_option_rows,
+    build_baseline_overview_rows,
+    build_set_baseline_command,
+)
 from research_cockpit.model import (
     build_experiment_matrix,
     build_search_index,
@@ -44,6 +50,7 @@ from research_cockpit.ui.graph_component import graph_component_build_available,
 from research_cockpit.ui.pyvis_renderer import build_pyvis_html, render_pyvis_graph
 from research_cockpit.ui.text import get_text
 from research_cockpit.ui.view_helpers import (
+    baseline_command_problem_ids,
     build_apply_suggestion_command,
     build_accept_decision_command,
     build_check_decision_acceptance_command,
@@ -402,6 +409,109 @@ def render_dashboard(
 
     if validation_errors:
         st.error(text["data_health_warning"].format(count=len(validation_errors)))
+
+
+def render_baselines(nodes: dict, current: dict, text: dict[str, str]) -> None:
+    baseline_rows = build_baseline_overview_rows(nodes, current)
+    accepted_options = build_accepted_option_rows(nodes, current)
+    accepted_decisions = build_accepted_decision_rows(nodes)
+
+    st.subheader(text["default_baselines"])
+    if baseline_rows:
+        st.dataframe(pd.DataFrame(baseline_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info(text["no_baselines"])
+
+    option_tab, decision_tab, command_tab = st.tabs([
+        text["accepted_options"],
+        text["accepted_decisions"],
+        text["baseline_commands"],
+    ])
+
+    with option_tab:
+        if accepted_options:
+            st.dataframe(pd.DataFrame(accepted_options), use_container_width=True, hide_index=True)
+        else:
+            st.info(text["no_accepted_options"])
+
+    with decision_tab:
+        if accepted_decisions:
+            st.dataframe(pd.DataFrame(accepted_decisions), use_container_width=True, hide_index=True)
+        else:
+            st.info(text["no_accepted_decisions"])
+
+    with command_tab:
+        baseline_by_problem = {
+            row["problem_id"]: row
+            for row in baseline_rows
+            if row.get("problem_id")
+        }
+        problem_ids = baseline_command_problem_ids(baseline_rows)
+        if problem_ids:
+            problem_id = st.selectbox(
+                text["baseline_target"],
+                problem_ids,
+                format_func=lambda value: format_node_option(nodes, value),
+                key="baseline_target_problem",
+            )
+            baseline_row = baseline_by_problem.get(problem_id, {})
+            baseline_option_id = str(baseline_row.get("baseline_option_id") or "")
+            st.write(text["clear_baseline_command"])
+            st.code(build_set_baseline_command(problem_id, clear=True), language=COMMAND_LANGUAGE)
+            if baseline_option_id:
+                st.write(text["baseline_context_command"])
+                st.code(
+                    f"research-cockpit context --id {baseline_option_id} --with-artifacts --compact --json",
+                    language=COMMAND_LANGUAGE,
+                )
+            option_ids = [
+                row["id"]
+                for row in accepted_options
+                if row.get("id") and row.get("problem_id") == problem_id
+            ]
+            if option_ids:
+                option_id = st.selectbox(
+                    text["baseline_option"],
+                    option_ids,
+                    format_func=lambda value: format_node_option(nodes, value),
+                    key="baseline_option",
+                )
+                decision_ids = [""] + [
+                    row["id"]
+                    for row in accepted_decisions
+                    if row.get("id") and row.get("option_id") == option_id
+                ]
+                decision_id = st.selectbox(
+                    text["baseline_decision"],
+                    decision_ids,
+                    format_func=lambda value: text["none"] if not value else format_node_option(nodes, value),
+                    key="baseline_decision",
+                )
+                if option_id in nodes:
+                    st.caption(nodes[option_id].summary or text["no_summary"])
+                if decision_id and decision_id in nodes:
+                    st.caption(nodes[decision_id].summary or text["no_summary"])
+                reason = st.text_input(text["baseline_reason"], value="", key="baseline_reason")
+                st.write(text["set_baseline_command"])
+                st.code(
+                    build_set_baseline_command(
+                        problem_id,
+                        option_id,
+                        decision_id=decision_id,
+                        reason=reason,
+                    ),
+                    language=COMMAND_LANGUAGE,
+                )
+                if decision_id:
+                    st.write(text["inspect_decision"])
+                    st.code(
+                        f"research-cockpit node-context --id {decision_id} --compact --json",
+                        language=COMMAND_LANGUAGE,
+                    )
+            else:
+                st.info(text["no_accepted_options"])
+        else:
+            st.info(text["no_baseline_command_targets"])
 
 
 def render_graph_tab(
@@ -1268,6 +1378,8 @@ def main() -> None:
         render_graph_tab(nodes, graph, current, text, link_rows, saved_graph_views, action_suggestions)
     elif page_key == "dashboard":
         render_dashboard(context, validation_errors, text, action_suggestions)
+    elif page_key == "baselines":
+        render_baselines(nodes, current, text)
     elif page_key == "branch_comparison":
         render_branch_comparison(nodes, current, text)
     elif page_key == "decision_trace":

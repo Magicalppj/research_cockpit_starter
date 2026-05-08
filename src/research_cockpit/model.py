@@ -672,6 +672,8 @@ def validate_explicit_edges(nodes: dict[str, ResearchNode], explicit_edges: list
 
 
 def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
+    from research_cockpit.baselines import validate_baseline_for_node
+
     errors: list[str] = []
 
     def validate_single_ref(
@@ -816,6 +818,7 @@ def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
         validate_list_refs(node.id, "linked_artifacts", "artifact")
         validate_list_refs(node.id, "alternatives_considered", "option")
         validate_list_refs(node.id, "derived_from")
+        errors.extend(validate_baseline_for_node(nodes, node, node.raw.get("baseline")))
         validate_findings(node)
         validate_option_workstream(node)
     return errors
@@ -1057,6 +1060,7 @@ def node_context(node: ResearchNode) -> dict[str, Any]:
         "evidence_strength": node.raw.get("evidence_strength"),
         "evidence_summary": node.raw.get("evidence_summary"),
         "current_best_option": node.raw.get("current_best_option"),
+        "baseline": node.raw.get("baseline"),
         "decision_state": node.raw.get("decision_state"),
         "outcome": node.raw.get("outcome"),
         "result_summary": node.raw.get("result_summary"),

@@ -28,6 +28,10 @@ React Flow is the default graph renderer. PyVis remains available as a legacy fa
 
 Use `Refresh` when a background agent has changed YAML. Refresh reruns Streamlit and reloads the current graph data without rebuilding the React bundle.
 
+## Baselines / Accepted
+
+Use the Baselines / Accepted page to review default baselines, accepted options, and accepted decisions without expanding all accepted history into agent context. Baseline rows are scoped per problem and do not reuse the global `current_state.current_option` as every problem's default. The page is read-only in v1: it generates `set-baseline`, `context`, and `node-context` commands for review instead of writing YAML directly.
+
 ## Frontend Build
 
 Only rebuild after changing frontend source:
