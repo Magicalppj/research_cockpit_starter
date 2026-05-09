@@ -5,7 +5,8 @@ status: active
 priority: critical
 parent: stage_demo_research
 question: How can the demo agent make answers more consistent across repeated runs?
-summary: Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.
+summary: Generic sample problem used to exercise option comparison, experiments, decisions,
+  and agent workstreams.
 children:
 - option_demo_prompt_refinement
 - option_demo_retrieval_branch
@@ -14,3 +15,10 @@ next_actions:
 - Run the prompt refinement demo experiment.
 blockers:
 - Need at least one structured finding before accepting the demo decision.
+baseline:
+  option: option_demo_prompt_refinement
+  decision: decision_demo_prompt_refinement
+  artifacts:
+  - artifact_demo_baseline
+  reason: Use prompt refinement as the default baseline for follow-up demo experiments.
+updated_at: '2026-05-09'

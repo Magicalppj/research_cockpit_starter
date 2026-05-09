@@ -66,6 +66,18 @@ The payload is computed from truth-source YAML, not from stale generated dashboa
 
 Known-node payloads include `effective_baseline`. This is the default option/decision/artifact bundle the target node should inherit. Use it instead of scanning every accepted decision unless the task is explicitly reviewing accepted history. When `--with-artifacts` is present, baseline artifacts are included in artifact/resource rows.
 
+## Set Baseline
+
+Use `set-baseline` when a problem, stage, option, or experiment should provide the default option/decision/artifact bundle for follow-up agents:
+
+```sh
+research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --artifact artifact_bundle_x --dry-run --json --show-diff
+research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --artifact artifact_bundle_x --no-build
+research-cockpit set-baseline --root research_cockpit --node problem_x --clear --no-build
+```
+
+`baseline` is not a node type. Do not edit the YAML field by hand when this command covers the change.
+
 Use `node-context --compact --json` only when you need the narrow node onboarding payload without bootstrap/artifact aggregation. Use full `node-context --json` without `--compact` when you need complete relations, resources, recent interactions, or type-specific traces.
 Avoid the old chain `bootstrap` + generated context packs + `node-context` for known-node work unless you are explicitly auditing global dashboard state.
 

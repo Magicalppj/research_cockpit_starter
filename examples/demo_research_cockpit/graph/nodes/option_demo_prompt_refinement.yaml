@@ -5,7 +5,8 @@ status: active
 priority: high
 parent: problem_demo_quality_gap
 summary: Candidate branch that improves instructions, examples, and acceptance checks.
-hypothesis: Clearer task framing and explicit success criteria will make responses more consistent.
+hypothesis: Clearer task framing and explicit success criteria will make responses
+  more consistent.
 children:
 - problem_demo_subtask_scope
 - experiment_demo_prompt_refinement
@@ -16,3 +17,6 @@ pros:
 cons:
 - May not solve retrieval gaps
 decision_state: promising
+linked_artifacts:
+- artifact_demo_baseline
+updated_at: '2026-05-09'

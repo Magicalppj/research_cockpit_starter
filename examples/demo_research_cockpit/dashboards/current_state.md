@@ -10,6 +10,12 @@
 
 A small structured demo can show how agents inspect, branch, test, and report option workstreams.
 
+## Effective Baseline
+
+- **Option:** `option_demo_prompt_refinement`
+- **Decision:** `decision_demo_prompt_refinement`
+- **Source:** `inherited` from `problem_demo_quality_gap`
+
 ## Open Risks
 
 - Demo data is illustrative and should be replaced by the user's own research nodes.

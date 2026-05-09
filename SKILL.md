@@ -143,6 +143,8 @@ After creating a workstream, use `option-workstream-context --id <option_id> --c
 
 Use `complete-experiment --evidence-path ... --evidence-link key=value` or per-entry `complete-experiments` evidence blocks when the finding depends on result folders, plots, reports, or metrics JSON. These commands create and link an artifact from both the finding and experiment so node resources show the evidence path. Use `complete-experiments` for sweeps or multi-backend experiment sets. Use `create-artifact --file artifact.yaml` for result folders with several links or target nodes, and use `link-artifact` for attaching existing artifacts, so agents do not patch `path`, `links`, or `linked_artifacts` by hand. Artifact paths are stored exactly as provided; JSON resource rows report `resolved_target`, `resolution_base`, `resolution_attempts`, and `exists` using root parent, data root, then cwd for relative paths. If a finding has no linked artifact, the command may still succeed but JSON includes `missing_evidence_artifact`. Use `update-finding` when revising an existing finding statement, confidence, outcome, metrics, or evidence artifacts.
 
+Known-node tasks should use `effective_baseline` from `context` or `node-context` as the default option/decision/artifact bundle for follow-up work. When an accepted branch should become the default for later agents, use `research-cockpit set-baseline`; do not expand every accepted decision into normal handoffs unless the task is explicitly auditing accepted history.
+
 Use `finalize-workstream --file finalize.yaml` when the close-out needs several flags. `--file` supports `option`, `status`, `problem_status`, `stage_status`, `summary_file`, `summary_target`, `artifacts`, `sync_focus`, `report`, `agent`, and `locale`; explicit CLI flags override file values. A relative `summary_file` in `finalize.yaml` resolves against the finalize file directory, then the data root, then the current working directory. Use `finalize-workstream` only for explicit close-out. It updates the named option/problem/stage statuses and optional report/artifact/focus fields that you pass; it does not accept decisions, pause old options, delete branches, or invent next actions.
 
 ## Parallel Agents With Git Worktrees
@@ -187,7 +189,7 @@ Allowed truth-source writes are under:
 
 Agents should normally write YAML truth-source files through `research-cockpit` CLI commands. Direct YAML repair is a last-resort structural fix and must be followed by validation and dashboard rebuild.
 
-Markdown notes under `research_cockpit/notes/**/*.md` may be edited directly for human-readable detail. Keep structured findings, status, focus, decision state, `current_best_option`, and `next_actions` in YAML via CLI where a command exists.
+Markdown notes under `research_cockpit/notes/**/*.md` may be edited directly for human-readable detail. Keep structured findings, status, focus, decision state, `baseline`, `current_best_option`, and `next_actions` in YAML via CLI where a command exists.
 
 Generated files under `research_cockpit/dashboards/` must be rebuilt, not hand-authored.
 

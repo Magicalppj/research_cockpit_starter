@@ -68,6 +68,7 @@ from research_cockpit.ui.view_helpers import (
     context_rows,
     build_graph_component_payload,
     default_detail_node_id,
+    default_show_baseline_lens,
     default_selected_node_types,
     default_selected_statuses,
     filter_action_suggestions,
@@ -100,6 +101,16 @@ from research_cockpit.commands.update_suggestion_state import update_suggestion_
 
 
 st.set_page_config(page_title="Research Cockpit", layout="wide")
+
+
+def _baseline_ref_label(ref: object) -> str:
+    if isinstance(ref, dict):
+        node_id = str(ref.get("id") or "")
+        title = str(ref.get("title") or "")
+        if node_id and title:
+            return f"{title} | {node_id}"
+        return title or node_id
+    return ""
 
 
 def load_graph_data():
@@ -152,6 +163,47 @@ def render_decision_repair_hints(checklist: dict, text: dict[str, str]) -> None:
                 st.code(row["suggested_command"], language=COMMAND_LANGUAGE)
 
 
+def render_effective_baseline(node: object, effective_baseline: dict, text: dict[str, str]) -> None:
+    st.write(text["effective_baseline"])
+    option = effective_baseline.get("option") if isinstance(effective_baseline, dict) else None
+    if not option:
+        st.caption(text["no_effective_baseline"])
+        st.code(
+            f"research-cockpit set-baseline --node {getattr(node, 'id', '')} "
+            "--option <option_id> --dry-run --json --show-diff",
+            language=COMMAND_LANGUAGE,
+        )
+        st.code(
+            f"research-cockpit context --id {getattr(node, 'id', '')} --compact --json",
+            language=COMMAND_LANGUAGE,
+        )
+        return
+
+    if getattr(node, "type", "") == "experiment":
+        st.caption(text["experiment_uses_baseline"])
+    decision = effective_baseline.get("decision") or {}
+    artifacts = effective_baseline.get("artifacts") or []
+    artifact_ids = [
+        str(item.get("id"))
+        for item in artifacts
+        if isinstance(item, dict) and item.get("id")
+    ]
+    rows = [
+        {"field": text["baseline_source"], "value": str(effective_baseline.get("source_node_id") or "")},
+        {"field": text["baseline_source_kind"], "value": str(effective_baseline.get("source_kind") or "")},
+        {"field": text["baseline_option"], "value": _baseline_ref_label(option)},
+        {"field": text["baseline_decision"], "value": _baseline_ref_label(decision)},
+        {"field": text["baseline_artifacts"], "value": ", ".join(artifact_ids)},
+        {"field": text["baseline_reason"], "value": str(effective_baseline.get("reason") or "")},
+    ]
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.write(text["baseline_context_command"])
+    st.code(
+        f"research-cockpit context --id {option.get('id')} --with-artifacts --compact --json",
+        language=COMMAND_LANGUAGE,
+    )
+
+
 def render_node_detail(
     nodes: dict,
     node_id: str,
@@ -201,6 +253,7 @@ def render_node_detail(
                 st.write(f"- {item}")
         else:
             st.caption(text["no_next_actions"])
+        render_effective_baseline(node, overview.get("effective_baseline") or {}, text)
         st.write(text["key_resources"])
         if overview["key_resources"]:
             st.dataframe(
@@ -550,6 +603,7 @@ def render_graph_tab(
             all_stages=all_stages,
             all_focus_roles=all_focus_roles,
         )
+        st.session_state["graph_show_baseline_lens"] = default_show_baseline_lens(next_view_mode)
 
     def selected_values(key: str, available: list[str], default: list[str]) -> list[str]:
         raw = st.session_state[key] if key in st.session_state else default
@@ -605,6 +659,9 @@ def render_graph_tab(
     only_blocking = bool(st.session_state.get("graph_only_blocking", False))
     only_next_actions = bool(st.session_state.get("graph_only_next_actions", False))
     only_missing_evidence = bool(st.session_state.get("graph_only_missing_evidence", False))
+    show_baseline_lens = bool(
+        st.session_state.get("graph_show_baseline_lens", default_show_baseline_lens(view_mode))
+    )
     renderer_label = st.session_state.get("graph_renderer", "React Flow")
     if renderer_label not in renderer_options:
         renderer_label = "React Flow"
@@ -642,7 +699,11 @@ def render_graph_tab(
     with graph_area:
         use_react_flow = renderer_label == "React Flow" and graph_component_build_available()
         if use_react_flow:
-            payload = build_graph_component_payload(filtered_graph, selected_node_id=current_detail_node)
+            payload = build_graph_component_payload(
+                filtered_graph,
+                selected_node_id=current_detail_node,
+                show_baseline_lens=show_baseline_lens,
+            )
             component_value = render_research_graph_component(
                 payload,
                 selected_node_id=current_detail_node,
@@ -725,6 +786,11 @@ def render_graph_tab(
                 value=only_missing_evidence,
                 key="graph_only_missing_evidence",
             )
+            show_baseline_lens = st.checkbox(
+                text["show_baseline_lens"],
+                value=show_baseline_lens,
+                key="graph_show_baseline_lens",
+            )
             renderer_label = st.radio(
                 "Graph Renderer",
                 renderer_options,
@@ -755,6 +821,7 @@ def render_graph_tab(
                             "only_blocking": only_blocking,
                             "only_next_actions": only_next_actions,
                             "only_missing_evidence": only_missing_evidence,
+                            "show_baseline_lens": show_baseline_lens,
                         },
                         "saved_focus_node_id": graph.get("current_focus_node"),
                         "saved_focus_path": current.get("current_focus_path", []) or [],

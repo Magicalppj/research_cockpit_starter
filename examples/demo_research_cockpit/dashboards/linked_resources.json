@@ -1,1 +1,245 @@
-[]
+[
+  {
+    "node_id": "artifact_demo_baseline",
+    "node_title": "Prompt refinement baseline bundle",
+    "node_type": "artifact",
+    "kind": "link",
+    "label": "context",
+    "target": "dashboards/focus_context_pack.json",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards/focus_context_pack.json",
+      "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/focus_context_pack.json"
+    ]
+  },
+  {
+    "node_id": "artifact_demo_baseline",
+    "node_title": "Prompt refinement baseline bundle",
+    "node_type": "artifact",
+    "kind": "link",
+    "label": "graph",
+    "target": "dashboards/graph_view.json",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards/graph_view.json",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards/graph_view.json",
+      "examples/demo_research_cockpit/dashboards/graph_view.json",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/graph_view.json"
+    ]
+  },
+  {
+    "node_id": "artifact_demo_baseline",
+    "node_title": "Prompt refinement baseline bundle",
+    "node_type": "artifact",
+    "kind": "path",
+    "label": "path",
+    "target": "dashboards",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards",
+      "examples/demo_research_cockpit/dashboards",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards"
+    ]
+  },
+  {
+    "node_id": "decision_demo_prompt_refinement",
+    "node_title": "Adopt prompt refinement branch",
+    "node_type": "decision",
+    "kind": "linked_artifact",
+    "label": "linked_artifact",
+    "target": "artifact_demo_baseline",
+    "exists": true,
+    "resolved_target": "artifact_demo_baseline",
+    "resolution_base": "graph",
+    "resolution_attempts": [
+      "artifact_demo_baseline"
+    ]
+  },
+  {
+    "node_id": "decision_demo_prompt_refinement",
+    "node_title": "Adopt prompt refinement branch",
+    "node_type": "decision",
+    "artifact_id": "artifact_demo_baseline",
+    "kind": "link",
+    "label": "artifact_demo_baseline:context",
+    "target": "dashboards/focus_context_pack.json",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards/focus_context_pack.json",
+      "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/focus_context_pack.json"
+    ]
+  },
+  {
+    "node_id": "decision_demo_prompt_refinement",
+    "node_title": "Adopt prompt refinement branch",
+    "node_type": "decision",
+    "artifact_id": "artifact_demo_baseline",
+    "kind": "link",
+    "label": "artifact_demo_baseline:graph",
+    "target": "dashboards/graph_view.json",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards/graph_view.json",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards/graph_view.json",
+      "examples/demo_research_cockpit/dashboards/graph_view.json",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/graph_view.json"
+    ]
+  },
+  {
+    "node_id": "decision_demo_prompt_refinement",
+    "node_title": "Adopt prompt refinement branch",
+    "node_type": "decision",
+    "artifact_id": "artifact_demo_baseline",
+    "kind": "path",
+    "label": "artifact_demo_baseline:path",
+    "target": "dashboards",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards",
+      "examples/demo_research_cockpit/dashboards",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards"
+    ]
+  },
+  {
+    "node_id": "experiment_demo_prompt_refinement",
+    "node_title": "Prompt refinement smoke run",
+    "node_type": "experiment",
+    "kind": "linked_artifact",
+    "label": "linked_artifact",
+    "target": "artifact_demo_baseline",
+    "exists": true,
+    "resolved_target": "artifact_demo_baseline",
+    "resolution_base": "graph",
+    "resolution_attempts": [
+      "artifact_demo_baseline"
+    ]
+  },
+  {
+    "node_id": "experiment_demo_prompt_refinement",
+    "node_title": "Prompt refinement smoke run",
+    "node_type": "experiment",
+    "artifact_id": "artifact_demo_baseline",
+    "kind": "link",
+    "label": "artifact_demo_baseline:context",
+    "target": "dashboards/focus_context_pack.json",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards/focus_context_pack.json",
+      "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/focus_context_pack.json"
+    ]
+  },
+  {
+    "node_id": "experiment_demo_prompt_refinement",
+    "node_title": "Prompt refinement smoke run",
+    "node_type": "experiment",
+    "artifact_id": "artifact_demo_baseline",
+    "kind": "link",
+    "label": "artifact_demo_baseline:graph",
+    "target": "dashboards/graph_view.json",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards/graph_view.json",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards/graph_view.json",
+      "examples/demo_research_cockpit/dashboards/graph_view.json",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/graph_view.json"
+    ]
+  },
+  {
+    "node_id": "experiment_demo_prompt_refinement",
+    "node_title": "Prompt refinement smoke run",
+    "node_type": "experiment",
+    "artifact_id": "artifact_demo_baseline",
+    "kind": "path",
+    "label": "artifact_demo_baseline:path",
+    "target": "dashboards",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards",
+      "examples/demo_research_cockpit/dashboards",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards"
+    ]
+  },
+  {
+    "node_id": "option_demo_prompt_refinement",
+    "node_title": "Prompt refinement branch",
+    "node_type": "option",
+    "kind": "linked_artifact",
+    "label": "linked_artifact",
+    "target": "artifact_demo_baseline",
+    "exists": true,
+    "resolved_target": "artifact_demo_baseline",
+    "resolution_base": "graph",
+    "resolution_attempts": [
+      "artifact_demo_baseline"
+    ]
+  },
+  {
+    "node_id": "option_demo_prompt_refinement",
+    "node_title": "Prompt refinement branch",
+    "node_type": "option",
+    "artifact_id": "artifact_demo_baseline",
+    "kind": "link",
+    "label": "artifact_demo_baseline:context",
+    "target": "dashboards/focus_context_pack.json",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards/focus_context_pack.json",
+      "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/focus_context_pack.json"
+    ]
+  },
+  {
+    "node_id": "option_demo_prompt_refinement",
+    "node_title": "Prompt refinement branch",
+    "node_type": "option",
+    "artifact_id": "artifact_demo_baseline",
+    "kind": "link",
+    "label": "artifact_demo_baseline:graph",
+    "target": "dashboards/graph_view.json",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards/graph_view.json",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards/graph_view.json",
+      "examples/demo_research_cockpit/dashboards/graph_view.json",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/graph_view.json"
+    ]
+  },
+  {
+    "node_id": "option_demo_prompt_refinement",
+    "node_title": "Prompt refinement branch",
+    "node_type": "option",
+    "artifact_id": "artifact_demo_baseline",
+    "kind": "path",
+    "label": "artifact_demo_baseline:path",
+    "target": "dashboards",
+    "exists": true,
+    "resolved_target": "examples/demo_research_cockpit/dashboards",
+    "resolution_base": "root",
+    "resolution_attempts": [
+      "examples/dashboards",
+      "examples/demo_research_cockpit/dashboards",
+      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards"
+    ]
+  }
+]

@@ -7,3 +7,6 @@ summary: Small demo experiment for recording a structured finding in an isolated
 metrics:
 - consistency_score
 - failure_count
+linked_artifacts:
+- artifact_demo_baseline
+updated_at: '2026-05-09'

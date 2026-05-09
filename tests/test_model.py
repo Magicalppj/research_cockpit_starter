@@ -338,6 +338,32 @@ class ModelValidationTests(unittest.TestCase):
         self.assertFalse(graph_nodes["option_old"]["is_focus_visible"])
         self.assertTrue(graph_nodes["option_old"]["is_hidden_by_focus"])
 
+    def test_graph_json_includes_baseline_lens_metadata(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["baseline"] = {
+            "option": "option_t5",
+            "decision": "decision_t5",
+            "artifacts": [],
+            "reason": "Use T5 as the default baseline.",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "exp_t5"
+        current["current_focus_path"] = ["stage_text", "problem_text", "option_t5", "exp_t5"]
+        nodes = load_nodes(self.root)
+
+        graph = graph_to_json(nodes, current["current_focus_path"], current)
+        graph_nodes = {node["id"]: node for node in graph["nodes"]}
+
+        self.assertEqual(graph_nodes["problem_text"]["effective_baseline_option_id"], "option_t5")
+        self.assertEqual(graph_nodes["problem_text"]["baseline_source_id"], "problem_text")
+        self.assertEqual(graph_nodes["problem_text"]["baseline_source_kind"], "explicit")
+        self.assertEqual(graph_nodes["exp_t5"]["effective_baseline_option_id"], "option_t5")
+        self.assertEqual(graph_nodes["exp_t5"]["baseline_source_kind"], "inherited")
+        self.assertTrue(graph_nodes["problem_text"]["is_baseline_source"])
+        self.assertTrue(graph_nodes["option_t5"]["is_effective_baseline_option"])
+        self.assertTrue(graph_nodes["option_t5"]["is_current_effective_baseline_option"])
+
     def test_graph_json_adds_interaction_facets(self) -> None:
         problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
         problem["blockers"] = ["Need annotation policy"]
@@ -430,6 +456,7 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(views[0]["filters"]["statuses"], ["active"])
         self.assertTrue(views[0]["filters"]["only_blocking"])
         self.assertFalse(views[0]["filters"]["only_next_actions"])
+        self.assertNotIn("show_baseline_lens", views[0]["filters"])
         self.assertEqual(views[0]["saved_focus_path"], ["stage_text", "problem_text"])
 
     def test_upsert_graph_view_preserves_created_at_and_logs_event(self) -> None:

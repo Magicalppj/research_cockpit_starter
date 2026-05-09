@@ -84,6 +84,7 @@ GRAPH_VIEW_FILTER_BOOL_KEYS = (
     "only_blocking",
     "only_next_actions",
     "only_missing_evidence",
+    "show_baseline_lens",
 )
 
 STATUS_COLORS = {

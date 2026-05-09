@@ -60,6 +60,8 @@ def _normal_graph_view_filters(data: Any) -> dict[str, Any]:
     for key in GRAPH_VIEW_FILTER_LIST_KEYS:
         filters[key] = _normal_string_list(raw.get(key))
     for key in GRAPH_VIEW_FILTER_BOOL_KEYS:
+        if key == "show_baseline_lens" and key not in raw:
+            continue
         filters[key] = _normal_bool(raw.get(key, False))
     return filters
 

@@ -507,10 +507,13 @@ def graph_to_json(
     current: dict[str, Any] | None = None,
     explicit_edges: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    from research_cockpit.baselines import build_graph_baseline_metadata
+
     current_focus_path = current_focus_path or []
     focus_set = set(current_focus_path)
     focus_metadata = _focus_graph_metadata(nodes, current_focus_path, current)
     interaction_metadata = _graph_interaction_metadata(nodes, current)
+    baseline_metadata = build_graph_baseline_metadata(nodes, current)
     current_focus_node = focus_node_id_from_current(current or {}, nodes) if current else None
 
     out_nodes = []
@@ -528,6 +531,7 @@ def graph_to_json(
             "is_focus": node.id in focus_set,
             **focus_metadata.get(node.id, {}),
             **interaction_metadata.get(node.id, {}),
+            **baseline_metadata.get(node.id, {}),
             "raw": node.raw,
         })
     out_edges = iter_graph_edges(nodes, explicit_edges)

@@ -55,6 +55,9 @@ research-cockpit ui --root examples/demo_research_cockpit --server.port 8501
 http://localhost:8501
 ```
 
+Demo 已包含一个显式 baseline：在研究图使用 React Flow 并打开 Baseline Lens，可看到 baseline 来源节点的 `SOURCE` 和默认方案节点的 `CURRENT BASELINE` 标记。
+“基线 / Accepted”页面会集中展示默认 baseline、accepted options 和 accepted decisions，并生成 `set-baseline` 命令。
+
 如果 `research-cockpit` 命令不可用，但 Python 包可以 import，可以用模块入口：
 
 ```sh
@@ -210,9 +213,12 @@ research-cockpit finalize-workstream --root research_cockpit --file finalize.yam
 ```sh
 research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --artifact artifact_bundle_x --reason "Default for follow-up experiments." --dry-run --json --show-diff
 research-cockpit set-baseline --root research_cockpit --node problem_x --option option_x --decision decision_x --artifact artifact_bundle_x --no-build
+research-cockpit set-baseline --root research_cockpit --node problem_x --clear --no-build
 ```
 
 `context` 和 `node-context` 会解析并输出 `effective_baseline`：当前节点显式 baseline 优先，其次继承上游 baseline，再 fallback 到 problem 的 `current_best_option` / `resolved_by`，最后在当前焦点上下文中 fallback 到 `current_state.current_option`。UI 的“基线 / Accepted”页面用于集中查看默认 baselines、accepted options 和 accepted decisions，并生成设置 baseline 的命令；该页面按每个 problem 自己的 baseline 或 current best 展示，不把全局 `current_option` 当作所有 problem 的默认 baseline。
+
+研究图的 Baseline Lens 会在 Focus 和方案工作流视图里标记当前默认 baseline、来源节点和选中节点使用的 baseline；完整 accepted history 仍在“基线 / Accepted”页面查看，避免节点图过载。
 
 ## 给 Agent 的最短上下文路径
 

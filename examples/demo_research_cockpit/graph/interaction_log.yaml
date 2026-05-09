@@ -1059,3 +1059,32 @@ events:
     - problem_demo_quality_gap
     - option_demo_prompt_refinement
     - experiment_demo_prompt_refinement
+- id: 2026-05-09T04_33_17Z_create_artifact_artifact_demo_baseline
+  kind: create_artifact
+  actor: researcher
+  created_at: '2026-05-09T04:33:17Z'
+  node_id: artifact_demo_baseline
+  command: research-cockpit create-artifact --id artifact_demo_baseline
+  after:
+    artifact_id: artifact_demo_baseline
+    status: done
+    path: dashboards
+    links:
+    - context
+    - graph
+    linked_to:
+    - option_demo_prompt_refinement
+    - experiment_demo_prompt_refinement
+    - decision_demo_prompt_refinement
+- id: 2026-05-09T04_33_37Z_set_baseline_problem_demo_quality_gap
+  kind: set_baseline
+  actor: researcher
+  created_at: '2026-05-09T04:33:37Z'
+  node_id: problem_demo_quality_gap
+  command: research-cockpit set-baseline --node problem_demo_quality_gap
+  after:
+    option: option_demo_prompt_refinement
+    decision: decision_demo_prompt_refinement
+    artifacts:
+    - artifact_demo_baseline
+    reason: Use prompt refinement as the default baseline for follow-up demo experiments.

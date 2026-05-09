@@ -167,6 +167,62 @@ def resolve_current_effective_baseline(
     return empty_effective_baseline()
 
 
+def _effective_baseline_option_id(effective: dict[str, Any]) -> str:
+    option = effective.get("option")
+    if isinstance(option, dict) and option.get("id"):
+        return str(option["id"])
+    return ""
+
+
+def _empty_graph_baseline_metadata() -> dict[str, Any]:
+    return {
+        "effective_baseline_option_id": "",
+        "baseline_source_id": "",
+        "baseline_source_kind": "none",
+        "is_baseline_source": False,
+        "is_effective_baseline_option": False,
+        "is_current_effective_baseline_option": False,
+    }
+
+
+def build_graph_baseline_metadata(
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
+    current = current or {}
+    metadata = {node_id: _empty_graph_baseline_metadata() for node_id in nodes}
+
+    for node_id in sorted(nodes):
+        try:
+            effective = resolve_effective_baseline(
+                nodes,
+                node_id,
+                current,
+                allow_current_state_fallback=False,
+            )
+        except ValueError:
+            continue
+        option_id = _effective_baseline_option_id(effective)
+        source_id = str(effective.get("source_node_id") or "")
+        source_kind = str(effective.get("source_kind") or "none")
+        metadata[node_id].update({
+            "effective_baseline_option_id": option_id,
+            "baseline_source_id": source_id if source_id in nodes else "",
+            "baseline_source_kind": source_kind,
+        })
+        if source_id in metadata:
+            metadata[source_id]["is_baseline_source"] = True
+        if option_id in metadata:
+            metadata[option_id]["is_effective_baseline_option"] = True
+
+    current_effective = resolve_current_effective_baseline(nodes, current)
+    current_option_id = _effective_baseline_option_id(current_effective)
+    if current_option_id in metadata:
+        metadata[current_option_id]["is_current_effective_baseline_option"] = True
+        metadata[current_option_id]["is_effective_baseline_option"] = True
+    return metadata
+
+
 def validate_baseline_for_node(
     nodes: dict[str, ResearchNode],
     node: ResearchNode,

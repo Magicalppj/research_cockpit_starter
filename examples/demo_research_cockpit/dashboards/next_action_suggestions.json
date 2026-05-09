@@ -15,6 +15,8 @@
     "lifecycle_state": "active",
     "lifecycle_reason": "",
     "lifecycle_updated_at": "",
+    "display_id": "next_action_001",
+    "suggestion_id": "sg_73b2b109ac6225a7",
     "id": "next_action_001",
     "queued_in_current": false,
     "queued_in_node": false
@@ -38,6 +40,8 @@
     "lifecycle_state": "active",
     "lifecycle_reason": "",
     "lifecycle_updated_at": "",
+    "display_id": "next_action_002",
+    "suggestion_id": "sg_a1ca1747de1fdfec",
     "id": "next_action_002",
     "queued_in_current": true,
     "queued_in_node": false
@@ -61,6 +65,8 @@
     "lifecycle_state": "active",
     "lifecycle_reason": "",
     "lifecycle_updated_at": "",
+    "display_id": "next_action_003",
+    "suggestion_id": "sg_7388d78cd7ada404",
     "id": "next_action_003",
     "queued_in_current": true,
     "queued_in_node": false
@@ -81,6 +87,8 @@
     "lifecycle_state": "active",
     "lifecycle_reason": "",
     "lifecycle_updated_at": "",
+    "display_id": "next_action_004",
+    "suggestion_id": "sg_f87fe9f5344b1ffb",
     "id": "next_action_004",
     "queued_in_current": false,
     "queued_in_node": false
@@ -101,6 +109,8 @@
     "lifecycle_state": "active",
     "lifecycle_reason": "",
     "lifecycle_updated_at": "",
+    "display_id": "next_action_005",
+    "suggestion_id": "sg_d9a47b09035c9e9d",
     "id": "next_action_005",
     "queued_in_current": false,
     "queued_in_node": false
@@ -121,6 +131,8 @@
     "lifecycle_state": "active",
     "lifecycle_reason": "",
     "lifecycle_updated_at": "",
+    "display_id": "next_action_006",
+    "suggestion_id": "sg_0ea8d0f5a173e6e0",
     "id": "next_action_006",
     "queued_in_current": false,
     "queued_in_node": false

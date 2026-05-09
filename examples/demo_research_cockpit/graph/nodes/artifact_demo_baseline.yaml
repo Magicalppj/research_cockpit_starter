@@ -1,0 +1,11 @@
+id: artifact_demo_baseline
+type: artifact
+title: Prompt refinement baseline bundle
+status: done
+summary: Demo bundle showing that a baseline can carry supporting resources.
+created_at: '2026-05-09'
+updated_at: '2026-05-09'
+path: dashboards
+links:
+  context: dashboards/focus_context_pack.json
+  graph: dashboards/graph_view.json

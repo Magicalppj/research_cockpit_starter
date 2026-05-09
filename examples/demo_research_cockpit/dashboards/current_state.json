@@ -7,6 +7,34 @@
   "current_option_title": "Prompt refinement branch",
   "current_focus_node": "experiment_demo_prompt_refinement",
   "current_focus_node_title": "Prompt refinement smoke run",
+  "effective_baseline": {
+    "source_node_id": "problem_demo_quality_gap",
+    "source_kind": "inherited",
+    "option": {
+      "id": "option_demo_prompt_refinement",
+      "title": "Prompt refinement branch",
+      "type": "option",
+      "status": "active",
+      "summary": "Candidate branch that improves instructions, examples, and acceptance checks."
+    },
+    "decision": {
+      "id": "decision_demo_prompt_refinement",
+      "title": "Adopt prompt refinement branch",
+      "type": "decision",
+      "status": "proposed",
+      "summary": "Demo decision used to exercise evidence refresh and acceptance checklist behavior."
+    },
+    "artifacts": [
+      {
+        "id": "artifact_demo_baseline",
+        "title": "Prompt refinement baseline bundle",
+        "type": "artifact",
+        "status": "done",
+        "summary": "Demo bundle showing that a baseline can carry supporting resources."
+      }
+    ],
+    "reason": "Use prompt refinement as the default baseline for follow-up demo experiments."
+  },
   "focus_mode": {
     "default_depth": 2,
     "hide_statuses": [
@@ -35,6 +63,44 @@
   "updated_at": "2026-04-29",
   "saved_graph_views": [],
   "recent_interactions": [
+    {
+      "id": "2026-05-09T04_33_37Z_set_baseline_problem_demo_quality_gap",
+      "kind": "set_baseline",
+      "actor": "researcher",
+      "created_at": "2026-05-09T04:33:37Z",
+      "node_id": "problem_demo_quality_gap",
+      "command": "research-cockpit set-baseline --node problem_demo_quality_gap",
+      "after": {
+        "option": "option_demo_prompt_refinement",
+        "decision": "decision_demo_prompt_refinement",
+        "artifacts": [
+          "artifact_demo_baseline"
+        ],
+        "reason": "Use prompt refinement as the default baseline for follow-up demo experiments."
+      }
+    },
+    {
+      "id": "2026-05-09T04_33_17Z_create_artifact_artifact_demo_baseline",
+      "kind": "create_artifact",
+      "actor": "researcher",
+      "created_at": "2026-05-09T04:33:17Z",
+      "node_id": "artifact_demo_baseline",
+      "command": "research-cockpit create-artifact --id artifact_demo_baseline",
+      "after": {
+        "artifact_id": "artifact_demo_baseline",
+        "status": "done",
+        "path": "dashboards",
+        "links": [
+          "context",
+          "graph"
+        ],
+        "linked_to": [
+          "option_demo_prompt_refinement",
+          "experiment_demo_prompt_refinement",
+          "decision_demo_prompt_refinement"
+        ]
+      }
+    },
     {
       "id": "2026-04-29T11_19_13Z_set_focus_experiment_demo_prompt_refinement",
       "kind": "set_focus",
@@ -132,72 +198,9 @@
           "experiment_demo_eval_cases"
         ]
       }
-    },
-    {
-      "id": "2026-04-29T11_00_46Z_set_focus_decision_demo_prompt_refinement",
-      "kind": "set_focus",
-      "actor": "researcher",
-      "created_at": "2026-04-29T11:00:46Z",
-      "node_id": "decision_demo_prompt_refinement",
-      "command": "research-cockpit set-focus --focus-node decision_demo_prompt_refinement",
-      "before": {
-        "current_stage": "stage_demo_research",
-        "current_problem": "problem_demo_quality_gap",
-        "current_option": "option_demo_prompt_refinement",
-        "current_focus_node": "option_demo_prompt_refinement",
-        "current_focus_path": [
-          "stage_demo_research",
-          "problem_demo_quality_gap",
-          "option_demo_prompt_refinement"
-        ]
-      },
-      "after": {
-        "current_stage": "stage_demo_research",
-        "current_problem": "problem_demo_quality_gap",
-        "current_option": "option_demo_prompt_refinement",
-        "current_focus_node": "decision_demo_prompt_refinement",
-        "current_focus_path": [
-          "stage_demo_research",
-          "problem_demo_quality_gap",
-          "option_demo_prompt_refinement",
-          "decision_demo_prompt_refinement"
-        ]
-      }
-    },
-    {
-      "id": "2026-04-29T10_59_52Z_set_focus_option_demo_prompt_refinement",
-      "kind": "set_focus",
-      "actor": "researcher",
-      "created_at": "2026-04-29T10:59:52Z",
-      "node_id": "option_demo_prompt_refinement",
-      "command": "research-cockpit set-focus --focus-node option_demo_prompt_refinement",
-      "before": {
-        "current_stage": "stage_demo_research",
-        "current_problem": "problem_demo_subtask_scope",
-        "current_option": "option_demo_eval_cases",
-        "current_focus_node": "experiment_demo_eval_cases",
-        "current_focus_path": [
-          "stage_demo_research",
-          "problem_demo_quality_gap",
-          "option_demo_prompt_refinement",
-          "problem_demo_subtask_scope",
-          "option_demo_eval_cases",
-          "experiment_demo_eval_cases"
-        ]
-      },
-      "after": {
-        "current_stage": "stage_demo_research",
-        "current_problem": "problem_demo_quality_gap",
-        "current_option": "option_demo_prompt_refinement",
-        "current_focus_node": "option_demo_prompt_refinement",
-        "current_focus_path": [
-          "stage_demo_research",
-          "problem_demo_quality_gap",
-          "option_demo_prompt_refinement"
-        ]
-      }
     }
   ],
+  "warnings": [],
   "linked_nodes": [
     {
       "id": "stage_demo_research",
@@ -211,6 +214,7 @@
       "evidence_strength": null,
       "evidence_summary": null,
       "current_best_option": null,
+      "baseline": null,
       "decision_state": null,
       "outcome": null,
       "result_summary": null,
@@ -242,6 +246,14 @@
       "evidence_strength": null,
       "evidence_summary": null,
       "current_best_option": "option_demo_prompt_refinement",
+      "baseline": {
+        "option": "option_demo_prompt_refinement",
+        "decision": "decision_demo_prompt_refinement",
+        "artifacts": [
+          "artifact_demo_baseline"
+        ],
+        "reason": "Use prompt refinement as the default baseline for follow-up demo experiments."
+      },
       "decision_state": null,
       "outcome": null,
       "result_summary": null,
@@ -275,13 +287,16 @@
       "evidence_strength": null,
       "evidence_summary": null,
       "current_best_option": null,
+      "baseline": null,
       "decision_state": "promising",
       "outcome": null,
       "result_summary": null,
       "supporting_experiments": [],
       "contradicting_experiments": [],
       "supporting_decisions": [],
-      "linked_artifacts": [],
+      "linked_artifacts": [
+        "artifact_demo_baseline"
+      ],
       "links": [],
       "findings": [],
       "implementation_steps": [],
@@ -304,13 +319,16 @@
       "evidence_strength": null,
       "evidence_summary": null,
       "current_best_option": null,
+      "baseline": null,
       "decision_state": null,
       "outcome": null,
       "result_summary": null,
       "supporting_experiments": [],
       "contradicting_experiments": [],
       "supporting_decisions": [],
-      "linked_artifacts": [],
+      "linked_artifacts": [
+        "artifact_demo_baseline"
+      ],
       "links": [],
       "findings": [],
       "implementation_steps": [],

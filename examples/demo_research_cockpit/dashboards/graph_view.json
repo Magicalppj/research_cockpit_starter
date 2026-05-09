@@ -1,6 +1,56 @@
 {
   "nodes": [
     {
+      "id": "artifact_demo_baseline",
+      "label": "Prompt refinement baseline bundle",
+      "title": "Demo bundle showing that a baseline can carry supporting resources.",
+      "type": "artifact",
+      "status": "done",
+      "priority": null,
+      "color": "#CFEAD6",
+      "shape": "database",
+      "is_focus": false,
+      "current_focus_node": "experiment_demo_prompt_refinement",
+      "in_focus_path": false,
+      "is_current_focus": false,
+      "focus_role": "child",
+      "focus_priority": null,
+      "show_in_focus": "auto",
+      "focus_visible_depth": 2,
+      "is_focus_visible": true,
+      "is_hidden_by_focus": false,
+      "stage_id": null,
+      "problem_id": null,
+      "option_workstream_id": null,
+      "option_workstream_upstream_problem_id": null,
+      "agent_owner": null,
+      "agent_session_id": null,
+      "in_current_branch": false,
+      "has_blockers": false,
+      "has_next_actions": false,
+      "has_evidence": false,
+      "effective_baseline_option_id": "",
+      "baseline_source_id": "",
+      "baseline_source_kind": "none",
+      "is_baseline_source": false,
+      "is_effective_baseline_option": false,
+      "is_current_effective_baseline_option": false,
+      "raw": {
+        "id": "artifact_demo_baseline",
+        "type": "artifact",
+        "title": "Prompt refinement baseline bundle",
+        "status": "done",
+        "summary": "Demo bundle showing that a baseline can carry supporting resources.",
+        "created_at": "2026-05-09",
+        "updated_at": "2026-05-09",
+        "path": "dashboards",
+        "links": {
+          "context": "dashboards/focus_context_pack.json",
+          "graph": "dashboards/graph_view.json"
+        }
+      }
+    },
+    {
       "id": "decision_demo_prompt_refinement",
       "label": "Adopt prompt refinement branch",
       "title": "Demo decision used to exercise evidence refresh and acceptance checklist behavior.",
@@ -23,10 +73,18 @@
       "problem_id": "problem_demo_quality_gap",
       "option_workstream_id": "option_demo_prompt_refinement",
       "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "agent_owner": null,
+      "agent_session_id": null,
       "in_current_branch": false,
       "has_blockers": false,
       "has_next_actions": false,
       "has_evidence": true,
+      "effective_baseline_option_id": "option_demo_prompt_refinement",
+      "baseline_source_id": "problem_demo_quality_gap",
+      "baseline_source_kind": "inherited",
+      "is_baseline_source": false,
+      "is_effective_baseline_option": false,
+      "is_current_effective_baseline_option": false,
       "raw": {
         "id": "decision_demo_prompt_refinement",
         "type": "decision",
@@ -39,7 +97,11 @@
         ],
         "consequences": [
           "If accepted, use the refined prompt as the default demo workflow."
-        ]
+        ],
+        "linked_artifacts": [
+          "artifact_demo_baseline"
+        ],
+        "updated_at": "2026-05-09"
       }
     },
     {
@@ -65,10 +127,18 @@
       "problem_id": "problem_demo_subtask_scope",
       "option_workstream_id": "option_demo_eval_cases",
       "option_workstream_upstream_problem_id": "problem_demo_subtask_scope",
+      "agent_owner": null,
+      "agent_session_id": null,
       "in_current_branch": false,
       "has_blockers": false,
       "has_next_actions": false,
       "has_evidence": false,
+      "effective_baseline_option_id": "option_demo_prompt_refinement",
+      "baseline_source_id": "problem_demo_quality_gap",
+      "baseline_source_kind": "inherited",
+      "is_baseline_source": false,
+      "is_effective_baseline_option": false,
+      "is_current_effective_baseline_option": false,
       "raw": {
         "id": "experiment_demo_eval_cases",
         "type": "experiment",
@@ -105,10 +175,18 @@
       "problem_id": "problem_demo_quality_gap",
       "option_workstream_id": "option_demo_prompt_refinement",
       "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "agent_owner": null,
+      "agent_session_id": null,
       "in_current_branch": true,
       "has_blockers": false,
       "has_next_actions": false,
-      "has_evidence": false,
+      "has_evidence": true,
+      "effective_baseline_option_id": "option_demo_prompt_refinement",
+      "baseline_source_id": "problem_demo_quality_gap",
+      "baseline_source_kind": "inherited",
+      "is_baseline_source": false,
+      "is_effective_baseline_option": false,
+      "is_current_effective_baseline_option": false,
       "raw": {
         "id": "experiment_demo_prompt_refinement",
         "type": "experiment",
@@ -119,7 +197,11 @@
         "metrics": [
           "consistency_score",
           "failure_count"
-        ]
+        ],
+        "linked_artifacts": [
+          "artifact_demo_baseline"
+        ],
+        "updated_at": "2026-05-09"
       }
     },
     {
@@ -145,10 +227,18 @@
       "problem_id": "problem_demo_subtask_scope",
       "option_workstream_id": "option_demo_eval_cases",
       "option_workstream_upstream_problem_id": "problem_demo_subtask_scope",
+      "agent_owner": null,
+      "agent_session_id": null,
       "in_current_branch": false,
       "has_blockers": false,
       "has_next_actions": false,
       "has_evidence": false,
+      "effective_baseline_option_id": "option_demo_prompt_refinement",
+      "baseline_source_id": "problem_demo_quality_gap",
+      "baseline_source_kind": "inherited",
+      "is_baseline_source": false,
+      "is_effective_baseline_option": false,
+      "is_current_effective_baseline_option": false,
       "raw": {
         "id": "option_demo_eval_cases",
         "type": "option",
@@ -185,10 +275,18 @@
       "problem_id": "problem_demo_quality_gap",
       "option_workstream_id": "option_demo_prompt_refinement",
       "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "agent_owner": null,
+      "agent_session_id": null,
       "in_current_branch": true,
       "has_blockers": false,
       "has_next_actions": false,
-      "has_evidence": false,
+      "has_evidence": true,
+      "effective_baseline_option_id": "option_demo_prompt_refinement",
+      "baseline_source_id": "problem_demo_quality_gap",
+      "baseline_source_kind": "inherited",
+      "is_baseline_source": false,
+      "is_effective_baseline_option": true,
+      "is_current_effective_baseline_option": true,
       "raw": {
         "id": "option_demo_prompt_refinement",
         "type": "option",
@@ -210,7 +308,11 @@
         "cons": [
           "May not solve retrieval gaps"
         ],
-        "decision_state": "promising"
+        "decision_state": "promising",
+        "linked_artifacts": [
+          "artifact_demo_baseline"
+        ],
+        "updated_at": "2026-05-09"
       }
     },
     {
@@ -236,10 +338,18 @@
       "problem_id": "problem_demo_quality_gap",
       "option_workstream_id": "option_demo_retrieval_branch",
       "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "agent_owner": null,
+      "agent_session_id": null,
       "in_current_branch": false,
       "has_blockers": false,
       "has_next_actions": false,
       "has_evidence": false,
+      "effective_baseline_option_id": "option_demo_prompt_refinement",
+      "baseline_source_id": "problem_demo_quality_gap",
+      "baseline_source_kind": "inherited",
+      "is_baseline_source": false,
+      "is_effective_baseline_option": false,
+      "is_current_effective_baseline_option": false,
       "raw": {
         "id": "option_demo_retrieval_branch",
         "type": "option",
@@ -280,10 +390,18 @@
       "problem_id": "problem_demo_quality_gap",
       "option_workstream_id": null,
       "option_workstream_upstream_problem_id": null,
+      "agent_owner": null,
+      "agent_session_id": null,
       "in_current_branch": true,
       "has_blockers": true,
       "has_next_actions": true,
       "has_evidence": false,
+      "effective_baseline_option_id": "option_demo_prompt_refinement",
+      "baseline_source_id": "problem_demo_quality_gap",
+      "baseline_source_kind": "explicit",
+      "is_baseline_source": true,
+      "is_effective_baseline_option": false,
+      "is_current_effective_baseline_option": false,
       "raw": {
         "id": "problem_demo_quality_gap",
         "type": "problem",
@@ -303,7 +421,16 @@
         ],
         "blockers": [
           "Need at least one structured finding before accepting the demo decision."
-        ]
+        ],
+        "baseline": {
+          "option": "option_demo_prompt_refinement",
+          "decision": "decision_demo_prompt_refinement",
+          "artifacts": [
+            "artifact_demo_baseline"
+          ],
+          "reason": "Use prompt refinement as the default baseline for follow-up demo experiments."
+        },
+        "updated_at": "2026-05-09"
       }
     },
     {
@@ -329,10 +456,18 @@
       "problem_id": "problem_demo_subtask_scope",
       "option_workstream_id": "option_demo_prompt_refinement",
       "option_workstream_upstream_problem_id": "problem_demo_quality_gap",
+      "agent_owner": null,
+      "agent_session_id": null,
       "in_current_branch": false,
       "has_blockers": false,
       "has_next_actions": true,
       "has_evidence": false,
+      "effective_baseline_option_id": "option_demo_prompt_refinement",
+      "baseline_source_id": "problem_demo_quality_gap",
+      "baseline_source_kind": "inherited",
+      "is_baseline_source": false,
+      "is_effective_baseline_option": false,
+      "is_current_effective_baseline_option": false,
       "raw": {
         "id": "problem_demo_subtask_scope",
         "type": "problem",
@@ -373,10 +508,18 @@
       "problem_id": null,
       "option_workstream_id": null,
       "option_workstream_upstream_problem_id": null,
+      "agent_owner": null,
+      "agent_session_id": null,
       "in_current_branch": true,
       "has_blockers": false,
       "has_next_actions": true,
       "has_evidence": false,
+      "effective_baseline_option_id": "",
+      "baseline_source_id": "",
+      "baseline_source_kind": "none",
+      "is_baseline_source": false,
+      "is_effective_baseline_option": false,
+      "is_current_effective_baseline_option": false,
       "raw": {
         "id": "stage_demo_research",
         "type": "stage",
@@ -467,6 +610,7 @@
   },
   "available_filters": {
     "types": [
+      "artifact",
       "decision",
       "experiment",
       "option",
@@ -475,6 +619,7 @@
     ],
     "statuses": [
       "active",
+      "done",
       "open",
       "parked",
       "planned",
@@ -488,6 +633,7 @@
       "problem_demo_subtask_scope"
     ],
     "focus_roles": [
+      "child",
       "current",
       "historical",
       "parent",
@@ -499,6 +645,7 @@
       "option_demo_prompt_refinement",
       "option_demo_retrieval_branch"
     ],
+    "agents": [],
     "priorities": [
       "critical",
       "high",

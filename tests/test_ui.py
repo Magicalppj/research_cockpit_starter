@@ -14,9 +14,11 @@ from research_cockpit.ui.app import build_pyvis_html, get_text
 from research_cockpit.baselines import (
     build_accepted_decision_rows,
     build_accepted_option_rows,
+    build_graph_baseline_metadata,
     build_baseline_overview_rows,
     build_set_baseline_command,
 )
+from research_cockpit.graph_core import graph_to_json
 from research_cockpit.ui.view_helpers import (
     baseline_command_problem_ids,
     build_accept_decision_command,
@@ -282,6 +284,96 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(baseline_command_problem_ids(baseline_rows), ["problem_t5"])
         self.assertIn("baseline_command_problem_ids(baseline_rows)", source)
 
+    def test_graph_baseline_metadata_marks_effective_baseline_without_global_current_fallback(self) -> None:
+        nodes = {
+            "stage_t5": SimpleNamespace(
+                id="stage_t5",
+                type="stage",
+                title="Stage",
+                status="active",
+                parent=None,
+                children=["problem_t5", "problem_other"],
+                priority=None,
+                summary="",
+                raw={},
+            ),
+            "problem_t5": SimpleNamespace(
+                id="problem_t5",
+                type="problem",
+                title="Problem",
+                status="active",
+                parent="stage_t5",
+                children=["option_t5"],
+                priority=None,
+                summary="",
+                raw={"baseline": {"option": "option_t5", "reason": "Default branch."}},
+            ),
+            "option_t5": SimpleNamespace(
+                id="option_t5",
+                type="option",
+                title="T5",
+                status="accepted",
+                parent="problem_t5",
+                children=["exp_t5"],
+                priority=None,
+                summary="",
+                raw={},
+            ),
+            "exp_t5": SimpleNamespace(
+                id="exp_t5",
+                type="experiment",
+                title="Experiment",
+                status="done",
+                parent="option_t5",
+                children=[],
+                priority=None,
+                summary="",
+                raw={},
+            ),
+            "problem_other": SimpleNamespace(
+                id="problem_other",
+                type="problem",
+                title="Other Problem",
+                status="active",
+                parent="stage_t5",
+                children=["option_current"],
+                priority=None,
+                summary="",
+                raw={},
+            ),
+            "option_current": SimpleNamespace(
+                id="option_current",
+                type="option",
+                title="Global Current",
+                status="active",
+                parent="problem_other",
+                children=[],
+                priority=None,
+                summary="",
+                raw={},
+            ),
+        }
+        current = {
+            "current_focus_node": "exp_t5",
+            "current_focus_path": ["stage_t5", "problem_t5", "option_t5", "exp_t5"],
+            "current_option": "option_current",
+        }
+
+        metadata = build_graph_baseline_metadata(nodes, current)
+        graph = graph_to_json(nodes, current_focus_path=current["current_focus_path"], current=current)
+        graph_nodes = {node["id"]: node for node in graph["nodes"]}
+        overview = build_node_overview(nodes["exp_t5"], nodes, current, [], [])
+
+        self.assertEqual(metadata["exp_t5"]["effective_baseline_option_id"], "option_t5")
+        self.assertEqual(metadata["exp_t5"]["baseline_source_id"], "problem_t5")
+        self.assertEqual(metadata["problem_other"]["effective_baseline_option_id"], "")
+        self.assertTrue(metadata["problem_t5"]["is_baseline_source"])
+        self.assertTrue(metadata["option_t5"]["is_effective_baseline_option"])
+        self.assertTrue(metadata["option_t5"]["is_current_effective_baseline_option"])
+        self.assertFalse(metadata["option_current"]["is_effective_baseline_option"])
+        self.assertEqual(graph_nodes["exp_t5"]["effective_baseline_option_id"], "option_t5")
+        self.assertEqual(overview["effective_baseline"]["option"]["id"], "option_t5")
+
     def test_graph_renders_before_control_panel(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
         graph_index = source.find('key="research_graph_component"')
@@ -302,6 +394,14 @@ class UiRenderingTests(unittest.TestCase):
         self.assertNotEqual(detail_index, -1)
         self.assertLess(graph_area_index, controls_index)
         self.assertLess(controls_index, detail_index)
+
+    def test_baseline_lens_control_drives_payload_and_saved_views(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn('key="graph_show_baseline_lens"', source)
+        self.assertIn("default_show_baseline_lens(view_mode)", source)
+        self.assertIn("show_baseline_lens=show_baseline_lens", source)
+        self.assertIn('"show_baseline_lens": show_baseline_lens', source)
 
     def test_set_focus_resets_stale_graph_filters(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
@@ -335,12 +435,16 @@ class UiRenderingTests(unittest.TestCase):
     def test_node_detail_prioritizes_overview_before_raw_metadata(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
         detail_start = source.find("def render_node_detail(")
+        baseline_helper_start = source.find("def render_effective_baseline(")
         evidence_start = source.find("with evidence_tab:", detail_start)
         overview_block = source[detail_start:evidence_start]
+        baseline_helper = source[baseline_helper_start:detail_start]
 
         self.assertIn('text["overview_tab"]', overview_block)
         self.assertIn('text["node_purpose"]', overview_block)
         self.assertIn('text["current_state"]', overview_block)
+        self.assertIn("render_effective_baseline", overview_block)
+        self.assertIn('text["effective_baseline"]', baseline_helper)
         self.assertIn('text["key_resources"]', overview_block)
         self.assertNotIn("c1.code(node.type)", overview_block)
         self.assertNotIn("c2.code(node.status)", overview_block)
@@ -456,6 +560,9 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("pendingSelectedNodeId", source)
         self.assertIn("pendingSelectedNodeId.current = node.id", source)
         self.assertIn("selectedNodeId === pending", source)
+        self.assertIn("badges?: string[]", source)
+        self.assertIn("graph-node-badges", source)
+        self.assertIn("CURRENT BASELINE", source)
 
     def test_pyvis_html_generation_supports_chinese_without_file_encoding(self) -> None:
         graph = {
@@ -677,6 +784,20 @@ class UiRenderingTests(unittest.TestCase):
         self.assertTrue(state["graph_only_blocking"])
         self.assertFalse(state["graph_only_next_actions"])
         self.assertTrue(state["graph_only_missing_evidence"])
+        self.assertTrue(state["graph_show_baseline_lens"])
+
+        global_state = graph_view_state_from_saved_view(
+            {"scope": "global", "filters": {}},
+            {"types": [], "statuses": [], "stages": [], "focus_roles": [], "workstreams": []},
+            {"focus_depth_2": "Focus Depth 2", "global": "Global"},
+        )
+        explicit_state = graph_view_state_from_saved_view(
+            {"scope": "global", "filters": {"show_baseline_lens": True}},
+            {"types": [], "statuses": [], "stages": [], "focus_roles": [], "workstreams": []},
+            {"focus_depth_2": "Focus Depth 2", "global": "Global"},
+        )
+        self.assertFalse(global_state["graph_show_baseline_lens"])
+        self.assertTrue(explicit_state["graph_show_baseline_lens"])
 
     def test_pyvis_html_focuses_current_node(self) -> None:
         graph = {
@@ -746,6 +867,66 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(payload["edges"][0]["source"], "problem_text")
         self.assertEqual(payload["edges"][0]["target"], "option_t5")
         self.assertIn("color", payload["edges"][0])
+
+    def test_graph_component_payload_adds_baseline_lens_markers_only_when_enabled(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "label": "Weak text",
+                    "title": "Focus problem",
+                    "type": "problem",
+                    "status": "active",
+                    "color": "#FFE9A8",
+                    "is_baseline_source": True,
+                    "effective_baseline_option_id": "option_t5",
+                    "baseline_source_id": "problem_text",
+                    "baseline_source_kind": "explicit",
+                },
+                {
+                    "id": "option_t5",
+                    "label": "T5",
+                    "title": "Baseline option",
+                    "type": "option",
+                    "status": "accepted",
+                    "color": "#CFEAD6",
+                    "is_effective_baseline_option": True,
+                    "is_current_effective_baseline_option": True,
+                },
+                {
+                    "id": "exp_t5",
+                    "label": "Run",
+                    "title": "Experiment",
+                    "type": "experiment",
+                    "status": "done",
+                    "color": "#CFEAD6",
+                    "effective_baseline_option_id": "option_t5",
+                    "baseline_source_id": "problem_text",
+                    "baseline_source_kind": "inherited",
+                },
+            ],
+            "edges": [
+                {"from": "problem_text", "to": "option_t5", "relation": "contains"},
+                {"from": "option_t5", "to": "exp_t5", "relation": "contains"},
+            ],
+        }
+
+        hidden = build_graph_component_payload(graph, selected_node_id="exp_t5")
+        visible = build_graph_component_payload(graph, selected_node_id="exp_t5", show_baseline_lens=True)
+
+        self.assertNotIn("badges", hidden["nodes"][0])
+        self.assertFalse(any(edge["type"].startswith("baseline") for edge in hidden["edges"]))
+        nodes = {node["id"]: node for node in visible["nodes"]}
+        self.assertEqual(nodes["problem_text"]["badges"], ["SOURCE"])
+        self.assertEqual(nodes["option_t5"]["badges"], ["CURRENT BASELINE"])
+        self.assertIn(
+            ("problem_text", "option_t5", "baseline"),
+            {(edge["source"], edge["target"], edge["type"]) for edge in visible["edges"]},
+        )
+        self.assertIn(
+            ("exp_t5", "option_t5", "baseline_use"),
+            {(edge["source"], edge["target"], edge["type"]) for edge in visible["edges"]},
+        )
 
     def test_graph_component_selection_only_accepts_visible_nodes(self) -> None:
         visible_node_ids = ["problem_text", "option_t5"]

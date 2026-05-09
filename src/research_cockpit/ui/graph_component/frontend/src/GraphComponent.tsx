@@ -31,6 +31,7 @@ type GraphNode = {
   color?: string;
   is_current_focus?: boolean;
   is_focus?: boolean;
+  badges?: string[];
 };
 
 type GraphEdge = {
@@ -51,13 +52,26 @@ type GraphPayload = {
 };
 
 const nodeWidth = 220;
-const nodeHeight = 86;
+const nodeHeight = 96;
 const structuralEdgeTypes = new Set(["parent", "contains", "child"]);
 
 function labelFor(node: GraphNode) {
+  const badges = node.badges || [];
   return (
     <div className="graph-node-label" title={node.title || node.label}>
       <div className="graph-node-title">{node.label}</div>
+      {badges.length > 0 ? (
+        <div className="graph-node-badges" aria-label="Baseline markers">
+          {badges.map((badge) => (
+            <span
+              key={badge}
+              className={badge === "CURRENT BASELINE" ? "is-current-baseline" : undefined}
+            >
+              {badge}
+            </span>
+          ))}
+        </div>
+      ) : null}
       <div className="graph-node-meta">
         <span>{node.type || "node"}</span>
         <span>{node.status || "unknown"}</span>
@@ -95,7 +109,8 @@ function graphSignature(payload: GraphPayload) {
       node.color,
       node.title,
       node.is_current_focus,
-      node.is_focus
+      node.is_focus,
+      node.badges
     ]),
     edges: (payload.edges || []).map((edge) => [
       edge.id,
@@ -120,7 +135,7 @@ function toReactFlowNodes(payload: GraphPayload, selectedNodeId: string | null):
     selected: node.id === selectedNodeId,
     style: {
       width: nodeWidth,
-      minHeight: 64,
+      minHeight: 76,
       borderRadius: 8,
       borderWidth: node.id === selectedNodeId || node.is_current_focus ? 3 : 1,
       borderColor: nodeBorder(node, selectedNodeId),

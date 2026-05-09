@@ -29,8 +29,9 @@ If the working directory is unreliable, use absolute `--root` paths.
 ## Write Rules
 
 - Prefer `research-cockpit` commands over manual YAML edits for all supported operations.
-- Use mutating CLI commands for focus, status, findings, decisions, notes, suggestions, and lifecycle cleanup.
+- Use mutating CLI commands for focus, baseline, status, findings, decisions, notes, suggestions, and lifecycle cleanup.
 - Use `research-cockpit node-context` as the shortest read-only handoff when continuing work from a known node id.
+- Use `effective_baseline` from `context`/`node-context` as the default inherited option, decision, and artifact bundle; do not scan all accepted history unless asked.
 - Do not directly set a decision to `accepted`; use `research-cockpit accept-decision --root <data-root> --id <decision_id>`.
 - Do not execute a suggested command just because it appears in Action Guidance. Queue, dismiss, or complete suggestions only when asked.
 

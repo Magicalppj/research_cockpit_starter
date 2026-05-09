@@ -3,10 +3,12 @@ from __future__ import annotations
 from collections.abc import MutableMapping
 from typing import Any
 
+from research_cockpit.baselines import empty_effective_baseline, resolve_effective_baseline
 from research_cockpit.model import script_command, search_knowledge
 
 
 PRIMARY_GRAPH_NODE_TYPES = ("stage", "problem", "option", "experiment", "decision")
+BASELINE_LENS_DEFAULT_MODES = {"focus_depth_1", "focus_depth_2", "current_branch", "option_workstream"}
 
 
 def ordered_tab_keys(text: dict[str, str]) -> list[str]:
@@ -49,6 +51,10 @@ def default_detail_node_id(graph: dict, node_ids: list[str]) -> str:
     if focus_node_id in node_ids:
         return focus_node_id
     return node_ids[0] if node_ids else ""
+
+
+def default_show_baseline_lens(view_mode: str) -> bool:
+    return view_mode in BASELINE_LENS_DEFAULT_MODES
 
 
 def format_node_option(nodes: dict, node_id: str) -> str:
@@ -111,6 +117,10 @@ def build_node_overview(
         for row in (link_rows or [])
         if row.get("node_id") == getattr(node, "id", "")
     ]
+    try:
+        effective_baseline = resolve_effective_baseline(nodes, getattr(node, "id", ""), current or {})
+    except ValueError:
+        effective_baseline = empty_effective_baseline()
 
     def relation_row(node_id: str) -> dict[str, str]:
         return {
@@ -131,6 +141,7 @@ def build_node_overview(
         "next": next_items,
         "key_resources": node_link_rows[:3],
         "relations": relations,
+        "effective_baseline": effective_baseline,
     }
 
 
@@ -275,7 +286,58 @@ def edge_style_for_type(edge_type: str | None) -> dict[str, object]:
     return styles.get(str(edge_type or ""), {"color": "#888888", "dashes": False})
 
 
-def build_graph_component_payload(graph: dict, selected_node_id: str | None = None) -> dict[str, Any]:
+def _baseline_badges_for_node(node: dict[str, Any]) -> list[str]:
+    badges: list[str] = []
+    if node.get("is_current_effective_baseline_option"):
+        badges.append("CURRENT BASELINE")
+    elif node.get("is_effective_baseline_option"):
+        badges.append("BASELINE")
+    if node.get("is_baseline_source"):
+        badges.append("SOURCE")
+    return badges
+
+
+def _baseline_visual_edges(graph_nodes: list[dict[str, Any]], included: set[str], selected_node_id: str | None) -> list[dict[str, Any]]:
+    edges: list[dict[str, Any]] = []
+    seen_pairs: set[tuple[str, str, str]] = set()
+    node_by_id = {str(node.get("id")): node for node in graph_nodes if node.get("id")}
+
+    def add_edge(source: str, target: str, edge_type: str, label: str, color: str, width: float) -> None:
+        if source not in included or target not in included or source == target:
+            return
+        key = (source, target, edge_type)
+        if key in seen_pairs:
+            return
+        seen_pairs.add(key)
+        edges.append({
+            "id": f"{edge_type}--{source}--{target}",
+            "source": source,
+            "target": target,
+            "label": label,
+            "type": edge_type,
+            "color": color,
+            "dashes": True,
+            "width": width,
+        })
+
+    for node in graph_nodes:
+        source = str(node.get("baseline_source_id") or "")
+        target = str(node.get("effective_baseline_option_id") or "")
+        add_edge(source, target, "baseline", "baseline", "#0F766E", 1.7)
+
+    if selected_node_id and selected_node_id in node_by_id:
+        selected_node = node_by_id[selected_node_id]
+        target = str(selected_node.get("effective_baseline_option_id") or "")
+        add_edge(selected_node_id, target, "baseline_use", "uses baseline", "#64748B", 1.3)
+    return edges
+
+
+def build_graph_component_payload(
+    graph: dict,
+    selected_node_id: str | None = None,
+    *,
+    show_baseline_lens: bool = False,
+) -> dict[str, Any]:
     nodes = []
     included: set[str] = set()
 
@@ -284,7 +346,7 @@ def build_graph_component_payload(graph: dict, selected_node_id: str | None = No
         if not node_id:
             continue
         included.add(node_id)
-        nodes.append({
+        payload_node = {
             "id": node_id,
             "label": str(node.get("label") or node.get("title") or node_id),
             "title": str(node.get("title") or node.get("label") or ""),
@@ -294,7 +356,12 @@ def build_graph_component_payload(graph: dict, selected_node_id: str | None = No
             "color": str(node.get("color") or "#EEEEEE"),
             "is_current_focus": bool(node.get("is_current_focus")),
             "is_focus": bool(node.get("is_focus")),
-        })
+        }
+        if show_baseline_lens:
+            badges = _baseline_badges_for_node(node)
+            if badges:
+                payload_node["badges"] = badges
+        nodes.append(payload_node)
 
     edges = []
     for index, edge in enumerate(graph.get("edges", [])):
@@ -321,6 +388,8 @@ def build_graph_component_payload(graph: dict, selected_node_id: str | None = No
         })
 
     selected = str(selected_node_id) if selected_node_id in included else None
+    if show_baseline_lens:
+        edges.extend(_baseline_visual_edges(graph.get("nodes", []), included, selected))
     return {
         "nodes": nodes,
         "edges": edges,
@@ -794,6 +863,11 @@ def graph_view_state_from_saved_view(
         "graph_only_blocking": _saved_view_bool(filters.get("only_blocking", False)),
         "graph_only_next_actions": _saved_view_bool(filters.get("only_next_actions", False)),
         "graph_only_missing_evidence": _saved_view_bool(filters.get("only_missing_evidence", False)),
+        "graph_show_baseline_lens": (
+            _saved_view_bool(filters["show_baseline_lens"])
+            if "show_baseline_lens" in filters
+            else default_show_baseline_lens(scope)
+        ),
     }
 
 
