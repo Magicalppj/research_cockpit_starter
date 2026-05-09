@@ -113,20 +113,38 @@ def _baseline_ref_label(ref: object) -> str:
     return ""
 
 
-def load_graph_data():
-    nodes = load_nodes(RESEARCH_ROOT)
-    current = load_yaml(RESEARCH_ROOT / "current_state.yaml")
-    explicit_edges = load_explicit_edges(RESEARCH_ROOT)
-    validation_errors = validate_cockpit(RESEARCH_ROOT, nodes, current, explicit_edges)
+def _truth_source_revision(root: Path) -> tuple[tuple[str, int, int], ...]:
+    paths: list[Path] = []
+    current_state = root / "current_state.yaml"
+    if current_state.is_file():
+        paths.append(current_state)
+    for directory, pattern in ((root / "graph", "**/*.yaml"), (root / "notes", "**/*.md")):
+        if directory.exists():
+            paths.extend(path for path in directory.glob(pattern) if path.is_file())
+
+    revision = []
+    for path in sorted(paths):
+        stat = path.stat()
+        revision.append((path.relative_to(root).as_posix(), stat.st_mtime_ns, stat.st_size))
+    return tuple(revision)
+
+
+@st.cache_data(show_spinner=False, ttl=10)
+def _load_graph_data_cached(root_value: str, revision: tuple[tuple[str, int, int], ...]):
+    root = Path(root_value)
+    nodes = load_nodes(root)
+    current = load_yaml(root / "current_state.yaml")
+    explicit_edges = load_explicit_edges(root)
+    validation_errors = validate_cockpit(root, nodes, current, explicit_edges)
     graph = graph_to_json(nodes, current.get("current_focus_path", []), current, explicit_edges)
-    context = build_agent_context(RESEARCH_ROOT, nodes)
-    link_rows = build_link_rows(RESEARCH_ROOT, nodes)
-    search_index = build_search_index(RESEARCH_ROOT, nodes, current)
+    context = build_agent_context(root, nodes)
+    link_rows = build_link_rows(root, nodes)
+    search_index = build_search_index(root, nodes, current)
     option_workstreams = build_option_workstream_rows(nodes, current)
-    saved_graph_views = load_graph_views(RESEARCH_ROOT)
-    action_suggestions = build_action_suggestions(RESEARCH_ROOT, nodes, current, link_rows)
+    saved_graph_views = load_graph_views(root)
+    action_suggestions = build_action_suggestions(root, nodes, current, link_rows)
     all_action_suggestions = build_action_suggestions(
-        RESEARCH_ROOT,
+        root,
         nodes,
         current,
         link_rows,
@@ -145,6 +163,14 @@ def load_graph_data():
         option_workstreams,
         saved_graph_views,
     )
+
+
+def load_graph_data():
+    return _load_graph_data_cached(str(RESEARCH_ROOT), _truth_source_revision(RESEARCH_ROOT))
+
+
+def clear_graph_data_cache() -> None:
+    _load_graph_data_cached.clear()
 
 
 def render_decision_repair_hints(checklist: dict, text: dict[str, str]) -> None:
@@ -613,7 +639,12 @@ def render_graph_tab(
     message = st.session_state.pop("graph_view_message", None)
     header_left, header_right = st.columns([4, 1])
     header_left.subheader(text["research_graph"])
-    header_right.button("刷新图谱 / Refresh", key="graph_refresh_data", use_container_width=True)
+    header_right.button(
+        "刷新图谱 / Refresh",
+        key="graph_refresh_data",
+        use_container_width=True,
+        on_click=clear_graph_data_cache,
+    )
     if message:
         st.success(message)
 
@@ -679,22 +710,27 @@ def render_graph_tab(
         only_missing_evidence=only_missing_evidence,
     )
     visible_node_ids = [node["id"] for node in filtered_graph["nodes"] if node["id"] in nodes]
-    current_detail_node = st.session_state.get("graph_detail_node")
-    if current_detail_node not in visible_node_ids:
-        current_detail_node = default_detail_node_id(graph, visible_node_ids)
-        if current_detail_node:
-            st.session_state["graph_detail_node"] = current_detail_node
-            st.session_state["graph_detail_select"] = current_detail_node
+    select_key = "graph_detail_select"
     pending_detail_select = st.session_state.pop("graph_pending_detail_select", None)
     pending_node_search = st.session_state.pop("graph_pending_node_search", None)
     if pending_detail_select in visible_node_ids:
-        current_detail_node = pending_detail_select
         st.session_state["graph_detail_node"] = pending_detail_select
-        st.session_state["graph_detail_select"] = pending_detail_select
+        st.session_state[select_key] = pending_detail_select
     if pending_node_search is not None:
         st.session_state["graph_node_search"] = str(pending_node_search)
+    selected_from_select = st.session_state.get(select_key)
+    current_detail_node = st.session_state.get("graph_detail_node")
+    if selected_from_select in visible_node_ids and selected_from_select != current_detail_node:
+        current_detail_node = selected_from_select
+        st.session_state["graph_detail_node"] = selected_from_select
+    elif current_detail_node not in visible_node_ids:
+        current_detail_node = default_detail_node_id(graph, visible_node_ids)
+        if current_detail_node:
+            st.session_state["graph_detail_node"] = current_detail_node
+            st.session_state[select_key] = current_detail_node
+    elif current_detail_node:
+        st.session_state[select_key] = current_detail_node
 
-    selection_changed = False
     graph_area, detail = st.columns([2, 1])
     with graph_area:
         use_react_flow = renderer_label == "React Flow" and graph_component_build_available()
@@ -723,7 +759,6 @@ def render_graph_tab(
                 st.session_state["graph_detail_node"] = clicked_node_id
                 st.session_state["graph_detail_select"] = clicked_node_id
                 st.session_state["graph_node_search"] = ""
-                selection_changed = True
         else:
             if renderer_label == "React Flow":
                 st.caption("React Flow build missing; using PyVis fallback.")
@@ -850,7 +885,6 @@ def render_graph_tab(
             st.info(text["select_node_hint"])
             return
         default_index = detail_options.index(default_id) if default_id in detail_options else 0
-        select_key = "graph_detail_select"
         if st.session_state.get(select_key) not in detail_options:
             st.session_state[select_key] = detail_options[default_index]
         node_id = st.selectbox(
@@ -862,7 +896,6 @@ def render_graph_tab(
         )
         if node_id != st.session_state.get("graph_detail_node"):
             st.session_state["graph_detail_node"] = node_id
-            selection_changed = True
         render_node_detail(nodes, node_id, text, current, link_rows, action_suggestions)
 
     saved_view_by_id = {str(view.get("id")): view for view in saved_graph_views if view.get("id")}
@@ -894,10 +927,6 @@ def render_graph_tab(
             st.rerun()
     else:
         st.caption(text["no_saved_graph_views"])
-
-    if selection_changed:
-        st.rerun()
-
 
 def render_branch_comparison(nodes: dict, current: dict, text: dict[str, str]) -> None:
     problem_options = sorted(node.id for node in nodes.values() if node.type == "problem")

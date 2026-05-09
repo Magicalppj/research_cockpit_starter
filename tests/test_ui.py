@@ -98,7 +98,17 @@ class UiRenderingTests(unittest.TestCase):
         refresh_index = source.find('key="graph_refresh_data"')
 
         self.assertNotEqual(refresh_index, -1)
+        self.assertIn("on_click=clear_graph_data_cache", source[refresh_index:refresh_index + 250])
         self.assertNotIn("st.rerun()", source[refresh_index:refresh_index + 200])
+
+    def test_graph_data_load_uses_truth_source_cache(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn("@st.cache_data", source)
+        self.assertIn("def _truth_source_revision", source)
+        self.assertIn("revision: tuple[tuple[str, int, int], ...]", source)
+        self.assertIn("_load_graph_data_cached(str(RESEARCH_ROOT), _truth_source_revision(RESEARCH_ROOT))", source)
+        self.assertIn("_load_graph_data_cached.clear()", source)
 
     def test_main_navigation_uses_sidebar_radio_instead_of_top_tabs(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
@@ -429,8 +439,8 @@ class UiRenderingTests(unittest.TestCase):
         self.assertNotEqual(pending_index, -1)
         self.assertNotEqual(search_widget_index, -1)
         self.assertNotEqual(select_key_index, -1)
+        self.assertLess(select_key_index, pending_index)
         self.assertLess(pending_index, search_widget_index)
-        self.assertLess(pending_index, select_key_index)
 
     def test_node_detail_prioritizes_overview_before_raw_metadata(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
@@ -552,7 +562,9 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn('rankdir: "LR"', source)
         self.assertIn("nodesDraggable", source)
         self.assertIn('type: "smoothstep"', source)
-        self.assertIn("key={graphKey}", source)
+        self.assertIn("key={layoutKey}", source)
+        self.assertIn("layoutSignature", source)
+        self.assertIn("renderSignature", source)
         self.assertIn("event_id", source)
         self.assertIn("visualSelectedNodeId", source)
         self.assertIn("setVisualSelectedNodeId(node.id)", source)
@@ -919,14 +931,12 @@ class UiRenderingTests(unittest.TestCase):
         nodes = {node["id"]: node for node in visible["nodes"]}
         self.assertEqual(nodes["problem_text"]["badges"], ["SOURCE"])
         self.assertEqual(nodes["option_t5"]["badges"], ["CURRENT BASELINE"])
+        self.assertEqual(nodes["exp_t5"]["effective_baseline_option_id"], "option_t5")
         self.assertIn(
             ("problem_text", "option_t5", "baseline"),
             {(edge["source"], edge["target"], edge["type"]) for edge in visible["edges"]},
         )
-        self.assertIn(
-            ("option_t5", "exp_t5", "baseline_use"),
-            {(edge["source"], edge["target"], edge["type"]) for edge in visible["edges"]},
-        )
+        self.assertNotIn("baseline_use", {edge["type"] for edge in visible["edges"]})
 
     def test_graph_component_selection_only_accepts_visible_nodes(self) -> None:
         visible_node_ids = ["problem_text", "option_t5"]
@@ -954,19 +964,42 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("new_component_click", source)
         self.assertIn('key="research_graph_component"', source)
         self.assertIn('select_key = "graph_detail_select"', source)
+        self.assertIn("selected_from_select = st.session_state.get(select_key)", source)
         self.assertIn('st.session_state["graph_detail_node"] = clicked_node_id', source)
-        self.assertIn("selection_changed = True", source)
+        self.assertIn('st.session_state["graph_detail_select"] = clicked_node_id', source)
         click_index = source.find("new_component_click")
         controls_index = source.find("Graph Controls")
         detail_index = source.find("with detail:", controls_index)
-        selection_rerun_index = source.find("if selection_changed:")
         self.assertNotEqual(click_index, -1)
         self.assertNotEqual(controls_index, -1)
         self.assertNotEqual(detail_index, -1)
-        self.assertNotEqual(selection_rerun_index, -1)
         self.assertNotIn("st.rerun()", source[click_index:controls_index])
-        self.assertGreater(selection_rerun_index, detail_index)
-        self.assertGreater(selection_rerun_index, controls_index)
+        self.assertNotIn("selection_changed", source)
+
+    def test_graph_component_layout_ignores_selection_only_changes(self) -> None:
+        source = (
+            ROOT_DIR
+            / "src"
+            / "research_cockpit"
+            / "ui"
+            / "graph_component"
+            / "frontend"
+            / "src"
+            / "GraphComponent.tsx"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('selectionOnlyEdgeTypes = new Set(["baseline_use"])', source)
+        self.assertIn("function baselineUseEdgeFor", source)
+        self.assertIn("function visibleGraphEdges", source)
+        self.assertIn("effective_baseline_option_id?: string", source)
+        self.assertIn("function layoutSignature", source)
+        self.assertIn("function renderSignature", source)
+        self.assertIn("const layoutKey = useMemo(() => layoutSignature(payload), [payload])", source)
+        self.assertIn("const renderKey = useMemo(() => renderSignature(payload), [payload])", source)
+        self.assertIn("visibleGraphEdges(payload, visualSelectedNodeId)", source)
+        self.assertIn("key={layoutKey}", source)
+        self.assertNotIn("return layoutNodes(flowNodes, payload.edges || [])", source)
+        self.assertNotIn("graphSignature", source)
 
     def test_graph_view_mode_radio_clears_stale_workstream_before_rerun(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")

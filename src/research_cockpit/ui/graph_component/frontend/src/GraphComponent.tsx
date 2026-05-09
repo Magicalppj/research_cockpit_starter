@@ -32,6 +32,7 @@ type GraphNode = {
   is_current_focus?: boolean;
   is_focus?: boolean;
   badges?: string[];
+  effective_baseline_option_id?: string;
 };
 
 type GraphEdge = {
@@ -54,6 +55,7 @@ type GraphPayload = {
 const nodeWidth = 220;
 const nodeHeight = 96;
 const structuralEdgeTypes = new Set(["parent", "contains", "child"]);
+const selectionOnlyEdgeTypes = new Set(["baseline_use"]);
 
 function labelFor(node: GraphNode) {
   const badges = node.badges || [];
@@ -98,7 +100,28 @@ function isStructuralEdge(edge: GraphEdge) {
   return structuralEdgeTypes.has(String(edge.type || "").toLowerCase());
 }
 
-function graphSignature(payload: GraphPayload) {
+function isSelectionOnlyEdge(edge: GraphEdge) {
+  return selectionOnlyEdgeTypes.has(String(edge.type || "").toLowerCase());
+}
+
+function layoutEdgesFor(payload: GraphPayload) {
+  const edges = payload.edges || [];
+  const structuralEdges = edges.filter(isStructuralEdge);
+  return structuralEdges.length > 0 ? structuralEdges : edges.filter((edge) => !isSelectionOnlyEdge(edge));
+}
+
+function layoutSignature(payload: GraphPayload) {
+  return JSON.stringify({
+    nodes: (payload.nodes || []).map((node) => node.id),
+    edges: layoutEdgesFor(payload).map((edge) => [
+      edge.source,
+      edge.target,
+      edge.type
+    ])
+  });
+}
+
+function renderSignature(payload: GraphPayload) {
   return JSON.stringify({
     nodes: (payload.nodes || []).map((node) => [
       node.id,
@@ -110,7 +133,8 @@ function graphSignature(payload: GraphPayload) {
       node.title,
       node.is_current_focus,
       node.is_focus,
-      node.badges
+      node.badges,
+      node.effective_baseline_option_id
     ]),
     edges: (payload.edges || []).map((edge) => [
       edge.id,
@@ -191,8 +215,36 @@ function layoutNodes(nodes: Node[], edges: GraphEdge[]): Node[] {
   });
 }
 
-function toReactFlowEdges(payload: GraphPayload): Edge[] {
-  return (payload.edges || []).map((edge) => {
+function baselineUseEdgeFor(payload: GraphPayload, selectedNodeId: string | null): GraphEdge | null {
+  if (!selectedNodeId) {
+    return null;
+  }
+  const nodes = payload.nodes || [];
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
+  const source = selectedNode?.effective_baseline_option_id || "";
+  if (!source || source === selectedNodeId || !nodes.some((node) => node.id === source)) {
+    return null;
+  }
+  return {
+    id: `baseline_use--${source}--${selectedNodeId}`,
+    source,
+    target: selectedNodeId,
+    label: "uses baseline",
+    type: "baseline_use",
+    color: "#64748B",
+    dashes: true,
+    width: 1.3
+  };
+}
+
+function visibleGraphEdges(payload: GraphPayload, selectedNodeId: string | null): GraphEdge[] {
+  const edges = (payload.edges || []).filter((edge) => !isSelectionOnlyEdge(edge));
+  const baselineUseEdge = baselineUseEdgeFor(payload, selectedNodeId);
+  return baselineUseEdge ? [...edges, baselineUseEdge] : edges;
+}
+
+function toReactFlowEdges(edges: GraphEdge[]): Edge[] {
+  return edges.map((edge) => {
     const structural = isStructuralEdge(edge);
     const stroke = structural ? "#2563EB" : edge.color || "#6B7280";
     return {
@@ -217,16 +269,25 @@ function ResearchGraph({ args }: ComponentProps) {
   const payload = (args.payload || {}) as GraphPayload;
   const selectedNodeId = (args.selected_node_id || payload.selected_node_id || null) as string | null;
   const [visualSelectedNodeId, setVisualSelectedNodeId] = useState<string | null>(selectedNodeId);
-  const graphKey = useMemo(() => graphSignature(payload), [payload]);
-  const baseEdges = useMemo(() => toReactFlowEdges(payload), [payload]);
+  const layoutKey = useMemo(() => layoutSignature(payload), [payload]);
+  const renderKey = useMemo(() => renderSignature(payload), [payload]);
+  const nodePositions = useMemo(() => {
+    const flowNodes = toReactFlowNodes(payload, null);
+    return new Map(layoutNodes(flowNodes, layoutEdgesFor(payload)).map((node) => [node.id, node.position]));
+  }, [layoutKey]);
+  const graphEdges = useMemo(() => visibleGraphEdges(payload, visualSelectedNodeId), [renderKey, visualSelectedNodeId]);
+  const baseEdges = useMemo(() => toReactFlowEdges(graphEdges), [graphEdges]);
   const baseNodes = useMemo(() => {
     const flowNodes = toReactFlowNodes(payload, visualSelectedNodeId);
-    return layoutNodes(flowNodes, payload.edges || []);
-  }, [payload, visualSelectedNodeId]);
+    return flowNodes.map((node, index) => ({
+      ...node,
+      position: nodePositions.get(node.id) || { x: index * (nodeWidth + 70), y: 0 }
+    }));
+  }, [nodePositions, renderKey, visualSelectedNodeId]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(baseNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(baseEdges);
-  const previousGraphKey = useRef<string>("");
+  const previousLayoutKey = useRef<string>("");
   const pendingSelectedNodeId = useRef<string | null>(null);
   const clickSequence = useRef<number>(0);
 
@@ -247,8 +308,8 @@ function ResearchGraph({ args }: ComponentProps) {
   }, [selectedNodeId]);
 
   useEffect(() => {
-    if (previousGraphKey.current !== graphKey) {
-      previousGraphKey.current = graphKey;
+    if (previousLayoutKey.current !== layoutKey) {
+      previousLayoutKey.current = layoutKey;
       setNodes(baseNodes);
       return;
     }
@@ -260,7 +321,7 @@ function ResearchGraph({ args }: ComponentProps) {
         return current ? { ...node, position: current.position } : node;
       });
     });
-  }, [baseNodes, graphKey, setNodes]);
+  }, [baseNodes, layoutKey, setNodes]);
 
   useEffect(() => {
     Streamlit.setFrameHeight(660);
@@ -285,7 +346,7 @@ function ResearchGraph({ args }: ComponentProps) {
     <div className="graph-shell">
       <ReactFlowProvider>
         <ReactFlow
-          key={graphKey}
+          key={layoutKey}
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}

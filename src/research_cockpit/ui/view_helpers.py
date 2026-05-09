@@ -297,10 +297,9 @@ def _baseline_badges_for_node(node: dict[str, Any]) -> list[str]:
     return badges
 
 
-def _baseline_visual_edges(graph_nodes: list[dict[str, Any]], included: set[str], selected_node_id: str | None) -> list[dict[str, Any]]:
+def _baseline_visual_edges(graph_nodes: list[dict[str, Any]], included: set[str]) -> list[dict[str, Any]]:
     edges: list[dict[str, Any]] = []
     seen_pairs: set[tuple[str, str, str]] = set()
-    node_by_id = {str(node.get("id")): node for node in graph_nodes if node.get("id")}
 
     def add_edge(source: str, target: str, edge_type: str, label: str, color: str, width: float) -> None:
         if source not in included or target not in included or source == target:
@@ -325,10 +324,6 @@ def _baseline_visual_edges(graph_nodes: list[dict[str, Any]], included: set[str]
         target = str(node.get("effective_baseline_option_id") or "")
         add_edge(source, target, "baseline", "baseline", "#0F766E", 1.7)
 
-    if selected_node_id and selected_node_id in node_by_id:
-        selected_node = node_by_id[selected_node_id]
-        source = str(selected_node.get("effective_baseline_option_id") or "")
-        add_edge(source, selected_node_id, "baseline_use", "uses baseline", "#64748B", 1.3)
     return edges
 
 
@@ -358,6 +353,9 @@ def build_graph_component_payload(
             "is_focus": bool(node.get("is_focus")),
         }
         if show_baseline_lens:
+            baseline_option_id = str(node.get("effective_baseline_option_id") or "")
+            if baseline_option_id:
+                payload_node["effective_baseline_option_id"] = baseline_option_id
             badges = _baseline_badges_for_node(node)
             if badges:
                 payload_node["badges"] = badges
@@ -389,7 +387,7 @@ def build_graph_component_payload(
 
     selected = str(selected_node_id) if selected_node_id in included else None
     if show_baseline_lens:
-        edges.extend(_baseline_visual_edges(graph.get("nodes", []), included, selected))
+        edges.extend(_baseline_visual_edges(graph.get("nodes", []), included))
     return {
         "nodes": nodes,
         "edges": edges,
