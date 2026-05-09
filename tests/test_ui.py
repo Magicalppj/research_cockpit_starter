@@ -924,7 +924,7 @@ class UiRenderingTests(unittest.TestCase):
             {(edge["source"], edge["target"], edge["type"]) for edge in visible["edges"]},
         )
         self.assertIn(
-            ("exp_t5", "option_t5", "baseline_use"),
+            ("option_t5", "exp_t5", "baseline_use"),
             {(edge["source"], edge["target"], edge["type"]) for edge in visible["edges"]},
         )
 

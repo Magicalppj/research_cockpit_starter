@@ -327,8 +327,8 @@ def _baseline_visual_edges(graph_nodes: list[dict[str, Any]], included: set[str]
 
     if selected_node_id and selected_node_id in node_by_id:
         selected_node = node_by_id[selected_node_id]
-        target = str(selected_node.get("effective_baseline_option_id") or "")
-        add_edge(selected_node_id, target, "baseline_use", "uses baseline", "#64748B", 1.3)
+        source = str(selected_node.get("effective_baseline_option_id") or "")
+        add_edge(source, selected_node_id, "baseline_use", "uses baseline", "#64748B", 1.3)
     return edges
 
 
