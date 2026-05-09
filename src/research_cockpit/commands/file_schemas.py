@@ -78,9 +78,9 @@ id: artifact_x
 title: Result bundle
 status: done
 summary: Collected outputs and metrics.
-path: outputs/run_x
+path: artifacts/experiment_x/run_x
 links:
-  metrics: outputs/run_x/metrics.json
+  metrics: artifacts/experiment_x/run_x/metrics.json
   review: notes/review.md
 link_to:
   - experiment_x

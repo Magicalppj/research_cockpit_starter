@@ -168,8 +168,8 @@ research-cockpit complete-experiment \
   --id experiment_x \
   --finding "..." \
   --confidence medium \
-  --evidence-path outputs/run_x \
-  --evidence-link metrics=outputs/run_x/metrics.json \
+  --evidence-path artifacts/experiment_x/run_x \
+  --evidence-link metrics=artifacts/experiment_x/run_x/metrics.json \
   --json --compact
 ```
 
@@ -181,20 +181,41 @@ research-cockpit complete-experiments --root research_cockpit --file findings.ya
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build
 ```
 
-inline evidence 只负责用 `path` 和 `links` 快速创建并关联 evidence artifact。复杂 artifact 元数据请先用 `create-artifact` 创建，再通过 `--artifact-id` 关联。
+inline evidence 只负责用 `path` 和 `links` 快速创建并关联 evidence artifact；它不会复制文件。来自临时 git worktree 的输出先按下一节 ingest，再用 `--artifact-id` 关联。
 
-### 3. 显式创建或关联 artifact
+### 3. 从 worktree ingest 长期 artifact
+
+如果实验输出来自临时 git worktree，先把结果包复制到 canonical data root 的稳定目录：
+
+```sh
+research-cockpit ingest-artifact \
+  --root research_cockpit \
+  --node experiment_x \
+  --from ../worktrees/agent_x/.agent_runs/run_x \
+  --run-id run_x \
+  --agent agent_x \
+  --link metrics=metrics.json \
+  --dry-run --json --show-diff
+research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from ../worktrees/agent_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --no-build
+research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --artifact-id artifact_experiment_x_run_x --no-build
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
+```
+
+默认复制到 `research_cockpit/artifacts/<node_id>/<run_id>/`，并创建 `artifact_<node_id>_<run_id>`。最后一次 truth-source 写入后运行 `validate` 和 `build`，UI、context 和 Resources 才会看到最新 finding 与 artifact；更完整的多 agent 规则见文末“并行 Agent 和 Worktree”。
+
+### 4. 显式创建或关联 artifact
 
 ```sh
 research-cockpit create-artifact --print-schema
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
-research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --no-build
+research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path artifacts/experiment_x/run_x --link metrics=artifacts/experiment_x/run_x/metrics.json --link-to experiment_x --no-build
 research-cockpit link-artifact --root research_cockpit --artifact artifact_x --to option_x --no-build
 ```
 
 Artifact 的 `path` 和 `links` 会按原样存储。生成的 resource rows 会包含解析路径、解析基准和文件是否存在等信息。
 
-### 4. 收尾一个方案工作流
+### 5. 收尾一个方案工作流
 
 只有当 close-out 状态明确时再 finalize：
 
@@ -206,7 +227,7 @@ research-cockpit finalize-workstream --root research_cockpit --file finalize.yam
 
 `finalize-workstream` 不会创建 artifact、接受 decision、暂停旧分支、删除节点或编造 next actions。
 
-### 5. 把已采纳成果设为默认 baseline
+### 6. 把已采纳成果设为默认 baseline
 
 `accepted option/decision` 是历史事实，`baseline` 是某个节点及其下游 agent 默认继承的工作前提。多个方案都被接受后，不要把全部 accepted history 塞进每个 agent 上下文；由上游节点或用户显式选择默认 baseline：
 
@@ -261,6 +282,7 @@ research_cockpit/
   graph/graph_views.yaml
   graph/interaction_log.yaml
   notes/
+  artifacts/                # 长期 evidence/result bundles
   dashboards/               # build 生成
 ```
 
@@ -300,6 +322,7 @@ SKILL.md
 - `docs/repo-layout.md`: 仓库布局和模块地图。
 - `docs/internal-architecture.md`: 内部模块边界和依赖规则。
 - `docs/decisions/0001-layered-plugin-architecture.md`: layered plugin architecture rationale。
+- `docs/decisions/0002-canonical-artifact-store-for-worktrees.md`: 为什么 worktree 输出要 ingest 到 canonical artifact store。
 - `capabilities/ui-dashboard.md`: Streamlit UI、React Flow 图谱和刷新行为。
 - `capabilities/graph-state.md`: 图谱状态、saved views 和 interaction log。
 - `capabilities/experiment-tracking.md`: experiment、finding、artifact 和 workstream 流程。
@@ -307,17 +330,24 @@ SKILL.md
 
 ## 并行 Agent 和 Worktree
 
-并行 agent 可以用 git worktrees 隔离代码和实验输出，但 Research Cockpit 状态仍应写入主仓库的 canonical `research_cockpit/` root。
+并行 agent 可以用 git worktrees 隔离代码和实验输出，但 Research Cockpit 状态只写入主仓库的 canonical `research_cockpit/` root。Worktree 是可删除的执行沙盒；长期研究记录必须先沉淀到 canonical root。
 
 规则：
 
 - Worktree 里做代码改动、运行实验、保存本地输出。
-- Canonical root 里写所有 `research-cockpit` 状态变更。
-- 不要在 worktree 里重新 `research-cockpit init`。
-- 下游 agent 用 `set-agent-focus` 汇报进展，不要随意改全局 `set-focus`。
-- 多个写操作顺序执行；可在每个命令加 `--no-build`，最后由主仓库统一 `validate` 和 `build`。
+- 用 `ingest-artifact` 把有价值的 `.agent_runs/<run_id>/` 复制到 `research_cockpit/artifacts/<node_id>/<run_id>/`，再记录 finding。
+- 不在 worktree 里 `research-cockpit init`，也不把 worktree-local path 当作长期 `--evidence-path`。
+- 下游 agent 用 `set-agent-focus` 汇报进展；全局 `set-focus`、`validate`、`build` 由 coordinator 串行处理。
 
-更多细节见 `capabilities/experiment-tracking.md` 和 `capabilities/graph-state.md`。
+删除 worktree 前检查：
+
+1. 有价值的 run directory 已 ingest，并能在 Resources/context 里看到。
+2. 结论已用 `complete-experiment --artifact-id <artifact_id>` 或 `update-finding --artifact-id <artifact_id>` 写入。
+3. 有用代码已 merge/cherry-pick 或保存 patch。
+4. 需要继承的正向结果已记录 decision 或 `set-baseline`。
+5. canonical root 已通过 `validate` 和 `build`。
+
+更多细节见 `capabilities/experiment-tracking.md`、`capabilities/integrations.md` 和 ADR-0002。
 
 ## 开发者验证
 

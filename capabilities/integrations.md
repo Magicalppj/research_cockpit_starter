@@ -9,10 +9,23 @@ Recommended layout:
 ```text
 research-repo/
   research_cockpit/
+    artifacts/
   .agent/skills/research-cockpit/
 ```
 
 The plugin must not store project-specific research state inside the skill directory. Keep state in the research repo root `research_cockpit/`.
+
+## Canonical Root And Disposable Worktrees
+
+For multi-agent development, git worktrees are execution sandboxes. They may contain code changes and temporary `.agent_runs/<run_id>/` outputs, but they are not long-lived Research Cockpit truth sources.
+
+- Canonical truth source: `<main_repo>/research_cockpit/`.
+- Stable artifact store: `<main_repo>/research_cockpit/artifacts/<node_id>/<run_id>/`.
+- Disposable worktree: `../worktrees/<agent_or_node>/`.
+
+Agents should use `start-agent-session` to receive a handoff with `RESEARCH_COCKPIT_ROOT`, `stable_artifact_root`, and an `ingest-artifact` command template. Before a worktree can be deleted, any useful output must be copied with `ingest-artifact`, then referenced by `complete-experiment --artifact-id` or `update-finding --artifact-id`.
+
+`import-worktree-findings` is a recovery tool for accidental worktree-local cockpit writes. It is not the normal path for preserving outputs.
 
 ## Data Root Resolution
 

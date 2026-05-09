@@ -28,6 +28,7 @@ COMMAND_MODULES: dict[str, str] = {
     "report-option-workstream": "report_option_workstream",
     "finalize-workstream": "finalize_workstream",
     "import-worktree-findings": "import_worktree_findings",
+    "ingest-artifact": "ingest_artifact",
     "record-finding": "record_finding",
     "update-finding": "update_finding",
     "create-artifact": "create_artifact",

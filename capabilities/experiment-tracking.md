@@ -84,6 +84,22 @@ research-cockpit import-worktree-findings --root D:/main_repo/research_cockpit -
 
 The importer only accepts artifact nodes, experiment findings, result summaries, experiment-local `next_actions`, and option workstream reports. It rejects structural node changes, global focus changes, per-agent focus changes, and decision acceptance.
 
+## Worktree Artifact Ingest
+
+Worktree output is temporary. Before deleting a worktree or using its files as evidence, copy the run directory into the canonical artifact store:
+
+```sh
+research-cockpit ingest-artifact --root D:/main_repo/research_cockpit --node experiment_x --from ../worktrees/agent_option_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --dry-run --json --show-diff
+research-cockpit ingest-artifact --root D:/main_repo/research_cockpit --node experiment_x --from ../worktrees/agent_option_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --json --compact
+research-cockpit complete-experiment --root D:/main_repo/research_cockpit --id experiment_x --finding "..." --confidence medium --artifact-id artifact_experiment_x_run_x --no-build
+research-cockpit validate --root D:/main_repo/research_cockpit --json
+research-cockpit build --root D:/main_repo/research_cockpit
+```
+
+`ingest-artifact` copies `--from` to `research_cockpit/artifacts/<node_id>/<run_id>/`, writes `_research_cockpit_ingest.json`, creates a `done` artifact, and links it to `--node`. Repeated `--link key=relative/path` values must point inside the source directory; they are rewritten to stable artifact-store paths. The ingest manifest records the source path relative to the canonical root parent when possible; external source directories are recorded only as a short hint, not as a machine-local path. Source directories containing symlinks are rejected in v1. The command does not record findings, accept decisions, or set baselines.
+
+Use this as the normal path for multi-agent worktrees. Use inline `--evidence-path` only for files that already live at a stable path outside the disposable worktree.
+
 ## Artifacts
 
 Use artifact commands for result folders, review bundles, metrics directories, and other evidence objects that need their own status or links:
@@ -93,8 +109,8 @@ research-cockpit create-artifact --print-schema
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --json --compact
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --no-build
-research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --dry-run --json --show-diff
-research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path outputs/run_x --link metrics=outputs/run_x/metrics.json --link-to experiment_x --no-build
+research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path artifacts/experiment_x/run_x --link metrics=artifacts/experiment_x/run_x/metrics.json --link-to experiment_x --dry-run --json --show-diff
+research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Result bundle" --status done --path artifacts/experiment_x/run_x --link metrics=artifacts/experiment_x/run_x/metrics.json --link-to experiment_x --no-build
 research-cockpit link-artifact --root research_cockpit --artifact artifact_x --to option_x --link review=notes/review.md --no-build
 ```
 
@@ -107,19 +123,21 @@ Use `--file` when an artifact has several `links` or `link_to` targets; it is sh
 Record experiment findings through `research-cockpit record-finding`:
 
 ```sh
-research-cockpit record-finding --root research_cockpit --experiment experiment_x --statement "..." --confidence medium --outcome positive --summary "..." --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json
+research-cockpit record-finding --root research_cockpit --experiment experiment_x --statement "..." --confidence medium --outcome positive --summary "..." --evidence-path artifacts/experiment_x/run_x --evidence-link metrics=artifacts/experiment_x/run_x/metrics.json
 research-cockpit record-finding --root research_cockpit --experiment experiment_x --statement "..." --confidence medium --artifact-id artifact_x
 ```
 
 Use `--evidence-path` and repeated `--evidence-link key=value` when the result directory, image, report, or metrics JSON should be recorded with the finding. The command creates an `artifact_<finding_id>` artifact, links it from the finding, and mirrors it on the experiment top-level `linked_artifacts` field so context, resource tables, and dashboards can show where the conclusion came from. Use `create-artifact` plus `--artifact-id` when you need custom artifact metadata.
+
+Do not pass worktree-local output paths to `--evidence-path` for long-lived evidence. First run `ingest-artifact`, then pass the created artifact id with `--artifact-id`.
 
 `--artifact-id` must be an existing artifact node id, not a file path. A finding can be recorded without any artifact; the command succeeds but JSON output includes `warnings: ["missing_evidence_artifact"]`.
 
 Use `complete-experiment` when you want the conservative "record conclusion and mark done" workflow in one command:
 
 ```sh
-research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --outcome mixed --result-summary "..." --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json --next-action "Review follow-up" --no-build
-research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --evidence-path outputs/run_x --evidence-link metrics=outputs/run_x/metrics.json --json --compact
+research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --outcome mixed --result-summary "..." --artifact-id artifact_experiment_x_run_x --next-action "Review follow-up" --no-build
+research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --evidence-path artifacts/experiment_x/run_x --evidence-link metrics=artifacts/experiment_x/run_x/metrics.json --json --compact
 ```
 
 `complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, creates inline evidence artifacts when evidence fields are present, and appends de-duplicated experiment-local `next_actions`. It does not change focus, option status, problem status, or `current_best_option`.
@@ -146,9 +164,9 @@ experiments:
     finding: First finding.
     result_summary: First summary.
     evidence:
-      path: outputs/experiment_a
+      path: artifacts/experiment_a/run_a
       links:
-        metrics: outputs/experiment_a/metrics.json
+        metrics: artifacts/experiment_a/run_a/metrics.json
   - id: experiment_b
     finding: Second finding.
     confidence: strong

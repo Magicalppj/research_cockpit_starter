@@ -87,13 +87,16 @@ def session_handoff(
     worktree: Path | None = None,
 ) -> dict[str, Any]:
     root_text = str(root.resolve())
+    stable_artifact_root = str((root.resolve() / "artifacts"))
     return {
         "launch_env": {"RESEARCH_COCKPIT_ROOT": root_text},
+        "stable_artifact_root": stable_artifact_root,
         "guardrails": [
             "Use the worktree only for code and experiment files.",
             "Do not run research-cockpit init in the worktree.",
             "Do not mutate a worktree-local research_cockpit directory.",
             "Write research state only through the canonical --root shown here.",
+            "Do not use worktree paths as long-lived evidence paths; ingest outputs into the stable artifact root first.",
         ],
         "commands": {
             "read_context": (
@@ -107,6 +110,12 @@ def session_handoff(
             "option_context": (
                 f"research-cockpit option-workstream-context --root {root_text} "
                 f"--id {option_id} --compact --json"
+            ),
+            "ingest_artifact": (
+                f"research-cockpit ingest-artifact --root {root_text} "
+                "--node <node_id> --from <worktree_output_dir> --run-id <run_id> "
+                "--agent "
+                f"{agent_id} --json --compact"
             ),
         },
         "worktree": str(worktree.resolve()) if worktree else None,
@@ -174,6 +183,7 @@ def build_agent_session_context(
         "canonical_root": str(root.resolve()),
         "required_root": str(root.resolve()),
         "do_not_mutate_worktree_root": True,
+        "stable_artifact_root": str((root.resolve() / "artifacts")),
         "worktree_boundary": {
             "canonical_root": str(root.resolve()),
             "required_root": str(root.resolve()),

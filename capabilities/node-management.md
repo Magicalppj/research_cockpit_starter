@@ -232,4 +232,4 @@ research-cockpit set-agent-focus --root D:/main_repo/research_cockpit --agent ag
 research-cockpit validate --root D:/main_repo/research_cockpit --json
 ```
 
-The worktree is only for code/experiment isolation. Research graph mutations still go to the canonical root in the main repository. Relative `--worktree` values resolve against the canonical repository root (`--root` parent). Use `set-agent-focus` for downstream progress and reserve global `set-focus` for coordinator-level focus changes.
+The worktree is only for code/experiment isolation. Research graph mutations still go to the canonical root in the main repository. Relative `--worktree` values resolve against the canonical repository root (`--root` parent). Use `set-agent-focus` for downstream progress and reserve global `set-focus` for coordinator-level focus changes. Preserve useful run outputs with `ingest-artifact` before deleting the worktree; see `experiment-tracking.md` and `integrations.md`.

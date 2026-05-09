@@ -52,7 +52,7 @@ For a downstream agent launched in a git worktree, start from the canonical root
 research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
 ```
 
-The payload includes `required_root`, `do_not_mutate_worktree_root: true`, the agent session, per-agent focus, compact option context, and handoff commands.
+The payload includes `required_root`, `do_not_mutate_worktree_root: true`, the agent session, per-agent focus, compact option context, and handoff commands. Use the included `ingest-artifact` command template for worktree run outputs before recording findings or deleting the worktree.
 
 ## Node Handoff
 
