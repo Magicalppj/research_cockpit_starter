@@ -8,7 +8,9 @@ from research_cockpit.model import script_command, search_knowledge
 
 
 PRIMARY_GRAPH_NODE_TYPES = ("stage", "problem", "option", "experiment", "decision")
-BASELINE_LENS_DEFAULT_MODES = {"focus_depth_1", "focus_depth_2", "current_branch", "option_workstream"}
+BASELINE_LENS_DEFAULT_MODES = {"focus_depth_1", "focus_depth_2", "current_branch", "option_workstream", "global"}
+DEFAULT_HIDDEN_GRAPH_STATUSES = {"done"}
+DEFAULT_GRAPH_VIEW_MODE = "global"
 
 
 def ordered_tab_keys(text: dict[str, str]) -> list[str]:
@@ -774,10 +776,15 @@ def filter_node_ids(nodes: dict, query: str) -> list[str]:
     return matches
 
 
-def default_selected_statuses(graph: dict, all_statuses: list[str]) -> list[str]:
-    hidden = set((graph.get("focus_mode") or {}).get("hide_statuses", []))
+def default_graph_statuses(all_statuses: list[str], hidden_statuses: set[str] | None = None) -> list[str]:
+    hidden = DEFAULT_HIDDEN_GRAPH_STATUSES | set(hidden_statuses or set())
     defaults = [status for status in all_statuses if status not in hidden]
     return defaults or all_statuses
+
+
+def default_selected_statuses(graph: dict, all_statuses: list[str]) -> list[str]:
+    hidden = set((graph.get("focus_mode") or {}).get("hide_statuses", []))
+    return default_graph_statuses(all_statuses, hidden)
 
 
 def default_selected_node_types(all_types: list[str]) -> list[str]:
@@ -845,9 +852,10 @@ def graph_view_state_from_saved_view(
     mode_value_to_label: dict[str, str],
 ) -> dict[str, object]:
     filters = view.get("filters") if isinstance(view.get("filters"), dict) else {}
-    scope = str(view.get("scope") or "focus_depth_2")
+    scope = str(view.get("scope") or DEFAULT_GRAPH_VIEW_MODE)
     mode_label = (
         mode_value_to_label.get(scope)
+        or mode_value_to_label.get(DEFAULT_GRAPH_VIEW_MODE)
         or mode_value_to_label.get("focus_depth_2")
         or next(iter(mode_value_to_label.values()), scope)
     )
@@ -892,7 +900,7 @@ def reset_global_graph_filter_state(
 
     if view_mode == "global" and previous_view_mode != "global":
         session_state["graph_node_types"] = default_selected_node_types(all_types)
-        session_state["graph_statuses"] = list(all_statuses)
+        session_state["graph_statuses"] = default_graph_statuses(all_statuses)
         session_state["graph_stages"] = list(all_stages)
         session_state["graph_focus_roles"] = list(all_focus_roles)
         session_state["graph_workstreams"] = []

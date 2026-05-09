@@ -442,6 +442,14 @@ class UiRenderingTests(unittest.TestCase):
         self.assertLess(select_key_index, pending_index)
         self.assertLess(pending_index, search_widget_index)
 
+    def test_graph_view_defaults_to_global_mode(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn('DEFAULT_GRAPH_VIEW_MODE', source)
+        self.assertIn('default_view_label = mode_value_to_label.get(DEFAULT_GRAPH_VIEW_MODE, text["global_graph"])', source)
+        self.assertIn('st.session_state.get("graph_view_mode", default_view_label)', source)
+        self.assertIn('mode_label_to_value.get(view_label, DEFAULT_GRAPH_VIEW_MODE)', source)
+
     def test_node_detail_prioritizes_overview_before_raw_metadata(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
         detail_start = source.find("def render_node_detail(")
@@ -476,7 +484,7 @@ class UiRenderingTests(unittest.TestCase):
             state,
             "global",
             all_types=["artifact", "decision", "experiment", "option", "problem", "stage"],
-            all_statuses=["active", "open", "parked", "planned", "proposed"],
+            all_statuses=["active", "done", "open", "parked", "planned", "proposed"],
             all_stages=["stage_demo"],
             all_focus_roles=["child", "current", "parent", "sibling", "unrelated"],
         )
@@ -808,8 +816,16 @@ class UiRenderingTests(unittest.TestCase):
             {"types": [], "statuses": [], "stages": [], "focus_roles": [], "workstreams": []},
             {"focus_depth_2": "Focus Depth 2", "global": "Global"},
         )
-        self.assertFalse(global_state["graph_show_baseline_lens"])
+        self.assertTrue(global_state["graph_show_baseline_lens"])
         self.assertTrue(explicit_state["graph_show_baseline_lens"])
+
+        no_scope_state = graph_view_state_from_saved_view(
+            {"filters": {}},
+            {"types": [], "statuses": [], "stages": [], "focus_roles": [], "workstreams": []},
+            {"focus_depth_2": "Focus Depth 2", "global": "Global"},
+        )
+        self.assertEqual(no_scope_state["graph_view_mode"], "Global")
+        self.assertTrue(no_scope_state["graph_show_baseline_lens"])
 
     def test_pyvis_html_focuses_current_node(self) -> None:
         graph = {
@@ -1041,7 +1057,7 @@ class UiRenderingTests(unittest.TestCase):
     def test_default_status_filter_uses_focus_mode_hide_statuses(self) -> None:
         graph = {"focus_mode": {"hide_statuses": ["rejected", "parked", "archived"]}}
 
-        defaults = default_selected_statuses(graph, ["active", "archived", "parked", "rejected"])
+        defaults = default_selected_statuses(graph, ["active", "archived", "done", "parked", "rejected"])
 
         self.assertEqual(defaults, ["active"])
 

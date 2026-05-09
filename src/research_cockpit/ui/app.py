@@ -50,6 +50,7 @@ from research_cockpit.ui.graph_component import graph_component_build_available,
 from research_cockpit.ui.pyvis_renderer import build_pyvis_html, render_pyvis_graph
 from research_cockpit.ui.text import get_text
 from research_cockpit.ui.view_helpers import (
+    DEFAULT_GRAPH_VIEW_MODE,
     baseline_command_problem_ids,
     build_apply_suggestion_command,
     build_accept_decision_command,
@@ -616,11 +617,12 @@ def render_graph_tab(
         text["global_graph"]: "global",
     }
     mode_value_to_label = {value: label for label, value in mode_label_to_value.items()}
+    default_view_label = mode_value_to_label.get(DEFAULT_GRAPH_VIEW_MODE, text["global_graph"])
     renderer_options = ["React Flow", "PyVis legacy"]
 
     def sync_graph_view_mode_filters() -> None:
-        next_view_label = st.session_state.get("graph_view_mode", text["focus_depth_2"])
-        next_view_mode = mode_label_to_value.get(next_view_label, "focus_depth_2")
+        next_view_label = st.session_state.get("graph_view_mode", default_view_label)
+        next_view_mode = mode_label_to_value.get(next_view_label, DEFAULT_GRAPH_VIEW_MODE)
         reset_global_graph_filter_state(
             st.session_state,
             next_view_mode,
@@ -648,10 +650,10 @@ def render_graph_tab(
     if message:
         st.success(message)
 
-    view_label = st.session_state.get("graph_view_mode", text["focus_depth_2"])
+    view_label = st.session_state.get("graph_view_mode", default_view_label)
     if view_label not in mode_label_to_value:
-        view_label = text["focus_depth_2"]
-    view_mode = mode_label_to_value.get(view_label, "focus_depth_2")
+        view_label = default_view_label
+    view_mode = mode_label_to_value.get(view_label, DEFAULT_GRAPH_VIEW_MODE)
     reset_global_graph_filter_state(
         st.session_state,
         view_mode,
@@ -774,7 +776,7 @@ def render_graph_tab(
                 key="graph_view_mode",
                 on_change=sync_graph_view_mode_filters,
             )
-            view_mode = mode_label_to_value.get(view_label or text["focus_depth_2"], "focus_depth_2")
+            view_mode = mode_label_to_value.get(view_label or default_view_label, DEFAULT_GRAPH_VIEW_MODE)
             filter_left, filter_right = st.columns(2)
             selected_types = set(filter_left.multiselect(
                 text["node_types"],
