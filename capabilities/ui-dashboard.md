@@ -24,6 +24,8 @@ The graph uses React Flow with Dagre layout. Node clicks return a selected node 
 
 The graph hides `artifact` nodes by default so the first view stays focused on research reasoning. Researchers can show artifact nodes from Graph Controls when they need to inspect supporting materials in the graph.
 
+Use Branch Visibility in the right-side inspector to collapse or expand the selected node's full descendant branch. It only changes UI visibility. Use Reveal Hidden Children when you need to temporarily inspect direct children hidden by default status/depth filters, such as completed experiments.
+
 Use Baseline Lens from Graph Controls to mark the current default baseline, its source node, and the baseline used by the selected node. It is enabled by default for focus and option-workstream views, disabled by default for global graphs, and does not expand the full accepted history into the graph.
 
 React Flow is the default graph renderer. PyVis remains available as a legacy fallback when the React Flow production build is missing.

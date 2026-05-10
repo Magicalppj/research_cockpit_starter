@@ -826,7 +826,7 @@ def _saved_view_bool(value: object) -> bool:
     return bool(value)
 
 
-def _filter_saved_values(values: object, allowed_values: list[str]) -> list[str]:
+def _filter_saved_values(values: object, allowed_values: list[str] | None) -> list[str]:
     if isinstance(values, str):
         raw_values = [values]
     elif isinstance(values, (list, tuple, set)):
@@ -834,12 +834,12 @@ def _filter_saved_values(values: object, allowed_values: list[str]) -> list[str]
     else:
         raw_values = []
 
-    allowed = set(allowed_values)
+    allowed = set(allowed_values) if allowed_values is not None else None
     out: list[str] = []
     seen: set[str] = set()
     for value in raw_values:
         item = str(value)
-        if item not in allowed or item in seen:
+        if (allowed is not None and item not in allowed) or item in seen:
             continue
         seen.add(item)
         out.append(item)
@@ -850,6 +850,7 @@ def graph_view_state_from_saved_view(
     view: dict,
     options: dict[str, list[str]],
     mode_value_to_label: dict[str, str],
+    available_node_ids: list[str] | None = None,
 ) -> dict[str, object]:
     filters = view.get("filters") if isinstance(view.get("filters"), dict) else {}
     scope = str(view.get("scope") or DEFAULT_GRAPH_VIEW_MODE)
@@ -866,6 +867,8 @@ def graph_view_state_from_saved_view(
         "graph_stages": _filter_saved_values(filters.get("stages"), options.get("stages", [])),
         "graph_focus_roles": _filter_saved_values(filters.get("focus_roles"), options.get("focus_roles", [])),
         "graph_workstreams": _filter_saved_values(filters.get("workstreams"), options.get("workstreams", [])),
+        "graph_collapsed_branch_roots": _filter_saved_values(filters.get("collapsed_branch_roots"), available_node_ids),
+        "graph_revealed_child_roots": _filter_saved_values(filters.get("revealed_child_roots"), available_node_ids),
         "graph_only_blocking": _saved_view_bool(filters.get("only_blocking", False)),
         "graph_only_next_actions": _saved_view_bool(filters.get("only_next_actions", False)),
         "graph_only_missing_evidence": _saved_view_bool(filters.get("only_missing_evidence", False)),
@@ -912,6 +915,321 @@ def reset_global_graph_filter_state(
     return changed
 
 
+def _edge_endpoint(edge: dict, primary: str, fallback: str) -> str:
+    return str(edge.get(primary) or edge.get(fallback) or "")
+
+
+def _is_structural_edge(edge: dict) -> bool:
+    relation = str(edge.get("relation") or "").lower()
+    edge_type = str(edge.get("type") or "").lower()
+    return relation in {"parent", "child", "contains"} or edge_type in {"parent", "child", "contains"}
+
+
+def _graph_child_ids_by_parent(graph: dict) -> dict[str, list[str]]:
+    child_ids: dict[str, list[str]] = {}
+    for edge in graph.get("edges", []):
+        if not _is_structural_edge(edge):
+            continue
+        source = _edge_endpoint(edge, "from", "source")
+        target = _edge_endpoint(edge, "to", "target")
+        if not source or not target:
+            continue
+        child_ids.setdefault(source, []).append(target)
+    return child_ids
+
+
+def _upstream_problem_ids(graph: dict, selected_workstreams: set[str]) -> set[str]:
+    return {
+        str(node.get("option_workstream_upstream_problem_id"))
+        for node in graph.get("nodes", [])
+        if node.get("option_workstream_id") in selected_workstreams
+        and node.get("option_workstream_upstream_problem_id")
+    }
+
+
+def _node_matches_graph_filters(
+    node: dict,
+    view_mode: str,
+    selected_types: set[str],
+    selected_statuses: set[str],
+    selected_stages: set[str],
+    selected_focus_roles: set[str],
+    selected_workstreams: set[str],
+    upstream_problem_ids: set[str],
+    max_depth: int | None,
+    *,
+    only_blocking: bool = False,
+    only_next_actions: bool = False,
+    only_missing_evidence: bool = False,
+    ignore_status: bool = False,
+    ignore_focus_depth: bool = False,
+) -> bool:
+    if selected_types and node["type"] not in selected_types:
+        return False
+    if not ignore_status and selected_statuses and node["status"] not in selected_statuses:
+        return False
+    if selected_stages and node.get("stage_id") not in selected_stages:
+        return False
+    if selected_focus_roles and node.get("focus_role") not in selected_focus_roles:
+        return False
+    if selected_workstreams:
+        in_workstream = node.get("option_workstream_id") in selected_workstreams
+        is_upstream_problem = node.get("id") in upstream_problem_ids
+        if not in_workstream and not is_upstream_problem:
+            return False
+    if only_blocking and not node.get("has_blockers"):
+        return False
+    if only_next_actions and not node.get("has_next_actions"):
+        return False
+    if only_missing_evidence and node.get("has_evidence"):
+        return False
+    if view_mode == "current_branch" and not node.get("in_current_branch"):
+        return False
+    if not ignore_focus_depth and max_depth is not None:
+        depth = node.get("focus_visible_depth")
+        if not node.get("is_focus_visible") or depth is None or depth > max_depth:
+            return False
+    return True
+
+
+def _collapsed_descendant_ids(
+    child_ids_by_parent: dict[str, list[str]],
+    collapsed_branch_roots: set[str],
+    included: set[str],
+) -> set[str]:
+    hidden: set[str] = set()
+    processed: set[str] = set()
+    stack: list[tuple[str, str]] = []
+    for root_id in collapsed_branch_roots:
+        if root_id not in included:
+            continue
+        stack.extend((child_id, root_id) for child_id in child_ids_by_parent.get(root_id, []))
+    while stack:
+        node_id, root_id = stack.pop()
+        if node_id == root_id or node_id in processed:
+            continue
+        processed.add(node_id)
+        hidden.add(node_id)
+        stack.extend((child_id, root_id) for child_id in child_ids_by_parent.get(node_id, []))
+    return hidden
+
+
+def _visible_graph_nodes(
+    graph: dict,
+    view_mode: str,
+    selected_types: set[str],
+    selected_statuses: set[str],
+    selected_stages: set[str] | None = None,
+    selected_focus_roles: set[str] | None = None,
+    selected_workstreams: set[str] | None = None,
+    *,
+    only_blocking: bool = False,
+    only_next_actions: bool = False,
+    only_missing_evidence: bool = False,
+    collapsed_branch_roots: set[str] | None = None,
+    revealed_child_roots: set[str] | None = None,
+    child_ids_by_parent: dict[str, list[str]] | None = None,
+) -> tuple[list[dict], set[str], set[str]]:
+    max_depth = {"focus_depth_1": 1, "focus_depth_2": 2}.get(view_mode)
+    selected_stages = selected_stages or set()
+    selected_focus_roles = selected_focus_roles or set()
+    selected_workstreams = selected_workstreams or set()
+    collapsed_branch_roots = collapsed_branch_roots or set()
+    revealed_child_roots = revealed_child_roots or set()
+    if view_mode == "option_workstream" and not selected_workstreams:
+        return [], set(), set()
+
+    upstream_problem_ids = _upstream_problem_ids(graph, selected_workstreams)
+    visible_nodes = []
+    included: set[str] = set()
+    for node in graph.get("nodes", []):
+        if not _node_matches_graph_filters(
+            node,
+            view_mode,
+            selected_types,
+            selected_statuses,
+            selected_stages,
+            selected_focus_roles,
+            selected_workstreams,
+            upstream_problem_ids,
+            max_depth,
+            only_blocking=only_blocking,
+            only_next_actions=only_next_actions,
+            only_missing_evidence=only_missing_evidence,
+        ):
+            continue
+        visible_nodes.append(node)
+        included.add(str(node["id"]))
+
+    needs_branch_state = bool(collapsed_branch_roots or revealed_child_roots)
+    if needs_branch_state and child_ids_by_parent is None:
+        child_ids_by_parent = _graph_child_ids_by_parent(graph)
+    child_ids_by_parent = child_ids_by_parent or {}
+
+    hidden_by_collapse = _collapsed_descendant_ids(child_ids_by_parent, collapsed_branch_roots, included)
+    if hidden_by_collapse:
+        visible_nodes = [node for node in visible_nodes if node.get("id") not in hidden_by_collapse]
+        included.difference_update(hidden_by_collapse)
+
+    if revealed_child_roots:
+        node_by_id = {str(node.get("id")): node for node in graph.get("nodes", [])}
+        for root_id in revealed_child_roots:
+            if root_id not in included:
+                continue
+            for child_id in child_ids_by_parent.get(root_id, []):
+                if child_id in included or child_id in hidden_by_collapse:
+                    continue
+                child = node_by_id.get(child_id)
+                if not child or not _node_matches_graph_filters(
+                    child,
+                    view_mode,
+                    selected_types,
+                    selected_statuses,
+                    selected_stages,
+                    selected_focus_roles,
+                    selected_workstreams,
+                    upstream_problem_ids,
+                    max_depth,
+                    only_blocking=only_blocking,
+                    only_next_actions=only_next_actions,
+                    only_missing_evidence=only_missing_evidence,
+                    ignore_status=True,
+                    ignore_focus_depth=True,
+                ):
+                    continue
+                visible_nodes.append(child)
+                included.add(child_id)
+
+    return visible_nodes, included, hidden_by_collapse
+
+
+def revealable_child_ids_for_view(
+    graph: dict,
+    root_id: str,
+    view_mode: str,
+    selected_types: set[str],
+    selected_statuses: set[str],
+    selected_stages: set[str] | None = None,
+    selected_focus_roles: set[str] | None = None,
+    selected_workstreams: set[str] | None = None,
+    *,
+    only_blocking: bool = False,
+    only_next_actions: bool = False,
+    only_missing_evidence: bool = False,
+    collapsed_branch_roots: set[str] | None = None,
+    included_node_ids: set[str] | None = None,
+    hidden_by_collapse: set[str] | None = None,
+    child_ids_by_parent: dict[str, list[str]] | None = None,
+) -> list[str]:
+    selected_stages = selected_stages or set()
+    selected_focus_roles = selected_focus_roles or set()
+    selected_workstreams = selected_workstreams or set()
+    collapsed_branch_roots = collapsed_branch_roots or set()
+    if child_ids_by_parent is None:
+        child_ids_by_parent = _graph_child_ids_by_parent(graph)
+    if included_node_ids is None or hidden_by_collapse is None:
+        _visible_nodes, included, hidden_by_collapse = _visible_graph_nodes(
+            graph,
+            view_mode,
+            selected_types,
+            selected_statuses,
+            selected_stages=selected_stages,
+            selected_focus_roles=selected_focus_roles,
+            selected_workstreams=selected_workstreams,
+            only_blocking=only_blocking,
+            only_next_actions=only_next_actions,
+            only_missing_evidence=only_missing_evidence,
+            collapsed_branch_roots=collapsed_branch_roots,
+            child_ids_by_parent=child_ids_by_parent,
+        )
+    else:
+        included = set(included_node_ids)
+        hidden_by_collapse = set(hidden_by_collapse)
+    root_id = str(root_id)
+    if root_id not in included:
+        return []
+
+    max_depth = {"focus_depth_1": 1, "focus_depth_2": 2}.get(view_mode)
+    upstream_problem_ids = _upstream_problem_ids(graph, selected_workstreams)
+    node_by_id = {str(node.get("id")): node for node in graph.get("nodes", [])}
+    out: list[str] = []
+    for child_id in child_ids_by_parent.get(root_id, []):
+        if child_id in included or child_id in hidden_by_collapse:
+            continue
+        child = node_by_id.get(child_id)
+        if child and _node_matches_graph_filters(
+            child,
+            view_mode,
+            selected_types,
+            selected_statuses,
+            selected_stages,
+            selected_focus_roles,
+            selected_workstreams,
+            upstream_problem_ids,
+            max_depth,
+            only_blocking=only_blocking,
+            only_next_actions=only_next_actions,
+            only_missing_evidence=only_missing_evidence,
+            ignore_status=True,
+            ignore_focus_depth=True,
+        ):
+            out.append(child_id)
+    return out
+
+
+def _visible_edges_for_included_nodes(graph: dict, included: set[str]) -> list[dict]:
+    return [
+        edge
+        for edge in graph["edges"]
+        if edge["from"] in included and edge["to"] in included
+    ]
+
+
+def filter_graph_for_view_with_visibility(
+    graph: dict,
+    view_mode: str,
+    selected_types: set[str],
+    selected_statuses: set[str],
+    selected_stages: set[str] | None = None,
+    selected_focus_roles: set[str] | None = None,
+    selected_workstreams: set[str] | None = None,
+    *,
+    only_blocking: bool = False,
+    only_next_actions: bool = False,
+    only_missing_evidence: bool = False,
+    collapsed_branch_roots: set[str] | None = None,
+    revealed_child_roots: set[str] | None = None,
+) -> tuple[dict, dict[str, Any]]:
+    child_ids_by_parent = _graph_child_ids_by_parent(graph)
+    visible_nodes, included, hidden_by_collapse = _visible_graph_nodes(
+        graph,
+        view_mode,
+        selected_types,
+        selected_statuses,
+        selected_stages=selected_stages,
+        selected_focus_roles=selected_focus_roles,
+        selected_workstreams=selected_workstreams,
+        only_blocking=only_blocking,
+        only_next_actions=only_next_actions,
+        only_missing_evidence=only_missing_evidence,
+        collapsed_branch_roots=collapsed_branch_roots,
+        revealed_child_roots=revealed_child_roots,
+        child_ids_by_parent=child_ids_by_parent,
+    )
+    return (
+        {
+            **graph,
+            "nodes": visible_nodes,
+            "edges": _visible_edges_for_included_nodes(graph, included),
+        },
+        {
+            "included_node_ids": included,
+            "hidden_by_collapse": hidden_by_collapse,
+            "child_ids_by_parent": child_ids_by_parent,
+        },
+    )
+
+
 def filter_graph_for_view(
     graph: dict,
     view_mode: str,
@@ -924,69 +1242,27 @@ def filter_graph_for_view(
     only_blocking: bool = False,
     only_next_actions: bool = False,
     only_missing_evidence: bool = False,
+    collapsed_branch_roots: set[str] | None = None,
+    revealed_child_roots: set[str] | None = None,
 ) -> dict:
-    max_depth = {"focus_depth_1": 1, "focus_depth_2": 2}.get(view_mode)
-    visible_nodes = []
-    included = set()
-    selected_stages = selected_stages or set()
-    selected_focus_roles = selected_focus_roles or set()
-    selected_workstreams = selected_workstreams or set()
-    if view_mode == "option_workstream" and not selected_workstreams:
-        return {
-            **graph,
-            "nodes": [],
-            "edges": [],
-        }
-    upstream_problem_ids = {
-        str(node.get("option_workstream_upstream_problem_id"))
-        for node in graph.get("nodes", [])
-        if node.get("option_workstream_id") in selected_workstreams
-        and node.get("option_workstream_upstream_problem_id")
-    }
-
-    for node in graph["nodes"]:
-        if selected_types and node["type"] not in selected_types:
-            continue
-        if selected_statuses and node["status"] not in selected_statuses:
-            continue
-        if selected_stages and node.get("stage_id") not in selected_stages:
-            continue
-        if selected_focus_roles and node.get("focus_role") not in selected_focus_roles:
-            continue
-        if selected_workstreams:
-            in_workstream = node.get("option_workstream_id") in selected_workstreams
-            is_upstream_problem = node.get("id") in upstream_problem_ids
-            if not in_workstream and not is_upstream_problem:
-                continue
-        if only_blocking and not node.get("has_blockers"):
-            continue
-        if only_next_actions and not node.get("has_next_actions"):
-            continue
-        if only_missing_evidence and node.get("has_evidence"):
-            continue
-        if view_mode == "current_branch" and not node.get("in_current_branch"):
-            continue
-        if view_mode == "option_workstream" and selected_workstreams:
-            in_workstream = node.get("option_workstream_id") in selected_workstreams
-            is_upstream_problem = node.get("id") in upstream_problem_ids
-            if not in_workstream and not is_upstream_problem:
-                continue
-        if max_depth is not None:
-            depth = node.get("focus_visible_depth")
-            if not node.get("is_focus_visible") or depth is None or depth > max_depth:
-                continue
-        visible_nodes.append(node)
-        included.add(node["id"])
-
-    visible_edges = [
-        edge
-        for edge in graph["edges"]
-        if edge["from"] in included and edge["to"] in included
-    ]
+    visible_nodes, included, _hidden_by_collapse = _visible_graph_nodes(
+        graph,
+        view_mode,
+        selected_types,
+        selected_statuses,
+        selected_stages=selected_stages,
+        selected_focus_roles=selected_focus_roles,
+        selected_workstreams=selected_workstreams,
+        only_blocking=only_blocking,
+        only_next_actions=only_next_actions,
+        only_missing_evidence=only_missing_evidence,
+        collapsed_branch_roots=collapsed_branch_roots,
+        revealed_child_roots=revealed_child_roots,
+    )
     return {
         **graph,
         "nodes": visible_nodes,
-        "edges": visible_edges,
+        "edges": _visible_edges_for_included_nodes(graph, included),
     }
 
 

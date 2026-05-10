@@ -115,7 +115,8 @@ Research Cockpit 提供三层能力：
 - 用 Focus 深度、当前分支、方案工作流、全局图谱切换视图范围。
 - 按 node type、status、stage、focus role、workstream、blocking、missing evidence 筛选节点。
 - 点击图谱节点，在右侧查看概览、证据、资源、关系、行动和 agent 上下文。
-- 保存常用 graph view，后续一键恢复筛选条件。
+- 在右侧对当前节点收拢/展开整棵分支，或临时显示被默认隐藏的直接子节点。
+- 保存常用 graph view，后续一键恢复筛选条件和分支可见性。
 
 图谱默认使用 React Flow 和 Dagre layout。PyVis 是 legacy fallback。后台 agent 或手动命令改了 YAML 后，先运行 `research-cockpit build --root research_cockpit`，再在 UI 中点击 `Refresh`。普通数据变化不需要重建 React bundle。
 

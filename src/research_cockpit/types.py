@@ -78,6 +78,8 @@ GRAPH_VIEW_FILTER_LIST_KEYS = (
     "stages",
     "focus_roles",
     "workstreams",
+    "collapsed_branch_roots",
+    "revealed_child_roots",
 )
 
 GRAPH_VIEW_FILTER_BOOL_KEYS = (

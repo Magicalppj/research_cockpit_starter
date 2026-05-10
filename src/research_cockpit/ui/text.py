@@ -386,6 +386,12 @@ EXTRA_UI_TEXT = {
         "graph_view_save_failed": "保存图谱视图失败：",
         "graph_view_loaded": "图谱视图已加载。",
         "graph_view_title_required": "请先填写视图标题。",
+        "branch_visibility": "分支可见性",
+        "collapse_branch": "收拢分支",
+        "expand_branch": "展开分支",
+        "reveal_hidden_children": "显示隐藏子节点 ({count})",
+        "hide_revealed_children": "隐藏已显示子节点",
+        "reset_branch_visibility": "重置分支可见性",
     },
     "en": {
         "suggestion_state": "Suggestion State",
@@ -444,6 +450,12 @@ EXTRA_UI_TEXT = {
         "graph_view_save_failed": "Failed to save graph view:",
         "graph_view_loaded": "Graph view loaded.",
         "graph_view_title_required": "Enter a view title first.",
+        "branch_visibility": "Branch Visibility",
+        "collapse_branch": "Collapse Branch",
+        "expand_branch": "Expand Branch",
+        "reveal_hidden_children": "Reveal Hidden Children ({count})",
+        "hide_revealed_children": "Hide Revealed Children",
+        "reset_branch_visibility": "Reset Branch Visibility",
     },
 }
 

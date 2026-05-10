@@ -73,7 +73,7 @@ from research_cockpit.ui.view_helpers import (
     default_selected_node_types,
     default_selected_statuses,
     filter_action_suggestions,
-    filter_graph_for_view,
+    filter_graph_for_view_with_visibility,
     filter_node_ids,
     filter_search_results,
     graph_component_event_id,
@@ -93,6 +93,7 @@ from research_cockpit.ui.view_helpers import (
     format_search_result_rows,
     format_suggestion_lifecycle_rows,
     ordered_tab_keys,
+    revealable_child_ids_for_view,
     reset_global_graph_filter_state,
 )
 from research_cockpit.commands.build_dashboard import build_dashboard
@@ -435,6 +436,102 @@ def render_node_detail(
         st.json(node.raw)
 
 
+def _session_node_id_set(key: str) -> set[str]:
+    raw = st.session_state.get(key, [])
+    values = [raw] if isinstance(raw, str) else list(raw or [])
+    return {str(value) for value in values if value not in (None, "")}
+
+
+def _store_session_node_ids(key: str, values: set[str], all_node_ids: list[str]) -> None:
+    st.session_state[key] = [node_id for node_id in all_node_ids if node_id in values]
+
+
+def render_branch_visibility_controls(
+    graph: dict,
+    node_id: str,
+    text: dict[str, str],
+    *,
+    all_node_ids: list[str],
+    view_mode: str,
+    selected_types: set[str],
+    selected_statuses: set[str],
+    selected_stages: set[str],
+    selected_focus_roles: set[str],
+    selected_workstreams: set[str],
+    only_blocking: bool,
+    only_next_actions: bool,
+    only_missing_evidence: bool,
+    collapsed_branch_roots: set[str],
+    revealed_child_roots: set[str],
+    visibility_context: dict[str, object],
+) -> None:
+    revealable_child_ids = revealable_child_ids_for_view(
+        graph,
+        node_id,
+        view_mode,
+        selected_types,
+        selected_statuses,
+        selected_stages=selected_stages,
+        selected_focus_roles=selected_focus_roles,
+        selected_workstreams=selected_workstreams,
+        only_blocking=only_blocking,
+        only_next_actions=only_next_actions,
+        only_missing_evidence=only_missing_evidence,
+        collapsed_branch_roots=collapsed_branch_roots,
+        included_node_ids=visibility_context.get("included_node_ids"),
+        hidden_by_collapse=visibility_context.get("hidden_by_collapse"),
+        child_ids_by_parent=visibility_context.get("child_ids_by_parent"),
+    )
+    is_collapsed = node_id in collapsed_branch_roots
+    is_revealed = node_id in revealed_child_roots
+
+    with st.expander(text["branch_visibility"], expanded=False):
+        branch_left, branch_right = st.columns(2)
+        if is_collapsed:
+            if branch_left.button(
+                text["expand_branch"],
+                key=f"graph_expand_branch_{node_id}",
+                use_container_width=True,
+            ):
+                collapsed = _session_node_id_set("graph_collapsed_branch_roots")
+                collapsed.discard(node_id)
+                _store_session_node_ids("graph_collapsed_branch_roots", collapsed, all_node_ids)
+                st.rerun()
+        else:
+            if branch_left.button(
+                text["collapse_branch"],
+                key=f"graph_collapse_branch_{node_id}",
+                use_container_width=True,
+            ):
+                collapsed = _session_node_id_set("graph_collapsed_branch_roots")
+                revealed = _session_node_id_set("graph_revealed_child_roots")
+                collapsed.add(node_id)
+                revealed.discard(node_id)
+                _store_session_node_ids("graph_collapsed_branch_roots", collapsed, all_node_ids)
+                _store_session_node_ids("graph_revealed_child_roots", revealed, all_node_ids)
+                st.rerun()
+
+        reveal_label = (
+            text["hide_revealed_children"]
+            if is_revealed
+            else text["reveal_hidden_children"].format(count=len(revealable_child_ids))
+        )
+        reveal_disabled = is_collapsed or (not is_revealed and not revealable_child_ids)
+        if branch_right.button(
+            reveal_label,
+            key=f"graph_reveal_children_{node_id}",
+            disabled=reveal_disabled,
+            use_container_width=True,
+        ):
+            revealed = _session_node_id_set("graph_revealed_child_roots")
+            if is_revealed:
+                revealed.discard(node_id)
+            else:
+                revealed.add(node_id)
+            _store_session_node_ids("graph_revealed_child_roots", revealed, all_node_ids)
+            st.rerun()
+
+
 def render_dashboard(
     context: dict,
     validation_errors: list[str],
@@ -609,6 +706,7 @@ def render_graph_tab(
     all_stages = options["stages"]
     all_focus_roles = options["focus_roles"]
     all_workstreams = options["workstreams"]
+    all_node_ids = sorted(nodes.keys())
     mode_label_to_value = {
         text["focus_depth_2"]: "focus_depth_2",
         text["focus_depth_1"]: "focus_depth_1",
@@ -695,11 +793,18 @@ def render_graph_tab(
     show_baseline_lens = bool(
         st.session_state.get("graph_show_baseline_lens", default_show_baseline_lens(view_mode))
     )
+    collapsed_branch_roots = set(selected_values("graph_collapsed_branch_roots", all_node_ids, []))
+    revealed_child_roots = set(selected_values("graph_revealed_child_roots", all_node_ids, []))
+    if revealed_child_roots.intersection(collapsed_branch_roots):
+        revealed_child_roots.difference_update(collapsed_branch_roots)
+        st.session_state["graph_revealed_child_roots"] = [
+            node_id for node_id in all_node_ids if node_id in revealed_child_roots
+        ]
     renderer_label = st.session_state.get("graph_renderer", "React Flow")
     if renderer_label not in renderer_options:
         renderer_label = "React Flow"
 
-    filtered_graph = filter_graph_for_view(
+    filtered_graph, graph_visibility_context = filter_graph_for_view_with_visibility(
         graph,
         view_mode,
         selected_types,
@@ -710,6 +815,8 @@ def render_graph_tab(
         only_blocking=only_blocking,
         only_next_actions=only_next_actions,
         only_missing_evidence=only_missing_evidence,
+        collapsed_branch_roots=collapsed_branch_roots,
+        revealed_child_roots=revealed_child_roots,
     )
     visible_node_ids = [node["id"] for node in filtered_graph["nodes"] if node["id"] in nodes]
     select_key = "graph_detail_select"
@@ -828,6 +935,10 @@ def render_graph_tab(
                 value=show_baseline_lens,
                 key="graph_show_baseline_lens",
             )
+            if st.button(text["reset_branch_visibility"], key="graph_reset_branch_visibility"):
+                st.session_state["graph_collapsed_branch_roots"] = []
+                st.session_state["graph_revealed_child_roots"] = []
+                st.rerun()
             renderer_label = st.radio(
                 "Graph Renderer",
                 renderer_options,
@@ -855,6 +966,12 @@ def render_graph_tab(
                             "stages": [value for value in all_stages if value in selected_stages],
                             "focus_roles": [value for value in all_focus_roles if value in selected_focus_roles],
                             "workstreams": [value for value in all_workstreams if value in selected_workstreams],
+                            "collapsed_branch_roots": [
+                                value for value in all_node_ids if value in collapsed_branch_roots
+                            ],
+                            "revealed_child_roots": [
+                                value for value in all_node_ids if value in revealed_child_roots
+                            ],
                             "only_blocking": only_blocking,
                             "only_next_actions": only_next_actions,
                             "only_missing_evidence": only_missing_evidence,
@@ -898,6 +1015,24 @@ def render_graph_tab(
         )
         if node_id != st.session_state.get("graph_detail_node"):
             st.session_state["graph_detail_node"] = node_id
+        render_branch_visibility_controls(
+            graph,
+            node_id,
+            text,
+            all_node_ids=all_node_ids,
+            view_mode=view_mode,
+            selected_types=selected_types,
+            selected_statuses=selected_statuses,
+            selected_stages=selected_stages,
+            selected_focus_roles=selected_focus_roles,
+            selected_workstreams=selected_workstreams,
+            only_blocking=only_blocking,
+            only_next_actions=only_next_actions,
+            only_missing_evidence=only_missing_evidence,
+            collapsed_branch_roots=collapsed_branch_roots,
+            revealed_child_roots=revealed_child_roots,
+            visibility_context=graph_visibility_context,
+        )
         render_node_detail(nodes, node_id, text, current, link_rows, action_suggestions)
 
     saved_view_by_id = {str(view.get("id")): view for view in saved_graph_views if view.get("id")}
@@ -921,6 +1056,7 @@ def render_graph_tab(
                 saved_view_by_id[selected_view_id],
                 options,
                 mode_value_to_label,
+                all_node_ids,
             )
             for key, value in state.items():
                 st.session_state[key] = value

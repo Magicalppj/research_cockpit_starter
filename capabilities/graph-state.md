@@ -27,7 +27,7 @@ In multi-agent worktree runs, run `build --watch` from the main repository again
 
 ## Saved Views
 
-Saved graph views preserve view mode, filters, and saved focus context. They intentionally do not save temporary search text or a one-off selected node.
+Saved graph views preserve view mode, filters, branch visibility state, and saved focus context. They intentionally do not save temporary search text or a one-off selected node.
 
 The Streamlit UI writes saved views through model helpers. Agents should treat `graph_views.yaml` as researcher workspace state and read it through context packs.
 

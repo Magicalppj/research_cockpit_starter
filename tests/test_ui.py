@@ -20,6 +20,7 @@ from research_cockpit.baselines import (
 )
 from research_cockpit.graph_core import graph_to_json
 from research_cockpit.ui.view_helpers import (
+    _collapsed_descendant_ids,
     baseline_command_problem_ids,
     build_accept_decision_command,
     build_apply_suggestion_command,
@@ -46,6 +47,8 @@ from research_cockpit.ui.view_helpers import (
     format_suggestion_lifecycle_rows,
     filter_action_suggestions,
     filter_graph_for_view,
+    filter_graph_for_view_with_visibility,
+    revealable_child_ids_for_view,
     graph_view_state_from_saved_view,
     graph_filter_options,
     filter_search_results,
@@ -767,6 +770,346 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(options["stages"], ["stage_other", "stage_text"])
         self.assertIn("option_t5", options["workstreams"])
 
+    def test_graph_filter_collapses_branch_descendants(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "type": "problem",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 0,
+                },
+                {
+                    "id": "option_t5",
+                    "type": "option",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                },
+                {
+                    "id": "exp_t5",
+                    "type": "experiment",
+                    "status": "running",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                },
+                {
+                    "id": "artifact_t5",
+                    "type": "artifact",
+                    "status": "done",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 3,
+                },
+                {
+                    "id": "option_other",
+                    "type": "option",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                },
+            ],
+            "edges": [
+                {"from": "problem_text", "to": "option_t5", "relation": "child"},
+                {"from": "option_t5", "to": "exp_t5", "relation": "child"},
+                {"from": "exp_t5", "to": "artifact_t5", "relation": "child"},
+                {"from": "problem_text", "to": "option_other", "relation": "child"},
+            ],
+        }
+
+        option_collapsed = filter_graph_for_view(
+            graph,
+            "global",
+            {"problem", "option", "experiment", "artifact"},
+            {"active", "running", "done"},
+            collapsed_branch_roots={"option_t5"},
+        )
+        problem_collapsed = filter_graph_for_view(
+            graph,
+            "global",
+            {"problem", "option", "experiment", "artifact"},
+            {"active", "running", "done"},
+            collapsed_branch_roots={"problem_text"},
+        )
+
+        self.assertEqual(
+            {node["id"] for node in option_collapsed["nodes"]},
+            {"problem_text", "option_t5", "option_other"},
+        )
+        self.assertEqual(
+            option_collapsed["edges"],
+            [
+                {"from": "problem_text", "to": "option_t5", "relation": "child"},
+                {"from": "problem_text", "to": "option_other", "relation": "child"},
+            ],
+        )
+        self.assertEqual({node["id"] for node in problem_collapsed["nodes"]}, {"problem_text"})
+        self.assertEqual(problem_collapsed["edges"], [])
+
+    def test_graph_filter_collapsed_branch_preserves_root_when_structural_edges_cycle(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "type": "problem",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 0,
+                },
+                {
+                    "id": "option_t5",
+                    "type": "option",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                },
+            ],
+            "edges": [
+                {"from": "problem_text", "to": "option_t5", "relation": "child"},
+                {"from": "option_t5", "to": "problem_text", "relation": "child"},
+            ],
+        }
+
+        filtered = filter_graph_for_view(
+            graph,
+            "global",
+            {"problem", "option"},
+            {"active"},
+            collapsed_branch_roots={"problem_text"},
+        )
+
+        self.assertEqual({node["id"] for node in filtered["nodes"]}, {"problem_text"})
+        self.assertEqual(filtered["edges"], [])
+
+    def test_graph_filter_parent_collapse_hides_nested_collapsed_roots(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "type": "problem",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 0,
+                },
+                {
+                    "id": "option_t5",
+                    "type": "option",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                },
+                {
+                    "id": "exp_t5",
+                    "type": "experiment",
+                    "status": "running",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                },
+            ],
+            "edges": [
+                {"from": "problem_text", "to": "option_t5", "relation": "child"},
+                {"from": "option_t5", "to": "exp_t5", "relation": "child"},
+            ],
+        }
+
+        filtered = filter_graph_for_view(
+            graph,
+            "global",
+            {"problem", "option", "experiment"},
+            {"active", "running"},
+            collapsed_branch_roots={"problem_text", "option_t5"},
+        )
+
+        self.assertEqual({node["id"] for node in filtered["nodes"]}, {"problem_text"})
+        self.assertEqual(filtered["edges"], [])
+
+    def test_collapsed_descendant_walk_does_not_rescan_nested_roots(self) -> None:
+        class CountingChildren(dict):
+            def __init__(self, values: dict[str, list[str]]) -> None:
+                super().__init__(values)
+                self.get_calls: list[str] = []
+
+            def get(self, key: str, default: object = None) -> object:
+                self.get_calls.append(key)
+                return super().get(key, default)
+
+        node_ids = [f"node_{index}" for index in range(25)]
+        child_ids_by_parent = CountingChildren({
+            node_id: [node_ids[index + 1]] if index + 1 < len(node_ids) else []
+            for index, node_id in enumerate(node_ids)
+        })
+
+        hidden = _collapsed_descendant_ids(
+            child_ids_by_parent,
+            set(node_ids),
+            set(node_ids),
+        )
+
+        self.assertEqual(hidden, set(node_ids[1:]))
+        self.assertLessEqual(len(child_ids_by_parent.get_calls), len(node_ids) * 2)
+
+    def test_graph_filter_reveals_direct_hidden_children_without_bypassing_semantic_filters(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "type": "problem",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 0,
+                    "option_workstream_id": None,
+                },
+                {
+                    "id": "option_t5",
+                    "type": "option",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                    "option_workstream_id": "option_t5",
+                    "option_workstream_upstream_problem_id": "problem_text",
+                },
+                {
+                    "id": "exp_done",
+                    "type": "experiment",
+                    "status": "done",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                    "option_workstream_id": "option_t5",
+                    "option_workstream_upstream_problem_id": "problem_text",
+                    "has_evidence": True,
+                },
+                {
+                    "id": "exp_other_workstream",
+                    "type": "experiment",
+                    "status": "done",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                    "option_workstream_id": "option_other",
+                    "option_workstream_upstream_problem_id": "problem_text",
+                    "has_evidence": True,
+                },
+                {
+                    "id": "artifact_done",
+                    "type": "artifact",
+                    "status": "done",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                    "option_workstream_id": "option_t5",
+                    "option_workstream_upstream_problem_id": "problem_text",
+                    "has_evidence": True,
+                },
+            ],
+            "edges": [
+                {"from": "problem_text", "to": "option_t5", "relation": "child"},
+                {"from": "option_t5", "to": "exp_done", "relation": "child"},
+                {"from": "option_t5", "to": "exp_other_workstream", "relation": "child"},
+                {"from": "option_t5", "to": "artifact_done", "relation": "child"},
+            ],
+        }
+
+        filtered = filter_graph_for_view(
+            graph,
+            "option_workstream",
+            {"problem", "option", "experiment"},
+            {"active"},
+            selected_workstreams={"option_t5"},
+            revealed_child_roots={"option_t5"},
+        )
+        collapsed = filter_graph_for_view(
+            graph,
+            "option_workstream",
+            {"problem", "option", "experiment"},
+            {"active"},
+            selected_workstreams={"option_t5"},
+            collapsed_branch_roots={"option_t5"},
+            revealed_child_roots={"option_t5"},
+        )
+        revealable = revealable_child_ids_for_view(
+            graph,
+            "option_t5",
+            "option_workstream",
+            {"problem", "option", "experiment"},
+            {"active"},
+            selected_workstreams={"option_t5"},
+        )
+
+        self.assertEqual(
+            {node["id"] for node in filtered["nodes"]},
+            {"problem_text", "option_t5", "exp_done"},
+        )
+        self.assertEqual({node["id"] for node in collapsed["nodes"]}, {"problem_text", "option_t5"})
+        self.assertEqual(revealable, ["exp_done"])
+
+    def test_graph_filter_visibility_context_can_be_reused_for_reveal_counts(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "type": "problem",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 0,
+                },
+                {
+                    "id": "option_t5",
+                    "type": "option",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                },
+                {
+                    "id": "exp_done",
+                    "type": "experiment",
+                    "status": "done",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                },
+            ],
+            "edges": [
+                {"from": "problem_text", "to": "option_t5", "relation": "child"},
+                {"from": "option_t5", "to": "exp_done", "relation": "child"},
+            ],
+        }
+
+        filtered, visibility = filter_graph_for_view_with_visibility(
+            graph,
+            "global",
+            {"problem", "option", "experiment"},
+            {"active"},
+        )
+        revealable = revealable_child_ids_for_view(
+            graph,
+            "option_t5",
+            "global",
+            {"problem", "option", "experiment"},
+            {"active"},
+            included_node_ids=visibility["included_node_ids"],
+            hidden_by_collapse=visibility["hidden_by_collapse"],
+            child_ids_by_parent=visibility["child_ids_by_parent"],
+        )
+
+        self.assertEqual({node["id"] for node in filtered["nodes"]}, {"problem_text", "option_t5"})
+        self.assertEqual(visibility["included_node_ids"], {"problem_text", "option_t5"})
+        self.assertEqual(revealable, ["exp_done"])
+
     def test_saved_graph_view_state_filters_missing_options(self) -> None:
         state = graph_view_state_from_saved_view(
             {
@@ -777,6 +1120,8 @@ class UiRenderingTests(unittest.TestCase):
                     "stages": ["stage_text", "stage_old"],
                     "focus_roles": ["current", "unrelated"],
                     "workstreams": ["option_t5", "option_old"],
+                    "collapsed_branch_roots": ["option_t5", "missing"],
+                    "revealed_child_roots": ["option_old", "missing"],
                     "only_blocking": "true",
                     "only_next_actions": False,
                     "only_missing_evidence": True,
@@ -793,6 +1138,7 @@ class UiRenderingTests(unittest.TestCase):
                 "focus_depth_2": "Focus Depth 2",
                 "current_branch": "Current Branch",
             },
+            ["problem_text", "option_t5", "option_old"],
         )
 
         self.assertEqual(state["graph_view_mode"], "Current Branch")
@@ -801,6 +1147,8 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(state["graph_stages"], ["stage_text"])
         self.assertEqual(state["graph_focus_roles"], ["current"])
         self.assertEqual(state["graph_workstreams"], ["option_t5"])
+        self.assertEqual(state["graph_collapsed_branch_roots"], ["option_t5"])
+        self.assertEqual(state["graph_revealed_child_roots"], ["option_old"])
         self.assertTrue(state["graph_only_blocking"])
         self.assertFalse(state["graph_only_next_actions"])
         self.assertTrue(state["graph_only_missing_evidence"])
@@ -1027,6 +1375,18 @@ class UiRenderingTests(unittest.TestCase):
         self.assertNotEqual(radio_index, -1)
         self.assertNotEqual(callback_arg_index, -1)
         self.assertLess(callback_index, radio_index)
+
+    def test_graph_branch_visibility_controls_are_wired_to_session_and_saved_views(self) -> None:
+        source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
+
+        self.assertIn("render_branch_visibility_controls(", source)
+        self.assertIn("graph_collapsed_branch_roots", source)
+        self.assertIn("graph_revealed_child_roots", source)
+        self.assertIn('"collapsed_branch_roots": [', source)
+        self.assertIn('"revealed_child_roots": [', source)
+        self.assertIn('text["reset_branch_visibility"]', source)
+        self.assertIn("revealable_child_ids_for_view(", source)
+        self.assertIn("all_node_ids,", source)
 
     def test_graph_component_build_availability_detects_missing_assets(self) -> None:
         temp_root = ROOT_DIR / ".test_tmp" / "ui"

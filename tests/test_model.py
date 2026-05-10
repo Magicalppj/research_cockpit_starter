@@ -438,6 +438,8 @@ class ModelValidationTests(unittest.TestCase):
                         "filters": {
                             "node_types": ["problem", "", "problem"],
                             "statuses": "active",
+                            "collapsed_branch_roots": ["option_t5", "", "option_t5"],
+                            "revealed_child_roots": "option_old",
                             "only_blocking": "yes",
                         },
                         "saved_focus_node_id": "problem_text",
@@ -454,6 +456,8 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(views[0]["scope"], "focus_depth_2")
         self.assertEqual(views[0]["filters"]["node_types"], ["problem"])
         self.assertEqual(views[0]["filters"]["statuses"], ["active"])
+        self.assertEqual(views[0]["filters"]["collapsed_branch_roots"], ["option_t5"])
+        self.assertEqual(views[0]["filters"]["revealed_child_roots"], ["option_old"])
         self.assertTrue(views[0]["filters"]["only_blocking"])
         self.assertFalse(views[0]["filters"]["only_next_actions"])
         self.assertNotIn("show_baseline_lens", views[0]["filters"])
@@ -468,6 +472,8 @@ class ModelValidationTests(unittest.TestCase):
                 "filters": {
                     "node_types": ["problem", "option"],
                     "statuses": ["active", "open"],
+                    "collapsed_branch_roots": ["option_t5"],
+                    "revealed_child_roots": ["option_old"],
                     "only_blocking": True,
                 },
                 "saved_focus_node_id": "problem_text",
@@ -491,6 +497,8 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(len(views), 1)
         self.assertEqual(second["created_at"], first["created_at"])
         self.assertEqual(views[0]["scope"], "global")
+        self.assertEqual(first["filters"]["collapsed_branch_roots"], ["option_t5"])
+        self.assertEqual(first["filters"]["revealed_child_roots"], ["option_old"])
         self.assertEqual(log["events"][-1]["kind"], "save_graph_view")
         self.assertEqual(log["events"][-1]["view_id"], first["id"])
         self.assertIn("filters", log["events"][-1])
