@@ -23,6 +23,9 @@ COMPACT_COMMAND_KEYS = {
     "supports_build",
     "supports_watch",
     "supports_show_diff",
+    "supports_root",
+    "supported_flags",
+    "unsupported_flags",
     "can_batch",
     "requires_serial_mutation",
     "conflict_policy",
@@ -37,6 +40,7 @@ WORKFLOW_TAGS_BY_COMMAND = {
     "ui": ["read"],
     "bootstrap": ["read", "focus"],
     "validate": ["read", "maintenance", "graph"],
+    "lint": ["read", "maintenance", "graph"],
     "repair-interaction-log": ["maintenance"],
     "build": ["maintenance", "graph"],
     "smoke": ["read", "maintenance"],
@@ -67,13 +71,16 @@ WORKFLOW_TAGS_BY_COMMAND = {
     "create-artifact": ["evidence"],
     "link-artifact": ["evidence"],
     "complete-experiment": ["evidence"],
+    "close-current-experiment": ["evidence", "focus"],
     "complete-experiments": ["evidence"],
+    "create-followup-experiment": ["graph", "evidence", "focus"],
     "promote-decision": ["decision"],
     "update-decision-evidence": ["decision", "evidence"],
     "update-decision-checklist": ["decision"],
     "accept-decision": ["decision"],
     "set-baseline": ["decision", "focus"],
     "update-node-fields": ["graph"],
+    "update-workstream-fields": ["evidence", "graph"],
     "apply-suggestion": ["focus"],
     "update-suggestion-state": ["focus", "maintenance"],
     "cleanup-suggestion-lifecycle": ["focus", "maintenance"],
@@ -87,6 +94,7 @@ SHOW_DIFF_COMMANDS = {
     "complete-experiment",
     "complete-experiments",
     "create-artifact",
+    "create-followup-experiment",
     "create-note",
     "create-workstream",
     "finalize-workstream",
@@ -104,6 +112,7 @@ SHOW_DIFF_COMMANDS = {
     "update-decision-evidence",
     "update-finding",
     "update-node-fields",
+    "update-workstream-fields",
     "update-suggestion-state",
     "update-status",
     "repair-interaction-log",
@@ -115,6 +124,7 @@ CAPABILITY_BY_COMMAND = {
     "ui": "capabilities/ui-dashboard.md",
     "agent_bootstrap.py": "capabilities/focus-context.md",
     "validate_cockpit.py": "capabilities/troubleshooting.md",
+    "lint_semantic.py": "capabilities/troubleshooting.md",
     "repair_interaction_log.py": "capabilities/troubleshooting.md",
     "build_dashboard.py": "capabilities/graph-state.md",
     "skill_smoke_test.py": "capabilities/integrations.md",
@@ -145,13 +155,16 @@ CAPABILITY_BY_COMMAND = {
     "create_artifact.py": "capabilities/experiment-tracking.md",
     "link_artifact.py": "capabilities/experiment-tracking.md",
     "complete_experiment.py": "capabilities/experiment-tracking.md",
+    "close_current_experiment.py": "capabilities/experiment-tracking.md",
     "complete_experiments.py": "capabilities/experiment-tracking.md",
+    "create_followup_experiment.py": "capabilities/experiment-tracking.md",
     "promote_decision.py": "capabilities/decision-adr.md",
     "update_decision_evidence.py": "capabilities/decision-adr.md",
     "update_decision_checklist.py": "capabilities/decision-adr.md",
     "accept_decision.py": "capabilities/decision-adr.md",
     "set_baseline.py": "capabilities/focus-context.md",
     "update_node_fields.py": "capabilities/node-management.md",
+    "update_workstream_fields.py": "capabilities/experiment-tracking.md",
     "apply_suggestion.py": "capabilities/node-management.md",
     "update_suggestion_state.py": "capabilities/node-management.md",
     "cleanup_suggestion_lifecycle.py": "capabilities/node-management.md",
@@ -199,6 +212,16 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": False,
         "supports_no_build": False,
         "recommended_when": "Run before and after mutating cockpit data.",
+    },
+    {
+        "name": "lint_semantic.py",
+        "purpose": "Warn about stale but structurally valid research state.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "fields_supported": ["semantic"],
+        "recommended_when": "Check for done focus nodes, stale agent focus, and next action drift.",
     },
     {
         "name": "repair_interaction_log.py",
@@ -262,6 +285,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": False,
         "supports_no_build": False,
         "supports_compact": True,
+        "supports_root": False,
         "recommended_when": "Choose the shortest safe command for a workflow.",
     },
     {
@@ -372,6 +396,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "supports_compact": True,
         "fields_supported": ["current_stage", "current_problem", "current_option", "current_focus_node", "current_focus_path", "current_hypothesis", "open_risks", "next_actions"],
         "recommended_when": "Change the current research focus.",
     },
@@ -382,6 +407,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "supports_compact": True,
         "fields_supported": ["agent_focuses", "current_focus_node", "current_focus_path", "current_option", "next_actions"],
         "recommended_when": "Track one downstream agent's local progress in a shared canonical root.",
     },
@@ -392,6 +418,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "supports_compact": True,
         "recommended_when": "Keep focus actions aligned with the current focus node.",
     },
     {
@@ -539,6 +566,17 @@ COMMANDS: list[dict[str, object]] = [
         "recommended_when": "Conservatively complete an experiment without changing option, problem, or focus state.",
     },
     {
+        "name": "close_current_experiment.py",
+        "purpose": "Complete an experiment and explicitly move global and/or agent focus.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": False,
+        "supports_no_build": True,
+        "supports_compact": True,
+        "fields_supported": ["finding", "confidence", "outcome", "artifact_ids", "result_summary", "next_focus", "sync_agent"],
+        "recommended_when": "Close the current experiment and advance focus in one explicit workflow.",
+    },
+    {
         "name": "complete_experiments.py",
         "purpose": "Batch complete several experiments from a YAML findings file.",
         "mutating": True,
@@ -562,6 +600,17 @@ COMMANDS: list[dict[str, object]] = [
         ],
         **file_schema_for_script("complete_experiments.py"),
         "recommended_when": "Close a sweep or multi-backend experiment set without repeated rebuilds.",
+    },
+    {
+        "name": "create_followup_experiment.py",
+        "purpose": "Create a follow-up experiment derived from an existing experiment.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "supports_compact": True,
+        "fields_supported": ["derived_from", "parent", "title", "success_criteria", "next_actions", "set_focus"],
+        "recommended_when": "Branch a mixed or incomplete result into the next optimization gate.",
     },
     {
         "name": "promote_decision.py",
@@ -618,8 +667,26 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "supports_compact": True,
         "fields_supported": supported_field_names(),
         "recommended_when": "Update supported node fields without hand-editing YAML.",
+    },
+    {
+        "name": "update_workstream_fields.py",
+        "purpose": "Update safe option agent_workstream fields without hand-editing YAML.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "supports_compact": True,
+        "fields_supported": [
+            "agent_workstream.status",
+            "agent_workstream.objective",
+            "agent_workstream.owner",
+            "agent_workstream.session_id",
+            "agent_workstream.report_to_problem",
+        ],
+        "recommended_when": "Adjust nested option workstream metadata safely.",
     },
     {
         "name": "apply_suggestion.py",
@@ -661,6 +728,30 @@ COMMANDS: list[dict[str, object]] = [
 ]
 
 
+DISCOVERY_FLAGS = {
+    "--compact": "supports_compact",
+    "--dry-run": "supports_dry_run",
+    "--json": "supports_json",
+    "--no-build": "supports_no_build",
+    "--show-diff": "supports_show_diff",
+}
+
+
+def _flag_support(row: dict[str, object]) -> tuple[list[str], list[str]]:
+    supported: list[str] = []
+    unsupported: list[str] = []
+    if bool(row.get("supports_root", True)):
+        supported.append("--root")
+    else:
+        unsupported.append("--root")
+    for flag, field in DISCOVERY_FLAGS.items():
+        if bool(row.get(field)):
+            supported.append(flag)
+        else:
+            unsupported.append(flag)
+    return sorted(supported), sorted(unsupported)
+
+
 def agent_command_manifest(
     *,
     compact: bool = False,
@@ -697,7 +788,11 @@ def agent_command_manifest(
             "fields_supported": command.get("fields_supported", []),
             "workflow_tags": WORKFLOW_TAGS_BY_COMMAND.get(subcommand, []),
             "supports_show_diff": subcommand in SHOW_DIFF_COMMANDS,
+            "supports_root": bool(command.get("supports_root", True)),
         }
+        supported_flags, unsupported_flags = _flag_support(row)
+        row["supported_flags"] = supported_flags
+        row["unsupported_flags"] = unsupported_flags
         if workflow and workflow not in row["workflow_tags"]:
             continue
         if compact:

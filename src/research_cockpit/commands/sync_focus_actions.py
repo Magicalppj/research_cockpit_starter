@@ -10,7 +10,7 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.graph_core import unique_strings
 from research_cockpit.model import ValidationError, load_yaml, script_command, validate_cockpit
 
@@ -96,6 +96,7 @@ def main() -> None:
     parser.add_argument("--mode", choices=sorted(VALID_MODES), default="replace")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
@@ -114,7 +115,14 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        payload = compact_mutation_result(
+            result,
+            command="sync-focus-actions",
+            target=args.from_node,
+            root=args.root,
+            updated=["current_state"],
+        ) if args.compact else result
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     verb = "Would sync" if args.dry_run else "Synced"
     print(f"{verb} current_state next_actions from {args.from_node}")

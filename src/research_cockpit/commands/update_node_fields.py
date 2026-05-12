@@ -10,7 +10,7 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import ResearchNode, ValidationError, load_yaml, script_command, validate_cockpit
 
@@ -59,7 +59,7 @@ FIELD_ALIASES = {
 
 
 def supported_field_names() -> list[str]:
-    return sorted([*SCALAR_FIELDS, *LIST_APPEND_FIELDS, "current_best_option", "replace_next_actions"])
+    return sorted([*SCALAR_FIELDS, *LIST_APPEND_FIELDS, "clear_next_actions", "current_best_option", "replace_next_actions"])
 
 
 def _validate_current_best_option(nodes: dict[str, ResearchNode], node: ResearchNode, option_id: str) -> None:
@@ -170,7 +170,11 @@ def apply_node_field_updates(
         data["current_best_option"] = current_best_option
         touched.append("current_best_option")
     if replace_next_actions is not None:
-        data["next_actions"] = [str(action) for action in replace_next_actions if str(action).strip()]
+        actions = [str(action) for action in replace_next_actions if str(action).strip()]
+        if actions:
+            data["next_actions"] = actions
+        else:
+            data.pop("next_actions", None)
         touched.append("next_actions")
     for field_name, value in scalar_updates.items():
         data[field_name] = "" if value is None else str(value)
@@ -191,6 +195,7 @@ def update_node_fields(
     node_id: str,
     current_best_option: str | None = None,
     replace_next_actions: list[str] | None = None,
+    clear_next_actions: bool = False,
     scalar_updates: dict[str, Any] | None = None,
     list_appends: dict[str, list[str]] | None = None,
     rebuild_dashboard: bool = True,
@@ -199,6 +204,10 @@ def update_node_fields(
 ) -> dict[str, Any]:
     scalar_updates = scalar_updates or {}
     list_appends = list_appends or {}
+    if clear_next_actions and replace_next_actions is not None:
+        raise ValueError("--clear-next-actions cannot be used together with --replace-next-actions")
+    if clear_next_actions:
+        replace_next_actions = list_appends.pop("next_actions", [])
     if current_best_option is None and replace_next_actions is None and not scalar_updates and not list_appends:
         raise ValueError("At least one field update is required")
     if replace_next_actions is not None and list_appends.get("next_actions"):
@@ -273,6 +282,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--id", required=True, dest="node_id")
     parser.add_argument("--current-best-option")
+    parser.add_argument("--clear-next-actions", action="store_true")
     parser.add_argument("--replace-next-actions", action="append", dest="replace_next_actions")
     parser.add_argument("--title")
     parser.add_argument("--summary")
@@ -295,6 +305,7 @@ def main() -> None:
     parser.add_argument("--derived-from", action="append", dest="derived_from")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
@@ -336,6 +347,7 @@ def main() -> None:
             node_id=args.node_id,
             current_best_option=args.current_best_option,
             replace_next_actions=args.replace_next_actions,
+            clear_next_actions=args.clear_next_actions,
             scalar_updates=scalar_updates,
             list_appends=list_appends,
             rebuild_dashboard=not args.no_build,
@@ -347,7 +359,14 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        payload = compact_mutation_result(
+            result,
+            command="update-node-fields",
+            target=args.node_id,
+            root=args.root,
+            updated=[args.node_id],
+        ) if args.compact else result
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     if args.dry_run:
         print(f"Would update node fields for {args.node_id}")

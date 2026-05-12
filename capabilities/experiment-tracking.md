@@ -142,6 +142,22 @@ research-cockpit complete-experiment --root research_cockpit --id experiment_x -
 
 `complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, creates inline evidence artifacts when evidence fields are present, and appends de-duplicated experiment-local `next_actions`. It does not change focus, option status, problem status, or `current_best_option`.
 
+If the completed experiment is still the global `current_focus_node` or a per-agent focus node, JSON output includes focus-stale warnings plus recommended `set-focus` / `set-agent-focus` commands. Use explicit focus movement when closing a branch:
+
+```sh
+research-cockpit close-current-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --next-focus option_x --sync-agent agent_x --json --compact
+```
+
+`--next-focus` must point to a non-terminal node and cannot be the experiment being closed.
+
+For mixed or incomplete findings that need a follow-up gate, derive the next experiment instead of hand-editing YAML:
+
+```sh
+research-cockpit create-followup-experiment --root research_cockpit --from experiment_x --parent option_x --id experiment_x_followup --title "Follow-up gate" --next-action "Run follow-up gate" --set-focus --json --compact
+```
+
+`complete-experiment` records linked artifact ids both in the finding `linked_artifacts` field and in the finding `evidence` list, so a finding remains traceable when read without the full experiment node.
+
 Use `complete-experiments` for sweeps or repeated backend/ablation runs:
 
 ```sh

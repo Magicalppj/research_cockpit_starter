@@ -94,6 +94,8 @@ def compact_mutation_result(
         payload["normalized_statuses"] = result["normalized_statuses"]
     if "warnings" in result:
         payload["warnings"] = result["warnings"]
+    if "recommended_commands" in result:
+        payload["recommended_commands"] = result["recommended_commands"]
     return payload
 
 

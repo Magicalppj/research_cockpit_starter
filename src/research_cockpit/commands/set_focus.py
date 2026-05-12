@@ -17,7 +17,7 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
-from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
+from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, finish_mutation, yaml_change_diff
 
 
 def parse_path(value: str) -> list[str]:
@@ -170,6 +170,7 @@ def main() -> None:
     parser.add_argument("--next-action", action="append", dest="next_actions")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true", help="Only update current_state.yaml; do not rebuild dashboards")
     args = parser.parse_args()
@@ -194,7 +195,14 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        payload = compact_mutation_result(
+            result,
+            command="set-focus",
+            target=result["focus_node"],
+            root=args.root,
+            updated=[str(result["focus_node"])],
+        ) if args.compact else result
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     verb = "Would update" if args.dry_run else "Updated"
     print(f"{verb} {result['path']}")

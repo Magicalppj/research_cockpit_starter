@@ -10,6 +10,7 @@ from research_cockpit.paths import default_data_root
 ROOT = default_data_root()
 
 from research_cockpit.commands.agent_bootstrap import agent_bootstrap_payload
+from research_cockpit.commands.lint_semantic import semantic_lint
 from research_cockpit.commands.node_context import node_context_payload
 from research_cockpit.baselines import baseline_artifact_ids, resolve_effective_baseline
 from research_cockpit.graph_core import (
@@ -118,10 +119,12 @@ def context_payload(
     global_focus = _compact_focus_payload(current)
     target_context = _target_context_payload(nodes, node_id, global_focus)
     target_differs_from_global_focus = not target_context["is_current_global_focus"]
+    semantic = semantic_lint(root)
 
     payload: dict[str, Any] = {
         "root": str(root),
         "warnings": list(node_payload.get("warnings", [])),
+        "semantic_warnings": semantic["warnings"],
         "node": node_payload["node"],
         "node_context": node_payload,
         "validation": {
@@ -163,6 +166,7 @@ def context_payload(
             "focus": bootstrap.get("focus"),
             "mutation_guidance": bootstrap.get("mutation_guidance"),
             "top_suggestions": bootstrap.get("top_suggestions", [])[:3],
+            "semantic_warnings": bootstrap.get("semantic_warnings", []),
         } if compact else bootstrap
     if with_artifacts:
         payload["artifacts"] = {

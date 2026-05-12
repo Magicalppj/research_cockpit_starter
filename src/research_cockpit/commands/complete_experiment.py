@@ -41,6 +41,28 @@ from research_cockpit.model import (
 TERMINAL_NON_COMPLETABLE_STATUSES = {"failed", "cancelled"}
 
 
+def _focus_completion_guidance(state_current: dict[str, Any], experiment: ResearchNode, root: Path) -> tuple[list[str], list[str]]:
+    warnings: list[str] = []
+    commands: list[str] = []
+    next_focus = experiment.parent or state_current.get("current_option") or state_current.get("current_problem")
+    if state_current.get("current_focus_node") == experiment.id:
+        warnings.append("current_focus_node_is_terminal")
+        if next_focus:
+            commands.append(f"research-cockpit set-focus --root {root} --focus-node {next_focus}")
+    agent_focuses = state_current.get("agent_focuses")
+    if isinstance(agent_focuses, dict):
+        for agent_id, focus in agent_focuses.items():
+            if not isinstance(focus, dict):
+                continue
+            if focus.get("current_focus_node") == experiment.id:
+                warnings.append(f"agent_focus_is_terminal:{agent_id}")
+                if next_focus:
+                    commands.append(
+                        f"research-cockpit set-agent-focus --root {root} --agent {agent_id} --node {next_focus}"
+                    )
+    return warnings, commands
+
+
 def _append_unique_actions(existing: Any, additions: list[str]) -> tuple[list[str], list[str]]:
     if existing is None:
         existing = []
@@ -125,7 +147,7 @@ def complete_experiment(
         "id": finding_id,
         "statement": finding,
         "confidence": confidence,
-        "evidence": [experiment_id],
+        "evidence": [experiment_id, *all_artifact_ids],
         "outcome": outcome,
         "metrics": metrics,
         "linked_artifacts": all_artifact_ids,
@@ -174,7 +196,11 @@ def complete_experiment(
         "linked_artifacts": all_artifact_ids,
         "added_experiment_artifacts": added_artifacts,
         "warnings": evidence_warnings(all_artifact_ids),
+        "recommended_commands": [],
     }
+    focus_warnings, focus_commands = _focus_completion_guidance(state.current, experiment, root)
+    result["warnings"].extend(focus_warnings)
+    result["recommended_commands"].extend(focus_commands)
     if show_diff:
         result["diff"] = yaml_change_diff(changes)
     if dry_run:

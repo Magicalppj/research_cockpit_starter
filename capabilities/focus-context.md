@@ -113,6 +113,8 @@ Focus changes write `current_state.yaml`, append `interaction_log.yaml`, and reb
 
 Passing `--next-action` replaces the current_state `next_actions` list with the repeated values supplied in this command. It does not append.
 
+Dashboard "Current Next Actions" is sourced from `current_state.yaml`, not from problem/option/experiment node-local `next_actions`. Updating a node's `next_actions` is useful for local planning, but the dashboard will not show it as current work until you run `set-focus --next-action ...` or `sync-focus-actions`.
+
 In multi-agent worktree runs, downstream agents should not use global `set-focus`. Use per-agent focus instead:
 
 ```sh
@@ -134,3 +136,11 @@ research-cockpit sync-focus-actions --root research_cockpit --from-node problem_
 Default mode is `replace`: current_state `next_actions` becomes the node `next_actions`. Use `--mode append` to append de-duplicated node actions after existing current_state actions.
 
 `suggest-next-actions` deterministically de-duplicates focus actions after trimming, lowercasing, collapsing whitespace, and stripping trailing punctuation. This avoids duplicate suggestions when current_state and the focus node differ only in formatting.
+
+Run semantic lint when generated context looks stale even though `validate` passes:
+
+```sh
+research-cockpit lint --root research_cockpit --semantic --json
+```
+
+Semantic lint warns about terminal global/agent focus nodes, `next_actions` that still mention closed nodes, open experiments that already have results, and option workstream state that no longer matches child experiment state.

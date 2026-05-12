@@ -8,6 +8,7 @@ from typing import Any
 
 from research_cockpit.agent_sessions import option_for_focus, today
 from research_cockpit.commands._runtime import (
+    compact_mutation_result,
     dry_run_preflight_result,
     emit_json,
     finish_mutation,
@@ -56,11 +57,11 @@ def set_agent_focus(
 
     validate_cockpit(root, state.nodes, current, state.explicit_edges, raise_on_error=True)
     changes = [(current_path, before_current, current)]
+    changed = before_current != current
     result: dict[str, Any] = {
         "ok": True,
         "dry_run": dry_run,
-        "changed": not dry_run,
-        "would_change": dry_run,
+        "changed": False if dry_run else changed,
         "agent_id": agent_id,
         "node_id": node_id,
         "current_option": focuses[agent_id]["current_option"],
@@ -68,11 +69,15 @@ def set_agent_focus(
         "before": {"agent_focus": existing or None},
         "after": {"agent_focus": focuses[agent_id]},
     }
+    if dry_run:
+        result["would_change"] = changed
     if show_diff:
         result["diff"] = yaml_change_diff(changes)
     if dry_run:
         result["changed"] = False
         return dry_run_preflight_result(root, result)
+    if not changed:
+        return result
 
     finish_mutation(
         root,
@@ -103,6 +108,7 @@ def main() -> None:
     parser.add_argument("--next-action", action="append", dest="next_actions")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     args = parser.parse_args()
@@ -137,7 +143,15 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     if args.json:
-        emit_json(payload)
+        emit_json(
+            compact_mutation_result(
+                payload,
+                command="set-agent-focus",
+                target={"agent_id": args.agent_id, "node_id": args.node_id},
+                root=args.root,
+                updated=[args.node_id],
+            ) if args.compact else payload
+        )
         return
     if args.dry_run:
         safe_print(f"Would set agent focus for {args.agent_id} to {args.node_id}.")

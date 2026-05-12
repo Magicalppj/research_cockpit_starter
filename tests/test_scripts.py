@@ -40,16 +40,19 @@ from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.check_decision_acceptance import decision_acceptance_payload
 from research_cockpit.commands.claim_option import claim_option
 from research_cockpit.commands.cleanup_suggestion_lifecycle import cleanup_suggestion_lifecycle
+from research_cockpit.commands.close_current_experiment import close_current_experiment
 from research_cockpit.commands.complete_experiment import complete_experiment
 from research_cockpit.commands.complete_experiments import complete_experiments
 from research_cockpit.commands.context import context_payload
 from research_cockpit.commands.create_artifact import create_artifact
+from research_cockpit.commands.create_followup_experiment import create_followup_experiment
 from research_cockpit.commands.create_workstream import create_workstream
 from research_cockpit.commands.create_note import create_note
 from research_cockpit.commands.finalize_workstream import finalize_workstream
 from research_cockpit.commands.ingest_artifact import ingest_artifact
 from research_cockpit.commands.import_worktree_findings import import_worktree_findings
 from research_cockpit.commands.link_artifact import link_artifact
+from research_cockpit.commands.lint_semantic import semantic_lint
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
 from research_cockpit.commands.node_context import node_context_payload
 from research_cockpit.commands.option_workstream_context import compact_option_workstream_context, option_workstream_context_payload
@@ -68,6 +71,7 @@ from research_cockpit.commands.update_decision_evidence import update_decision_e
 from research_cockpit.commands.update_decision_checklist import update_decision_checklist
 from research_cockpit.commands.update_node_fields import update_node_fields
 from research_cockpit.commands.update_finding import update_finding
+from research_cockpit.commands.update_workstream_fields import update_workstream_fields
 from research_cockpit.commands.update_suggestion_state import update_suggestion_state
 from research_cockpit.commands.update_status import update_status
 from research_cockpit.context_packs import build_agent_context
@@ -955,6 +959,51 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["stable_artifact_root"], str((self.root / "artifacts").resolve()))
         self.assertIn("ingest-artifact", payload["handoff"]["commands"]["ingest_artifact"])
         self.assertEqual(payload["agent_focus"]["current_focus_node"], "exp_t5")
+
+    def test_set_agent_focus_actual_json_omits_would_change_and_compact_is_supported(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("set-agent-focus"),
+                "--root",
+                str(self.root),
+                "--agent",
+                "agent_t5",
+                "--node",
+                "exp_t5",
+                "--json",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        compact = subprocess.run(
+            [
+                *cli_command("set-agent-focus"),
+                "--root",
+                str(self.root),
+                "--agent",
+                "agent_t5",
+                "--node",
+                "exp_t5",
+                "--json",
+                "--compact",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        payload = json.loads(out.stdout)
+        compact_payload = json.loads(compact.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertTrue(payload["changed"])
+        self.assertNotIn("would_change", payload)
+        self.assertEqual(compact.returncode, 0, compact.stdout + compact.stderr)
+        self.assertEqual(compact_payload["command"], "research-cockpit set-agent-focus")
+        self.assertEqual(compact_payload["target"], {"agent_id": "agent_t5", "node_id": "exp_t5"})
 
     def test_agent_session_context_json_error_is_structured(self) -> None:
         out = subprocess.run(
@@ -1871,6 +1920,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(by_name["smoke"]["mutating"])
         self.assertFalse(by_name["commands"]["mutating"])
         self.assertTrue(by_name["commands"]["supports_compact"])
+        self.assertFalse(by_name["commands"]["supports_root"])
+        self.assertIn("--root", by_name["commands"]["unsupported_flags"])
+        self.assertNotIn("--root", by_name["commands"]["supported_flags"])
         self.assertIn("read", by_name["commands"]["workflow_tags"])
         self.assertTrue(by_name["init"]["mutating"])
         self.assertFalse(by_name["ui"]["mutating"])
@@ -1909,7 +1961,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["update-status"]["supports_dry_run"])
         self.assertTrue(by_name["set-focus"]["supports_json"])
         self.assertTrue(by_name["set-focus"]["supports_dry_run"])
+        self.assertTrue(by_name["set-focus"]["supports_compact"])
         self.assertTrue(by_name["set-agent-focus"]["supports_dry_run"])
+        self.assertTrue(by_name["set-agent-focus"]["supports_compact"])
         self.assertIn("agent_focuses", by_name["set-agent-focus"]["fields_supported"])
         self.assertTrue(by_name["apply-graph-plan"]["supports_json"])
         self.assertTrue(by_name["apply-graph-plan"]["supports_dry_run"])
@@ -1932,6 +1986,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("metrics", by_name["create-workstream"]["fields_supported"])
         self.assertEqual(by_name["create-workstream"]["status_aliases"], {"option": {"planned": "open"}})
         self.assertTrue(by_name["sync-focus-actions"]["supports_dry_run"])
+        self.assertTrue(by_name["sync-focus-actions"]["supports_compact"])
         self.assertTrue(by_name["complete-experiment"]["mutating"])
         self.assertTrue(by_name["complete-experiment"]["supports_json"])
         self.assertTrue(by_name["complete-experiment"]["supports_dry_run"])
@@ -1962,8 +2017,27 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["update-node-fields"]["supports_json"])
         self.assertTrue(by_name["update-node-fields"]["supports_dry_run"])
         self.assertTrue(by_name["update-node-fields"]["supports_no_build"])
+        self.assertTrue(by_name["update-node-fields"]["supports_compact"])
+        self.assertIn("--root", by_name["update-node-fields"]["supported_flags"])
+        self.assertIn("--compact", by_name["update-node-fields"]["supported_flags"])
+        self.assertNotIn("--compact", by_name["update-node-fields"]["unsupported_flags"])
+        self.assertIn("--compact", by_name["update-decision-evidence"]["unsupported_flags"])
         self.assertIn("question", by_name["update-node-fields"]["fields_supported"])
         self.assertIn("supporting_experiments", by_name["update-node-fields"]["fields_supported"])
+        self.assertIn("lint", by_name)
+        self.assertFalse(by_name["lint"]["mutating"])
+        self.assertIn("semantic", by_name["lint"]["fields_supported"])
+        self.assertIn("close-current-experiment", by_name)
+        self.assertTrue(by_name["close-current-experiment"]["mutating"])
+        self.assertIn("next_focus", by_name["close-current-experiment"]["fields_supported"])
+        self.assertFalse(by_name["close-current-experiment"]["supports_show_diff"])
+        self.assertIn("--show-diff", by_name["close-current-experiment"]["unsupported_flags"])
+        self.assertIn("create-followup-experiment", by_name)
+        self.assertIn("derived_from", by_name["create-followup-experiment"]["fields_supported"])
+        self.assertTrue(by_name["create-followup-experiment"]["supports_show_diff"])
+        self.assertIn("--show-diff", by_name["create-followup-experiment"]["supported_flags"])
+        self.assertIn("update-workstream-fields", by_name)
+        self.assertIn("agent_workstream.status", by_name["update-workstream-fields"]["fields_supported"])
         self.assertTrue(by_name["claim-option"]["supports_json"])
         self.assertTrue(by_name["claim-option"]["supports_dry_run"])
         self.assertTrue(by_name["claim-workstream"]["supports_dry_run"])
@@ -2183,6 +2257,9 @@ class ScriptBehaviorTests(unittest.TestCase):
             confidence="medium",
             rebuild_dashboard=False,
         )
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["next_actions"] = ["Compact sync action."]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
         graph_plan = self.tmp_root / "graph_plan.yaml"
         save_yaml(
             graph_plan,
@@ -2269,6 +2346,50 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "exp_t5_finding_001",
                 "--statement",
                 "Compact finding update.",
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            [
+                *cli_command("set-focus"),
+                "--root",
+                str(self.root),
+                "--focus-node",
+                "exp_t5",
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            [
+                *cli_command("set-agent-focus"),
+                "--root",
+                str(self.root),
+                "--agent",
+                "agent_compact",
+                "--node",
+                "exp_t5",
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            [
+                *cli_command("sync-focus-actions"),
+                "--root",
+                str(self.root),
+                "--from-node",
+                "problem_text",
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            [
+                *cli_command("update-node-fields"),
+                "--root",
+                str(self.root),
+                "--id",
+                "problem_text",
+                "--summary",
+                "Compact problem summary.",
                 "--dry-run",
                 "--json",
                 "--compact",
@@ -2689,6 +2810,99 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertEqual(failed.returncode, 1)
         self.assertIn("invalid status", failed.stdout)
+
+    def test_semantic_lint_reports_stale_focus_and_state_drift(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["result_summary"] = "Finished."
+        experiment["findings"] = [
+            {
+                "id": "exp_t5_finding_001",
+                "statement": "Done.",
+                "confidence": "medium",
+                "evidence": ["exp_t5"],
+            }
+        ]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "exp_t5"
+        current["current_focus_path"] = ["stage_text", "problem_text", "option_t5", "exp_t5"]
+        current["next_actions"] = ["Continue exp_t5."]
+        current["agent_focuses"] = {
+            "agent_t5": {
+                "current_focus_node": "exp_t5",
+                "current_focus_path": ["stage_text", "problem_text", "option_t5", "exp_t5"],
+                "current_option": "option_t5",
+                "next_actions": ["Continue exp_t5."],
+            }
+        }
+        save_yaml(self.root / "current_state.yaml", current)
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["next_actions"] = ["Review done branch."]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        payload = semantic_lint(self.root)
+        out = subprocess.run(
+            [*cli_command("lint"), "--root", str(self.root), "--semantic", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        cli_payload = json.loads(out.stdout)
+
+        warning_ids = {warning["id"] for warning in payload["warnings"]}
+        self.assertFalse(payload["ok"])
+        self.assertIn("current_focus_terminal", warning_ids)
+        self.assertIn("agent_focus_terminal", warning_ids)
+        self.assertIn("next_action_references_terminal_node", warning_ids)
+        self.assertIn("current_next_actions_diverge_from_focus_node", warning_ids)
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(cli_payload["warning_count"], len(payload["warnings"]))
+
+    def test_semantic_lint_does_not_substring_match_terminal_node_ids(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        write_node(
+            self.root,
+            {
+                "id": "exp_t5_followup",
+                "type": "experiment",
+                "title": "T5 follow-up",
+                "status": "planned",
+                "parent": "option_t5",
+            },
+        )
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "option_t5"
+        current["next_actions"] = ["Run exp_t5_followup."]
+        save_yaml(self.root / "current_state.yaml", current)
+
+        payload = semantic_lint(self.root)
+
+        terminal_reference_warnings = [
+            warning
+            for warning in payload["warnings"]
+            if warning["id"] == "next_action_references_terminal_node"
+        ]
+        self.assertEqual(terminal_reference_warnings, [])
+
+    def test_bootstrap_and_context_include_semantic_warnings(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "exp_t5"
+        current["current_focus_path"] = ["stage_text", "problem_text", "option_t5", "exp_t5"]
+        save_yaml(self.root / "current_state.yaml", current)
+
+        bootstrap = agent_bootstrap_payload(self.root)
+        context = context_payload(self.root, node_id="exp_t5", with_bootstrap=True, compact=True)
+
+        self.assertIn("semantic_warnings", bootstrap)
+        self.assertTrue(bootstrap["semantic_warnings"])
+        self.assertTrue(context["semantic_warnings"])
+        self.assertTrue(context["bootstrap"]["semantic_warnings"])
 
     def test_search_knowledge_cli_outputs_json_and_filters(self) -> None:
         command = "search"
@@ -4036,6 +4250,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(experiment["result_summary"], "Improved edit following.")
         self.assertEqual(experiment["findings"][0]["statement"], "T5 improves replace following.")
         self.assertEqual(experiment["findings"][0]["linked_artifacts"], ["artifact_cache"])
+        self.assertEqual(experiment["findings"][0]["evidence"], ["exp_t5", "artifact_cache"])
         self.assertEqual(experiment["linked_artifacts"], ["artifact_cache"])
         self.assertEqual(experiment["next_actions"], ["Compare cache footprint."])
         self.assertEqual(option["status"], "active")
@@ -4043,6 +4258,72 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("current_best_option", problem)
         self.assertTrue((self.root / "dashboards" / "focus_context_pack.json").exists())
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "complete_experiment")
+
+    def test_complete_experiment_warns_when_completed_node_is_still_focus(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "exp_t5"
+        current["current_focus_path"] = ["stage_text", "problem_text", "option_t5", "exp_t5"]
+        current["agent_focuses"] = {
+            "agent_t5": {
+                "current_focus_node": "exp_t5",
+                "current_focus_path": ["stage_text", "problem_text", "option_t5", "exp_t5"],
+                "current_option": "option_t5",
+                "next_actions": ["Run exp_t5."],
+            }
+        }
+        save_yaml(self.root / "current_state.yaml", current)
+
+        result = complete_experiment(
+            self.root,
+            experiment_id="exp_t5",
+            finding="Focus completion warning.",
+            confidence="medium",
+            rebuild_dashboard=False,
+        )
+
+        self.assertIn("current_focus_node_is_terminal", result["warnings"])
+        self.assertIn("agent_focus_is_terminal:agent_t5", result["warnings"])
+        self.assertIn("set-focus", " ".join(result["recommended_commands"]))
+        self.assertIn("set-agent-focus", " ".join(result["recommended_commands"]))
+
+    def test_complete_experiment_compact_keeps_recommended_commands(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "exp_t5"
+        current["current_focus_path"] = ["stage_text", "problem_text", "option_t5", "exp_t5"]
+        current["agent_focuses"] = {
+            "agent_t5": {
+                "current_focus_node": "exp_t5",
+                "current_focus_path": ["stage_text", "problem_text", "option_t5", "exp_t5"],
+                "current_option": "option_t5",
+            }
+        }
+        save_yaml(self.root / "current_state.yaml", current)
+
+        out = subprocess.run(
+            [
+                *cli_command("complete-experiment"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_t5",
+                "--finding",
+                "Compact warning.",
+                "--confidence",
+                "medium",
+                "--json",
+                "--compact",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn("current_focus_node_is_terminal", payload["warnings"])
+        self.assertIn("set-focus", " ".join(payload["recommended_commands"]))
+        self.assertIn("set-agent-focus", " ".join(payload["recommended_commands"]))
 
     def test_complete_experiment_creates_inline_evidence_artifact(self) -> None:
         result = complete_experiment(
@@ -5344,6 +5625,40 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(problem["next_actions"], ["Review branch.", "Record decision."])
         self.assertFalse((self.root / "dashboards").exists())
 
+    def test_update_node_fields_clear_next_actions_and_compact_json(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["next_actions"] = ["Old action."]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        out = subprocess.run(
+            [
+                *cli_command("update-node-fields"),
+                "--root",
+                str(self.root),
+                "--id",
+                "problem_text",
+                "--clear-next-actions",
+                "--next-action",
+                "Review branch.",
+                "--next-action",
+                "Record decision.",
+                "--no-build",
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(problem["next_actions"], ["Review branch.", "Record decision."])
+        self.assertEqual(payload["command"], "research-cockpit update-node-fields")
+        self.assertEqual(payload["target"], "problem_text")
+        self.assertEqual(payload["updated"], ["problem_text"])
+
     def test_apply_graph_plan_creates_batched_subtree_and_syncs_parent_children(self) -> None:
         plan = {
             "nodes": [
@@ -5518,6 +5833,115 @@ class ScriptBehaviorTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_update_workstream_fields_updates_safe_nested_allowlist(self) -> None:
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["agent_workstream"] = {"status": "in_progress", "owner": "agent_old"}
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+
+        result = update_workstream_fields(
+            self.root,
+            option_id="option_t5",
+            status="reported",
+            objective="Summarize downstream results.",
+            owner="agent_t5",
+            report_to_problem="problem_text",
+            rebuild_dashboard=False,
+        )
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(option["agent_workstream"]["status"], "reported")
+        self.assertEqual(option["agent_workstream"]["objective"], "Summarize downstream results.")
+        self.assertEqual(option["agent_workstream"]["owner"], "agent_t5")
+        self.assertEqual(option["agent_workstream"]["report_to_problem"], "problem_text")
+
+    def test_create_followup_experiment_derives_from_source_and_can_set_focus(self) -> None:
+        result = create_followup_experiment(
+            self.root,
+            from_experiment="exp_t5",
+            parent="option_t5",
+            node_id="exp_t5_followup",
+            title="T5 follow-up gate",
+            next_action="Run follow-up gate.",
+            set_focus_to_created=True,
+            rebuild_dashboard=False,
+        )
+        followup = load_yaml(self.root / "graph" / "nodes" / "exp_t5_followup.yaml")
+        current = load_yaml(self.root / "current_state.yaml")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(followup["parent"], "option_t5")
+        self.assertEqual(followup["derived_from"], ["exp_t5"])
+        self.assertIn("Validate follow-up against exp_t5.", followup["success_criteria"])
+        self.assertEqual(followup["next_actions"], ["Run follow-up gate."])
+        self.assertEqual(current["current_focus_node"], "exp_t5_followup")
+
+    def test_close_current_experiment_completes_and_moves_global_and_agent_focus(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "exp_t5"
+        current["current_focus_path"] = ["stage_text", "problem_text", "option_t5", "exp_t5"]
+        current["next_actions"] = ["Run exp_t5."]
+        current["agent_focuses"] = {
+            "agent_t5": {
+                "current_focus_node": "exp_t5",
+                "current_focus_path": ["stage_text", "problem_text", "option_t5", "exp_t5"],
+                "current_option": "option_t5",
+            }
+        }
+        save_yaml(self.root / "current_state.yaml", current)
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["next_actions"] = ["Review option branch."]
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+
+        result = close_current_experiment(
+            self.root,
+            experiment_id="exp_t5",
+            finding="Closed via workflow.",
+            confidence="medium",
+            next_focus="option_t5",
+            sync_agent="agent_t5",
+            rebuild_dashboard=False,
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        current = load_yaml(self.root / "current_state.yaml")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(experiment["status"], "done")
+        self.assertEqual(current["current_focus_node"], "option_t5")
+        self.assertEqual(current["agent_focuses"]["agent_t5"]["current_focus_node"], "option_t5")
+        self.assertEqual(current["next_actions"], ["Review option branch."])
+        self.assertEqual(current["agent_focuses"]["agent_t5"]["next_actions"], ["Review option branch."])
+        self.assertEqual(result["completed_experiment"]["experiment_id"], "exp_t5")
+        self.assertNotIn("current_focus_node_is_terminal", result["warnings"])
+        self.assertNotIn("agent_focus_is_terminal:agent_t5", result["warnings"])
+        self.assertNotIn("set-focus", " ".join(result["recommended_commands"]))
+        self.assertNotIn("set-agent-focus", " ".join(result["recommended_commands"]))
+
+    def test_close_current_experiment_rejects_terminal_next_focus(self) -> None:
+        with self.assertRaisesRegex(ValueError, "cannot be the experiment being closed"):
+            close_current_experiment(
+                self.root,
+                experiment_id="exp_t5",
+                finding="Do not refocus closed experiment.",
+                confidence="medium",
+                next_focus="exp_t5",
+                rebuild_dashboard=False,
+            )
+
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["status"] = "resolved"
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        with self.assertRaisesRegex(ValueError, "terminal status"):
+            close_current_experiment(
+                self.root,
+                experiment_id="exp_t5",
+                finding="Do not focus resolved problem.",
+                confidence="medium",
+                next_focus="problem_text",
+                rebuild_dashboard=False,
+            )
 
     def test_apply_graph_plan_reports_normalized_statuses_for_option_alias(self) -> None:
         result = apply_graph_plan(

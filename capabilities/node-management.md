@@ -155,14 +155,23 @@ Use `update-node-fields` when a supported node field would otherwise require han
 ```sh
 research-cockpit update-node-fields --root research_cockpit --id problem_x --current-best-option option_x --no-build
 research-cockpit update-node-fields --root research_cockpit --id experiment_x --replace-next-actions "Review metrics" --replace-next-actions "Draft decision" --no-build
+research-cockpit update-node-fields --root research_cockpit --id experiment_x --clear-next-actions --next-action "Review metrics" --next-action "Draft decision" --no-build
 research-cockpit update-node-fields --root research_cockpit --id problem_x --question "..." --hypothesis "..." --tag timeline-control --success-criterion "..." --supporting-experiment experiment_x --no-build
 ```
 
-`--current-best-option` is only valid on `problem` nodes and must point to a child `option`. `--replace-next-actions` replaces the node `next_actions` list with the repeated values supplied in the command. `--next-action` appends de-duplicated actions and cannot be used with `--replace-next-actions` in the same call.
+`--current-best-option` is only valid on `problem` nodes and must point to a child `option`. `--replace-next-actions` replaces the node `next_actions` list with the repeated values supplied in the command. Prefer `--clear-next-actions --next-action ...` when composing a replacement list interactively; it reads as "clear then rebuild". `--next-action` alone appends de-duplicated actions and cannot be used with `--replace-next-actions` in the same call.
 
 Supported scalar replace flags: `--title`, `--summary`, `--question`, `--hypothesis`, `--evidence-summary`, `--result-summary`, `--priority`.
 
 Supported list append flags: `--tag`, `--success-criterion`, `--metric`, `--pro`, `--con`, `--next-action`, `--supporting-experiment`, `--contradicting-experiment`, `--supporting-decision`, `--linked-artifact`, `--alternative`, `--derived-from`.
+
+For nested option workstream metadata, use the narrow allowlisted command instead of patching YAML:
+
+```sh
+research-cockpit update-workstream-fields --root research_cockpit --option option_x --status reported --objective "Summarize downstream results" --owner agent_x --report-to-problem problem_x --no-build
+```
+
+`--report-to-problem` must reference an existing `problem` node id.
 
 ## Suggestions
 
