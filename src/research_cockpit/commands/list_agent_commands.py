@@ -220,6 +220,8 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
+        "required_flags": ["--semantic"],
+        "extra_supported_flags": ["--semantic"],
         "fields_supported": ["semantic"],
         "recommended_when": "Check for done focus nodes, stale agent focus, and next action drift.",
     },
@@ -738,7 +740,7 @@ DISCOVERY_FLAGS = {
 
 
 def _flag_support(row: dict[str, object]) -> tuple[list[str], list[str]]:
-    supported: list[str] = []
+    supported: list[str] = [str(flag) for flag in row.get("extra_supported_flags", [])]
     unsupported: list[str] = []
     if bool(row.get("supports_root", True)):
         supported.append("--root")
@@ -766,6 +768,7 @@ def agent_command_manifest(
             continue
         mutating = bool(command["mutating"])
         supports_no_build = bool(command.get("supports_no_build"))
+        required_flags = [str(flag) for flag in command.get("required_flags", [])]
         rebuild_default = bool(command.get("rebuild_default", mutating and supports_no_build))
         writes_truth_source = bool(command.get("writes_truth_source", mutating and command_name != "build_dashboard.py"))
         writes_generated_files = bool(
@@ -775,8 +778,10 @@ def agent_command_manifest(
             **command,
             "name": subcommand,
             "capability_file": CAPABILITY_BY_COMMAND[command_name],
-            "command": f"research-cockpit {subcommand}",
-            "python_module_command": f"python -m research_cockpit.cli {subcommand}",
+            "command": " ".join(["research-cockpit", subcommand, *required_flags]),
+            "python_module_command": " ".join(
+                ["python", "-m", "research_cockpit.cli", subcommand, *required_flags]
+            ),
             "cwd": "research_repo_root",
             "writes_truth_source": writes_truth_source,
             "writes_generated_files": writes_generated_files,
@@ -791,6 +796,7 @@ def agent_command_manifest(
             "supports_root": bool(command.get("supports_root", True)),
         }
         supported_flags, unsupported_flags = _flag_support(row)
+        row.pop("extra_supported_flags", None)
         row["supported_flags"] = supported_flags
         row["unsupported_flags"] = unsupported_flags
         if workflow and workflow not in row["workflow_tags"]:

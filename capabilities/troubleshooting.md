@@ -44,6 +44,16 @@ research-cockpit validate --root research_cockpit --json
 
 The repair command only handles YAML that can be parsed. If the file has a scanner error, fix the YAML structure manually or restore from backup before running `validate` again.
 
+## Semantic Lint
+
+Run semantic lint when generated context looks stale even though `validate` passes:
+
+```sh
+research-cockpit lint --root research_cockpit --semantic --json
+```
+
+Semantic lint checks for terminal global or per-agent focus nodes, `next_actions` that still mention closed nodes, open experiments that already contain results, and option workstream state that no longer matches child experiment state. Warning output exits with status 1; a zero exit means no semantic warnings were found.
+
 ## Release Checks
 
 From the plugin repo root:

@@ -96,6 +96,8 @@ research-cockpit complete-experiment --root research_cockpit --id <experiment_id
 research-cockpit complete-experiments --print-schema
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --json --compact
+research-cockpit close-current-experiment --root research_cockpit --id <experiment_id> --finding "..." --confidence medium --next-focus <next_node> --sync-agent all --json --compact
+research-cockpit create-followup-experiment --root research_cockpit --from <experiment_id> --parent <option_id> --id <followup_id> --title "..." --next-action "Run follow-up gate" --set-focus --json --compact
 research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --dry-run --json --show-diff
 research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --json --compact
 research-cockpit finalize-workstream --print-schema
@@ -109,7 +111,9 @@ research-cockpit set-agent-focus --root <canonical_root> --agent <agent_id> --no
 research-cockpit import-worktree-findings --root <canonical_root> --from-root <worktree>/research_cockpit --agent <agent_id> --option <option_id> --dry-run --json --show-diff
 research-cockpit build --root <canonical_root> --watch --interval 5 --json
 research-cockpit update-node-fields --root research_cockpit --id <node_id> --question "..." --tag <tag> --no-build
+research-cockpit update-workstream-fields --root research_cockpit --option <option_id> --status reported --objective "..." --no-build
 research-cockpit sync-focus-actions --root research_cockpit --from-node <node_id> --dry-run --json --show-diff
+research-cockpit lint --root research_cockpit --semantic --json
 research-cockpit update-suggestion-state --root research_cockpit --id <suggestion_id> --state dismissed --reason "..." --dry-run --json --show-diff
 research-cockpit update-decision-evidence --root research_cockpit --id <decision_id> --dry-run --json --show-diff
 research-cockpit update-decision-checklist --root research_cockpit --id <decision_id> --alternative <option_id> --consequence "..." --next-required-action "..." --dry-run --json --show-diff
@@ -144,6 +148,8 @@ Follow-up options should use status `open`; file-based graph commands accept opt
 After creating a workstream, use `option-workstream-context --id <option_id> --compact --json` to verify experiment ids, statuses, success criteria count, metric count, finding count, and linked artifact count. Read per-experiment `node-context` only when you need the full criterion text or other detailed fields.
 
 Use `complete-experiment --evidence-path ... --evidence-link key=value` or per-entry `complete-experiments` evidence blocks when the finding depends on result folders, plots, reports, or metrics JSON that already live at a stable path. These commands create and link an artifact from both the finding and experiment so node resources show the evidence path, but they do not copy files. If outputs were produced inside a git worktree, run `ingest-artifact` first and then record the finding with `--artifact-id`. Use `complete-experiments` for sweeps or multi-backend experiment sets. Use `create-artifact --file artifact.yaml` for stable result folders with several links or target nodes, and use `link-artifact` for attaching existing artifacts, so agents do not patch `path`, `links`, or `linked_artifacts` by hand. Artifact paths are stored exactly as provided; JSON resource rows report `resolved_target`, `resolution_base`, `resolution_attempts`, and `exists` using root parent, data root, then cwd for relative paths. If a finding has no linked artifact, the command may still succeed but JSON includes `missing_evidence_artifact`. Use `update-finding` when revising an existing finding statement, confidence, outcome, metrics, or evidence artifacts.
+
+When closing the current experiment and advancing focus in the same turn, prefer `close-current-experiment` over manually chaining `complete-experiment`, `set-focus`, and `set-agent-focus`. Use `create-followup-experiment --set-focus` for a derived next gate; when `--next-action` is passed with `--set-focus`, the same action is written to both the new experiment and `current_state.next_actions`.
 
 Known-node tasks should use `effective_baseline` from `context` or `node-context` as the default option/decision/artifact bundle for follow-up work. When an accepted branch should become the default for later agents, use `research-cockpit set-baseline`; do not expand every accepted decision into normal handoffs unless the task is explicitly auditing accepted history.
 
@@ -183,7 +189,7 @@ research-cockpit build --root D:/main_repo/research_cockpit
 
 Do not use worktree-local paths as long-lived `--evidence-path` values. Keep run directories free of symlinks before `ingest-artifact`; v1 rejects symlinked files or directories instead of copying through them. Deletion is safe only after artifact files, finding/decision/baseline updates, and any useful commit/patch have been preserved outside the worktree.
 
-For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `create-artifact`, `ingest-artifact`, `complete-experiment`, `complete-experiments`, `update-finding`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `--show-diff` still includes the full diff; use it only when reviewing write content.
+For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `create-artifact`, `ingest-artifact`, `complete-experiment`, `complete-experiments`, `close-current-experiment`, `create-followup-experiment`, `update-finding`, `update-workstream-fields`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `--show-diff` still includes the full diff; use it only when reviewing write content.
 For legacy mutation commands without `--compact`, use `--dry-run --json --show-diff` to preview writes and keep the JSON payload focused on `changed/would_change`, affected path, before/after summary, and optional diff. Dry-run also performs mutation preflight; if `interaction_log.yaml` is malformed, it fails before showing a misleading successful preview.
 Use `commands --json --compact --workflow <graph|evidence|decision|focus|maintenance|read>` or `--name <command>` to read the short discovery manifest. It omits long examples and Python/cwd metadata; use full `commands --json` only when you need the complete command contract. If `validate` or a mutating dry-run reports malformed interaction log schema, use `repair-interaction-log --dry-run --json --show-diff`; it can drop non-mapping event items with a backup, but it refuses YAML scanner errors.
 

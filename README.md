@@ -135,6 +135,7 @@ npm run build
 | 初始化最小状态 | `research-cockpit init --root research_cockpit --build --json` |
 | 初始化 demo 状态 | `research-cockpit init --template demo --root research_cockpit --build --json` |
 | 校验数据 | `research-cockpit validate --root research_cockpit --json` |
+| 检查语义陈旧状态 | `research-cockpit lint --root research_cockpit --semantic --json` |
 | 生成 dashboard/context | `research-cockpit build --root research_cockpit` |
 | 启动 UI | `research-cockpit ui --root research_cockpit --server.port 8501` |
 | 查看可用命令 | `research-cockpit commands --json --compact` |
@@ -172,6 +173,18 @@ research-cockpit complete-experiment \
   --evidence-path artifacts/experiment_x/run_x \
   --evidence-link metrics=artifacts/experiment_x/run_x/metrics.json \
   --json --compact
+```
+
+如果要关闭当前实验并立刻推进 global/agent focus，优先用组合命令：
+
+```sh
+research-cockpit close-current-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --next-focus option_x --sync-agent all --json --compact
+```
+
+如果 mixed/incomplete 结论需要派生下一轮实验：
+
+```sh
+research-cockpit create-followup-experiment --root research_cockpit --from experiment_x --parent option_x --id experiment_x_followup --title "Follow-up gate" --next-action "Run follow-up gate" --set-focus --json --compact
 ```
 
 批量实验：

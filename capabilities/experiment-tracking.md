@@ -149,12 +149,15 @@ research-cockpit close-current-experiment --root research_cockpit --id experimen
 ```
 
 `--next-focus` must point to a non-terminal node and cannot be the experiment being closed.
+When `--next-focus` is present, the command copies that node's node-local `next_actions` into global `current_state.next_actions`. `--sync-agent <agent_id>` moves one agent focus to the same node; `--sync-agent all` moves only agents currently focused on the experiment being closed.
 
 For mixed or incomplete findings that need a follow-up gate, derive the next experiment instead of hand-editing YAML:
 
 ```sh
 research-cockpit create-followup-experiment --root research_cockpit --from experiment_x --parent option_x --id experiment_x_followup --title "Follow-up gate" --next-action "Run follow-up gate" --set-focus --json --compact
 ```
+
+`--next-action` writes the initial follow-up experiment `next_actions`. When combined with `--set-focus`, the same action is also written to `current_state.next_actions`, so dashboard "Current Next Actions" immediately points at the new gate.
 
 `complete-experiment` records linked artifact ids both in the finding `linked_artifacts` field and in the finding `evidence` list, so a finding remains traceable when read without the full experiment node.
 

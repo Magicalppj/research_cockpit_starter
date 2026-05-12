@@ -200,7 +200,11 @@ def semantic_lint(root: Path = ROOT) -> dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="research-cockpit lint")
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--semantic", action="store_true", help="Run semantic stale-state checks.")
+    parser.add_argument(
+        "--semantic",
+        action="store_true",
+        help="Run semantic stale-state checks; exits 1 when warnings are present.",
+    )
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 

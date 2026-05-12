@@ -162,8 +162,11 @@ def main() -> None:
     parser.add_argument("--metric", action="append", dest="metrics")
     parser.add_argument("--artifact-id", action="append", dest="artifact_ids")
     parser.add_argument("--result-summary")
-    parser.add_argument("--next-focus")
-    parser.add_argument("--sync-agent")
+    parser.add_argument("--next-focus", help="Non-terminal node to use as the new global focus.")
+    parser.add_argument(
+        "--sync-agent",
+        help="Agent id to move with --next-focus, or 'all' to move agents currently focused on the closed experiment.",
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--no-build", action="store_true")

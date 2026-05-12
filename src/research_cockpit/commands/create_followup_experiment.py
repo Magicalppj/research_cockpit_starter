@@ -70,6 +70,8 @@ def create_followup_experiment(
     before_current = copy.deepcopy(current)
     if set_focus_to_created:
         current.update(derive_focus_fields(candidate, node_id, current))
+        if next_action:
+            current["next_actions"] = [next_action]
         current["updated_at"] = today
         changes.append((root / "current_state.yaml", before_current, current))
     validate_cockpit(root, candidate, current, state.explicit_edges, raise_on_error=True)
@@ -116,8 +118,16 @@ def main() -> None:
     parser.add_argument("--title", required=True)
     parser.add_argument("--summary", default="")
     parser.add_argument("--success-criterion", action="append", dest="success_criteria")
-    parser.add_argument("--next-action")
-    parser.add_argument("--set-focus", action="store_true", dest="set_focus_to_created")
+    parser.add_argument(
+        "--next-action",
+        help="Initial node-local next action; with --set-focus it also becomes current_state next_actions.",
+    )
+    parser.add_argument(
+        "--set-focus",
+        action="store_true",
+        dest="set_focus_to_created",
+        help="Move global focus to the new experiment.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--compact", action="store_true")

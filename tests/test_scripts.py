@@ -2027,6 +2027,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("lint", by_name)
         self.assertFalse(by_name["lint"]["mutating"])
         self.assertIn("semantic", by_name["lint"]["fields_supported"])
+        self.assertEqual(by_name["lint"]["command"], "research-cockpit lint --semantic")
+        self.assertIn("--semantic", by_name["lint"]["supported_flags"])
         self.assertIn("close-current-experiment", by_name)
         self.assertTrue(by_name["close-current-experiment"]["mutating"])
         self.assertIn("next_focus", by_name["close-current-experiment"]["fields_supported"])
@@ -5876,6 +5878,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("Validate follow-up against exp_t5.", followup["success_criteria"])
         self.assertEqual(followup["next_actions"], ["Run follow-up gate."])
         self.assertEqual(current["current_focus_node"], "exp_t5_followup")
+        self.assertEqual(current["next_actions"], ["Run follow-up gate."])
 
     def test_close_current_experiment_completes_and_moves_global_and_agent_focus(self) -> None:
         current = load_yaml(self.root / "current_state.yaml")

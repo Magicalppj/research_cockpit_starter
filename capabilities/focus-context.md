@@ -143,4 +143,4 @@ Run semantic lint when generated context looks stale even though `validate` pass
 research-cockpit lint --root research_cockpit --semantic --json
 ```
 
-Semantic lint warns about terminal global/agent focus nodes, `next_actions` that still mention closed nodes, open experiments that already have results, and option workstream state that no longer matches child experiment state.
+Semantic lint warns about terminal global/agent focus nodes, `next_actions` that still mention closed nodes, open experiments that already have results, and option workstream state that no longer matches child experiment state. Warning output exits with status 1; a zero exit means no semantic warnings were found. The command discovery manifest lists this as `research-cockpit lint --semantic`.
