@@ -83,8 +83,8 @@ function labelFor(node: GraphNode) {
   );
 }
 
-function nodeBorder(node: GraphNode, selectedNodeId: string | null) {
-  if (node.id === selectedNodeId) {
+function nodeBorder(node: GraphNode, selected: boolean) {
+  if (selected) {
     return "#111827";
   }
   if (node.is_current_focus) {
@@ -94,6 +94,27 @@ function nodeBorder(node: GraphNode, selectedNodeId: string | null) {
     return "#F59E0B";
   }
   return "#6B7280";
+}
+
+function nodeStyle(node: GraphNode, selected: boolean) {
+  return {
+    width: nodeWidth,
+    minHeight: 76,
+    borderRadius: 8,
+    borderWidth: selected || node.is_current_focus ? 3 : 1,
+    borderColor: nodeBorder(node, selected),
+    background: node.color || "#F9FAFB",
+    color: "#111827",
+    padding: 10
+  };
+}
+
+function applyNodeSelection(node: Node, graphNode: GraphNode, selected: boolean): Node {
+  return {
+    ...node,
+    selected,
+    style: nodeStyle(graphNode, selected)
+  };
 }
 
 function isStructuralEdge(edge: GraphEdge) {
@@ -149,24 +170,15 @@ function renderSignature(payload: GraphPayload) {
   });
 }
 
-function toReactFlowNodes(payload: GraphPayload, selectedNodeId: string | null): Node[] {
+function toReactFlowNodes(payload: GraphPayload): Node[] {
   return (payload.nodes || []).map((node) => ({
     id: node.id,
     position: { x: 0, y: 0 },
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
     data: { label: labelFor(node) },
-    selected: node.id === selectedNodeId,
-    style: {
-      width: nodeWidth,
-      minHeight: 76,
-      borderRadius: 8,
-      borderWidth: node.id === selectedNodeId || node.is_current_focus ? 3 : 1,
-      borderColor: nodeBorder(node, selectedNodeId),
-      background: node.color || "#F9FAFB",
-      color: "#111827",
-      padding: 10
-    }
+    selected: false,
+    style: nodeStyle(node, false)
   }));
 }
 
@@ -215,14 +227,16 @@ function layoutNodes(nodes: Node[], edges: GraphEdge[]): Node[] {
   });
 }
 
-function baselineUseEdgeFor(payload: GraphPayload, selectedNodeId: string | null): GraphEdge | null {
+function baselineUseEdgeFor(
+  graphNodeById: Map<string, GraphNode>,
+  selectedNodeId: string | null
+): GraphEdge | null {
   if (!selectedNodeId) {
     return null;
   }
-  const nodes = payload.nodes || [];
-  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
+  const selectedNode = graphNodeById.get(selectedNodeId);
   const source = selectedNode?.effective_baseline_option_id || "";
-  if (!source || source === selectedNodeId || !nodes.some((node) => node.id === source)) {
+  if (!source || source === selectedNodeId || !graphNodeById.has(source)) {
     return null;
   }
   return {
@@ -237,10 +251,12 @@ function baselineUseEdgeFor(payload: GraphPayload, selectedNodeId: string | null
   };
 }
 
-function visibleGraphEdges(payload: GraphPayload, selectedNodeId: string | null): GraphEdge[] {
-  const edges = (payload.edges || []).filter((edge) => !isSelectionOnlyEdge(edge));
-  const baselineUseEdge = baselineUseEdgeFor(payload, selectedNodeId);
-  return baselineUseEdge ? [...edges, baselineUseEdge] : edges;
+function visibleGraphEdges(payload: GraphPayload): GraphEdge[] {
+  return (payload.edges || []).filter((edge) => !isSelectionOnlyEdge(edge));
+}
+
+function isSelectionOnlyFlowEdge(edge: Edge) {
+  return edge.id.startsWith("baseline_use--");
 }
 
 function toReactFlowEdges(edges: GraphEdge[]): Edge[] {
@@ -271,29 +287,51 @@ function ResearchGraph({ args }: ComponentProps) {
   const [visualSelectedNodeId, setVisualSelectedNodeId] = useState<string | null>(selectedNodeId);
   const layoutKey = useMemo(() => layoutSignature(payload), [payload]);
   const renderKey = useMemo(() => renderSignature(payload), [payload]);
+  const graphNodeById = useMemo(() => {
+    return new Map((payload.nodes || []).map((node) => [node.id, node]));
+  }, [renderKey]);
   const nodePositions = useMemo(() => {
-    const flowNodes = toReactFlowNodes(payload, null);
+    const flowNodes = toReactFlowNodes(payload);
     return new Map(layoutNodes(flowNodes, layoutEdgesFor(payload)).map((node) => [node.id, node.position]));
   }, [layoutKey]);
-  const graphEdges = useMemo(() => visibleGraphEdges(payload, visualSelectedNodeId), [renderKey, visualSelectedNodeId]);
+  const graphEdges = useMemo(() => visibleGraphEdges(payload), [renderKey]);
   const baseEdges = useMemo(() => toReactFlowEdges(graphEdges), [graphEdges]);
+  const selectedBaselineEdge = useMemo(() => {
+    const edge = baselineUseEdgeFor(graphNodeById, visualSelectedNodeId);
+    return edge ? toReactFlowEdges([edge])[0] : null;
+  }, [graphNodeById, visualSelectedNodeId]);
   const baseNodes = useMemo(() => {
-    const flowNodes = toReactFlowNodes(payload, visualSelectedNodeId);
+    const flowNodes = toReactFlowNodes(payload);
     return flowNodes.map((node, index) => ({
       ...node,
       position: nodePositions.get(node.id) || { x: index * (nodeWidth + 70), y: 0 }
     }));
-  }, [nodePositions, renderKey, visualSelectedNodeId]);
+  }, [nodePositions, renderKey]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(baseNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(baseEdges);
   const previousLayoutKey = useRef<string>("");
+  const previousVisualSelectedNodeId = useRef<string | null>(selectedNodeId);
+  const visualSelectedNodeIdRef = useRef<string | null>(selectedNodeId);
   const pendingSelectedNodeId = useRef<string | null>(null);
   const clickSequence = useRef<number>(0);
 
   useEffect(() => {
-    setEdges(baseEdges);
+    setEdges((currentEdges) => {
+      const selectionEdges = currentEdges.filter(isSelectionOnlyFlowEdge);
+      return [...baseEdges, ...selectionEdges];
+    });
   }, [baseEdges, setEdges]);
+
+  useEffect(() => {
+    setEdges((currentEdges) => {
+      const normalEdges = currentEdges.filter((edge) => !isSelectionOnlyFlowEdge(edge));
+      if (!selectedBaselineEdge) {
+        return normalEdges.length === currentEdges.length ? currentEdges : normalEdges;
+      }
+      return [...normalEdges, selectedBaselineEdge];
+    });
+  }, [selectedBaselineEdge, setEdges]);
 
   useEffect(() => {
     const pending = pendingSelectedNodeId.current;
@@ -308,9 +346,40 @@ function ResearchGraph({ args }: ComponentProps) {
   }, [selectedNodeId]);
 
   useEffect(() => {
+    visualSelectedNodeIdRef.current = visualSelectedNodeId;
+    const previous = previousVisualSelectedNodeId.current;
+    if (previous === visualSelectedNodeId) {
+      return;
+    }
+    previousVisualSelectedNodeId.current = visualSelectedNodeId;
+    const changedIds = new Set([previous, visualSelectedNodeId].filter(Boolean));
+    setNodes((currentNodes) => {
+      let changed = false;
+      const nextNodes = currentNodes.map((node) => {
+        if (!changedIds.has(node.id)) {
+          return node;
+        }
+        const graphNode = graphNodeById.get(node.id);
+        if (!graphNode) {
+          return node;
+        }
+        changed = true;
+        return applyNodeSelection(node, graphNode, node.id === visualSelectedNodeId);
+      });
+      return changed ? nextNodes : currentNodes;
+    });
+  }, [visualSelectedNodeId, graphNodeById, setNodes]);
+
+  useEffect(() => {
+    const currentSelectedNodeId = visualSelectedNodeIdRef.current;
     if (previousLayoutKey.current !== layoutKey) {
       previousLayoutKey.current = layoutKey;
-      setNodes(baseNodes);
+      setNodes(baseNodes.map((node) => {
+        const graphNode = graphNodeById.get(node.id);
+        return graphNode
+          ? applyNodeSelection(node, graphNode, node.id === currentSelectedNodeId)
+          : node;
+      }));
       return;
     }
 
@@ -318,10 +387,14 @@ function ResearchGraph({ args }: ComponentProps) {
       const currentById = new Map(currentNodes.map((node) => [node.id, node]));
       return baseNodes.map((node) => {
         const current = currentById.get(node.id);
-        return current ? { ...node, position: current.position } : node;
+        const nextNode = current ? { ...node, position: current.position } : node;
+        const graphNode = graphNodeById.get(node.id);
+        return graphNode
+          ? applyNodeSelection(nextNode, graphNode, node.id === currentSelectedNodeId)
+          : nextNode;
       });
     });
-  }, [baseNodes, layoutKey, setNodes]);
+  }, [baseNodes, graphNodeById, layoutKey, setNodes]);
 
   useEffect(() => {
     Streamlit.setFrameHeight(660);
