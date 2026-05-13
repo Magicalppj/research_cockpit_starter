@@ -131,7 +131,7 @@ def _truth_source_revision(root: Path) -> tuple[tuple[str, int, int], ...]:
     return tuple(revision)
 
 
-@st.cache_data(show_spinner=False, ttl=10)
+@st.cache_data(show_spinner=False)
 def _load_graph_data_cached(root_value: str, revision: tuple[tuple[str, int, int], ...]):
     root = Path(root_value)
     nodes = load_nodes(root)
