@@ -6,6 +6,7 @@ from typing import Any
 import subprocess
 
 from research_cockpit.baselines import resolve_current_effective_baseline
+from research_cockpit.assignment_view import build_assignment_view
 from research_cockpit.graph_core import (
     child_ids,
     derive_focus_path,
@@ -179,6 +180,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         "active_option_workstreams": [
             row for row in option_workstreams if row.get("workstream_status") in ACTIVE_WORKSTREAM_STATUSES
         ],
+        "assignment_view": build_assignment_view(nodes),
         "saved_graph_views": load_graph_views(root),
         "recent_interactions": recent_interactions(root),
         "warnings": interaction_log_warnings(root),

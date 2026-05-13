@@ -37,6 +37,8 @@ STATUS_ALIASES_BY_TYPE = {
     "option": {"planned": "open"},
 }
 
+UPDATE_TOP_LEVEL_FIELDS = {"id", "status", "fields"}
+
 
 def _as_list(value: Any, field_name: str) -> list[Any]:
     if value is None:
@@ -97,6 +99,10 @@ class GraphPlanBuilder:
         raw_status = str(entry.get("status") or default_status_for_type(node_type))
         status, alias_from = _normalize_input_status(node_type, raw_status)
         validate_status(node_type, status)
+        if node_type == "decision" and status == "accepted":
+            raise ValueError(
+                "Use `research-cockpit accept-decision` to accept a decision so option/problem state stays synchronized."
+            )
         if alias_from:
             self.normalized_statuses.append({
                 "node_id": node_id,
@@ -141,6 +147,7 @@ class GraphPlanBuilder:
                 updates["replace_next_actions"] is not None,
                 updates["scalar_updates"],
                 updates["list_appends"],
+                updates["bool_updates"],
             ]
         ):
             raise ValueError(f"{owner}.fields must include at least one supported field")
@@ -153,7 +160,39 @@ class GraphPlanBuilder:
             replace_next_actions=updates["replace_next_actions"],
             scalar_updates=updates["scalar_updates"],
             list_appends=updates["list_appends"],
+            bool_updates=updates["bool_updates"],
         )
+        data["updated_at"] = str(date.today())
+        self.candidate[node_id] = ResearchNode.from_dict(data)
+        if node_id not in self.created_ids:
+            self.updated_ids.add(node_id)
+
+    def apply_status(self, node_id: str, raw_status: Any, *, owner: str) -> None:
+        status_text = str(raw_status or "").strip()
+        if not status_text:
+            raise ValueError(f"{owner}.status is required when present")
+        node = self.candidate[node_id]
+        status, alias_from = _normalize_input_status(node.type, status_text)
+        validate_status(node.type, status)
+        if node.type == "decision" and status == "accepted":
+            raise ValueError(
+                "Use `research-cockpit accept-decision` to accept a decision so option/problem state stays synchronized."
+            )
+        if alias_from:
+            self.normalized_statuses.append({
+                "node_id": node_id,
+                "node_type": node.type,
+                "input_status": alias_from,
+                "stored_status": status,
+            })
+            self.status_aliases.append({
+                "node_id": node_id,
+                "type": node.type,
+                "from": alias_from,
+                "to": status,
+            })
+        data = self.mutable_data(node_id)
+        data["status"] = status
         data["updated_at"] = str(date.today())
         self.candidate[node_id] = ResearchNode.from_dict(data)
         if node_id not in self.created_ids:
@@ -226,13 +265,26 @@ def apply_graph_plan(
     for index, raw_update in enumerate(update_entries, start=1):
         if not isinstance(raw_update, dict):
             raise ValueError(f"updates[{index}] must be a mapping")
+        unsupported = sorted(set(raw_update) - UPDATE_TOP_LEVEL_FIELDS)
+        if unsupported:
+            field_text = ", ".join(unsupported)
+            raise ValueError(
+                f"updates[{index}] unsupported top-level field(s): {field_text}; "
+                "use updates[*].fields for node field updates"
+            )
         node_id = _required_text(raw_update, "id", f"updates[{index}]")
         if node_id not in builder.candidate:
             raise ValueError(f"updates[{index}].id references missing node {node_id!r}")
+        has_status = "status" in raw_update
         fields = raw_update.get("fields")
-        if not isinstance(fields, dict):
+        if not has_status and fields is None:
+            raise ValueError(f"updates[{index}] must include status or fields")
+        if fields is not None and not isinstance(fields, dict):
             raise ValueError(f"updates[{index}].fields must be a mapping")
-        builder.apply_fields(node_id, fields, owner=f"updates[{index}]")
+        if has_status:
+            builder.apply_status(node_id, raw_update.get("status"), owner=f"updates[{index}]")
+        if fields is not None:
+            builder.apply_fields(node_id, fields, owner=f"updates[{index}]")
 
     builder.sync_parent_children()
     validate_cockpit(root, builder.candidate, builder.state.current, builder.state.explicit_edges, raise_on_error=True)

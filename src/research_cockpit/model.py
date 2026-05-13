@@ -81,6 +81,10 @@ SEARCH_NODE_TEXT_FIELDS = (
     "blockers",
     "agent_workstream",
     "workstream_report",
+    "owner",
+    "handoff_context",
+    "depends_on",
+    "blocked_by",
     "pros",
     "cons",
     "rejection_reason",
@@ -794,6 +798,25 @@ def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
                         f"{node.id}: workstream_report.recommendation invalid {recommendation!r}; allowed: {allowed}"
                     )
 
+    def validate_experiment_assignment(node: ResearchNode) -> None:
+        assignment_fields = {"owner", "blocked_by", "depends_on", "ready_for_agent", "handoff_context"}
+        present_fields = sorted(field_name for field_name in assignment_fields if field_name in node.raw)
+        if not present_fields:
+            return
+        if node.type != "experiment":
+            fields_text = ", ".join(present_fields)
+            errors.append(f"{node.id}: assignment fields are only supported on experiment nodes: {fields_text}")
+            return
+        for field_name in ("owner", "handoff_context"):
+            value = node.raw.get(field_name)
+            if value is not None and not isinstance(value, str):
+                errors.append(f"{node.id}: {field_name} must be a string")
+        ready_for_agent = node.raw.get("ready_for_agent")
+        if ready_for_agent is not None and type(ready_for_agent) is not bool:
+            errors.append(f"{node.id}: ready_for_agent must be a boolean")
+        validate_list_refs(node.id, "depends_on")
+        validate_list_refs(node.id, "blocked_by")
+
     for node in nodes.values():
         if not node.id:
             errors.append("node has empty id")
@@ -828,6 +851,7 @@ def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
         errors.extend(validate_baseline_for_node(nodes, node, node.raw.get("baseline")))
         validate_findings(node)
         validate_option_workstream(node)
+        validate_experiment_assignment(node)
     return errors
 
 
@@ -1061,6 +1085,8 @@ def node_context(node: ResearchNode) -> dict[str, Any]:
         "title": node.title,
         "status": node.status,
         "priority": node.priority,
+        "order": node.raw.get("order"),
+        "rank": node.raw.get("rank"),
         "summary": node.summary,
         "question": node.raw.get("question"),
         "hypothesis": node.raw.get("hypothesis"),
@@ -1081,6 +1107,11 @@ def node_context(node: ResearchNode) -> dict[str, Any]:
         "success_criteria": node.raw.get("success_criteria", []),
         "agent_workstream": node.raw.get("agent_workstream"),
         "workstream_report": node.raw.get("workstream_report"),
+        "owner": node.raw.get("owner"),
+        "ready_for_agent": node.raw.get("ready_for_agent"),
+        "depends_on": node.raw.get("depends_on", []),
+        "blocked_by": node.raw.get("blocked_by", []),
+        "handoff_context": node.raw.get("handoff_context"),
         "agent_context": node.raw.get("agent_context"),
         "next_actions": node.raw.get("next_actions", []),
         "blockers": node.raw.get("blockers", []),

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from research_cockpit.paths import plugin_root
 from research_cockpit.types import ResearchNode
 
 
@@ -63,6 +64,22 @@ def _unique_paths(paths: list[tuple[str, Path]]) -> list[tuple[str, Path]]:
     return out
 
 
+def _display_resolution_path(root: Path, path: Path, label: str) -> str:
+    if label == "cwd":
+        try:
+            return path.relative_to(Path.cwd()).as_posix()
+        except ValueError:
+            return path.as_posix()
+
+    resolved = path.resolve(strict=False)
+    for base in (plugin_root(), root.parent, root):
+        try:
+            return resolved.relative_to(base.resolve(strict=False)).as_posix()
+        except ValueError:
+            continue
+    return path.as_posix()
+
+
 def _target_resolution(root: Path, kind: str, target: str, nodes: dict[str, ResearchNode]) -> dict[str, Any]:
     if kind == "run_id" or _is_external_target(target):
         return {
@@ -97,15 +114,25 @@ def _target_resolution(root: Path, kind: str, target: str, nodes: dict[str, Rese
         if candidate.exists():
             return {
                 "exists": True,
-                "resolved_target": candidate.as_posix(),
+                "resolved_target": _display_resolution_path(root, candidate, label),
                 "resolution_base": label,
-                "resolution_attempts": [item.as_posix() for _, item in attempts],
+                "resolution_attempts": [
+                    _display_resolution_path(root, item, item_label)
+                    for item_label, item in attempts
+                ],
             }
     return {
         "exists": False,
-        "resolved_target": attempts[0][1].as_posix() if attempts else target,
+        "resolved_target": (
+            _display_resolution_path(root, attempts[0][1], attempts[0][0])
+            if attempts
+            else target
+        ),
         "resolution_base": None,
-        "resolution_attempts": [item.as_posix() for _, item in attempts],
+        "resolution_attempts": [
+            _display_resolution_path(root, item, item_label)
+            for item_label, item in attempts
+        ],
     }
 
 

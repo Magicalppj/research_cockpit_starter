@@ -15,6 +15,7 @@ from research_cockpit.context_packs import (
     build_focus_context,
     write_dashboard_markdown,
 )
+from research_cockpit.assignment_view import build_assignment_view
 from research_cockpit.model import (
     build_experiment_matrix,
     build_search_index,
@@ -73,6 +74,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
     search_index = build_search_index(root, nodes, current)
     decision_checklists = build_decision_acceptance_checklists(nodes)
     option_workstreams = build_option_workstream_rows(nodes, current)
+    assignment_view = build_assignment_view(nodes)
 
     dash = root / "dashboards"
     dash.mkdir(parents=True, exist_ok=True)
@@ -89,6 +91,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
         dash / "search_index.json",
         dash / "decision_acceptance_checklists.json",
         dash / "option_workstreams.json",
+        dash / "assignment_view.json",
     ]
     save_text(outputs[0], json.dumps(graph_json, indent=2, ensure_ascii=False))
     save_text(outputs[1], json.dumps(context, indent=2, ensure_ascii=False))
@@ -101,6 +104,7 @@ def build_dashboard(root: Path = ROOT) -> list[Path]:
     save_text(outputs[8], json.dumps(search_index, indent=2, ensure_ascii=False))
     save_text(outputs[9], json.dumps(decision_checklists, indent=2, ensure_ascii=False))
     save_text(outputs[10], json.dumps(option_workstreams, indent=2, ensure_ascii=False))
+    save_text(outputs[11], json.dumps(assignment_view, indent=2, ensure_ascii=False))
     return outputs
 
 

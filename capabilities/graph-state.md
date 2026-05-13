@@ -22,6 +22,7 @@ research-cockpit build --root research_cockpit --watch --interval 5 --json
 ```
 
 `validate` and `repair-interaction-log --dry-run` are read-only. `build --json` reports generated dashboard files and node count; it writes generated files only and does not append an interaction log event. `build --watch` polls truth-source YAML/notes and rebuilds dashboards only after changes; use `--max-iterations` in tests. `build --watch --json` prints one JSON object per iteration (JSONL-style), not one final JSON document.
+Generated dashboards include `assignment_view.json`, a machine-readable queue of high-priority queued/running experiment assignments. Regenerate it with `build`; do not edit it by hand.
 
 In multi-agent worktree runs, run `build --watch` from the main repository against the canonical shared `research_cockpit/` root. Downstream agents should not rebuild or mutate worktree-local cockpit roots.
 

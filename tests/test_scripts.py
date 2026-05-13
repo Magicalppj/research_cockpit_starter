@@ -36,6 +36,7 @@ from research_cockpit.commands.agent_bootstrap import agent_bootstrap_payload, f
 from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.apply_suggestion import apply_suggestion
 from research_cockpit.commands.agent_session_context import agent_session_context_payload
+from research_cockpit.commands.assignment_view import assignment_view_payload
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.check_decision_acceptance import decision_acceptance_payload
 from research_cockpit.commands.claim_option import claim_option
@@ -453,6 +454,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "search_index.json",
             "decision_acceptance_checklists.json",
             "option_workstreams.json",
+            "assignment_view.json",
         }
 
         self.assertEqual({path.name for path in paths}, expected)
@@ -464,6 +466,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         search_index = json.loads((self.root / "dashboards" / "search_index.json").read_text(encoding="utf-8"))
         checklists = json.loads((self.root / "dashboards" / "decision_acceptance_checklists.json").read_text(encoding="utf-8"))
         option_workstreams = json.loads((self.root / "dashboards" / "option_workstreams.json").read_text(encoding="utf-8"))
+        assignment_view = json.loads((self.root / "dashboards" / "assignment_view.json").read_text(encoding="utf-8"))
         nodes = load_nodes(self.root)
 
         self.assertEqual(context["linked_nodes"][0]["id"], "stage_text")
@@ -480,7 +483,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIsInstance(search_index, list)
         self.assertIsInstance(checklists, list)
         self.assertIsInstance(option_workstreams, list)
+        self.assertIn("assignments", assignment_view)
         self.assertIn("active_option_workstreams", context)
+        self.assertIn("assignment_view", context)
         self.assertIn("option_workstream_context", focus_context)
         self.assertIn("saved_graph_views", context)
         self.assertIn("saved_graph_views", focus_context)
@@ -501,7 +506,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["node_count"], 4)
-        self.assertEqual(len(payload["written_files"]), 11)
+        self.assertEqual(len(payload["written_files"]), 12)
         self.assertTrue((self.root / "dashboards" / "graph_view.json").exists())
 
     def test_build_watch_json_max_iterations_reports_one_iteration(self) -> None:
@@ -528,7 +533,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["watch"])
         self.assertEqual(payload["iteration"], 1)
         self.assertTrue(payload["truth_source_changed"])
-        self.assertEqual(len(payload["written_files"]), 11)
+        self.assertEqual(len(payload["written_files"]), 12)
 
     def test_build_cli_respects_root_argument_over_environment(self) -> None:
         env_root = self.tmp_root / "env_research_cockpit"
@@ -1993,12 +1998,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["complete-experiment"]["supports_no_build"])
         self.assertTrue(by_name["complete-experiment"]["supports_compact"])
         self.assertIn("evidence_path", by_name["complete-experiment"]["fields_supported"])
+        self.assertNotIn("next_actions", by_name["complete-experiment"]["fields_supported"])
         self.assertNotIn("evidence_artifact_id", by_name["complete-experiment"]["fields_supported"])
         self.assertTrue(by_name["complete-experiments"]["can_batch"])
         self.assertTrue(by_name["complete-experiments"]["supports_dry_run"])
         self.assertEqual(by_name["complete-experiments"]["file_schema"], "experiment_completion_v1")
         self.assertIn("experiments:", by_name["complete-experiments"]["example_file"])
         self.assertIn("evidence.links", by_name["complete-experiments"]["fields_supported"])
+        self.assertNotIn("next_actions", by_name["complete-experiments"]["fields_supported"])
         self.assertNotIn("evidence.artifact_id", by_name["complete-experiments"]["fields_supported"])
         self.assertNotIn("evidence.title", by_name["complete-experiments"]["fields_supported"])
         self.assertIn("evidence:", by_name["complete-experiments"]["example_file"])
@@ -2024,6 +2031,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--compact", by_name["update-decision-evidence"]["unsupported_flags"])
         self.assertIn("question", by_name["update-node-fields"]["fields_supported"])
         self.assertIn("supporting_experiments", by_name["update-node-fields"]["fields_supported"])
+        self.assertIn("ready_for_agent", by_name["update-node-fields"]["fields_supported"])
+        self.assertIn("assignment-view", by_name)
+        self.assertFalse(by_name["assignment-view"]["mutating"])
+        self.assertIn("depends_on", by_name["assignment-view"]["fields_supported"])
         self.assertIn("lint", by_name)
         self.assertFalse(by_name["lint"]["mutating"])
         self.assertIn("semantic", by_name["lint"]["fields_supported"])
@@ -2825,6 +2836,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "evidence": ["exp_t5"],
             }
         ]
+        experiment["next_actions"] = ["Create follow-up gate."]
         save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
         current = load_yaml(self.root / "current_state.yaml")
         current["current_focus_node"] = "exp_t5"
@@ -2858,8 +2870,26 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("agent_focus_terminal", warning_ids)
         self.assertIn("next_action_references_terminal_node", warning_ids)
         self.assertIn("current_next_actions_diverge_from_focus_node", warning_ids)
+        self.assertIn("terminal_node_has_next_actions", warning_ids)
+        followup_warning = next(
+            warning for warning in payload["warnings"] if warning["id"] == "terminal_node_has_next_actions"
+        )
+        self.assertIn("create-followup-experiment", followup_warning["command"])
         self.assertEqual(out.returncode, 1)
         self.assertEqual(cli_payload["warning_count"], len(payload["warnings"]))
+
+    def test_semantic_lint_does_not_suggest_invalid_followup_for_failed_experiment(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "failed"
+        experiment["next_actions"] = ["Investigate failure."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+
+        payload = semantic_lint(self.root)
+        warning = next(
+            warning for warning in payload["warnings"] if warning["id"] == "terminal_node_has_next_actions"
+        )
+
+        self.assertIsNone(warning.get("command"))
 
     def test_semantic_lint_does_not_substring_match_terminal_node_ids(self) -> None:
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
@@ -4221,7 +4251,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(failed.returncode, 1)
         self.assertIn("missing_artifact", failed.stdout)
 
-    def test_complete_experiment_records_finding_marks_done_and_appends_actions(self) -> None:
+    def test_complete_experiment_records_finding_marks_done_and_clears_actions(self) -> None:
         write_node(
             self.root,
             {
@@ -4231,6 +4261,9 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "status": "active",
             },
         )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["next_actions"] = ["Compare cache footprint."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
 
         result = complete_experiment(
             self.root,
@@ -4241,7 +4274,6 @@ class ScriptBehaviorTests(unittest.TestCase):
             metrics=["replace_following"],
             artifact_ids=["artifact_cache"],
             result_summary="Improved edit following.",
-            next_actions=["Compare cache footprint.", "Compare cache footprint."],
         )
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
         option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
@@ -4254,12 +4286,24 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(experiment["findings"][0]["linked_artifacts"], ["artifact_cache"])
         self.assertEqual(experiment["findings"][0]["evidence"], ["exp_t5", "artifact_cache"])
         self.assertEqual(experiment["linked_artifacts"], ["artifact_cache"])
-        self.assertEqual(experiment["next_actions"], ["Compare cache footprint."])
+        self.assertNotIn("next_actions", experiment)
+        self.assertEqual(result["removed_next_actions"], ["Compare cache footprint."])
         self.assertEqual(option["status"], "active")
         self.assertEqual(problem["status"], "active")
         self.assertNotIn("current_best_option", problem)
         self.assertTrue((self.root / "dashboards" / "focus_context_pack.json").exists())
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "complete_experiment")
+
+    def test_complete_experiment_rejects_next_actions_on_done_node(self) -> None:
+        with self.assertRaisesRegex(ValueError, "create-followup-experiment"):
+            complete_experiment(
+                self.root,
+                experiment_id="exp_t5",
+                finding="T5 improves replace following.",
+                confidence="strong",
+                next_actions=["Compare cache footprint."],
+                rebuild_dashboard=False,
+            )
 
     def test_complete_experiment_warns_when_completed_node_is_still_focus(self) -> None:
         current = load_yaml(self.root / "current_state.yaml")
@@ -4464,8 +4508,6 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "mixed",
                 "--result-summary",
                 "CLI summary.",
-                "--next-action",
-                "Review next branch.",
                 "--no-build",
                 "--json",
             ],
@@ -4480,8 +4522,33 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["changed"])
         self.assertEqual(payload["experiment_id"], "exp_t5")
         self.assertEqual(experiment["status"], "done")
-        self.assertEqual(experiment["next_actions"], ["Review next branch."])
+        self.assertNotIn("next_actions", experiment)
         self.assertFalse((self.root / "dashboards").exists())
+
+    def test_complete_experiment_cli_rejects_next_action(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("complete-experiment"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_t5",
+                "--finding",
+                "CLI completion works.",
+                "--confidence",
+                "medium",
+                "--next-action",
+                "Review next branch.",
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("create-followup-experiment", out.stdout)
 
     def test_complete_experiment_cli_compact_json(self) -> None:
         out = subprocess.run(
@@ -4697,6 +4764,9 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "status": "done",
             },
         )
+        exp_a_before = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        exp_a_before["next_actions"] = ["Review aggregate."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", exp_a_before)
 
         result = complete_experiments(
             self.root,
@@ -4705,7 +4775,6 @@ class ScriptBehaviorTests(unittest.TestCase):
                     "confidence": "medium",
                     "outcome": "mixed",
                     "artifact_ids": ["artifact_bundle"],
-                    "next_actions": ["Review aggregate."],
                 },
                 "experiments": [
                     {
@@ -4736,8 +4805,40 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(exp_a["linked_artifacts"], ["artifact_bundle"])
         self.assertEqual(exp_b["findings"][0]["confidence"], "strong")
         self.assertEqual(exp_b["findings"][0]["outcome"], "positive")
-        self.assertEqual(exp_a["next_actions"], ["Review aggregate."])
+        self.assertNotIn("next_actions", exp_a)
+        self.assertEqual(result["completed_experiments"][0]["removed_next_actions"], ["Review aggregate."])
         self.assertFalse((self.root / "dashboards").exists())
+
+        with self.assertRaisesRegex(ValueError, "create-followup-experiment"):
+            complete_experiments(
+                self.root,
+                plan={
+                    "defaults": {
+                        "confidence": "medium",
+                        "next_actions": ["Review aggregate."],
+                    },
+                    "experiments": [
+                        {"id": "exp_t5", "finding": "Should not write."},
+                    ],
+                },
+                rebuild_dashboard=False,
+            )
+
+        with self.assertRaisesRegex(ValueError, "create-followup-experiment"):
+            complete_experiments(
+                self.root,
+                plan={
+                    "defaults": {"confidence": "medium"},
+                    "experiments": [
+                        {
+                            "id": "exp_t5",
+                            "finding": "Should not write.",
+                            "next_actions": ["Review aggregate."],
+                        },
+                    ],
+                },
+                rebuild_dashboard=False,
+            )
 
         before = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
         with self.assertRaises(ValueError) as missing:
@@ -5749,6 +5850,13 @@ class ScriptBehaviorTests(unittest.TestCase):
             )
         self.assertFalse((self.root / "graph" / "nodes" / "problem_invalid_plan.yaml").exists())
 
+        with self.assertRaisesRegex(ValueError, "fields must include"):
+            apply_graph_plan(
+                self.root,
+                plan={"updates": [{"id": "exp_t5", "fields": {}}]},
+                dry_run=True,
+            )
+
     def test_create_workstream_creates_branch_without_focus_or_old_option_changes(self) -> None:
         before_current = load_yaml(self.root / "current_state.yaml")
         before_old_option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
@@ -5859,12 +5967,16 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(option["agent_workstream"]["report_to_problem"], "problem_text")
 
     def test_create_followup_experiment_derives_from_source_and_can_set_focus(self) -> None:
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+
         result = create_followup_experiment(
             self.root,
             from_experiment="exp_t5",
-            parent="option_t5",
             node_id="exp_t5_followup",
             title="T5 follow-up gate",
+            priority="high",
             next_action="Run follow-up gate.",
             set_focus_to_created=True,
             rebuild_dashboard=False,
@@ -5873,12 +5985,24 @@ class ScriptBehaviorTests(unittest.TestCase):
         current = load_yaml(self.root / "current_state.yaml")
 
         self.assertTrue(result["changed"])
+        self.assertEqual(followup["status"], "queued")
         self.assertEqual(followup["parent"], "option_t5")
+        self.assertEqual(followup["priority"], "high")
         self.assertEqual(followup["derived_from"], ["exp_t5"])
         self.assertIn("Validate follow-up against exp_t5.", followup["success_criteria"])
         self.assertEqual(followup["next_actions"], ["Run follow-up gate."])
         self.assertEqual(current["current_focus_node"], "exp_t5_followup")
         self.assertEqual(current["next_actions"], ["Run follow-up gate."])
+
+    def test_create_followup_experiment_rejects_non_active_source_status(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must be done or running"):
+            create_followup_experiment(
+                self.root,
+                from_experiment="exp_t5",
+                node_id="exp_t5_followup",
+                title="T5 follow-up gate",
+                rebuild_dashboard=False,
+            )
 
     def test_close_current_experiment_completes_and_moves_global_and_agent_focus(self) -> None:
         current = load_yaml(self.root / "current_state.yaml")
@@ -5974,6 +6098,138 @@ class ScriptBehaviorTests(unittest.TestCase):
                 }
             ],
         )
+
+    def test_apply_graph_plan_updates_status_and_assignment_fields(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_t5_gate",
+                "type": "artifact",
+                "title": "T5 gate bundle",
+                "status": "done",
+            },
+        )
+
+        result = apply_graph_plan(
+            self.root,
+            plan={
+                "updates": [
+                    {
+                        "id": "exp_t5",
+                        "status": "queued",
+                        "fields": {
+                            "priority": "high",
+                            "order": "p2.2",
+                            "owner": "agent_t5",
+                            "ready_for_agent": True,
+                            "depends_on": ["problem_text"],
+                            "blocked_by": ["problem_text"],
+                            "handoff_context": "Run the queued T5 gate.",
+                            "linked_artifact": "artifact_t5_gate",
+                        },
+                    }
+                ]
+            },
+            rebuild_dashboard=False,
+        )
+
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["updated_nodes"], ["exp_t5"])
+        self.assertEqual(experiment["status"], "queued")
+        self.assertEqual(experiment["priority"], "high")
+        self.assertEqual(experiment["order"], "p2.2")
+        self.assertEqual(experiment["owner"], "agent_t5")
+        self.assertIs(experiment["ready_for_agent"], True)
+        self.assertEqual(experiment["depends_on"], ["problem_text"])
+        self.assertEqual(experiment["blocked_by"], ["problem_text"])
+        self.assertEqual(experiment["handoff_context"], "Run the queued T5 gate.")
+        self.assertEqual(experiment["linked_artifacts"], ["artifact_t5_gate"])
+
+    def test_apply_graph_plan_rejects_direct_decision_acceptance(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Adopt T5",
+                "status": "proposed",
+                "parent": "option_t5",
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "accept-decision"):
+            apply_graph_plan(
+                self.root,
+                plan={"updates": [{"id": "decision_t5", "status": "accepted"}]},
+                dry_run=True,
+            )
+
+    def test_assignment_view_lists_high_priority_agent_tasks(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_t5_gate",
+                "type": "artifact",
+                "title": "T5 gate bundle",
+                "status": "done",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment.update({
+            "status": "queued",
+            "priority": "high",
+            "order": "p2.2",
+            "owner": "agent_t5",
+            "ready_for_agent": True,
+            "depends_on": ["problem_text"],
+            "blocked_by": ["problem_text"],
+            "handoff_context": "Run the queued T5 gate.",
+            "linked_artifacts": ["artifact_t5_gate"],
+            "next_actions": ["Run gate and record one finding."],
+        })
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        write_node(
+            self.root,
+            {
+                "id": "exp_medium",
+                "type": "experiment",
+                "title": "Medium task",
+                "status": "queued",
+                "priority": "medium",
+                "parent": "option_t5",
+            },
+        )
+
+        payload = assignment_view_payload(self.root)
+
+        self.assertEqual(payload["count"], 1)
+        row = payload["assignments"][0]
+        self.assertEqual(row["id"], "exp_t5")
+        self.assertEqual(row["parent_option"]["id"], "option_t5")
+        self.assertEqual(row["owner"], "agent_t5")
+        self.assertIs(row["ready_for_agent"], True)
+        self.assertEqual(row["depends_on"][0]["id"], "problem_text")
+        self.assertEqual(row["blocked_by"][0]["id"], "problem_text")
+        self.assertEqual(row["key_artifacts"][0]["id"], "artifact_t5_gate")
+        self.assertEqual(row["next_action"], "Run gate and record one finding.")
+
+    def test_apply_graph_plan_print_schema_lists_status_and_assignment_fields(self) -> None:
+        result = subprocess.run(
+            [
+                *cli_command("apply-graph-plan"),
+                "--print-schema",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("status: queued", result.stdout)
+        self.assertIn("ready_for_agent", result.stdout)
+        self.assertIn("updates[*].fields", result.stdout)
 
     def test_promote_decision_creates_proposed_decision(self) -> None:
         write_node(

@@ -23,6 +23,10 @@ SCALAR_FIELDS = {
     "evidence_summary",
     "result_summary",
     "priority",
+    "order",
+    "rank",
+    "owner",
+    "handoff_context",
 }
 
 LIST_APPEND_FIELDS = {
@@ -38,6 +42,12 @@ LIST_APPEND_FIELDS = {
     "linked_artifacts",
     "alternatives_considered",
     "derived_from",
+    "depends_on",
+    "blocked_by",
+}
+
+BOOL_FIELDS = {
+    "ready_for_agent",
 }
 
 FIELD_ALIASES = {
@@ -55,11 +65,20 @@ FIELD_ALIASES = {
     "alternatives": "alternatives_considered",
     "alternative_considered": "alternatives_considered",
     "derived": "derived_from",
+    "dependency": "depends_on",
+    "blocked": "blocked_by",
 }
 
 
 def supported_field_names() -> list[str]:
-    return sorted([*SCALAR_FIELDS, *LIST_APPEND_FIELDS, "clear_next_actions", "current_best_option", "replace_next_actions"])
+    return sorted([
+        *SCALAR_FIELDS,
+        *LIST_APPEND_FIELDS,
+        *BOOL_FIELDS,
+        "clear_next_actions",
+        "current_best_option",
+        "replace_next_actions",
+    ])
 
 
 def _validate_current_best_option(nodes: dict[str, ResearchNode], node: ResearchNode, option_id: str) -> None:
@@ -87,6 +106,18 @@ def _as_str_list(value: Any, *, field_name: str) -> list[str]:
     raise ValueError(f"{field_name} must be a string or list")
 
 
+def _as_bool(value: Any, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"true", "1", "yes", "y"}:
+            return True
+        if text in {"false", "0", "no", "n"}:
+            return False
+    raise ValueError(f"{field_name} must be a boolean")
+
+
 def _append_unique(data: dict[str, Any], field_name: str, values: list[str]) -> None:
     existing = data.get(field_name, []) or []
     if not isinstance(existing, list):
@@ -112,6 +143,7 @@ def field_updates_from_mapping(fields: dict[str, Any] | None) -> dict[str, Any]:
 
     scalar_updates: dict[str, str] = {}
     list_appends: dict[str, list[str]] = {}
+    bool_updates: dict[str, bool] = {}
     current_best_option: str | None = None
     replace_next_actions: list[str] | None = None
 
@@ -130,6 +162,9 @@ def field_updates_from_mapping(fields: dict[str, Any] | None) -> dict[str, Any]:
         if field_name in LIST_APPEND_FIELDS:
             list_appends.setdefault(field_name, []).extend(_as_str_list(value, field_name=field_name))
             continue
+        if field_name in BOOL_FIELDS:
+            bool_updates[field_name] = _as_bool(value, field_name=field_name)
+            continue
         allowed = ", ".join(supported_field_names())
         raise ValueError(f"Unsupported node field {raw_key!r}; supported fields: {allowed}")
 
@@ -138,6 +173,7 @@ def field_updates_from_mapping(fields: dict[str, Any] | None) -> dict[str, Any]:
         "replace_next_actions": replace_next_actions,
         "scalar_updates": scalar_updates,
         "list_appends": list_appends,
+        "bool_updates": bool_updates,
     }
 
 
@@ -150,9 +186,11 @@ def apply_node_field_updates(
     replace_next_actions: list[str] | None = None,
     scalar_updates: dict[str, Any] | None = None,
     list_appends: dict[str, list[str]] | None = None,
+    bool_updates: dict[str, bool] | None = None,
 ) -> list[str]:
     scalar_updates = scalar_updates or {}
     list_appends = list_appends or {}
+    bool_updates = bool_updates or {}
     if replace_next_actions is not None and list_appends.get("next_actions"):
         raise ValueError("--next-action cannot be used together with --replace-next-actions")
 
@@ -162,6 +200,9 @@ def apply_node_field_updates(
     for field_name in list_appends:
         if field_name not in LIST_APPEND_FIELDS:
             raise ValueError(f"Unsupported list node field: {field_name}")
+    for field_name in bool_updates:
+        if field_name not in BOOL_FIELDS:
+            raise ValueError(f"Unsupported boolean node field: {field_name}")
 
     node = nodes[node_id]
     touched: list[str] = []
@@ -182,6 +223,9 @@ def apply_node_field_updates(
     for field_name, values in list_appends.items():
         _append_unique(data, field_name, values)
         touched.append(field_name)
+    for field_name, value in bool_updates.items():
+        data[field_name] = bool(value)
+        touched.append(field_name)
     return sorted(set(touched))
 
 
@@ -198,17 +242,19 @@ def update_node_fields(
     clear_next_actions: bool = False,
     scalar_updates: dict[str, Any] | None = None,
     list_appends: dict[str, list[str]] | None = None,
+    bool_updates: dict[str, bool] | None = None,
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
 ) -> dict[str, Any]:
     scalar_updates = scalar_updates or {}
     list_appends = list_appends or {}
+    bool_updates = bool_updates or {}
     if clear_next_actions and replace_next_actions is not None:
         raise ValueError("--clear-next-actions cannot be used together with --replace-next-actions")
     if clear_next_actions:
         replace_next_actions = list_appends.pop("next_actions", [])
-    if current_best_option is None and replace_next_actions is None and not scalar_updates and not list_appends:
+    if current_best_option is None and replace_next_actions is None and not scalar_updates and not list_appends and not bool_updates:
         raise ValueError("At least one field update is required")
     if replace_next_actions is not None and list_appends.get("next_actions"):
         raise ValueError("--next-action cannot be used together with --replace-next-actions")
@@ -229,6 +275,7 @@ def update_node_fields(
         replace_next_actions=replace_next_actions,
         scalar_updates=scalar_updates,
         list_appends=list_appends,
+        bool_updates=bool_updates,
     )
     data["updated_at"] = str(date.today())
 
@@ -291,6 +338,13 @@ def main() -> None:
     parser.add_argument("--evidence-summary")
     parser.add_argument("--result-summary")
     parser.add_argument("--priority")
+    parser.add_argument("--order")
+    parser.add_argument("--rank")
+    parser.add_argument("--owner")
+    parser.add_argument("--handoff-context")
+    ready_group = parser.add_mutually_exclusive_group()
+    ready_group.add_argument("--ready-for-agent", action="store_true", dest="ready_for_agent")
+    ready_group.add_argument("--not-ready-for-agent", action="store_true", dest="not_ready_for_agent")
     parser.add_argument("--tag", action="append", dest="tags")
     parser.add_argument("--success-criterion", action="append", dest="success_criteria")
     parser.add_argument("--metric", action="append", dest="metrics")
@@ -303,6 +357,8 @@ def main() -> None:
     parser.add_argument("--linked-artifact", action="append", dest="linked_artifacts")
     parser.add_argument("--alternative", action="append", dest="alternatives_considered")
     parser.add_argument("--derived-from", action="append", dest="derived_from")
+    parser.add_argument("--depends-on", action="append", dest="depends_on")
+    parser.add_argument("--blocked-by", action="append", dest="blocked_by")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--compact", action="store_true")
@@ -319,6 +375,10 @@ def main() -> None:
             "evidence_summary": args.evidence_summary,
             "result_summary": args.result_summary,
             "priority": args.priority,
+            "order": args.order,
+            "rank": args.rank,
+            "owner": args.owner,
+            "handoff_context": args.handoff_context,
         }.items()
         if value is not None
     }
@@ -337,9 +397,16 @@ def main() -> None:
             "linked_artifacts": args.linked_artifacts,
             "alternatives_considered": args.alternatives_considered,
             "derived_from": args.derived_from,
+            "depends_on": args.depends_on,
+            "blocked_by": args.blocked_by,
         }.items()
         if value is not None
     }
+    bool_updates = {}
+    if args.ready_for_agent:
+        bool_updates["ready_for_agent"] = True
+    elif args.not_ready_for_agent:
+        bool_updates["ready_for_agent"] = False
 
     try:
         result = update_node_fields(
@@ -350,6 +417,7 @@ def main() -> None:
             clear_next_actions=args.clear_next_actions,
             scalar_updates=scalar_updates,
             list_appends=list_appends,
+            bool_updates=bool_updates,
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,

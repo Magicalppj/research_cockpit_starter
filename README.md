@@ -184,7 +184,7 @@ research-cockpit close-current-experiment --root research_cockpit --id experimen
 如果 mixed/incomplete 结论需要派生下一轮实验：
 
 ```sh
-research-cockpit create-followup-experiment --root research_cockpit --from experiment_x --parent option_x --id experiment_x_followup --title "Follow-up gate" --next-action "Run follow-up gate" --set-focus --json --compact
+research-cockpit create-followup-experiment --root research_cockpit --from experiment_x --id experiment_x_followup --title "Follow-up gate" --priority high --next-action "Run follow-up gate" --set-focus --json --compact
 ```
 
 批量实验：

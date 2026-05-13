@@ -154,6 +154,21 @@ def semantic_lint(root: Path = ROOT) -> dict[str, Any]:
             break
 
     for node in nodes.values():
+        if node.status in TERMINAL_STATUSES and _next_actions(node.raw.get("next_actions")):
+            command = ""
+            if node.type == "experiment" and node.status == "done":
+                parent = str(node.parent or "<option_id>")
+                command = (
+                    f"research-cockpit create-followup-experiment --root {root} "
+                    f"--from {node.id} --parent {parent} --id <followup_experiment_id> "
+                    f"--title \"<follow-up title>\" --dry-run --json --show-diff"
+                )
+            warnings.append(_warning(
+                "terminal_node_has_next_actions",
+                f"{node.type} {node.id!r} is {node.status!r} but still has node-local next_actions.",
+                node_id=node.id,
+                command=command or None,
+            ))
         if node.type == "experiment" and node.status in OPEN_EXPERIMENT_STATUSES:
             if node.raw.get("result_summary") or node.raw.get("findings"):
                 warnings.append(_warning(

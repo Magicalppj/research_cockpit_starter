@@ -993,6 +993,48 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(context["agent_workstream"]["owner"], "agent_t5")
         self.assertEqual(context["workstream_report"]["recommendation"], "continue")
 
+    def test_experiment_assignment_fields_enter_node_context_and_validate(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment.update({
+            "priority": "high",
+            "order": "p2.2",
+            "owner": "agent_t5",
+            "ready_for_agent": True,
+            "depends_on": ["problem_text"],
+            "blocked_by": ["problem_text"],
+            "handoff_context": "Run T5 gate and record one finding.",
+        })
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+
+        errors = validate_cockpit(self.root, nodes)
+        context = node_context(nodes["exp_t5"])
+
+        self.assertEqual(errors, [])
+        self.assertEqual(context["owner"], "agent_t5")
+        self.assertIs(context["ready_for_agent"], True)
+        self.assertEqual(context["depends_on"], ["problem_text"])
+        self.assertEqual(context["blocked_by"], ["problem_text"])
+        self.assertEqual(context["handoff_context"], "Run T5 gate and record one finding.")
+
+    def test_experiment_assignment_fields_validate_type_and_refs(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["ready_for_agent"] = True
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["ready_for_agent"] = "yes"
+        experiment["depends_on"] = ["missing_dependency"]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, nodes, raise_on_error=True)
+
+        message = str(ctx.exception)
+        self.assertIn("assignment fields are only supported on experiment nodes", message)
+        self.assertIn("ready_for_agent must be a boolean", message)
+        self.assertIn("depends_on references missing node 'missing_dependency'", message)
+
     def test_workstream_fields_are_only_valid_on_options(self) -> None:
         problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
         problem["agent_workstream"] = {"owner": "agent_bad", "status": "claimed"}

@@ -3,6 +3,39 @@ from __future__ import annotations
 
 APPLY_GRAPH_PLAN_EXAMPLE = """File schema v1: graph_plan_v1
 
+Supported top-level sections:
+- nodes: create new nodes.
+- updates: update existing or newly-created nodes.
+
+nodes[*] supported keys:
+- id, type, title: required.
+- parent, status, summary: optional.
+- fields: optional supported node field mapping.
+
+updates[*] supported keys:
+- id: required.
+- status: optional validated node status. Use accept-decision for decision accepted.
+- fields: optional supported node field mapping.
+
+updates[*].fields and nodes[*].fields supported scalar fields:
+- title, summary, question, hypothesis, evidence_summary, result_summary
+- priority, order, rank
+- owner, handoff_context
+
+Supported boolean fields:
+- ready_for_agent
+
+Supported list append fields:
+- tags, success_criteria, metrics, pros, cons, next_actions
+- supporting_experiments, contradicting_experiments, supporting_decisions
+- linked_artifacts, alternatives_considered, derived_from
+- depends_on, blocked_by
+
+Notes:
+- priority is coarse urgency. Use high/medium/low for dispatchable work; existing critical values remain readable.
+- order or rank is for stable sequencing, e.g. order: p2.2 or rank: "020".
+- owner, ready_for_agent, depends_on, blocked_by, and handoff_context are experiment assignment fields.
+
 nodes:
   - id: problem_x
     type: problem
@@ -21,6 +54,16 @@ nodes:
     type: experiment
     title: First check
     parent: option_x
+    status: queued
+    fields:
+      priority: high
+      order: p2.2
+      owner: agent_audio
+      ready_for_agent: true
+      depends_on:
+        - option_x
+      blocked_by: []
+      handoff_context: Run the first check and record one finding.
 updates:
   - id: problem_x
     fields:
@@ -28,6 +71,11 @@ updates:
         - timeline-control
       next_actions:
         - Review first experiment result.
+  - id: experiment_x
+    status: queued
+    fields:
+      linked_artifact:
+        - artifact_x
 """
 
 
@@ -103,8 +151,6 @@ experiments:
       path: outputs/experiment_a
       links:
         metrics: outputs/experiment_a/metrics.json
-    next_actions:
-      - Review aggregate result.
   - id: experiment_b
     finding: Second finding.
     confidence: strong

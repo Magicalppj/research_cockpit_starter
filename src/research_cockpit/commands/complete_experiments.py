@@ -121,6 +121,11 @@ def complete_experiments(
     default_artifact_ids = _as_str_list(defaults.get("artifact_ids", defaults.get("artifacts")), "defaults.artifact_ids")
     default_metrics = _as_str_list(defaults.get("metrics"), "defaults.metrics")
     default_next_actions = _as_str_list(defaults.get("next_actions"), "defaults.next_actions")
+    if default_next_actions:
+        raise ValueError(
+            "complete-experiments no longer writes next_actions to done experiments; "
+            "use create-followup-experiment for follow-up work"
+        )
 
     for index, entry in enumerate(entries, start=1):
         if not isinstance(entry, dict):
@@ -164,10 +169,12 @@ def complete_experiments(
             fields = ", ".join(unsupported_evidence_fields)
             raise ValueError(f"{owner}.evidence unsupported evidence field(s): {fields}")
         metrics = [*default_metrics, *_as_str_list(entry.get("metrics"), f"{owner}.metrics")]
-        next_actions = [
-            *default_next_actions,
-            *_as_str_list(entry.get("next_actions"), f"{owner}.next_actions"),
-        ]
+        entry_next_actions = _as_str_list(entry.get("next_actions"), f"{owner}.next_actions")
+        if entry_next_actions:
+            raise ValueError(
+                "complete-experiments no longer writes next_actions to done experiments; "
+                "use create-followup-experiment for follow-up work"
+            )
         validate_artifact_ids(nodes, artifact_ids)
 
         path = find_node_file(root, experiment_id)
@@ -205,9 +212,11 @@ def complete_experiments(
         data["status"] = "done"
         if "result_summary" in entry:
             data["result_summary"] = "" if entry.get("result_summary") is None else str(entry.get("result_summary"))
-        data["next_actions"], added_actions = append_unique(data.get("next_actions"), next_actions, "next_actions")
-        if not data["next_actions"]:
-            data.pop("next_actions", None)
+        existing_next_actions = data.get("next_actions", []) or []
+        if not isinstance(existing_next_actions, list):
+            raise ValueError(f"{experiment_id}: next_actions must be a list")
+        removed_next_actions = list(existing_next_actions)
+        data.pop("next_actions", None)
         data["linked_artifacts"], added_artifacts = append_unique(data.get("linked_artifacts"), all_artifact_ids, "linked_artifacts")
         if not data["linked_artifacts"]:
             data.pop("linked_artifacts", None)
@@ -231,7 +240,7 @@ def complete_experiments(
                 "result_summary": data.get("result_summary"),
             },
             "finding": finding_record,
-            "added_next_actions": added_actions,
+            "removed_next_actions": removed_next_actions,
             "created_artifacts": [created_artifact_id] if created_artifact_id else [],
             "linked_artifacts": all_artifact_ids,
             "added_experiment_artifacts": added_artifacts,

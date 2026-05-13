@@ -12,6 +12,7 @@ COMMAND_MODULES: dict[str, str] = {
     "search": "search_knowledge",
     "suggest-next-actions": "suggest_next_actions",
     "context": "context",
+    "assignment-view": "assignment_view",
     "node-context": "node_context",
     "option-workstream-context": "option_workstream_context",
     "agent-session-context": "agent_session_context",

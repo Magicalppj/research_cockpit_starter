@@ -84,6 +84,7 @@ research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --json --compact
 research-cockpit context --root research_cockpit --node <node_id> --with-bootstrap --with-artifacts --compact --json
+research-cockpit assignment-view --root research_cockpit --json
 research-cockpit create-artifact --root research_cockpit --id <artifact_id> --title "..." --path <path> --link-to <node_id> --dry-run --json --show-diff
 research-cockpit create-artifact --print-schema
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
@@ -97,7 +98,7 @@ research-cockpit complete-experiments --print-schema
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --json --compact
 research-cockpit close-current-experiment --root research_cockpit --id <experiment_id> --finding "..." --confidence medium --next-focus <next_node> --sync-agent all --json --compact
-research-cockpit create-followup-experiment --root research_cockpit --from <experiment_id> --parent <option_id> --id <followup_id> --title "..." --next-action "Run follow-up gate" --set-focus --json --compact
+research-cockpit create-followup-experiment --root research_cockpit --from <done_or_running_experiment_id> --id <followup_id> --title "..." --priority high --next-action "Run follow-up gate" --set-focus --json --compact
 research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --dry-run --json --show-diff
 research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --json --compact
 research-cockpit finalize-workstream --print-schema
@@ -143,13 +144,16 @@ research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
 ```
 
+`apply-graph-plan` supports `updates[*].status` at the update entry top level. Put content fields under `updates[*].fields`; `status` inside `fields` is rejected. Run `apply-graph-plan --print-schema` for the supported field list, including experiment assignment fields: `owner`, `blocked_by`, `depends_on`, `ready_for_agent`, and `handoff_context`. For dispatch ordering, keep `priority` coarse and put stable sequence labels in `order` or `rank`.
+
 Use `create-workstream` for the common `problem -> active option -> experiments + follow-up options` shape. It creates the branch and sets the new problem `current_best_option`, but it does not change focus or pause old options.
 Follow-up options should use status `open`; file-based graph commands accept option status `planned` only as an input alias and write `open` to truth-source YAML. Dry-run/JSON output reports this under `normalized_statuses`.
 After creating a workstream, use `option-workstream-context --id <option_id> --compact --json` to verify experiment ids, statuses, success criteria count, metric count, finding count, and linked artifact count. Read per-experiment `node-context` only when you need the full criterion text or other detailed fields.
 
 Use `complete-experiment --evidence-path ... --evidence-link key=value` or per-entry `complete-experiments` evidence blocks when the finding depends on result folders, plots, reports, or metrics JSON that already live at a stable path. These commands create and link an artifact from both the finding and experiment so node resources show the evidence path, but they do not copy files. If outputs were produced inside a git worktree, run `ingest-artifact` first and then record the finding with `--artifact-id`. Use `complete-experiments` for sweeps or multi-backend experiment sets. Use `create-artifact --file artifact.yaml` for stable result folders with several links or target nodes, and use `link-artifact` for attaching existing artifacts, so agents do not patch `path`, `links`, or `linked_artifacts` by hand. Artifact paths are stored exactly as provided; JSON resource rows report `resolved_target`, `resolution_base`, `resolution_attempts`, and `exists` using root parent, data root, then cwd for relative paths. If a finding has no linked artifact, the command may still succeed but JSON includes `missing_evidence_artifact`. Use `update-finding` when revising an existing finding statement, confidence, outcome, metrics, or evidence artifacts.
 
-When closing the current experiment and advancing focus in the same turn, prefer `close-current-experiment` over manually chaining `complete-experiment`, `set-focus`, and `set-agent-focus`. Use `create-followup-experiment --set-focus` for a derived next gate; when `--next-action` is passed with `--set-focus`, the same action is written to both the new experiment and `current_state.next_actions`.
+When closing the current experiment and advancing focus in the same turn, prefer `close-current-experiment` over manually chaining `complete-experiment`, `set-focus`, and `set-agent-focus`. Use `create-followup-experiment --set-focus` for a derived queued next gate from a `done` or `running` experiment; by default it reuses the source experiment's option parent. When `--next-action` is passed with `--set-focus`, the same action is written to both the new experiment and `current_state.next_actions`.
+Done nodes should keep conclusions, not live work. If a done experiment still has real follow-up work in `next_actions`, create a small derived queued experiment with `create-followup-experiment` and move the action there.
 
 Known-node tasks should use `effective_baseline` from `context` or `node-context` as the default option/decision/artifact bundle for follow-up work. When an accepted branch should become the default for later agents, use `research-cockpit set-baseline`; do not expand every accepted decision into normal handoffs unless the task is explicitly auditing accepted history.
 
@@ -169,6 +173,8 @@ Send the JSON `handoff` to the downstream agent. Relative `--worktree` values re
 ```sh
 research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
 ```
+
+For coordinator-side task dispatch, use `assignment-view --json` to list high-priority queued/running experiments with `owner`, `depends_on`, `blocked_by`, key artifacts, and first `next_action`. Prefer one small queued experiment per downstream agent handoff.
 
 Do not run `init`, `set-focus`, or any mutation against a worktree-local `research_cockpit/`. Use `set-agent-focus` for per-agent progress; reserve global `set-focus` for a coordinator or human. Keep all canonical root mutations sequential and usually `--no-build`; run one main-root dashboard watcher when you want the panel to refresh:
 

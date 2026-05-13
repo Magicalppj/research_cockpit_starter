@@ -63,24 +63,6 @@ def _focus_completion_guidance(state_current: dict[str, Any], experiment: Resear
     return warnings, commands
 
 
-def _append_unique_actions(existing: Any, additions: list[str]) -> tuple[list[str], list[str]]:
-    if existing is None:
-        existing = []
-    if not isinstance(existing, list):
-        raise ValueError("next_actions must be a list")
-    actions = list(existing)
-    seen = {str(item) for item in actions}
-    added: list[str] = []
-    for item in additions:
-        action = str(item).strip()
-        if not action or action in seen:
-            continue
-        actions.append(action)
-        added.append(action)
-        seen.add(action)
-    return actions, added
-
-
 def complete_experiment(
     root: Path,
     *,
@@ -118,6 +100,11 @@ def complete_experiment(
     artifact_ids = artifact_ids or []
     evidence_links = evidence_links or {}
     next_actions = next_actions or []
+    if next_actions:
+        raise ValueError(
+            "complete-experiment no longer writes next_actions to done experiments; "
+            "use create-followup-experiment for follow-up work"
+        )
     validate_artifact_ids(nodes, artifact_ids)
 
     path = find_node_file(root, experiment_id)
@@ -158,9 +145,11 @@ def complete_experiment(
     data["status"] = "done"
     if result_summary is not None:
         data["result_summary"] = result_summary
-    data["next_actions"], added_actions = _append_unique_actions(data.get("next_actions"), next_actions)
-    if not data["next_actions"]:
-        data.pop("next_actions", None)
+    existing_next_actions = data.get("next_actions", []) or []
+    if not isinstance(existing_next_actions, list):
+        raise ValueError(f"{experiment_id}: next_actions must be a list")
+    removed_next_actions = list(existing_next_actions)
+    data.pop("next_actions", None)
     data["linked_artifacts"], added_artifacts = append_unique(data.get("linked_artifacts"), all_artifact_ids, "linked_artifacts")
     if not data["linked_artifacts"]:
         data.pop("linked_artifacts", None)
@@ -191,7 +180,7 @@ def complete_experiment(
         "before": before,
         "after": after,
         "finding": finding_record,
-        "added_next_actions": added_actions,
+        "removed_next_actions": removed_next_actions,
         "created_artifacts": [created_artifact_id] if created_artifact_id else [],
         "linked_artifacts": all_artifact_ids,
         "added_experiment_artifacts": added_artifacts,
@@ -225,7 +214,7 @@ def complete_experiment(
                 "metric_count": len(metrics),
                 "linked_artifacts": all_artifact_ids,
                 "created_artifacts": result["created_artifacts"],
-                "added_next_actions": added_actions,
+                "removed_next_actions": removed_next_actions,
             },
         },
         rebuild_dashboard=rebuild_dashboard,

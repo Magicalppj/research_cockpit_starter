@@ -60,6 +60,7 @@ def _context_paths(root: Path) -> dict[str, dict[str, Any]]:
         "agent_context_pack": dash / "agent_context_pack.json",
         "focus_context_pack": dash / "focus_context_pack.json",
         "graph_view": dash / "graph_view.json",
+        "assignment_view": dash / "assignment_view.json",
         "search_index": dash / "search_index.json",
         "next_action_suggestions": dash / "next_action_suggestions.json",
     }
@@ -98,6 +99,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
         "command_skeletons": [
             "research-cockpit init --root <root> --build --json",
             "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",
+            "research-cockpit assignment-view --root <root> --json",
             "research-cockpit add-node --root <root> --id <node_id> --type <type> --title \"...\" --parent <parent_id> --no-build",
             "research-cockpit update-node-fields --root <root> --id <node_id> --question \"...\" --tag <tag> --no-build",
             "research-cockpit apply-graph-plan --root <root> --file graph_update.yaml --dry-run --json --show-diff",
@@ -107,6 +109,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
             "research-cockpit set-baseline --root <root> --node <node_id> --option <option_id> --decision <decision_id> --no-build",
             "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --artifact-id <artifact_id> --no-build",
             "research-cockpit complete-experiments --root <root> --file findings.yaml --no-build",
+            "research-cockpit create-followup-experiment --root <root> --from <done_or_running_experiment_id> --id <followup_id> --title \"...\" --priority high --next-action \"...\" --no-build",
             "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
             "research-cockpit finalize-workstream --root <root> --option <option_id> --status accepted --problem-status resolved --report --no-build",
         ],

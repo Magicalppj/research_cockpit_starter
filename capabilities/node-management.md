@@ -49,15 +49,29 @@ nodes:
     title: Active option
     parent: problem_x
     status: active
+  - id: experiment_x
+    type: experiment
+    title: First check
+    parent: option_x
+    status: queued
+    fields:
+      priority: high
+      order: p2.2
+      owner: agent_x
+      ready_for_agent: true
+      handoff_context: Run the first check and record one finding.
 updates:
   - id: problem_x
     fields:
       tag: timeline-control
       next_actions:
         - Review first experiment result.
+  - id: experiment_x
+    status: running
 ```
 
 New nodes with `parent` automatically append themselves to the parent `children` list.
+For existing nodes, put status transitions at `updates[*].status`; put content and assignment metadata under `updates[*].fields`. `apply-graph-plan --print-schema` lists supported fields and rejects unsupported update top-level keys instead of silently ignoring them.
 
 ## Create Workstreams
 
@@ -156,14 +170,19 @@ Use `update-node-fields` when a supported node field would otherwise require han
 research-cockpit update-node-fields --root research_cockpit --id problem_x --current-best-option option_x --no-build
 research-cockpit update-node-fields --root research_cockpit --id experiment_x --replace-next-actions "Review metrics" --replace-next-actions "Draft decision" --no-build
 research-cockpit update-node-fields --root research_cockpit --id experiment_x --clear-next-actions --next-action "Review metrics" --next-action "Draft decision" --no-build
+research-cockpit update-node-fields --root research_cockpit --id experiment_x --priority high --order p2.2 --owner agent_x --ready-for-agent --depends-on option_x --handoff-context "Run and record one finding" --no-build
 research-cockpit update-node-fields --root research_cockpit --id problem_x --question "..." --hypothesis "..." --tag timeline-control --success-criterion "..." --supporting-experiment experiment_x --no-build
 ```
 
 `--current-best-option` is only valid on `problem` nodes and must point to a child `option`. `--replace-next-actions` replaces the node `next_actions` list with the repeated values supplied in the command. Prefer `--clear-next-actions --next-action ...` when composing a replacement list interactively; it reads as "clear then rebuild". `--next-action` alone appends de-duplicated actions and cannot be used with `--replace-next-actions` in the same call.
 
-Supported scalar replace flags: `--title`, `--summary`, `--question`, `--hypothesis`, `--evidence-summary`, `--result-summary`, `--priority`.
+Supported scalar replace flags: `--title`, `--summary`, `--question`, `--hypothesis`, `--evidence-summary`, `--result-summary`, `--priority`, `--order`, `--rank`, `--owner`, `--handoff-context`.
 
-Supported list append flags: `--tag`, `--success-criterion`, `--metric`, `--pro`, `--con`, `--next-action`, `--supporting-experiment`, `--contradicting-experiment`, `--supporting-decision`, `--linked-artifact`, `--alternative`, `--derived-from`.
+Supported list append flags: `--tag`, `--success-criterion`, `--metric`, `--pro`, `--con`, `--next-action`, `--supporting-experiment`, `--contradicting-experiment`, `--supporting-decision`, `--linked-artifact`, `--alternative`, `--derived-from`, `--depends-on`, `--blocked-by`.
+
+Supported boolean flags: `--ready-for-agent`, `--not-ready-for-agent`.
+
+Use `priority` as coarse urgency and `order`/`rank` for stable sequencing. Experiment assignment fields (`owner`, `ready_for_agent`, `depends_on`, `blocked_by`, `handoff_context`) validate only on experiment nodes.
 
 For nested option workstream metadata, use the narrow allowlisted command instead of patching YAML:
 

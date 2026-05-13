@@ -478,6 +478,8 @@ def _compact_node_summary(node: dict[str, Any] | None) -> dict[str, Any] | None:
         "title",
         "status",
         "priority",
+        "order",
+        "rank",
         "summary",
         "question",
         "hypothesis",
@@ -487,6 +489,11 @@ def _compact_node_summary(node: dict[str, Any] | None) -> dict[str, Any] | None:
         "evidence_summary",
         "result_summary",
         "outcome",
+        "owner",
+        "ready_for_agent",
+        "depends_on",
+        "blocked_by",
+        "handoff_context",
     ]
     return {field: node.get(field) for field in fields if node.get(field) not in (None, "", [])}
 

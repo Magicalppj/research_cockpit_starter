@@ -1,0 +1,16 @@
+{
+  "schema_version": "assignment_view_v1",
+  "filters": {
+    "node_type": "experiment",
+    "statuses": [
+      "queued",
+      "running"
+    ],
+    "priorities": [
+      "critical",
+      "high"
+    ]
+  },
+  "count": 0,
+  "assignments": []
+}

@@ -12,7 +12,7 @@
     "resolution_attempts": [
       "examples/dashboards/focus_context_pack.json",
       "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/focus_context_pack.json"
+      "dashboards/focus_context_pack.json"
     ]
   },
   {
@@ -28,7 +28,7 @@
     "resolution_attempts": [
       "examples/dashboards/graph_view.json",
       "examples/demo_research_cockpit/dashboards/graph_view.json",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/graph_view.json"
+      "dashboards/graph_view.json"
     ]
   },
   {
@@ -44,7 +44,7 @@
     "resolution_attempts": [
       "examples/dashboards",
       "examples/demo_research_cockpit/dashboards",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards"
+      "dashboards"
     ]
   },
   {
@@ -75,7 +75,7 @@
     "resolution_attempts": [
       "examples/dashboards/focus_context_pack.json",
       "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/focus_context_pack.json"
+      "dashboards/focus_context_pack.json"
     ]
   },
   {
@@ -92,7 +92,7 @@
     "resolution_attempts": [
       "examples/dashboards/graph_view.json",
       "examples/demo_research_cockpit/dashboards/graph_view.json",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/graph_view.json"
+      "dashboards/graph_view.json"
     ]
   },
   {
@@ -109,7 +109,7 @@
     "resolution_attempts": [
       "examples/dashboards",
       "examples/demo_research_cockpit/dashboards",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards"
+      "dashboards"
     ]
   },
   {
@@ -140,7 +140,7 @@
     "resolution_attempts": [
       "examples/dashboards/focus_context_pack.json",
       "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/focus_context_pack.json"
+      "dashboards/focus_context_pack.json"
     ]
   },
   {
@@ -157,7 +157,7 @@
     "resolution_attempts": [
       "examples/dashboards/graph_view.json",
       "examples/demo_research_cockpit/dashboards/graph_view.json",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/graph_view.json"
+      "dashboards/graph_view.json"
     ]
   },
   {
@@ -174,7 +174,7 @@
     "resolution_attempts": [
       "examples/dashboards",
       "examples/demo_research_cockpit/dashboards",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards"
+      "dashboards"
     ]
   },
   {
@@ -205,7 +205,7 @@
     "resolution_attempts": [
       "examples/dashboards/focus_context_pack.json",
       "examples/demo_research_cockpit/dashboards/focus_context_pack.json",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/focus_context_pack.json"
+      "dashboards/focus_context_pack.json"
     ]
   },
   {
@@ -222,7 +222,7 @@
     "resolution_attempts": [
       "examples/dashboards/graph_view.json",
       "examples/demo_research_cockpit/dashboards/graph_view.json",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards/graph_view.json"
+      "dashboards/graph_view.json"
     ]
   },
   {
@@ -239,7 +239,7 @@
     "resolution_attempts": [
       "examples/dashboards",
       "examples/demo_research_cockpit/dashboards",
-      "D:/Courses/PHD/Agent/research_cockpit_starter/dashboards"
+      "dashboards"
     ]
   }
 ]

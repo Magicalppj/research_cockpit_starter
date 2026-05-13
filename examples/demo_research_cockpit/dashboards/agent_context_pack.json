@@ -1,8 +1,8 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-05-09T04:43:23.993810Z",
-    "source_git_commit": "55f5d4f",
+    "generated_at": "2026-05-13T06:49:51.358983Z",
+    "source_git_commit": "7f486f0",
     "worktree_dirty": true,
     "current_state_updated_at": "2026-04-29"
   },
@@ -75,6 +75,8 @@
       "title": "Demo Research Stage",
       "status": "active",
       "priority": "high",
+      "order": null,
+      "rank": null,
       "summary": "Minimal public demo stage for validating Research Cockpit workflows.",
       "question": null,
       "hypothesis": null,
@@ -95,6 +97,11 @@
       "success_criteria": [],
       "agent_workstream": null,
       "workstream_report": null,
+      "owner": null,
+      "ready_for_agent": null,
+      "depends_on": [],
+      "blocked_by": [],
+      "handoff_context": null,
       "agent_context": null,
       "next_actions": [
         "Review the demo problem and compare candidate options."
@@ -107,6 +114,8 @@
       "title": "Demo answer quality is inconsistent",
       "status": "active",
       "priority": "critical",
+      "order": null,
+      "rank": null,
       "summary": "Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.",
       "question": "How can the demo agent make answers more consistent across repeated runs?",
       "hypothesis": null,
@@ -134,6 +143,11 @@
       "success_criteria": [],
       "agent_workstream": null,
       "workstream_report": null,
+      "owner": null,
+      "ready_for_agent": null,
+      "depends_on": [],
+      "blocked_by": [],
+      "handoff_context": null,
       "agent_context": null,
       "next_actions": [
         "Run the prompt refinement demo experiment."
@@ -148,6 +162,8 @@
       "title": "Prompt refinement branch",
       "status": "active",
       "priority": "high",
+      "order": null,
+      "rank": null,
       "summary": "Candidate branch that improves instructions, examples, and acceptance checks.",
       "question": null,
       "hypothesis": "Clearer task framing and explicit success criteria will make responses more consistent.",
@@ -170,6 +186,11 @@
       "success_criteria": [],
       "agent_workstream": null,
       "workstream_report": null,
+      "owner": null,
+      "ready_for_agent": null,
+      "depends_on": [],
+      "blocked_by": [],
+      "handoff_context": null,
       "agent_context": null,
       "next_actions": [],
       "blockers": []
@@ -180,6 +201,8 @@
       "title": "Prompt refinement smoke run",
       "status": "planned",
       "priority": null,
+      "order": null,
+      "rank": null,
       "summary": "Small demo experiment for recording a structured finding in an isolated copy.",
       "question": null,
       "hypothesis": null,
@@ -202,6 +225,11 @@
       "success_criteria": [],
       "agent_workstream": null,
       "workstream_report": null,
+      "owner": null,
+      "ready_for_agent": null,
+      "depends_on": [],
+      "blocked_by": [],
+      "handoff_context": null,
       "agent_context": null,
       "next_actions": [],
       "blockers": []
@@ -266,6 +294,22 @@
     }
   ],
   "active_option_workstreams": [],
+  "assignment_view": {
+    "schema_version": "assignment_view_v1",
+    "filters": {
+      "node_type": "experiment",
+      "statuses": [
+        "queued",
+        "running"
+      ],
+      "priorities": [
+        "critical",
+        "high"
+      ]
+    },
+    "count": 0,
+    "assignments": []
+  },
   "saved_graph_views": [],
   "recent_interactions": [
     {
