@@ -57,8 +57,13 @@ from research_cockpit.ui.view_helpers import (
     format_resource_index_rows,
     format_search_result_rows,
     build_graph_component_payload,
+    build_graph_component_base_payload,
+    build_graph_component_payload_from_base,
+    graph_cache_key,
     graph_component_event_id,
+    graph_component_payload_cache_key,
     graph_component_selected_node_id,
+    graph_filter_cache_key,
     ordered_tab_keys,
     ordered_tab_labels,
     reset_global_graph_filter_state,
@@ -1245,6 +1250,107 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(payload["edges"][0]["source"], "problem_text")
         self.assertEqual(payload["edges"][0]["target"], "option_t5")
         self.assertIn("color", payload["edges"][0])
+
+    def test_graph_component_base_payload_reuses_nodes_and_edges_for_selection(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "label": "Weak text",
+                    "title": "Focus problem",
+                    "type": "problem",
+                    "status": "active",
+                    "color": "#FFE9A8",
+                },
+                {
+                    "id": "option_t5",
+                    "label": "T5",
+                    "title": "Candidate option",
+                    "type": "option",
+                    "status": "open",
+                    "color": "#FFFFFF",
+                    "effective_baseline_option_id": "problem_text",
+                },
+            ],
+            "edges": [{"from": "problem_text", "to": "option_t5", "relation": "contains"}],
+        }
+
+        base_payload = build_graph_component_base_payload(graph, show_baseline_lens=True)
+        selected_problem = build_graph_component_payload_from_base(base_payload, "problem_text")
+        selected_option = build_graph_component_payload_from_base(base_payload, "option_t5")
+
+        self.assertEqual(selected_problem["selected_node_id"], "problem_text")
+        self.assertEqual(selected_option["selected_node_id"], "option_t5")
+        self.assertIs(selected_problem["nodes"], base_payload["nodes"])
+        self.assertIs(selected_problem["edges"], base_payload["edges"])
+        self.assertIs(selected_option["nodes"], base_payload["nodes"])
+        self.assertIs(selected_option["edges"], base_payload["edges"])
+        self.assertEqual(selected_problem["nodes"], selected_option["nodes"])
+        self.assertEqual(selected_problem["edges"], selected_option["edges"])
+
+    def test_graph_cache_keys_ignore_selection_but_track_filters_and_baseline_lens(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "label": "Weak text",
+                    "title": "Focus problem",
+                    "type": "problem",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 0,
+                },
+                {
+                    "id": "option_t5",
+                    "label": "T5",
+                    "title": "Candidate option",
+                    "type": "option",
+                    "status": "open",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                    "effective_baseline_option_id": "problem_text",
+                },
+            ],
+            "edges": [{"from": "problem_text", "to": "option_t5", "relation": "contains"}],
+        }
+
+        base_payload = build_graph_component_base_payload(graph)
+        selected_problem = build_graph_component_payload_from_base(base_payload, "problem_text")
+        selected_option = build_graph_component_payload_from_base(base_payload, "option_t5")
+        default_filter_key = graph_filter_cache_key(
+            graph,
+            "global",
+            {"problem", "option"},
+            {"active", "open"},
+            selected_stages={"stage_text"},
+        )
+        collapsed_filter_key = graph_filter_cache_key(
+            graph,
+            "global",
+            {"problem", "option"},
+            {"active", "open"},
+            selected_stages={"stage_text"},
+            collapsed_branch_roots={"problem_text"},
+        )
+
+        self.assertEqual(selected_problem["nodes"], selected_option["nodes"])
+        self.assertEqual(selected_problem["edges"], selected_option["edges"])
+        self.assertNotEqual(default_filter_key, collapsed_filter_key)
+        self.assertNotEqual(
+            graph_component_payload_cache_key(default_filter_key, show_baseline_lens=False),
+            graph_component_payload_cache_key(default_filter_key, show_baseline_lens=True),
+        )
+
+        changed_graph = {
+            **graph,
+            "nodes": [
+                {**graph["nodes"][0], "status": "done"},
+                graph["nodes"][1],
+            ],
+        }
+        self.assertNotEqual(graph_cache_key(graph), graph_cache_key(changed_graph))
 
     def test_graph_component_payload_adds_baseline_lens_markers_only_when_enabled(self) -> None:
         graph = {

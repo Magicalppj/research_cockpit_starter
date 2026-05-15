@@ -67,7 +67,8 @@ from research_cockpit.ui.view_helpers import (
     build_update_decision_checklist_command,
     build_update_suggestion_state_command,
     context_rows,
-    build_graph_component_payload,
+    build_graph_component_base_payload,
+    build_graph_component_payload_from_base,
     default_detail_node_id,
     default_show_baseline_lens,
     default_selected_node_types,
@@ -92,6 +93,8 @@ from research_cockpit.ui.view_helpers import (
     format_resource_rows,
     format_search_result_rows,
     format_suggestion_lifecycle_rows,
+    graph_component_payload_cache_key,
+    graph_filter_cache_key,
     ordered_tab_keys,
     revealable_child_ids_for_view,
     reset_global_graph_filter_state,
@@ -171,8 +174,54 @@ def load_graph_data():
     return _load_graph_data_cached(str(RESEARCH_ROOT), _truth_source_revision(RESEARCH_ROOT))
 
 
+@st.cache_data(show_spinner=False, max_entries=64)
+def _filter_graph_for_view_cached(
+    cache_key: tuple,
+    _graph: dict,
+    view_mode: str,
+    selected_types: tuple[str, ...],
+    selected_statuses: tuple[str, ...],
+    selected_stages: tuple[str, ...],
+    selected_focus_roles: tuple[str, ...],
+    selected_workstreams: tuple[str, ...],
+    only_blocking: bool,
+    only_next_actions: bool,
+    only_missing_evidence: bool,
+    collapsed_branch_roots: tuple[str, ...],
+    revealed_child_roots: tuple[str, ...],
+) -> tuple[dict, dict[str, object]]:
+    return filter_graph_for_view_with_visibility(
+        _graph,
+        view_mode,
+        set(selected_types),
+        set(selected_statuses),
+        selected_stages=set(selected_stages),
+        selected_focus_roles=set(selected_focus_roles),
+        selected_workstreams=set(selected_workstreams),
+        only_blocking=only_blocking,
+        only_next_actions=only_next_actions,
+        only_missing_evidence=only_missing_evidence,
+        collapsed_branch_roots=set(collapsed_branch_roots),
+        revealed_child_roots=set(revealed_child_roots),
+    )
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def _build_graph_component_base_payload_cached(
+    cache_key: tuple,
+    _filtered_graph: dict,
+    show_baseline_lens: bool,
+) -> dict[str, object]:
+    return build_graph_component_base_payload(
+        _filtered_graph,
+        show_baseline_lens=show_baseline_lens,
+    )
+
+
 def clear_graph_data_cache() -> None:
     _load_graph_data_cached.clear()
+    _filter_graph_for_view_cached.clear()
+    _build_graph_component_base_payload_cached.clear()
 
 
 def render_decision_repair_hints(checklist: dict, text: dict[str, str]) -> None:
@@ -804,19 +853,41 @@ def render_graph_tab(
     if renderer_label not in renderer_options:
         renderer_label = "React Flow"
 
-    filtered_graph, graph_visibility_context = filter_graph_for_view_with_visibility(
+    selected_types_key = tuple(sorted(selected_types))
+    selected_statuses_key = tuple(sorted(selected_statuses))
+    selected_stages_key = tuple(sorted(selected_stages))
+    selected_focus_roles_key = tuple(sorted(selected_focus_roles))
+    selected_workstreams_key = tuple(sorted(selected_workstreams))
+    collapsed_branch_roots_key = tuple(sorted(collapsed_branch_roots))
+    revealed_child_roots_key = tuple(sorted(revealed_child_roots))
+    graph_view_key = graph_filter_cache_key(
         graph,
         view_mode,
-        selected_types,
-        selected_statuses,
-        selected_stages=selected_stages,
-        selected_focus_roles=selected_focus_roles,
-        selected_workstreams=selected_workstreams,
+        selected_types_key,
+        selected_statuses_key,
+        selected_stages=selected_stages_key,
+        selected_focus_roles=selected_focus_roles_key,
+        selected_workstreams=selected_workstreams_key,
         only_blocking=only_blocking,
         only_next_actions=only_next_actions,
         only_missing_evidence=only_missing_evidence,
-        collapsed_branch_roots=collapsed_branch_roots,
-        revealed_child_roots=revealed_child_roots,
+        collapsed_branch_roots=collapsed_branch_roots_key,
+        revealed_child_roots=revealed_child_roots_key,
+    )
+    filtered_graph, graph_visibility_context = _filter_graph_for_view_cached(
+        graph_view_key,
+        graph,
+        view_mode,
+        selected_types_key,
+        selected_statuses_key,
+        selected_stages_key,
+        selected_focus_roles_key,
+        selected_workstreams_key,
+        only_blocking,
+        only_next_actions,
+        only_missing_evidence,
+        collapsed_branch_roots_key,
+        revealed_child_roots_key,
     )
     visible_node_ids = [node["id"] for node in filtered_graph["nodes"] if node["id"] in nodes]
     select_key = "graph_detail_select"
@@ -844,11 +915,15 @@ def render_graph_tab(
     with graph_area:
         use_react_flow = renderer_label == "React Flow" and graph_component_build_available()
         if use_react_flow:
-            payload = build_graph_component_payload(
+            base_payload = _build_graph_component_base_payload_cached(
+                graph_component_payload_cache_key(
+                    graph_view_key,
+                    show_baseline_lens=show_baseline_lens,
+                ),
                 filtered_graph,
-                selected_node_id=current_detail_node,
-                show_baseline_lens=show_baseline_lens,
+                show_baseline_lens,
             )
+            payload = build_graph_component_payload_from_base(base_payload, current_detail_node)
             component_value = render_research_graph_component(
                 payload,
                 selected_node_id=current_detail_node,

@@ -329,9 +329,71 @@ def _baseline_visual_edges(graph_nodes: list[dict[str, Any]], included: set[str]
     return edges
 
 
-def build_graph_component_payload(
+def _cache_key_value(value: object) -> object:
+    if isinstance(value, dict):
+        return tuple(
+            (str(key), _cache_key_value(item_value))
+            for key, item_value in sorted(value.items(), key=lambda item: str(item[0]))
+        )
+    if isinstance(value, set):
+        return tuple(sorted((_cache_key_value(item) for item in value), key=repr))
+    if isinstance(value, (list, tuple)):
+        return tuple(_cache_key_value(item) for item in value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _cache_key_values(values: set[str] | list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    return tuple(sorted(str(value) for value in (values or [])))
+
+
+def graph_cache_key(graph: dict) -> tuple[Any, ...]:
+    value = _cache_key_value({
+        "nodes": graph.get("nodes", []),
+        "edges": graph.get("edges", []),
+        "current_focus_node": graph.get("current_focus_node"),
+    })
+    return value if isinstance(value, tuple) else (value,)
+
+
+def graph_filter_cache_key(
     graph: dict,
-    selected_node_id: str | None = None,
+    view_mode: str,
+    selected_types: set[str] | list[str] | tuple[str, ...],
+    selected_statuses: set[str] | list[str] | tuple[str, ...],
+    selected_stages: set[str] | list[str] | tuple[str, ...] | None = None,
+    selected_focus_roles: set[str] | list[str] | tuple[str, ...] | None = None,
+    selected_workstreams: set[str] | list[str] | tuple[str, ...] | None = None,
+    *,
+    only_blocking: bool = False,
+    only_next_actions: bool = False,
+    only_missing_evidence: bool = False,
+    collapsed_branch_roots: set[str] | list[str] | tuple[str, ...] | None = None,
+    revealed_child_roots: set[str] | list[str] | tuple[str, ...] | None = None,
+) -> tuple[Any, ...]:
+    return (
+        graph_cache_key(graph),
+        str(view_mode),
+        _cache_key_values(selected_types),
+        _cache_key_values(selected_statuses),
+        _cache_key_values(selected_stages),
+        _cache_key_values(selected_focus_roles),
+        _cache_key_values(selected_workstreams),
+        bool(only_blocking),
+        bool(only_next_actions),
+        bool(only_missing_evidence),
+        _cache_key_values(collapsed_branch_roots),
+        _cache_key_values(revealed_child_roots),
+    )
+
+
+def graph_component_payload_cache_key(graph_view_key: tuple[Any, ...], *, show_baseline_lens: bool = False) -> tuple[Any, ...]:
+    return (graph_view_key, bool(show_baseline_lens))
+
+
+def build_graph_component_base_payload(
+    graph: dict,
     *,
     show_baseline_lens: bool = False,
 ) -> dict[str, Any]:
@@ -387,14 +449,37 @@ def build_graph_component_payload(
             "width": width,
         })
 
-    selected = str(selected_node_id) if selected_node_id in included else None
     if show_baseline_lens:
         edges.extend(_baseline_visual_edges(graph.get("nodes", []), included))
     return {
         "nodes": nodes,
         "edges": edges,
+    }
+
+
+def build_graph_component_payload_from_base(
+    base_payload: dict[str, Any],
+    selected_node_id: str | None = None,
+) -> dict[str, Any]:
+    included = {node["id"] for node in base_payload.get("nodes", [])}
+    selected = str(selected_node_id) if selected_node_id in included else None
+    return {
+        "nodes": base_payload.get("nodes", []),
+        "edges": base_payload.get("edges", []),
         "selected_node_id": selected,
     }
+
+
+def build_graph_component_payload(
+    graph: dict,
+    selected_node_id: str | None = None,
+    *,
+    show_baseline_lens: bool = False,
+) -> dict[str, Any]:
+    return build_graph_component_payload_from_base(
+        build_graph_component_base_payload(graph, show_baseline_lens=show_baseline_lens),
+        selected_node_id,
+    )
 
 
 def graph_component_selected_node_id(value: object, visible_node_ids: list[str] | set[str]) -> str | None:
