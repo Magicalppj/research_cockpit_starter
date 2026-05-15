@@ -13,6 +13,7 @@ from research_cockpit.graph_core import (
     ordered_node_contexts,
     unique_strings,
 )
+from research_cockpit.hierarchy_policy import hierarchy_policy
 from research_cockpit.types import ACTIVE_WORKSTREAM_STATUSES, ResearchNode
 
 
@@ -120,6 +121,7 @@ def build_option_workstream_context(
         "focus_next_actions": current.get("next_actions", []) or [],
         "open_next_actions": unique_strings(next_actions),
         "blockers": unique_strings(blockers),
+        "hierarchy_policy": hierarchy_policy(parent_option_id=option_id),
         "suggested_commands": {
             "claim": _workflow_command(
                 "claim_option.py",
@@ -131,6 +133,14 @@ def build_option_workstream_context(
             ),
             "context": _workflow_command("option_workstream_context.py", "--id", option_id, "--compact", "--json"),
             "context_option_alias": _workflow_command("option_workstream_context.py", "--option", option_id, "--json"),
+            "create_child_workstream": _workflow_command(
+                "create_workstream.py",
+                "--file",
+                "workstream.yaml",
+                "--dry-run",
+                "--json",
+                "--show-diff",
+            ),
             "finalize": _workflow_command(
                 "finalize_workstream.py",
                 "--file",

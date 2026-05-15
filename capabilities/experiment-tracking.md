@@ -142,7 +142,7 @@ research-cockpit complete-experiment --root research_cockpit --id experiment_x -
 research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --evidence-path artifacts/experiment_x/run_x --evidence-link metrics=artifacts/experiment_x/run_x/metrics.json --json --compact
 ```
 
-`complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, creates inline evidence artifacts when evidence fields are present, and clears experiment-local `next_actions` so completed nodes do not carry live work. It does not change focus, option status, problem status, or `current_best_option`. Use `create-followup-experiment` for follow-up work.
+`complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, creates inline evidence artifacts when evidence fields are present, and clears experiment-local `next_actions` so completed nodes do not carry live work. It does not change focus, option status, problem status, or `current_best_option`. Use `create-followup-experiment` only for a single small follow-up gate; when a conclusion opens a multi-step branch, use `create-workstream` with `problem.parent` and `problem.derived_from` so the node graph stays hierarchical.
 
 If the completed experiment is still the global `current_focus_node` or a per-agent focus node, JSON output includes focus-stale warnings plus recommended `set-focus` / `set-agent-focus` commands. Use explicit focus movement when closing a branch:
 
@@ -161,6 +161,7 @@ research-cockpit create-followup-experiment --root research_cockpit --from exper
 
 The source experiment must be `done` or `running`. The new experiment is queued, records `derived_from`, reuses the source experiment's option parent unless `--parent` is supplied, and gets a default success criterion that references the source. `--next-action` writes the initial follow-up experiment `next_actions`. When combined with `--set-focus`, the same action is also written to `current_state.next_actions`, so dashboard "Current Next Actions" immediately points at the new gate.
 If a `done` experiment still has real follow-up work, move that work into a derived queued experiment instead of leaving live `next_actions` on the completed node.
+Use this command only for a single follow-up gate. If the result creates a new worktree branch, several follow-up experiments, or a new question, create a child workstream instead: use `create-workstream` with `problem.parent` set to the inherited option id and `derived_from` pointing back to the source experiment. That keeps the graph as `option -> problem -> option -> experiment` instead of flattening all later experiments under one option.
 
 `complete-experiment` records linked artifact ids both in the finding `linked_artifacts` field and in the finding `evidence` list, so a finding remains traceable when read without the full experiment node.
 

@@ -160,6 +160,8 @@ research-cockpit build --root research_cockpit
 
 `create-workstream` 不会自动改变全局 focus、暂停旧方案或删除旧分支。follow-up option 应使用 `open` 状态；文件输入里的 option `planned` 会被规范化为 `open`。
 
+如果后续实验继承某个 worktree/option 的结论并会展开成多步探索，优先用 child workstream：在 `workstream.yaml` 里把 `problem.parent` 设为父 option id，并用 `problem.derived_from` 记录来源实验或方案。这样节点图会形成 `option -> problem -> option -> experiment` 的子树，而不是把所有后续实验平铺在同一层。
+
 ### 2. 记录实验结论和证据
 
 单个实验：
@@ -186,6 +188,8 @@ research-cockpit close-current-experiment --root research_cockpit --id experimen
 ```sh
 research-cockpit create-followup-experiment --root research_cockpit --from experiment_x --id experiment_x_followup --title "Follow-up gate" --priority high --next-action "Run follow-up gate" --set-focus --json --compact
 ```
+
+`create-followup-experiment` 只适合单个小的 follow-up gate。如果该结论会派生多个实验、需要继承 artifact bundle，或需要保留清晰的分支层次，请改用上面的 `create-workstream` 创建 child workstream。
 
 批量实验：
 

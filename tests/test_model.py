@@ -1169,6 +1169,10 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(context["type_context"]["kind"], "option")
         self.assertEqual(context["type_context"]["workstream"]["option"]["id"], "option_t5")
         self.assertIn("evidence_summary", context["type_context"]["workstream"])
+        hierarchy = context["type_context"]["workstream"]["hierarchy_policy"]
+        self.assertEqual(hierarchy["workstream_file_hint"]["problem.parent"], "option_t5")
+        self.assertIn("create-workstream", hierarchy["recommended_command"])
+        self.assertIn("create_child_workstream", context["type_context"]["workstream"]["suggested_commands"])
         for command in context["type_context"]["workstream"]["suggested_commands"].values():
             self.assertIn("--root", command)
             self.assertIn(str(self.root), command)
@@ -1190,6 +1194,11 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(context["type_context"]["parent_option"]["id"], "option_t5")
         self.assertEqual(context["type_context"]["metrics"], ["accuracy", "latency"])
         self.assertTrue(context["type_context"]["missing_evidence"])
+        hierarchy = context["type_context"]["hierarchy_policy"]
+        self.assertEqual(hierarchy["workstream_file_hint"]["problem.parent"], "option_t5")
+        self.assertEqual(hierarchy["source_experiment_id"], "exp_t5")
+        self.assertIn("create_child_workstream", context["type_context"]["suggested_commands"])
+        self.assertIn("create_single_followup", context["type_context"]["suggested_commands"])
         self.assertIn("record-finding", context["command_drafts"]["record_finding"])
         self.assertIn("--root", context["command_drafts"]["record_finding"])
 

@@ -117,6 +117,8 @@ followup_options:
 
 Note: option nodes do not have a stored planned status. In graph plan and
 workstream input files, option status planned is accepted as an alias for open.
+For a derived branch under an existing option or worktree conclusion, set
+problem.parent to that option id and record the source with derived_from.
 """
 
 

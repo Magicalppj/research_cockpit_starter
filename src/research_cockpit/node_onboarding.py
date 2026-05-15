@@ -12,6 +12,7 @@ from research_cockpit.graph_core import (
     node_id_by_type_in_path,
     ordered_node_contexts,
 )
+from research_cockpit.hierarchy_policy import hierarchy_policy
 from research_cockpit.decisions import build_decision_acceptance_checklist, build_decision_trace
 from research_cockpit.baselines import resolve_effective_baseline
 from research_cockpit.interaction_log import recent_interactions
@@ -166,6 +167,7 @@ def _experiment_context(
         "outcome": experiment.raw.get("outcome"),
         "missing_evidence": missing_evidence,
         "related_decisions": ordered_node_contexts(nodes, decision_ids),
+        "hierarchy_policy": hierarchy_policy(parent_option_id=option_id, source_experiment_id=experiment.id),
         "suggested_commands": {
             "mark_running": _rooted_cli_command(
                 root,
@@ -187,6 +189,30 @@ def _experiment_context(
                 "medium",
                 "--outcome",
                 "inconclusive",
+                command_style=command_style,
+            ),
+            "create_child_workstream": _rooted_cli_command(
+                root,
+                "create-workstream",
+                "--file",
+                "workstream.yaml",
+                "--dry-run",
+                "--json",
+                "--show-diff",
+                command_style=command_style,
+            ),
+            "create_single_followup": _rooted_cli_command(
+                root,
+                "create-followup-experiment",
+                "--from",
+                experiment.id,
+                "--id",
+                "<followup_experiment_id>",
+                "--title",
+                "Follow-up gate",
+                "--dry-run",
+                "--json",
+                "--show-diff",
                 command_style=command_style,
             ),
         },
@@ -336,6 +362,7 @@ def _option_onboarding_context(
     command_style: str = "console",
 ) -> dict[str, Any]:
     workstream = build_option_workstream_context(root, nodes, current, option.id)
+    workstream["hierarchy_policy"] = hierarchy_policy(parent_option_id=option.id)
     workstream["suggested_commands"] = {
         "claim": _rooted_cli_command(
             root,
@@ -354,6 +381,16 @@ def _option_onboarding_context(
             "--option",
             option.id,
             "--json",
+            command_style=command_style,
+        ),
+        "create_child_workstream": _rooted_cli_command(
+            root,
+            "create-workstream",
+            "--file",
+            "workstream.yaml",
+            "--dry-run",
+            "--json",
+            "--show-diff",
             command_style=command_style,
         ),
         "report": _rooted_cli_command(

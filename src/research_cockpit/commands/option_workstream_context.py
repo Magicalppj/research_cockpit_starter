@@ -144,6 +144,7 @@ def compact_option_workstream_context(payload: dict[str, Any], raw_nodes: dict[s
             "outcome_counts": evidence.get("outcome_counts", {}),
         },
         "experiment_summaries": _experiment_summaries(payload, raw_nodes),
+        "hierarchy_policy": payload.get("hierarchy_policy", {}),
         "suggested_commands": payload.get("suggested_commands", {}),
     }
 

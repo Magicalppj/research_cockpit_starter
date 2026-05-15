@@ -964,6 +964,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["stable_artifact_root"], str((self.root / "artifacts").resolve()))
         self.assertIn("ingest-artifact", payload["handoff"]["commands"]["ingest_artifact"])
         self.assertEqual(payload["agent_focus"]["current_focus_node"], "exp_t5")
+        self.assertEqual(payload["option_context"]["hierarchy_policy"]["workstream_file_hint"]["problem.parent"], "option_t5")
+        self.assertIn("create_child_workstream", payload["option_context"]["suggested_commands"])
 
     def test_set_agent_focus_actual_json_omits_would_change_and_compact_is_supported(self) -> None:
         out = subprocess.run(
@@ -1144,6 +1146,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(experiment_summary["metric_count"], 2)
         self.assertEqual(experiment_summary["finding_count"], 1)
         self.assertEqual(experiment_summary["linked_artifact_count"], 1)
+        self.assertEqual(payload["hierarchy_policy"]["workstream_file_hint"]["problem.parent"], "option_t5")
+        self.assertNotIn("active_option.parent", payload["hierarchy_policy"]["workstream_file_hint"])
+        self.assertIn("active_option.parent", payload["hierarchy_policy"]["command_created_shape"])
+        self.assertIn("create_child_workstream", payload["suggested_commands"])
         self.assertIn("--id option_t5", payload["suggested_commands"]["context"])
         self.assertNotIn("subtree_nodes", payload)
         self.assertNotIn("experiments", payload)
@@ -1834,6 +1840,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("search_summary", payload)
         self.assertIn("mutation_guidance", payload)
         self.assertIn("apply-graph-plan", " ".join(payload["mutation_guidance"]["command_skeletons"]))
+        hierarchy = payload["mutation_guidance"]["hierarchy_policy"]
+        self.assertEqual(hierarchy["default_branch_shape"], "option -> problem -> option -> experiment/decision")
+        self.assertIn("create-workstream", hierarchy["recommended_command"])
         self.assertIsInstance(payload["git"]["worktree_dirty"], bool)
 
     def test_agent_bootstrap_cli_json_builds_when_requested(self) -> None:
@@ -1989,6 +1998,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("hypothesis", by_name["create-workstream"]["fields_supported"])
         self.assertIn("success_criteria", by_name["create-workstream"]["fields_supported"])
         self.assertIn("metrics", by_name["create-workstream"]["fields_supported"])
+        self.assertIn("option -> problem -> option", by_name["create-workstream"]["hierarchy_guidance"])
         self.assertEqual(by_name["create-workstream"]["status_aliases"], {"option": {"planned": "open"}})
         self.assertTrue(by_name["sync-focus-actions"]["supports_dry_run"])
         self.assertTrue(by_name["sync-focus-actions"]["supports_compact"])
@@ -2049,6 +2059,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("derived_from", by_name["create-followup-experiment"]["fields_supported"])
         self.assertTrue(by_name["create-followup-experiment"]["supports_show_diff"])
         self.assertIn("--show-diff", by_name["create-followup-experiment"]["supported_flags"])
+        self.assertIn("single queued gate", by_name["create-followup-experiment"]["hierarchy_guidance"])
         self.assertIn("update-workstream-fields", by_name)
         self.assertIn("agent_workstream.status", by_name["update-workstream-fields"]["fields_supported"])
         self.assertTrue(by_name["claim-option"]["supports_json"])
@@ -5894,6 +5905,42 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(option["supporting_experiments"], ["exp_workstream_1", "exp_workstream_2"])
         self.assertEqual(load_yaml(self.root / "current_state.yaml"), before_current)
         self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml"), before_old_option)
+
+    def test_create_workstream_can_create_nested_branch_under_option(self) -> None:
+        result = create_workstream(
+            self.root,
+            workstream={
+                "problem": {
+                    "id": "problem_nested_worktree",
+                    "title": "Nested worktree follow-up",
+                    "parent": "option_t5",
+                    "summary": "Scope follow-up work from the completed run.",
+                    "derived_from": ["exp_t5"],
+                },
+                "active_option": {
+                    "id": "option_nested_route",
+                    "title": "Nested follow-up route",
+                },
+                "experiments": [
+                    {"id": "exp_nested_gate", "title": "Run nested gate"},
+                ],
+            },
+            rebuild_dashboard=False,
+        )
+
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_nested_worktree.yaml")
+        option = load_yaml(self.root / "graph" / "nodes" / "option_nested_route.yaml")
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_nested_gate.yaml")
+        parent = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(problem["parent"], "option_t5")
+        self.assertEqual(problem["derived_from"], ["exp_t5"])
+        self.assertEqual(problem["children"], ["option_nested_route"])
+        self.assertEqual(option["parent"], "problem_nested_worktree")
+        self.assertEqual(option["supporting_experiments"], ["exp_nested_gate"])
+        self.assertEqual(experiment["parent"], "option_nested_route")
+        self.assertIn("problem_nested_worktree", parent["children"])
 
     def test_create_workstream_normalizes_planned_followup_option_to_open(self) -> None:
         result = create_workstream(

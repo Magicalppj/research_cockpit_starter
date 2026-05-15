@@ -36,6 +36,7 @@ _MISSING_DEPENDENCIES = missing_runtime_dependencies()
 if not _MISSING_DEPENDENCIES:
     from research_cockpit.baselines import resolve_current_effective_baseline
     from research_cockpit.context_packs import build_context_metadata
+    from research_cockpit.hierarchy_policy import hierarchy_policy
     from research_cockpit.model import (
         build_search_index,
         build_search_index_summary,
@@ -96,6 +97,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
         "current_best_option": current_best_option,
         "pause_candidate_options": sorted(pause_candidates),
         "batching": "Use --dry-run --json --show-diff first, then run mutating commands with --no-build and finish with validate --json plus build.",
+        "hierarchy_policy": hierarchy_policy(parent_option_id=current.get("current_option") or current_best_option),
         "command_skeletons": [
             "research-cockpit init --root <root> --build --json",
             "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",

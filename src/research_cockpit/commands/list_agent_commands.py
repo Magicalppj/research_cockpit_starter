@@ -403,6 +403,10 @@ COMMANDS: list[dict[str, object]] = [
         "fields_supported": ["question", "hypothesis", "summary", "tags", "success_criteria", "metrics", "next_actions"],
         "status_aliases": STATUS_ALIASES,
         **file_schema_for_script("create_workstream.py"),
+        "hierarchy_guidance": (
+            "Use create-workstream to create an option -> problem -> option -> experiment branch. "
+            "For derived worktree follow-up, set problem.parent to the inherited option id."
+        ),
         "recommended_when": "Start a new research branch from a structured workstream plan.",
     },
     {
@@ -634,6 +638,10 @@ COMMANDS: list[dict[str, object]] = [
         "supports_no_build": True,
         "supports_compact": True,
         "fields_supported": ["status=queued", "derived_from", "parent", "title", "priority", "success_criteria", "next_actions", "set_focus"],
+        "hierarchy_guidance": (
+            "Use only for a single queued gate under an existing option. "
+            "Use create-workstream for multi-step or worktree-derived child branches."
+        ),
         "recommended_when": "Branch a done or running experiment into the next queued optimization gate.",
     },
     {

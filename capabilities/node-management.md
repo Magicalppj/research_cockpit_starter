@@ -127,6 +127,8 @@ Use `open` for not-yet-selected follow-up options. File-based graph commands acc
 `create-workstream --print-schema` shows the short supported example. Common node fields such as `summary`, `question`, `hypothesis`, `tags`, `success_criteria`, `metrics`, and `next_actions` pass through to the created graph nodes.
 After creation, use `option-workstream-context --root research_cockpit --id option_x --compact --json` to verify experiment ids, statuses, success criteria count, metric count, finding count, and linked artifact count. Read per-experiment `node-context` only when exact full text is needed.
 
+For a derived branch, set `problem.parent` to the inherited option id instead of the stage id. This creates a readable `option -> problem -> option -> experiment` subtree and keeps later agents from flattening every follow-up experiment under the same option. Add `derived_from` to the new problem or first experiment to record the prior experiment, worktree result, or option that motivated the branch.
+
 ## Update Status
 
 ```sh
