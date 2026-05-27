@@ -195,3 +195,36 @@ def load_progress_heartbeat(
         now=now,
         stale_after_minutes=stale_after_minutes,
     )
+
+
+def progress_heartbeat_signature(
+    root: Path,
+    progress_file: str | None,
+    *,
+    now: datetime | None = None,
+    stale_after_minutes: int = PROGRESS_STALE_AFTER_MINUTES,
+) -> tuple[Any, ...] | None:
+    if not progress_file:
+        return None
+    path, path_warnings = _resolve_progress_path(root, progress_file)
+    if path_warnings:
+        return (progress_file, "path_warning", tuple(path_warnings))
+    assert path is not None
+    if not path.exists():
+        return (progress_file, "missing")
+    try:
+        stat = path.stat()
+    except OSError as exc:
+        return (progress_file, "stat_error", str(exc))
+    progress = load_progress_heartbeat(
+        root,
+        progress_file,
+        now=now,
+        stale_after_minutes=stale_after_minutes,
+    )
+    return (
+        progress_file,
+        stat.st_mtime_ns,
+        stat.st_size,
+        bool(progress and progress.get("possibly_stale")),
+    )

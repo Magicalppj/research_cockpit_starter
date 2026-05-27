@@ -132,7 +132,7 @@ Standard `progress.json` heartbeat files should be JSON objects with this shape:
 }
 ```
 
-`total_steps` may be omitted or null when the total is unknown. `last_update` should be an ISO-8601 timestamp; active heartbeats are considered stale after 60 minutes without an update. `run-context --json` reads a run's relative `progress_file` and exposes normalized progress, percent complete when possible, heartbeat warnings, and schema warnings. Missing or malformed progress files produce warnings instead of blocking run context.
+`total_steps` may be omitted or null when the total is unknown. `last_update` should be an ISO-8601 timestamp; active heartbeats are considered stale after 60 minutes without an update. `run-context --json` and run summaries read a run's relative `progress_file` and expose normalized progress, percent complete when possible, heartbeat warnings, and schema warnings. Missing or malformed progress files produce warnings instead of blocking context reads.
 
 ## Artifacts
 

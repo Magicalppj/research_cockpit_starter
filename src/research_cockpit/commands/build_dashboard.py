@@ -30,7 +30,7 @@ from research_cockpit.resources import build_link_rows
 from research_cockpit.decisions import build_decision_acceptance_checklists
 from research_cockpit.mutation_lock import mutation_lock
 from research_cockpit.option_workstreams import build_option_workstream_rows
-from research_cockpit.run_summaries import run_staleness_signature
+from research_cockpit.run_summaries import run_progress_signature, run_staleness_signature
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.storage import save_text
 
@@ -64,10 +64,11 @@ def truth_source_signature(root: Path) -> tuple[tuple[str, int, int], ...]:
     return tuple(items)
 
 
-def dashboard_watch_signature(root: Path, *, now: Any | None = None) -> tuple[object, object]:
+def dashboard_watch_signature(root: Path, *, now: Any | None = None) -> tuple[object, object, object]:
     return (
         truth_source_signature(root),
         run_staleness_signature(root, now=now),
+        run_progress_signature(root, now=now),
     )
 
 
@@ -134,7 +135,7 @@ def build_dashboard_once(root: Path, *, json_output: bool = False) -> dict:
 
 
 def watch_dashboard(root: Path, *, interval: float, max_iterations: int | None, json_output: bool) -> None:
-    last_signature: tuple[object, object] | None = None
+    last_signature: tuple[object, object, object] | None = None
     iteration = 0
     while max_iterations is None or iteration < max_iterations:
         iteration += 1

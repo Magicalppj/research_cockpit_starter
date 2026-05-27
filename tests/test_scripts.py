@@ -87,6 +87,7 @@ from research_cockpit.mutation_lock import MutationError, mutation_lock
 from research_cockpit.mutation_runtime import finish_mutation
 from research_cockpit.progress import load_progress_heartbeat
 from research_cockpit.resources import build_link_rows
+from research_cockpit.run_summaries import build_run_summaries
 from workflow_metrics import workflow_metrics
 
 
@@ -566,12 +567,79 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(fresh[1], (("run_watch", "running", False),))
         self.assertEqual(stale[1], (("run_watch", "running", True),))
 
+    def test_dashboard_watch_signature_tracks_progress_file_state(self) -> None:
+        progress_path = self.root / "artifacts" / "exp_t5" / "run_watch_progress" / "progress.json"
+        progress_path.parent.mkdir(parents=True)
+        progress_path.write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "completed_steps": 1,
+                    "total_steps": 4,
+                    "last_update": "2026-05-27T00:00:00Z",
+                }
+            ),
+            encoding="utf-8",
+        )
+        save_yaml(
+            self.root / "runs" / "run_watch_progress.yaml",
+            {
+                "run_id": "run_watch_progress",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T00:00:00Z",
+                "progress_file": "artifacts/exp_t5/run_watch_progress/progress.json",
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_watch_progress_done.yaml",
+            {
+                "run_id": "run_watch_progress_done",
+                "status": "completed",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T00:00:00Z",
+                "finished_at": "2026-05-27T00:10:00Z",
+                "progress_file": "artifacts/exp_t5/run_watch_progress/progress.json",
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_watch_progress_missing.yaml",
+            {
+                "run_id": "run_watch_progress_missing",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T00:00:00Z",
+                "progress_file": "artifacts/exp_t5/run_watch_progress_missing/progress.json",
+            },
+        )
+
+        fresh = dashboard_watch_signature(
+            self.root,
+            now=datetime(2026, 5, 27, 0, 30, tzinfo=timezone.utc),
+        )
+        stale = dashboard_watch_signature(
+            self.root,
+            now=datetime(2026, 5, 27, 2, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertNotEqual(fresh, stale)
+        fresh_progress = {run_id: signature for run_id, signature in fresh[2]}
+        stale_progress = {run_id: signature for run_id, signature in stale[2]}
+        self.assertFalse(fresh_progress["run_watch_progress"][-1])
+        self.assertTrue(stale_progress["run_watch_progress"][-1])
+        self.assertFalse(fresh_progress["run_watch_progress_done"][-1])
+        self.assertFalse(stale_progress["run_watch_progress_done"][-1])
+        self.assertEqual(
+            fresh_progress["run_watch_progress_missing"],
+            ("artifacts/exp_t5/run_watch_progress_missing/progress.json", "missing"),
+        )
+
     def test_dashboard_watch_json_marks_time_sensitive_rebuilds(self) -> None:
         signatures = [
-            (("truth",), (("run_watch", "running", False),)),
-            (("truth",), (("run_watch", "running", False),)),
-            (("truth",), (("run_watch", "running", True),)),
-            (("truth",), (("run_watch", "running", True),)),
+            (("truth",), (("run_watch", "running", False),), ()),
+            (("truth",), (("run_watch", "running", False),), ()),
+            (("truth",), (("run_watch", "running", True),), ()),
+            (("truth",), (("run_watch", "running", True),), ()),
         ]
         with (
             patch("research_cockpit.commands.build_dashboard.dashboard_watch_signature", side_effect=signatures),
@@ -1174,6 +1242,20 @@ class ScriptBehaviorTests(unittest.TestCase):
             outcome="positive",
             rebuild_dashboard=False,
         )
+        progress_path = self.root / "artifacts" / "exp_t5" / "run_compact_context" / "progress.json"
+        progress_path.parent.mkdir(parents=True)
+        progress_path.write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "completed_steps": 1,
+                    "total_steps": 4,
+                    "last_update": "2999-01-01T00:00:00Z",
+                    "current_stage": "smoke",
+                }
+            ),
+            encoding="utf-8",
+        )
         save_yaml(
             self.root / "runs" / "run_compact_context.yaml",
             {
@@ -1218,6 +1300,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(experiment_summary["finding_count"], 1)
         self.assertEqual(experiment_summary["linked_artifact_count"], 1)
         self.assertEqual(experiment_summary["run_summary"]["active_run_ids"], ["run_compact_context"])
+        self.assertEqual(experiment_summary["run_summary"]["active_progress"][0]["percent_complete"], 25.0)
+        self.assertEqual(experiment_summary["run_summary"]["active_progress"][0]["current_stage"], "smoke")
+        self.assertNotIn("schema_version", experiment_summary["run_summary"]["active_progress"][0])
+        self.assertNotIn("path", experiment_summary["run_summary"]["active_progress"][0])
         self.assertNotIn("python train.py", str(experiment_summary["run_summary"]))
         self.assertEqual(payload["hierarchy_policy"]["workstream_file_hint"]["problem.parent"], "option_t5")
         self.assertNotIn("active_option.parent", payload["hierarchy_policy"]["workstream_file_hint"])
@@ -1902,6 +1988,22 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["related"]["experiments"][0]["id"], "exp_t5")
 
     def test_agent_bootstrap_payload_reports_context_without_building_by_default(self) -> None:
+        progress_path = self.root / "artifacts" / "exp_t5" / "run_bootstrap_running" / "progress.json"
+        progress_path.parent.mkdir(parents=True)
+        progress_path.write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "completed_steps": 2,
+                    "total_steps": 4,
+                    "last_update": "2999-01-01T00:00:00Z",
+                    "current_stage": "train",
+                    "latest_artifact": "artifacts/exp_t5/run_bootstrap_running/partial.json",
+                    "warnings": ["warmup slow"],
+                }
+            ),
+            encoding="utf-8",
+        )
         save_yaml(
             self.root / "runs" / "run_bootstrap_running.yaml",
             {
@@ -1911,6 +2013,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "started_at": "2000-01-01T00:00:00Z",
                 "monitor_command": "tail -f run.log",
                 "stop_command": "tmux kill-session -t run_bootstrap",
+                "progress_file": "artifacts/exp_t5/run_bootstrap_running/progress.json",
             },
         )
         save_yaml(
@@ -1958,6 +2061,33 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["run_overview"]["recently_completed"][0]["run_id"], "run_bootstrap_completed")
         self.assertNotIn("monitor_command", payload["run_overview"]["running"][0])
         self.assertNotIn("stop_command", payload["run_overview"]["running"][0])
+        self.assertEqual(payload["run_overview"]["running"][0]["progress"]["percent_complete"], 50.0)
+        self.assertEqual(payload["run_overview"]["running"][0]["progress"]["current_stage"], "train")
+        self.assertEqual(
+            payload["run_overview"]["running"][0]["progress"]["latest_artifact"],
+            "artifacts/exp_t5/run_bootstrap_running/partial.json",
+        )
+        self.assertEqual(payload["run_overview"]["running"][0]["progress"]["warnings"], ["warmup slow"])
+        self.assertNotIn("schema_version", payload["run_overview"]["running"][0]["progress"])
+        self.assertNotIn("path", payload["run_overview"]["running"][0]["progress"])
+
+    def test_agent_bootstrap_surfaces_missing_progress_warning_without_crashing(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_missing_progress.yaml",
+            {
+                "run_id": "run_missing_progress",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T01:00:00Z",
+                "progress_file": "artifacts/exp_t5/run_missing_progress/progress.json",
+            },
+        )
+
+        payload = agent_bootstrap_payload(self.root, build=False)
+
+        self.assertTrue(payload["validation"]["ok"])
+        self.assertEqual(payload["run_overview"]["running"][0]["run_id"], "run_missing_progress")
+        self.assertIn("does not exist", payload["run_overview"]["running"][0]["progress"]["schema_warnings"][0])
 
     def test_agent_bootstrap_reports_malformed_run_without_crashing(self) -> None:
         (self.root / "runs").mkdir(parents=True, exist_ok=True)
@@ -2280,6 +2410,87 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("JSON parse error", compact["progress"]["schema_warnings"][0])
         self.assertEqual(human.returncode, 0, human.stdout + human.stderr)
         self.assertIn("Progress: unavailable", human.stdout)
+
+    def test_run_summaries_use_progress_heartbeat_for_stale_and_warnings(self) -> None:
+        stale_path = self.root / "artifacts" / "exp_t5" / "run_progress_stale" / "progress.json"
+        stale_path.parent.mkdir(parents=True)
+        stale_path.write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "completed_steps": 3,
+                    "total_steps": 6,
+                    "last_update": "2026-05-27T00:00:00Z",
+                    "current_stage": "eval",
+                }
+            ),
+            encoding="utf-8",
+        )
+        malformed_path = self.root / "artifacts" / "exp_t5" / "run_progress_bad" / "progress.json"
+        malformed_path.parent.mkdir(parents=True)
+        malformed_path.write_text("{", encoding="utf-8")
+        terminal_path = self.root / "artifacts" / "exp_t5" / "run_progress_done" / "progress.json"
+        terminal_path.parent.mkdir(parents=True)
+        terminal_path.write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "completed_steps": 6,
+                    "total_steps": 6,
+                    "last_update": "2026-05-27T00:00:00Z",
+                    "current_stage": "done",
+                }
+            ),
+            encoding="utf-8",
+        )
+        save_yaml(
+            self.root / "runs" / "run_progress_stale.yaml",
+            {
+                "run_id": "run_progress_stale",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T00:30:00Z",
+                "progress_file": "artifacts/exp_t5/run_progress_stale/progress.json",
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_progress_bad.yaml",
+            {
+                "run_id": "run_progress_bad",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T00:30:00Z",
+                "progress_file": "artifacts/exp_t5/run_progress_bad/progress.json",
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_progress_done.yaml",
+            {
+                "run_id": "run_progress_done",
+                "status": "completed",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T00:30:00Z",
+                "finished_at": "2026-05-27T01:00:00Z",
+                "progress_file": "artifacts/exp_t5/run_progress_done/progress.json",
+            },
+        )
+
+        summaries, warnings = build_run_summaries(
+            self.root,
+            load_nodes(self.root),
+            now=datetime(2026, 5, 27, 2, 0, tzinfo=timezone.utc),
+        )
+        by_id = {summary["run_id"]: summary for summary in summaries}
+
+        self.assertEqual(warnings, [])
+        self.assertTrue(by_id["run_progress_stale"]["possibly_stale"])
+        self.assertEqual(by_id["run_progress_stale"]["stale_reasons"], ["progress_heartbeat"])
+        self.assertEqual(by_id["run_progress_stale"]["progress"]["percent_complete"], 50.0)
+        self.assertEqual(by_id["run_progress_stale"]["progress"]["current_stage"], "eval")
+        self.assertIn("JSON parse error", by_id["run_progress_bad"]["progress"]["schema_warnings"][0])
+        self.assertFalse(by_id["run_progress_done"]["possibly_stale"])
+        self.assertNotIn("stale_reasons", by_id["run_progress_done"])
+        self.assertFalse(by_id["run_progress_done"]["progress"]["possibly_stale"])
 
     def test_create_run_rejects_invalid_experiment_id(self) -> None:
         with self.assertRaises(ValidationError) as ctx:

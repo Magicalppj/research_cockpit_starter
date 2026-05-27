@@ -5,11 +5,23 @@ from pathlib import Path
 from typing import Any
 import yaml
 
+from research_cockpit.progress import load_progress_heartbeat, progress_heartbeat_signature
 from research_cockpit.storage import load_yaml
 
 
 RUN_STALE_AFTER_HOURS = 24
 ACTIVE_RUN_STATUSES = {"queued", "running"}
+COMPACT_PROGRESS_FIELDS = (
+    "percent_complete",
+    "completed_steps",
+    "total_steps",
+    "last_update",
+    "current_stage",
+    "latest_artifact",
+    "warnings",
+    "schema_warnings",
+    "possibly_stale",
+)
 
 
 def _parse_time(value: Any) -> datetime | None:
@@ -59,7 +71,16 @@ def _load_run_records(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
     return records, warnings
 
 
+def _compact_progress(progress: dict[str, Any]) -> dict[str, Any]:
+    return {
+        field: progress[field]
+        for field in COMPACT_PROGRESS_FIELDS
+        if progress.get(field) not in (None, "", [])
+    }
+
+
 def _record_summary(
+    root: Path,
     record: dict[str, Any],
     nodes: dict[str, Any],
     *,
@@ -75,12 +96,21 @@ def _record_summary(
     started_at = record.get("started_at")
     status = str(record.get("status") or "")
     started = _parse_time(started_at)
-    possibly_stale = (
-        status in ACTIVE_RUN_STATUSES
+    active_run = status in ACTIVE_RUN_STATUSES and not record.get("finished_at")
+    stale_reasons: list[str] = []
+    run_started_stale = (
+        active_run
         and started is not None
         and now - started > timedelta(hours=stale_after_hours)
-        and not record.get("finished_at")
     )
+    if run_started_stale:
+        stale_reasons.append("run_started_at")
+    progress = load_progress_heartbeat(root, record.get("progress_file"), now=now)
+    if progress and not active_run and progress.get("possibly_stale"):
+        progress = dict(progress)
+        progress["possibly_stale"] = False
+    if active_run and progress and progress.get("possibly_stale"):
+        stale_reasons.append("progress_heartbeat")
     summary: dict[str, Any] = {
         "run_id": run_id,
         "status": status,
@@ -94,7 +124,9 @@ def _record_summary(
         "progress_file": record.get("progress_file"),
         "log_root": record.get("log_root"),
         "output_root": record.get("output_root"),
-        "possibly_stale": possibly_stale,
+        "progress": _compact_progress(progress) if isinstance(progress, dict) else progress,
+        "possibly_stale": bool(stale_reasons),
+        "stale_reasons": stale_reasons,
     }
     return {key: value for key, value in summary.items() if value not in (None, "", [])}, None
 
@@ -110,7 +142,7 @@ def build_run_summaries(
     records, warnings = _load_run_records(root)
     summaries: list[dict[str, Any]] = []
     for record in records:
-        summary, warning = _record_summary(record, nodes, now=now, stale_after_hours=stale_after_hours)
+        summary, warning = _record_summary(root, record, nodes, now=now, stale_after_hours=stale_after_hours)
         if warning:
             warnings.append(warning)
         if summary:
@@ -138,6 +170,26 @@ def run_staleness_signature(
     return tuple(sorted(items))
 
 
+def run_progress_signature(
+    root: Path,
+    *,
+    now: datetime | None = None,
+) -> tuple[tuple[str, tuple[Any, ...]], ...]:
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    records, _warnings = _load_run_records(root)
+    items: list[tuple[str, tuple[Any, ...]]] = []
+    for record in records:
+        run_id = str(record.get("run_id") or "")
+        status = str(record.get("status") or "")
+        active_run = status in ACTIVE_RUN_STATUSES and not record.get("finished_at")
+        signature = progress_heartbeat_signature(root, record.get("progress_file"), now=now)
+        if run_id and signature:
+            if len(signature) == 4 and isinstance(signature[-1], bool):
+                signature = (*signature[:-1], bool(active_run and signature[-1]))
+            items.append((run_id, signature))
+    return tuple(sorted(items))
+
+
 def compact_run_summary(summaries: list[dict[str, Any]], *, limit: int = 5) -> dict[str, Any]:
     sorted_runs = sorted(summaries, key=_run_sort_key, reverse=True)
     active = [item for item in sorted_runs if item.get("status") in ACTIVE_RUN_STATUSES]
@@ -146,7 +198,12 @@ def compact_run_summary(summaries: list[dict[str, Any]], *, limit: int = 5) -> d
     cancelled = [item for item in sorted_runs if item.get("status") == "cancelled"]
     stale = [item for item in active if item.get("possibly_stale")]
     recent = sorted_runs[:limit]
-    return {
+    active_progress = [
+        {"run_id": str(item["run_id"]), **_compact_progress(item["progress"])}
+        for item in active[:limit]
+        if isinstance(item.get("progress"), dict)
+    ]
+    summary = {
         "total_count": len(summaries),
         "active_count": len(active),
         "running_count": len([item for item in active if item.get("status") == "running"]),
@@ -158,6 +215,9 @@ def compact_run_summary(summaries: list[dict[str, Any]], *, limit: int = 5) -> d
         "active_run_ids": [str(item["run_id"]) for item in active[:limit]],
         "recent_run_ids": [str(item["run_id"]) for item in recent],
     }
+    if active_progress:
+        summary["active_progress"] = active_progress
+    return summary
 
 
 def build_experiment_run_context(
