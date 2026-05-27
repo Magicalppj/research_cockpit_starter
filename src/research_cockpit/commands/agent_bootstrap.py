@@ -128,6 +128,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
                     "research-cockpit complete-run --root <root> --id <run_id> --status completed --no-build",
                 ],
                 "next_actions": [
+                    "research-cockpit migrate-terminal-next-actions --root <root> --id <done_experiment_id> --followup-id <followup_id> --title \"...\" --dry-run --json --show-diff",
                     "research-cockpit update-node-fields --root <root> --id <node_id> --clear-next-actions --next-action \"...\" --no-build",
                     "research-cockpit sync-focus-actions --root <root> --from-node <node_id> --no-build",
                     "research-cockpit update-suggestion-state --root <root> --id <suggestion_id> --state completed --reason \"...\" --no-build",
@@ -151,6 +152,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
             "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --artifact-id <artifact_id> --no-build",
             "research-cockpit complete-experiments --root <root> --file findings.yaml --no-build",
             "research-cockpit create-followup-experiment --root <root> --from <done_or_running_experiment_id> --id <followup_id> --title \"...\" --priority high --next-action \"...\" --no-build",
+            "research-cockpit migrate-terminal-next-actions --root <root> --id <done_experiment_id> --followup-id <followup_id> --title \"...\" --dry-run --json --show-diff",
             "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
             "research-cockpit finalize-workstream --root <root> --option <option_id> --status accepted --problem-status resolved --report --no-build",
         ],

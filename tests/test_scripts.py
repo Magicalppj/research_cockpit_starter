@@ -60,6 +60,7 @@ from research_cockpit.commands.link_artifact import link_artifact
 from research_cockpit.commands.list_runs import list_runs_payload
 from research_cockpit.commands.lint_semantic import semantic_lint
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
+from research_cockpit.commands.migrate_terminal_next_actions import migrate_terminal_next_actions
 from research_cockpit.commands.node_context import node_context_payload
 from research_cockpit.commands.option_workstream_context import compact_option_workstream_context, option_workstream_context_payload
 from research_cockpit.commands.promote_decision import promote_decision
@@ -4250,7 +4251,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         followup_warning = next(
             warning for warning in payload["warnings"] if warning["id"] == "terminal_node_has_next_actions"
         )
-        self.assertIn("create-followup-experiment", followup_warning["command"])
+        self.assertIn("migrate-terminal-next-actions", followup_warning["command"])
+        self.assertIn("--followup-id <followup_experiment_id>", followup_warning["command"])
+        self.assertIn("--dry-run --json --show-diff", followup_warning["command"])
+        self.assertNotIn("create-followup-experiment", followup_warning["command"])
         self.assertEqual(out.returncode, 1)
         self.assertEqual(cli_payload["warning_count"], len(payload["warnings"]))
 
@@ -7415,6 +7419,165 @@ class ScriptBehaviorTests(unittest.TestCase):
                 title="T5 follow-up gate",
                 rebuild_dashboard=False,
             )
+
+    def test_migrate_terminal_next_actions_dry_run_shows_followup_and_cleanup(self) -> None:
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        source["next_actions"] = ["Run cache validation gate."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+
+        result = migrate_terminal_next_actions(
+            self.root,
+            node_id="exp_t5",
+            followup_id="exp_t5_cache_gate",
+            title="T5 cache validation gate",
+            dry_run=True,
+            show_diff=True,
+        )
+        after_source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+
+        self.assertTrue(result["dry_run"])
+        self.assertTrue(result["would_change"])
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["strategy"], "single_followup_experiment")
+        self.assertEqual(result["moved_next_actions"], ["Run cache validation gate."])
+        self.assertEqual(result["created_nodes"], ["exp_t5_cache_gate"])
+        self.assertEqual(result["updated_nodes"], ["exp_t5"])
+        self.assertIn("exp_t5_cache_gate.yaml", result["diff"])
+        self.assertEqual(after_source["next_actions"], ["Run cache validation gate."])
+        self.assertFalse((self.root / "graph" / "nodes" / "exp_t5_cache_gate.yaml").exists())
+
+    def test_migrate_terminal_next_actions_creates_followup_and_clears_source(self) -> None:
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        source["next_actions"] = ["Run cache validation gate."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+
+        result = migrate_terminal_next_actions(
+            self.root,
+            node_id="exp_t5",
+            followup_id="exp_t5_cache_gate",
+            title="T5 cache validation gate",
+            priority="high",
+            rebuild_dashboard=False,
+        )
+        after_source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        followup = load_yaml(self.root / "graph" / "nodes" / "exp_t5_cache_gate.yaml")
+
+        self.assertTrue(result["changed"])
+        self.assertNotIn("next_actions", after_source)
+        self.assertEqual(followup["status"], "queued")
+        self.assertEqual(followup["parent"], "option_t5")
+        self.assertEqual(followup["priority"], "high")
+        self.assertEqual(followup["derived_from"], ["exp_t5"])
+        self.assertEqual(followup["next_actions"], ["Run cache validation gate."])
+        self.assertIn("Validate follow-up against exp_t5.", followup["success_criteria"])
+
+    def test_migrate_terminal_next_actions_guides_larger_work_to_workstream(self) -> None:
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        source["next_actions"] = ["Run cache gate.", "Design longer branch."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+
+        result = migrate_terminal_next_actions(self.root, node_id="exp_t5", dry_run=True)
+
+        self.assertFalse(result["would_change"])
+        self.assertEqual(result["strategy"], "create_workstream_guidance")
+        self.assertIn("create-workstream", result["recommended_commands"]["create_workstream"])
+        self.assertIn("Use create-workstream", result["guidance"])
+
+    def test_migrate_terminal_next_actions_guides_non_experiment_terminal_node(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_old",
+                "type": "artifact",
+                "title": "Old artifact",
+                "status": "deprecated",
+                "next_actions": ["Replace archived bundle."],
+            },
+        )
+
+        result = migrate_terminal_next_actions(
+            self.root,
+            node_id="artifact_old",
+            followup_id="artifact_old_followup",
+            title="Artifact follow-up",
+            dry_run=True,
+        )
+        artifact = load_yaml(self.root / "graph" / "nodes" / "artifact_old.yaml")
+        context = build_agent_context(self.root, load_nodes(self.root))
+        semantic = semantic_lint(self.root)
+
+        self.assertFalse(result["would_change"])
+        self.assertEqual(result["strategy"], "create_workstream_guidance")
+        self.assertIn("create-workstream", result["recommended_commands"]["create_workstream"])
+        self.assertEqual(artifact["next_actions"], ["Replace archived bundle."])
+        stale_ids = {item["node_id"] for item in context["next_action_scopes"]["stale_terminal_node_next_actions"]}
+        self.assertIn("artifact_old", stale_ids)
+        self.assertIn(
+            "terminal_node_has_next_actions",
+            {warning["id"] for warning in semantic["warnings"]},
+        )
+
+    def test_migrate_terminal_next_actions_guides_non_done_terminal_experiment(self) -> None:
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "failed"
+        source["next_actions"] = ["Investigate failed experiment."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+
+        result = migrate_terminal_next_actions(
+            self.root,
+            node_id="exp_t5",
+            followup_id="exp_t5_failed_followup",
+            title="Failed experiment follow-up",
+            dry_run=True,
+        )
+        after_source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+
+        self.assertFalse(result["would_change"])
+        self.assertEqual(result["strategy"], "create_workstream_guidance")
+        self.assertEqual(after_source["next_actions"], ["Investigate failed experiment."])
+        self.assertFalse((self.root / "graph" / "nodes" / "exp_t5_failed_followup.yaml").exists())
+
+    def test_migrate_terminal_next_actions_cli_compact_and_manifest(self) -> None:
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        source["next_actions"] = ["Run cache validation gate."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+
+        out = subprocess.run(
+            [
+                *cli_command("migrate-terminal-next-actions"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_t5",
+                "--followup-id",
+                "exp_t5_cache_gate",
+                "--title",
+                "T5 cache validation gate",
+                "--dry-run",
+                "--json",
+                "--compact",
+                "--show-diff",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        by_name = {item["name"]: item for item in agent_command_manifest()}
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["command"], "research-cockpit migrate-terminal-next-actions")
+        self.assertTrue(payload["would_change"])
+        self.assertEqual(payload["created"], ["exp_t5_cache_gate"])
+        self.assertEqual(payload["updated"], ["exp_t5"])
+        self.assertIn("migrate-terminal-next-actions", by_name)
+        self.assertTrue(by_name["migrate-terminal-next-actions"]["supports_dry_run"])
+        self.assertTrue(by_name["migrate-terminal-next-actions"]["supports_no_build"])
+        self.assertIn("create-workstream", by_name["migrate-terminal-next-actions"]["hierarchy_guidance"])
 
     def test_close_current_experiment_completes_and_moves_global_and_agent_focus(self) -> None:
         current = load_yaml(self.root / "current_state.yaml")

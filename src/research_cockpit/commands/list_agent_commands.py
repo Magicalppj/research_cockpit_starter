@@ -88,6 +88,7 @@ WORKFLOW_TAGS_BY_COMMAND = {
     "close-current-experiment": ["evidence", "focus"],
     "complete-experiments": ["evidence"],
     "create-followup-experiment": ["graph", "evidence", "focus"],
+    "migrate-terminal-next-actions": ["graph", "evidence", "focus"],
     "promote-decision": ["decision"],
     "update-decision-evidence": ["decision", "evidence"],
     "update-decision-checklist": ["decision"],
@@ -109,6 +110,7 @@ SHOW_DIFF_COMMANDS = {
     "complete-experiments",
     "create-artifact",
     "create-followup-experiment",
+    "migrate-terminal-next-actions",
     "create-note",
     "create-run",
     "create-workstream",
@@ -185,6 +187,7 @@ CAPABILITY_BY_COMMAND = {
     "close_current_experiment.py": "capabilities/experiment-tracking.md",
     "complete_experiments.py": "capabilities/experiment-tracking.md",
     "create_followup_experiment.py": "capabilities/experiment-tracking.md",
+    "migrate_terminal_next_actions.py": "capabilities/experiment-tracking.md",
     "promote_decision.py": "capabilities/decision-adr.md",
     "update_decision_evidence.py": "capabilities/decision-adr.md",
     "update_decision_checklist.py": "capabilities/decision-adr.md",
@@ -798,6 +801,27 @@ COMMANDS: list[dict[str, object]] = [
             "Use create-workstream for multi-step or worktree-derived child branches."
         ),
         "recommended_when": "Branch a done or running experiment into the next queued optimization gate.",
+    },
+    {
+        "name": "migrate_terminal_next_actions.py",
+        "purpose": "Move live next_actions off terminal nodes into an explicit follow-up path.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "supports_compact": True,
+        "fields_supported": [
+            "terminal next_actions",
+            "single followup experiment",
+            "derived_from",
+            "clear source next_actions",
+            "create-workstream guidance",
+        ],
+        "hierarchy_guidance": (
+            "Use for one queued follow-up gate from a done experiment. "
+            "Use create-workstream for multi-step cleanup or non-experiment terminal nodes."
+        ),
+        "recommended_when": "Clean up stale next_actions reported on done or otherwise terminal nodes.",
     },
     {
         "name": "promote_decision.py",

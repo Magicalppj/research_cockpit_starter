@@ -158,7 +158,7 @@ Use `complete-experiment --evidence-path ... --evidence-link key=value` or per-e
 
 When closing the current experiment and advancing focus in the same turn, prefer `close-current-experiment` over manually chaining `complete-experiment`, `set-focus`, and `set-agent-focus`. Use `create-followup-experiment --set-focus` for a derived queued next gate from a `done` or `running` experiment; by default it reuses the source experiment's option parent. When `--next-action` is passed with `--set-focus`, the same action is written to both the new experiment and `current_state.next_actions`.
 Generated dashboard context includes `next_action_scopes`; read it before choosing work so focus-node, parent option/problem, global coordinator, and stale terminal-node actions are not conflated.
-Done nodes should keep conclusions, not live work. If a done experiment still has real follow-up work in `next_actions`, create a small derived queued experiment with `create-followup-experiment` and move the action there.
+Done nodes should keep conclusions, not live work. If a done experiment still has real follow-up work in `next_actions`, create a small derived queued experiment with `create-followup-experiment` or clean up an older stale action with `migrate-terminal-next-actions`. Use `create-workstream` when the follow-up is a branch, not one gate.
 
 Known-node tasks should use `effective_baseline` from `context` or `node-context` as the default option/decision/artifact bundle for follow-up work. When an accepted branch should become the default for later agents, use `research-cockpit set-baseline`; do not expand every accepted decision into normal handoffs unless the task is explicitly auditing accepted history.
 

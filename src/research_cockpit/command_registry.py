@@ -46,6 +46,7 @@ COMMAND_MODULES: dict[str, str] = {
     "close-current-experiment": "close_current_experiment",
     "complete-experiments": "complete_experiments",
     "create-followup-experiment": "create_followup_experiment",
+    "migrate-terminal-next-actions": "migrate_terminal_next_actions",
     "promote-decision": "promote_decision",
     "update-decision-evidence": "update_decision_evidence",
     "update-decision-checklist": "update_decision_checklist",

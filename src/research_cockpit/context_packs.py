@@ -32,6 +32,7 @@ TERMINAL_NEXT_ACTION_STATUSES = {
     "accepted",
     "archived",
     "cancelled",
+    "deprecated",
     "done",
     "failed",
     "parked",

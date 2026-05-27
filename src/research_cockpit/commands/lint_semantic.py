@@ -15,11 +15,13 @@ TERMINAL_STATUSES = {
     "accepted",
     "archived",
     "cancelled",
+    "deprecated",
     "done",
     "failed",
     "parked",
     "rejected",
     "resolved",
+    "superseded",
 }
 
 OPEN_EXPERIMENT_STATUSES = {"active", "planned", "queued", "running"}
@@ -157,10 +159,9 @@ def semantic_lint(root: Path = ROOT) -> dict[str, Any]:
         if node.status in TERMINAL_STATUSES and _next_actions(node.raw.get("next_actions")):
             command = ""
             if node.type == "experiment" and node.status == "done":
-                parent = str(node.parent or "<option_id>")
                 command = (
-                    f"research-cockpit create-followup-experiment --root {root} "
-                    f"--from {node.id} --parent {parent} --id <followup_experiment_id> "
+                    f"research-cockpit migrate-terminal-next-actions --root {root} "
+                    f"--id {node.id} --followup-id <followup_experiment_id> "
                     f"--title \"<follow-up title>\" --dry-run --json --show-diff"
                 )
             warnings.append(_warning(

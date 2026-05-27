@@ -273,6 +273,15 @@ The source experiment must be `done` or `running`. The new experiment is queued,
 If a `done` experiment still has real follow-up work, move that work into a derived queued experiment instead of leaving live `next_actions` on the completed node.
 Use this command only for a single follow-up gate. If the result creates a new worktree branch, several follow-up experiments, or a new question, create a child workstream instead: use `create-workstream` with `problem.parent` set to the inherited option id and `derived_from` pointing back to the source experiment. That keeps the graph as `option -> problem -> option -> experiment` instead of flattening all later experiments under one option.
 
+Use `migrate-terminal-next-actions` when an older terminal node already carries live `next_actions`:
+
+```sh
+research-cockpit migrate-terminal-next-actions --root research_cockpit --id experiment_x --followup-id experiment_x_followup --title "Follow-up gate" --dry-run --json --show-diff
+research-cockpit migrate-terminal-next-actions --root research_cockpit --id experiment_x --followup-id experiment_x_followup --title "Follow-up gate" --no-build
+```
+
+The command creates one queued follow-up experiment only for a `done` experiment with exactly one node-local next action, then clears the source node's `next_actions`. For multiple actions, non-experiment terminal nodes, or larger branches, the JSON output points to `create-workstream` instead of mutating.
+
 `complete-experiment` records linked artifact ids both in the finding `linked_artifacts` field and in the finding `evidence` list, so a finding remains traceable when read without the full experiment node.
 
 Use `complete-experiments` for sweeps or repeated backend/ablation runs:
