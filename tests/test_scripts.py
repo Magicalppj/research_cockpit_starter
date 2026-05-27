@@ -3580,6 +3580,25 @@ class ScriptBehaviorTests(unittest.TestCase):
                     self.assertIn(flag, help_out.stdout)
                     self.assertTrue(manifest[command].get(flag_fields[flag]), f"{command} missing {flag_fields[flag]}")
 
+    def test_launcher_output_conventions_document_standard_files_and_ingest_paths(self) -> None:
+        doc = ROOT_DIR / "docs" / "launcher-output-conventions.md"
+        self.assertTrue(doc.exists())
+        text = doc.read_text(encoding="utf-8")
+
+        for filename in ("run_record.txt", "progress.json", "gate_result.json", "artifact_manifest.json"):
+            self.assertIn(filename, text)
+        for command in ("create-run", "update-run", "complete-run", "ingest-gate-result", "ingest-artifact"):
+            self.assertIn(f"research-cockpit {command}", text)
+        for launcher_mode in ("shell", "Python", "scheduler", "manual"):
+            self.assertIn(launcher_mode, text)
+        self.assertIn("artifact_manifest_v1", text)
+        self.assertIn("launcher_run_record_v1", text)
+
+        capability = (ROOT_DIR / "capabilities" / "experiment-tracking.md").read_text(encoding="utf-8")
+        skill = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("docs/launcher-output-conventions.md", capability)
+        self.assertIn("docs/launcher-output-conventions.md", skill)
+
     def test_list_agent_commands_compact_json_returns_short_discovery_payload(self) -> None:
         out = subprocess.run(
             [*cli_command("commands"), "--json", "--compact"],
