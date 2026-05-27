@@ -3599,6 +3599,79 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("docs/launcher-output-conventions.md", capability)
         self.assertIn("docs/launcher-output-conventions.md", skill)
 
+    def test_launcher_templates_cover_modes_and_write_standard_files(self) -> None:
+        template_dir = ROOT_DIR / "templates" / "launcher"
+        required_modes = ("dry-run", "smoke-gate", "full-run", "artifact-capture", "validate-build", "next-action-update")
+        standard_files = ("run_record.txt", "progress.json", "gate_result.json", "artifact_manifest.json")
+
+        readme = (template_dir / "README.md").read_text(encoding="utf-8")
+        python_template = (template_dir / "run_launcher.py").read_text(encoding="utf-8")
+        shell_template = (template_dir / "run_launcher.sh").read_text(encoding="utf-8")
+        manual_template = (template_dir / "manual_run_checklist.md").read_text(encoding="utf-8")
+        for mode in required_modes:
+            self.assertIn(mode, readme)
+            self.assertIn(mode, python_template)
+            self.assertIn(mode, shell_template)
+        for filename in standard_files:
+            self.assertIn(filename, readme)
+            self.assertIn(filename, manual_template)
+        self.assertIn("MONITOR_COMMAND", shell_template)
+        self.assertIn("STOP_COMMAND", shell_template)
+        self.assertIn('case "$MODE"', shell_template)
+        for expected_default in (
+            'DEFAULT_GATE_TYPE="dry_run"',
+            'DEFAULT_GATE_TYPE="smoke_check"',
+            'DEFAULT_GATE_TYPE="full_run"',
+            'DEFAULT_GATE_TYPE="artifact_capture"',
+            'DEFAULT_GATE_TYPE="validation_check"',
+            'DEFAULT_GATE_TYPE="handoff_check"',
+            'DEFAULT_NEXT_ALLOWED_ACTION="next_action_update"',
+        ):
+            self.assertIn(expected_default, shell_template)
+
+        run_dir = self.tmp_root / "launcher_run"
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(template_dir / "run_launcher.py"),
+                "--run-dir",
+                str(run_dir),
+                "--experiment-id",
+                "exp_t5",
+                "--run-id",
+                "run_template",
+                "--mode",
+                "smoke-gate",
+                "--command",
+                "python train.py --smoke",
+                "--status",
+                "completed",
+                "--link",
+                "metrics=outputs/metrics.json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        for filename in standard_files:
+            self.assertTrue((run_dir / filename).exists(), filename)
+
+        run_record = (run_dir / "run_record.txt").read_text(encoding="utf-8")
+        progress = json.loads((run_dir / "progress.json").read_text(encoding="utf-8"))
+        gate = json.loads((run_dir / "gate_result.json").read_text(encoding="utf-8"))
+        manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
+
+        self.assertIn("monitor_command: tail -f logs/run.log", run_record)
+        self.assertIn("stop_command:", run_record)
+        self.assertEqual(progress["current_stage"], "smoke_gate")
+        self.assertEqual(progress["status"], "completed")
+        self.assertEqual(gate["gate_type"], "smoke_check")
+        self.assertTrue(gate["passed"])
+        self.assertEqual(gate["next_allowed_action"], "full_run")
+        self.assertEqual(manifest["schema_version"], "artifact_manifest_v1")
+        self.assertEqual(manifest["links"]["metrics"], "outputs/metrics.json")
+
     def test_list_agent_commands_compact_json_returns_short_discovery_payload(self) -> None:
         out = subprocess.run(
             [*cli_command("commands"), "--json", "--compact"],

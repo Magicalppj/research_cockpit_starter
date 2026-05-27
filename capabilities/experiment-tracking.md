@@ -154,7 +154,7 @@ Use this as the normal path for multi-agent worktrees. Use inline `--evidence-pa
 
 Use run/job records for concrete executions of an experiment: launcher command, tmux session, pid, logs, outputs, progress file, and stop command. These records live under `research_cockpit/runs/*.yaml` and reference one experiment node.
 
-Launcher-produced output directories should follow `docs/launcher-output-conventions.md`: `run_record.txt` for the human handoff, `progress.json` for heartbeat state, `gate_result.json` for machine-readable gates, and `artifact_manifest.json` for evidence links. The convention works for shell, Python, tmux, scheduler, and manual flows because all stable records are still created through `research-cockpit` commands.
+Launcher-produced output directories should follow `docs/launcher-output-conventions.md`: `run_record.txt` for the human handoff, `progress.json` for heartbeat state, `gate_result.json` for machine-readable gates, and `artifact_manifest.json` for evidence links. Starter templates live in `templates/launcher/`. The convention works for shell, Python, tmux, scheduler, and manual flows because all stable records are still created through `research-cockpit` commands.
 
 ```sh
 research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher tmux --command "python train.py" --tmux-session train_x --progress-file artifacts/experiment_x/run_x/progress.json --monitor-command "tail -f artifacts/experiment_x/run_x/logs/run.log" --stop-command "tmux kill-session -t train_x" --no-build

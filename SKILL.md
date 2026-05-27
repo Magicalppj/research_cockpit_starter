@@ -70,7 +70,7 @@ Use `promising` only for an `option` that has positive signal but is not yet acc
 - Streamlit UI, React Flow graph, refresh behavior, and frontend build rules: `capabilities/ui-dashboard.md`
 - Installation shape, CLI, wrappers, environment variables, and agent integration: `capabilities/integrations.md`
 - Validation failures, release checks, dependency issues, and recovery: `capabilities/troubleshooting.md`
-- Launcher output files for shell, Python, scheduler, and manual experiment runs: `docs/launcher-output-conventions.md`
+- Launcher output files and starter templates for shell, Python, scheduler, and manual experiment runs: `docs/launcher-output-conventions.md`, `templates/launcher/`
 
 Read only the capability files needed for the current task.
 

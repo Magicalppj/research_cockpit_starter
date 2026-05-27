@@ -6,6 +6,8 @@ Use these conventions when a shell script, Python script, tmux session, notebook
 research_cockpit/artifacts/<experiment_id>/<run_id>/
 ```
 
+Starter templates live in `templates/launcher/`. Use them as copyable examples for dry runs, smoke gates, full runs, artifact capture, validate/build handoffs, and next action updates.
+
 Keep paths in launcher files relative to the run output directory whenever possible. Convert them to data-root relative paths, such as `artifacts/<experiment_id>/<run_id>/progress.json`, when recording runs, gates, or artifacts through `research-cockpit`.
 
 ## Standard Files
