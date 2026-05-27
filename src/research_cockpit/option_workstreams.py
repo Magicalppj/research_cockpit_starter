@@ -15,6 +15,7 @@ from research_cockpit.graph_core import (
 )
 from research_cockpit.hierarchy_policy import hierarchy_policy
 from research_cockpit.types import ACTIVE_WORKSTREAM_STATUSES, ResearchNode
+from research_cockpit.run_summaries import build_run_summaries_by_experiment
 
 
 def _workflow_command(script_name: str, *parts: str) -> str:
@@ -113,6 +114,7 @@ def build_option_workstream_context(
         "problems": ordered_node_contexts(nodes, subtree["problem_ids"]),
         "options": ordered_node_contexts(nodes, subtree["option_ids"]),
         "experiments": ordered_node_contexts(nodes, subtree["experiment_ids"]),
+        "run_summaries_by_experiment": build_run_summaries_by_experiment(root, nodes, subtree["experiment_ids"]),
         "decisions": ordered_node_contexts(nodes, subtree["decision_ids"]),
         "evidence_summary": {
             **evidence,

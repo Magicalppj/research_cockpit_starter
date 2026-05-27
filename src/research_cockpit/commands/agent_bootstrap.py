@@ -46,6 +46,7 @@ if not _MISSING_DEPENDENCIES:
         validate_cockpit,
     )
     from research_cockpit.resources import build_link_rows
+    from research_cockpit.run_summaries import build_run_overview
     from research_cockpit.suggestions import build_action_suggestions
     from research_cockpit.commands.build_dashboard import build_dashboard
     from research_cockpit.commands.lint_semantic import semantic_lint
@@ -163,6 +164,7 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
         "top_suggestions": suggestions[:3],
         "semantic_warnings": semantic["warnings"],
         "mutation_guidance": _mutation_guidance(nodes, current),
+        "run_overview": build_run_overview(root, nodes),
         "search_summary": build_search_index_summary(search_index),
         "git": {
             "source_git_commit": metadata["source_git_commit"],

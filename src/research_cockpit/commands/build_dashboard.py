@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import time
+from typing import Any
 
 from research_cockpit.paths import default_data_root
 import json
@@ -29,6 +30,7 @@ from research_cockpit.resources import build_link_rows
 from research_cockpit.decisions import build_decision_acceptance_checklists
 from research_cockpit.mutation_lock import mutation_lock
 from research_cockpit.option_workstreams import build_option_workstream_rows
+from research_cockpit.run_summaries import run_staleness_signature
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.storage import save_text
 
@@ -44,6 +46,9 @@ def _truth_source_files(root: Path) -> list[Path]:
     notes = root / "notes"
     if notes.exists():
         files.extend(path for path in notes.rglob("*.md") if path.is_file())
+    runs = root / "runs"
+    if runs.exists():
+        files.extend(path for path in runs.rglob("*.yaml") if path.is_file())
     return sorted(files)
 
 
@@ -57,6 +62,13 @@ def truth_source_signature(root: Path) -> tuple[tuple[str, int, int], ...]:
             name = str(path)
         items.append((name, stat.st_mtime_ns, stat.st_size))
     return tuple(items)
+
+
+def dashboard_watch_signature(root: Path, *, now: Any | None = None) -> tuple[object, object]:
+    return (
+        truth_source_signature(root),
+        run_staleness_signature(root, now=now),
+    )
 
 
 def build_dashboard(root: Path = ROOT) -> list[Path]:
@@ -122,15 +134,21 @@ def build_dashboard_once(root: Path, *, json_output: bool = False) -> dict:
 
 
 def watch_dashboard(root: Path, *, interval: float, max_iterations: int | None, json_output: bool) -> None:
-    last_signature: tuple[tuple[str, int, int], ...] | None = None
+    last_signature: tuple[object, object] | None = None
     iteration = 0
     while max_iterations is None or iteration < max_iterations:
         iteration += 1
-        signature = truth_source_signature(root)
+        signature = dashboard_watch_signature(root)
         if last_signature is None or signature != last_signature:
+            truth_source_changed = last_signature is None or signature[0] != last_signature[0]
             payload = build_dashboard_once(root, json_output=json_output)
-            payload.update({"watch": True, "iteration": iteration, "truth_source_changed": True})
-            last_signature = truth_source_signature(root)
+            payload.update({
+                "watch": True,
+                "iteration": iteration,
+                "truth_source_changed": truth_source_changed,
+                "time_sensitive_changed": not truth_source_changed,
+            })
+            last_signature = dashboard_watch_signature(root)
         else:
             payload = {
                 "ok": True,
@@ -138,12 +156,13 @@ def watch_dashboard(root: Path, *, interval: float, max_iterations: int | None, 
                 "watch": True,
                 "iteration": iteration,
                 "truth_source_changed": False,
+                "time_sensitive_changed": False,
                 "written_files": [],
             }
         if json_output:
             print(json.dumps(payload, ensure_ascii=False))
         else:
-            if payload["truth_source_changed"]:
+            if payload["truth_source_changed"] or payload.get("time_sensitive_changed"):
                 print(f"[{iteration}] Built dashboard.")
             else:
                 print(f"[{iteration}] No truth-source changes.")

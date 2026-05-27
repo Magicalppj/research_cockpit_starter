@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 import networkx as nx
+import yaml
 
 from research_cockpit.command_registry import cli_command_for_script
 from research_cockpit.context_packs import (
@@ -267,10 +268,13 @@ def load_runs(root: Path) -> dict[str, RunRecord]:
     if not run_dir.exists():
         return runs
     for path in sorted(run_dir.glob("*.yaml")):
-        data = load_yaml(path)
+        rel_path = f"runs/{path.name}"
+        try:
+            data = load_yaml(path)
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValidationError([f"{rel_path}: YAML parse error: {exc}"]) from exc
         if not data:
             continue
-        rel_path = f"runs/{path.name}"
         if not isinstance(data, dict):
             raise ValidationError([f"{rel_path}: run record must be a mapping"])
         if data.get("run_id") in (None, ""):

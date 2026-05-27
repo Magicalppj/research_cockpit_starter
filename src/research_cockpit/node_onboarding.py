@@ -21,6 +21,7 @@ from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.storage import load_yaml, relative_to_root
 from research_cockpit.types import VALID_COMMAND_STYLES, ResearchNode
 from research_cockpit.resources import build_link_rows
+from research_cockpit.run_summaries import build_experiment_run_context
 
 
 def _command_arg(value: Any) -> str:
@@ -167,6 +168,7 @@ def _experiment_context(
         "outcome": experiment.raw.get("outcome"),
         "missing_evidence": missing_evidence,
         "related_decisions": ordered_node_contexts(nodes, decision_ids),
+        "runs": build_experiment_run_context(root, nodes, experiment.id),
         "hierarchy_policy": hierarchy_policy(parent_option_id=option_id, source_experiment_id=experiment.id),
         "suggested_commands": {
             "mark_running": _rooted_cli_command(
@@ -575,7 +577,7 @@ def _compact_node_onboarding_context(payload: dict[str, Any]) -> dict[str, Any]:
         if summary
     ]
     recommended_next_steps = payload.get("recommended_next_steps", []) or []
-    return {
+    out = {
         "schema_version": "node_context_compact_v1",
         "node": _compact_node_summary(payload.get("node")) or {},
         "parent_path": parent_path,
@@ -589,6 +591,12 @@ def _compact_node_onboarding_context(payload: dict[str, Any]) -> dict[str, Any]:
         "command_drafts": payload.get("command_drafts", {}) or {},
         "context_freshness": payload.get("context_freshness", {}) or {},
     }
+    type_context = payload.get("type_context", {})
+    if isinstance(type_context, dict) and type_context.get("kind") == "experiment":
+        runs = type_context.get("runs")
+        if isinstance(runs, dict):
+            out["run_summary"] = runs.get("summary", {})
+    return out
 
 
 def build_node_onboarding_context(

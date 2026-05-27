@@ -72,6 +72,7 @@ def _first_text(value: Any, *, limit: int = 120) -> str | None:
 
 def _experiment_summaries(payload: dict[str, Any], raw_nodes: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     raw_nodes = raw_nodes or {}
+    run_summaries = payload.get("run_summaries_by_experiment", {})
     by_id = {
         str(node.get("id")): node
         for node in payload.get("subtree_nodes", [])
@@ -91,7 +92,7 @@ def _experiment_summaries(payload: dict[str, Any], raw_nodes: dict[str, Any] | N
             if raw_node is not None
             else _list_count(node.get("linked_artifacts", []))
         )
-        summaries.append({
+        summary = {
             "id": node.get("id"),
             "title": node.get("title"),
             "status": node.get("status"),
@@ -101,7 +102,11 @@ def _experiment_summaries(payload: dict[str, Any], raw_nodes: dict[str, Any] | N
             "metric_count": _list_count(metrics),
             "finding_count": _list_count(node.get("findings", [])),
             "linked_artifact_count": linked_artifact_count,
-        })
+        }
+        run_summary = run_summaries.get(str(experiment_id)) if isinstance(run_summaries, dict) else None
+        if isinstance(run_summary, dict) and run_summary.get("total_count", 0):
+            summary["run_summary"] = run_summary
+        summaries.append(summary)
     return summaries
 
 

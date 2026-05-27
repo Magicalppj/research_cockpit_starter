@@ -1281,6 +1281,16 @@ class ModelValidationTests(unittest.TestCase):
                 ],
             },
         )
+        save_yaml(
+            self.root / "runs" / "run_sub.yaml",
+            {
+                "run_id": "run_sub",
+                "status": "running",
+                "experiment_id": "exp_sub",
+                "started_at": "2026-05-27T01:00:00Z",
+                "progress_file": "artifacts/exp_sub/run_sub/progress.json",
+            },
+        )
         nodes = load_nodes(self.root)
         current = load_yaml(self.root / "current_state.yaml")
 
@@ -1291,6 +1301,7 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(context["upstream_problem"]["id"], "problem_text")
         self.assertIn("exp_sub", [item["id"] for item in context["experiments"]])
         self.assertEqual(context["evidence_summary"]["findings_count"], 1)
+        self.assertEqual(context["run_summaries_by_experiment"]["exp_sub"]["active_run_ids"], ["run_sub"])
         self.assertIn("Try sub option", context["open_next_actions"])
         self.assertEqual(rows[0]["option_id"], "option_t5")
 
@@ -1321,15 +1332,46 @@ class ModelValidationTests(unittest.TestCase):
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
         experiment["metrics"] = ["accuracy", "latency"]
         save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        save_yaml(
+            self.root / "runs" / "run_t5_active.yaml",
+            {
+                "run_id": "run_t5_active",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2000-01-01T00:00:00Z",
+                "command": "python train.py --full",
+                "progress_file": "artifacts/exp_t5/run_t5_active/progress.json",
+                "monitor_command": "tail -f artifacts/exp_t5/run_t5_active/logs/run.log",
+                "stop_command": "tmux kill-session -t t5",
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_t5_done.yaml",
+            {
+                "run_id": "run_t5_done",
+                "status": "completed",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-26T01:00:00Z",
+                "finished_at": "2026-05-26T02:00:00Z",
+            },
+        )
         nodes = load_nodes(self.root)
         current = load_yaml(self.root / "current_state.yaml")
 
         context = build_node_onboarding_context(self.root, nodes, current, "exp_t5")
+        compact = build_node_onboarding_context(self.root, nodes, current, "exp_t5", compact=True)
 
         self.assertEqual(context["type_context"]["kind"], "experiment")
         self.assertEqual(context["type_context"]["parent_option"]["id"], "option_t5")
         self.assertEqual(context["type_context"]["metrics"], ["accuracy", "latency"])
         self.assertTrue(context["type_context"]["missing_evidence"])
+        self.assertEqual(context["type_context"]["runs"]["summary"]["total_count"], 2)
+        self.assertEqual(context["type_context"]["runs"]["current"][0]["run_id"], "run_t5_active")
+        self.assertTrue(context["type_context"]["runs"]["current"][0]["possibly_stale"])
+        self.assertEqual(compact["run_summary"]["total_count"], 2)
+        self.assertEqual(compact["run_summary"]["active_run_ids"], ["run_t5_active"])
+        self.assertEqual(compact["run_summary"]["recent_run_ids"], ["run_t5_done", "run_t5_active"])
+        self.assertNotIn("python train.py", str(compact["run_summary"]))
         hierarchy = context["type_context"]["hierarchy_policy"]
         self.assertEqual(hierarchy["workstream_file_hint"]["problem.parent"], "option_t5")
         self.assertEqual(hierarchy["source_experiment_id"], "exp_t5")

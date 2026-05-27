@@ -116,6 +116,8 @@ research-cockpit list-runs --root research_cockpit --experiment experiment_x --j
 
 Prefer `--no-build` for frequent status updates in multi-agent workflows, then run `research-cockpit build --root research_cockpit` after batching. Use `run-context` before monitoring or stopping a known run. A completed run is not a finding; record conclusions with `complete-experiment` and preserve output directories with `ingest-artifact`.
 
+`bootstrap`, `node-context` for experiment nodes, and `option-workstream-context --compact --json` include short run summaries so agents can see active, failed, stale, and recently completed executions without reading every run file. Use `run-context` for full operational details.
+
 ## Artifacts
 
 Use artifact commands for result folders, review bundles, metrics directories, and other evidence objects that need their own status or links:

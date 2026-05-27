@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import re
@@ -8,7 +9,7 @@ import subprocess
 import time
 import unittest
 import uuid
-from datetime import date
+from datetime import datetime, timezone, date
 from pathlib import Path
 import sys
 from unittest.mock import patch
@@ -37,7 +38,7 @@ from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.apply_suggestion import apply_suggestion
 from research_cockpit.commands.agent_session_context import agent_session_context_payload
 from research_cockpit.commands.assignment_view import assignment_view_payload
-from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.commands.build_dashboard import build_dashboard, dashboard_watch_signature, watch_dashboard
 from research_cockpit.commands.check_decision_acceptance import decision_acceptance_payload
 from research_cockpit.commands.claim_option import claim_option
 from research_cockpit.commands.cleanup_suggestion_lifecycle import cleanup_suggestion_lifecycle
@@ -539,6 +540,59 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["iteration"], 1)
         self.assertTrue(payload["truth_source_changed"])
         self.assertEqual(len(payload["written_files"]), 12)
+
+    def test_dashboard_watch_signature_changes_when_run_becomes_stale(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_watch.yaml",
+            {
+                "run_id": "run_watch",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T00:00:00Z",
+            },
+        )
+
+        fresh = dashboard_watch_signature(
+            self.root,
+            now=datetime(2026, 5, 27, 23, 0, tzinfo=timezone.utc),
+        )
+        stale = dashboard_watch_signature(
+            self.root,
+            now=datetime(2026, 5, 28, 1, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertNotEqual(fresh, stale)
+        self.assertEqual(fresh[1], (("run_watch", "running", False),))
+        self.assertEqual(stale[1], (("run_watch", "running", True),))
+
+    def test_dashboard_watch_json_marks_time_sensitive_rebuilds(self) -> None:
+        signatures = [
+            (("truth",), (("run_watch", "running", False),)),
+            (("truth",), (("run_watch", "running", False),)),
+            (("truth",), (("run_watch", "running", True),)),
+            (("truth",), (("run_watch", "running", True),)),
+        ]
+        with (
+            patch("research_cockpit.commands.build_dashboard.dashboard_watch_signature", side_effect=signatures),
+            patch(
+                "research_cockpit.commands.build_dashboard.build_dashboard_once",
+                return_value={
+                    "ok": True,
+                    "root": str(self.root),
+                    "node_count": 0,
+                    "written_files": ["dashboards/agent_context_pack.json"],
+                    "json": True,
+                },
+            ),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            watch_dashboard(self.root, interval=0, max_iterations=2, json_output=True)
+
+        events = [json.loads(line) for line in stdout.getvalue().splitlines()]
+        self.assertTrue(events[0]["truth_source_changed"])
+        self.assertFalse(events[0]["time_sensitive_changed"])
+        self.assertFalse(events[1]["truth_source_changed"])
+        self.assertTrue(events[1]["time_sensitive_changed"])
 
     def test_build_cli_respects_root_argument_over_environment(self) -> None:
         env_root = self.tmp_root / "env_research_cockpit"
@@ -1119,6 +1173,17 @@ class ScriptBehaviorTests(unittest.TestCase):
             outcome="positive",
             rebuild_dashboard=False,
         )
+        save_yaml(
+            self.root / "runs" / "run_compact_context.yaml",
+            {
+                "run_id": "run_compact_context",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T01:00:00Z",
+                "command": "python train.py --long",
+                "progress_file": "artifacts/exp_t5/run_compact_context/progress.json",
+            },
+        )
 
         out = subprocess.run(
             [
@@ -1151,6 +1216,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(experiment_summary["metric_count"], 2)
         self.assertEqual(experiment_summary["finding_count"], 1)
         self.assertEqual(experiment_summary["linked_artifact_count"], 1)
+        self.assertEqual(experiment_summary["run_summary"]["active_run_ids"], ["run_compact_context"])
+        self.assertNotIn("python train.py", str(experiment_summary["run_summary"]))
         self.assertEqual(payload["hierarchy_policy"]["workstream_file_hint"]["problem.parent"], "option_t5")
         self.assertNotIn("active_option.parent", payload["hierarchy_policy"]["workstream_file_hint"])
         self.assertIn("active_option.parent", payload["hierarchy_policy"]["command_created_shape"])
@@ -1834,6 +1901,38 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["related"]["experiments"][0]["id"], "exp_t5")
 
     def test_agent_bootstrap_payload_reports_context_without_building_by_default(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_bootstrap_running.yaml",
+            {
+                "run_id": "run_bootstrap_running",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2000-01-01T00:00:00Z",
+                "monitor_command": "tail -f run.log",
+                "stop_command": "tmux kill-session -t run_bootstrap",
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_bootstrap_failed.yaml",
+            {
+                "run_id": "run_bootstrap_failed",
+                "status": "failed",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T01:00:00Z",
+                "finished_at": "2026-05-27T01:10:00Z",
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_bootstrap_completed.yaml",
+            {
+                "run_id": "run_bootstrap_completed",
+                "status": "completed",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T02:00:00Z",
+                "finished_at": "2026-05-27T02:10:00Z",
+            },
+        )
+
         payload = agent_bootstrap_payload(self.root, build=False)
 
         self.assertTrue(payload["validation"]["ok"])
@@ -1849,6 +1948,27 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(hierarchy["default_branch_shape"], "option -> problem -> option -> experiment/decision")
         self.assertIn("create-workstream", hierarchy["recommended_command"])
         self.assertIsInstance(payload["git"]["worktree_dirty"], bool)
+        self.assertEqual(payload["run_overview"]["running_count"], 1)
+        self.assertEqual(payload["run_overview"]["failed_count"], 1)
+        self.assertEqual(payload["run_overview"]["completed_count"], 1)
+        self.assertEqual(payload["run_overview"]["possibly_stale_count"], 1)
+        self.assertEqual(payload["run_overview"]["running"][0]["run_id"], "run_bootstrap_running")
+        self.assertEqual(payload["run_overview"]["failed"][0]["run_id"], "run_bootstrap_failed")
+        self.assertEqual(payload["run_overview"]["recently_completed"][0]["run_id"], "run_bootstrap_completed")
+        self.assertNotIn("monitor_command", payload["run_overview"]["running"][0])
+        self.assertNotIn("stop_command", payload["run_overview"]["running"][0])
+
+    def test_agent_bootstrap_reports_malformed_run_without_crashing(self) -> None:
+        (self.root / "runs").mkdir(parents=True, exist_ok=True)
+        (self.root / "runs" / "broken.yaml").write_text("[\n", encoding="utf-8")
+
+        payload = agent_bootstrap_payload(self.root, build=False)
+
+        self.assertFalse(payload["validation"]["ok"])
+        self.assertTrue(any("runs/broken.yaml: YAML parse error" in error for error in payload["validation"]["errors"]))
+        self.assertTrue(
+            any("runs/broken.yaml: YAML parse error" in warning for warning in payload["run_overview"]["warnings"])
+        )
 
     def test_agent_bootstrap_cli_json_builds_when_requested(self) -> None:
         command = "bootstrap"

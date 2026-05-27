@@ -21,6 +21,7 @@ from research_cockpit.graph_views import load_graph_views
 from research_cockpit.interaction_log import interaction_log_warnings, recent_interactions
 from research_cockpit.option_workstreams import build_option_workstream_context, build_option_workstream_rows
 from research_cockpit.resources import build_link_rows, node_artifact_ids, node_link_entries
+from research_cockpit.run_summaries import build_run_overview
 from research_cockpit.search_index import build_search_index, build_search_index_summary
 from research_cockpit.storage import load_yaml, save_text
 from research_cockpit.suggestions import build_action_suggestions
@@ -181,6 +182,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
             row for row in option_workstreams if row.get("workstream_status") in ACTIVE_WORKSTREAM_STATUSES
         ],
         "assignment_view": build_assignment_view(nodes),
+        "run_overview": build_run_overview(root, nodes),
         "saved_graph_views": load_graph_views(root),
         "recent_interactions": recent_interactions(root),
         "warnings": interaction_log_warnings(root),
