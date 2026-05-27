@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 import time
 from typing import Any
@@ -77,6 +78,10 @@ def dashboard_watch_signature(root: Path, *, now: Any | None = None) -> tuple[ob
     )
 
 
+def _utc_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def build_dashboard(root: Path = ROOT) -> list[Path]:
     nodes = load_nodes(root)
     current = load_yaml(root / "current_state.yaml")
@@ -141,37 +146,89 @@ def build_dashboard_once(root: Path, *, json_output: bool = False) -> dict:
 
 def watch_dashboard(root: Path, *, interval: float, max_iterations: int | None, json_output: bool) -> None:
     last_signature: tuple[object, ...] | None = None
+    last_build_at: str | None = None
+    last_build_status = "never"
+    last_build_error = ""
     iteration = 0
     while max_iterations is None or iteration < max_iterations:
         iteration += 1
-        signature = dashboard_watch_signature(root)
-        if last_signature is None or signature != last_signature:
-            truth_source_changed = last_signature is None or signature[0] != last_signature[0]
-            payload = build_dashboard_once(root, json_output=json_output)
-            payload.update({
-                "watch": True,
-                "iteration": iteration,
-                "truth_source_changed": truth_source_changed,
-                "time_sensitive_changed": not truth_source_changed,
-            })
-            last_signature = dashboard_watch_signature(root)
-        else:
+        try:
+            signature = dashboard_watch_signature(root)
+        except Exception as exc:
+            last_build_at = _utc_timestamp()
+            last_build_status = "failed"
+            last_build_error = str(exc)
             payload = {
-                "ok": True,
+                "ok": False,
                 "root": str(root),
                 "watch": True,
                 "iteration": iteration,
-                "truth_source_changed": False,
+                "truth_source_changed": True,
                 "time_sensitive_changed": False,
+                "build_attempted": False,
                 "written_files": [],
+                "error": str(exc),
             }
-        if json_output:
-            print(json.dumps(payload, ensure_ascii=False))
         else:
-            if payload["truth_source_changed"] or payload.get("time_sensitive_changed"):
-                print(f"[{iteration}] Built dashboard.")
+            if last_signature is None or signature != last_signature:
+                truth_source_changed = last_signature is None or signature[0] != last_signature[0]
+                try:
+                    payload = build_dashboard_once(root, json_output=json_output)
+                except Exception as exc:
+                    last_build_at = _utc_timestamp()
+                    last_build_status = "failed"
+                    last_build_error = str(exc)
+                    payload = {
+                        "ok": False,
+                        "root": str(root),
+                        "watch": True,
+                        "iteration": iteration,
+                        "truth_source_changed": truth_source_changed,
+                        "time_sensitive_changed": not truth_source_changed,
+                        "build_attempted": True,
+                        "written_files": [],
+                        "error": str(exc),
+                    }
+                else:
+                    last_build_at = _utc_timestamp()
+                    last_build_status = "success"
+                    last_build_error = ""
+                    payload.update({
+                        "watch": True,
+                        "iteration": iteration,
+                        "truth_source_changed": truth_source_changed,
+                        "time_sensitive_changed": not truth_source_changed,
+                        "build_attempted": True,
+                    })
+                    try:
+                        last_signature = dashboard_watch_signature(root)
+                    except Exception:
+                        last_signature = signature
             else:
-                print(f"[{iteration}] No truth-source changes.")
+                payload = {
+                    "ok": True,
+                    "root": str(root),
+                    "watch": True,
+                    "iteration": iteration,
+                    "truth_source_changed": False,
+                    "time_sensitive_changed": False,
+                    "build_attempted": False,
+                    "written_files": [],
+                }
+        payload.update({
+            "last_build_at": last_build_at,
+            "last_build_status": last_build_status,
+            "last_build_error": last_build_error,
+        })
+        if json_output:
+            print(json.dumps(payload, ensure_ascii=False), flush=True)
+        else:
+            if not payload.get("ok", True):
+                print(f"[{iteration}] Build failed: {payload.get('error')}", flush=True)
+            elif payload["truth_source_changed"] or payload.get("time_sensitive_changed"):
+                print(f"[{iteration}] Built dashboard.", flush=True)
+            else:
+                print(f"[{iteration}] No truth-source changes.", flush=True)
         if max_iterations is not None and iteration >= max_iterations:
             break
         time.sleep(max(0.0, interval))

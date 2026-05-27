@@ -544,6 +544,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["watch"])
         self.assertEqual(payload["iteration"], 1)
         self.assertTrue(payload["truth_source_changed"])
+        self.assertTrue(payload["build_attempted"])
+        self.assertEqual(payload["last_build_status"], "success")
+        self.assertTrue(payload["last_build_at"])
+        self.assertEqual(payload["last_build_error"], "")
         self.assertEqual(len(payload["written_files"]), 12)
 
     def test_dashboard_watch_signature_changes_when_run_becomes_stale(self) -> None:
@@ -665,6 +669,40 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(events[0]["time_sensitive_changed"])
         self.assertFalse(events[1]["truth_source_changed"])
         self.assertTrue(events[1]["time_sensitive_changed"])
+        self.assertEqual(events[1]["last_build_status"], "success")
+
+    def test_dashboard_watch_json_reports_build_failure_without_crashing(self) -> None:
+        with (
+            patch("research_cockpit.commands.build_dashboard.dashboard_watch_signature", return_value=(("truth",), (), (), ())),
+            patch("research_cockpit.commands.build_dashboard.build_dashboard_once", side_effect=ValueError("bad graph")),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            watch_dashboard(self.root, interval=0, max_iterations=1, json_output=True)
+
+        payload = json.loads(stdout.getvalue().splitlines()[0])
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["build_attempted"])
+        self.assertEqual(payload["last_build_status"], "failed")
+        self.assertTrue(payload["last_build_at"])
+        self.assertIn("bad graph", payload["last_build_error"])
+        self.assertIn("bad graph", payload["error"])
+        self.assertEqual(payload["written_files"], [])
+
+    def test_dashboard_watch_json_reports_signature_failure_without_crashing(self) -> None:
+        with (
+            patch("research_cockpit.commands.build_dashboard.dashboard_watch_signature", side_effect=FileNotFoundError("race")),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            watch_dashboard(self.root, interval=0, max_iterations=1, json_output=True)
+
+        payload = json.loads(stdout.getvalue().splitlines()[0])
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["build_attempted"])
+        self.assertEqual(payload["last_build_status"], "failed")
+        self.assertTrue(payload["last_build_at"])
+        self.assertIn("race", payload["last_build_error"])
+        self.assertIn("race", payload["error"])
+        self.assertEqual(payload["written_files"], [])
 
     def test_build_cli_respects_root_argument_over_environment(self) -> None:
         env_root = self.tmp_root / "env_research_cockpit"

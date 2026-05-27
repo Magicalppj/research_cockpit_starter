@@ -128,11 +128,12 @@ research-cockpit repair-interaction-log --root research_cockpit --dry-run --json
 
 `node-context` is read-only and computed from truth-source YAML. Use `--compact --json` as the shortest older onboarding path when a human asks you to continue from one node; use full `--json` when you need parent chain, relations, resources, recent interactions, and type-specific traces. The combined `context` payload separates `target_context` from `current_global_focus`; use `context_boundary.warning` to notice when a target node differs from the global focus.
 
-When making several related state changes, run mutating commands sequentially. Do not parallelize mutating commands against the same data root; they share `graph/interaction_log.yaml` and are protected by a mutation lock. Truth-source mutations also verify that target files did not change after command planning; if a command reports a mutation conflict, reread compact context and retry the command. Pass `--no-build` to each supported mutating command, then validate and rebuild once:
+When making several related state changes, run mutating commands sequentially. Do not parallelize mutating commands against the same data root; they share `graph/interaction_log.yaml` and are protected by a mutation lock. Truth-source mutations also verify that target files did not change after command planning; if a command reports a mutation conflict, reread compact context and retry the command. Pass `--no-build` to each supported mutating command, then validate, rebuild, and smoke once:
 
 ```sh
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
+research-cockpit smoke --root research_cockpit --json
 ```
 
 For several node creations or rich field edits, prefer a single plan file:
@@ -142,6 +143,7 @@ research-cockpit apply-graph-plan --root research_cockpit --file graph_update.ya
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --no-build
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
+research-cockpit smoke --root research_cockpit --json
 ```
 
 `apply-graph-plan` supports `updates[*].status` at the update entry top level. Put content fields under `updates[*].fields`; `status` inside `fields` is rejected. Run `apply-graph-plan --print-schema` for the supported field list, including experiment assignment fields: `owner`, `blocked_by`, `depends_on`, `ready_for_agent`, and `handoff_context`. For dispatch ordering, keep `priority` coarse and put stable sequence labels in `order` or `rank`.
@@ -184,7 +186,7 @@ Do not run `init`, `set-focus`, or any mutation against a worktree-local `resear
 research-cockpit build --root D:/main_repo/research_cockpit --watch --interval 5 --json
 ```
 
-`build --watch --json` prints one JSON object per iteration. `import-worktree-findings` is only a recovery tool for evidence accidentally written in a worktree-local cockpit root. It imports artifact nodes, experiment findings, result summaries, experiment-local `next_actions`, and workstream reports; it refuses structural graph changes, global/per-agent focus changes, and decision acceptance.
+`build --watch --json` prints one JSON object per iteration. Each event includes `last_build_at`, `last_build_status`, and `last_build_error`; the watcher only refreshes generated dashboards and does not replace final `validate` or `smoke`. `import-worktree-findings` is only a recovery tool for evidence accidentally written in a worktree-local cockpit root. It imports artifact nodes, experiment findings, result summaries, experiment-local `next_actions`, and workstream reports; it refuses structural graph changes, global/per-agent focus changes, and decision acceptance.
 
 Before deleting a worktree, ingest any useful run directory into the canonical artifact store and record the conclusion:
 
@@ -193,6 +195,7 @@ research-cockpit ingest-artifact --root D:/main_repo/research_cockpit --node exp
 research-cockpit complete-experiment --root D:/main_repo/research_cockpit --id experiment_x --finding "..." --confidence medium --artifact-id artifact_experiment_x_run_x --no-build
 research-cockpit validate --root D:/main_repo/research_cockpit --json
 research-cockpit build --root D:/main_repo/research_cockpit
+research-cockpit smoke --root D:/main_repo/research_cockpit --json
 ```
 
 Do not use worktree-local paths as long-lived `--evidence-path` values. Keep run directories free of symlinks before `ingest-artifact`; v1 rejects symlinked files or directories instead of copying through them. Deletion is safe only after artifact files, finding/decision/baseline updates, and any useful commit/patch have been preserved outside the worktree.
