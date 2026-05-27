@@ -134,6 +134,22 @@ Standard `progress.json` heartbeat files should be JSON objects with this shape:
 
 `total_steps` may be omitted or null when the total is unknown. `last_update` should be an ISO-8601 timestamp; active heartbeats are considered stale after 60 minutes without an update. `run-context --json` and run summaries read a run's relative `progress_file` and expose normalized progress, percent complete when possible, heartbeat warnings, and schema warnings. Missing or malformed progress files produce warnings instead of blocking context reads.
 
+Standard `gate_result.json` files should use this machine-readable shape:
+
+```json
+{
+  "gate_type": "dataset_check",
+  "passed": true,
+  "expected": {},
+  "observed": {},
+  "fatal_failures": {},
+  "warnings": [],
+  "next_allowed_action": "precompute"
+}
+```
+
+`gate_type` is a required string, `passed` is a required boolean, and `expected`, `observed`, and `fatal_failures` are JSON objects. Warning-only gates report `blocks_next_action: false`. A failed gate, malformed gate file, or non-empty `fatal_failures` reports `blocks_next_action: true` so later ingest/context workflows can block or override the next action explicitly. Gate files may also include `experiment_id` and `run_id` so later ingest/context commands can link them back to the execution that produced them.
+
 ## Artifacts
 
 Use artifact commands for result folders, review bundles, metrics directories, and other evidence objects that need their own status or links:

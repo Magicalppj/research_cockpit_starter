@@ -82,6 +82,7 @@ from research_cockpit.commands.update_workstream_fields import update_workstream
 from research_cockpit.commands.update_suggestion_state import update_suggestion_state
 from research_cockpit.commands.update_status import update_status
 from research_cockpit.context_packs import build_agent_context
+from research_cockpit.gate_results import load_gate_result, normalize_gate_result
 from research_cockpit.graph_views import upsert_graph_view
 from research_cockpit.mutation_lock import MutationError, mutation_lock
 from research_cockpit.mutation_runtime import finish_mutation
@@ -2410,6 +2411,160 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("JSON parse error", compact["progress"]["schema_warnings"][0])
         self.assertEqual(human.returncode, 0, human.stdout + human.stderr)
         self.assertIn("Progress: unavailable", human.stdout)
+
+    def test_gate_result_schema_normalizes_passed_warning_only_gate(self) -> None:
+        gate = normalize_gate_result(
+            {
+                "gate_type": "dataset_check",
+                "passed": True,
+                "expected": {"rows": 100},
+                "observed": {"rows": 100},
+                "warnings": ["class imbalance is high"],
+                "next_allowed_action": "precompute",
+            },
+            path="artifacts/exp_t5/run_gate/gate_result.json",
+            experiment_id="exp_t5",
+            run_id="run_gate",
+        )
+
+        self.assertTrue(gate["valid"])
+        self.assertFalse(gate["blocks_next_action"])
+        self.assertEqual(gate["schema_version"], "gate_result_v1")
+        self.assertEqual(gate["gate_type"], "dataset_check")
+        self.assertTrue(gate["passed"])
+        self.assertEqual(gate["expected"], {"rows": 100})
+        self.assertEqual(gate["observed"], {"rows": 100})
+        self.assertEqual(gate["warnings"], ["class imbalance is high"])
+        self.assertEqual(gate["next_allowed_action"], "precompute")
+        self.assertEqual(gate["experiment_id"], "exp_t5")
+        self.assertEqual(gate["run_id"], "run_gate")
+
+    def test_gate_result_schema_blocks_failed_or_fatal_gate(self) -> None:
+        failed = normalize_gate_result(
+            {
+                "gate_type": "cache_check",
+                "passed": False,
+                "fatal_failures": {"missing_cache": "embeddings_v4"},
+                "warnings": [],
+            }
+        )
+        fatal = normalize_gate_result(
+            {
+                "gate_type": "smoke_check",
+                "passed": True,
+                "fatal_failures": {"nan_loss": True},
+            }
+        )
+
+        self.assertTrue(failed["valid"])
+        self.assertTrue(failed["blocks_next_action"])
+        self.assertTrue(fatal["valid"])
+        self.assertTrue(fatal["blocks_next_action"])
+
+    def test_gate_result_schema_reports_malformed_and_unsafe_files(self) -> None:
+        malformed_path = self.root / "artifacts" / "exp_t5" / "run_gate_bad" / "gate_result.json"
+        malformed_path.parent.mkdir(parents=True)
+        malformed_path.write_text("{", encoding="utf-8")
+        valid_path = self.root / "artifacts" / "exp_t5" / "run_gate_ok" / "gate_result.json"
+        valid_path.parent.mkdir(parents=True)
+        valid_path.write_text(
+            json.dumps(
+                {
+                    "gate_type": "preflight",
+                    "passed": True,
+                    "expected": {},
+                    "observed": {"disk_available_gb": 1200},
+                    "fatal_failures": {},
+                    "warnings": [],
+                    "next_allowed_action": "smoke",
+                    "experiment_id": "exp_t5",
+                    "run_id": "run_gate_ok",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        valid = load_gate_result(self.root, "artifacts/exp_t5/run_gate_ok/gate_result.json")
+        conflicting = load_gate_result(
+            self.root,
+            "artifacts/exp_t5/run_gate_ok/gate_result.json",
+            experiment_id="exp_other",
+            run_id="run_other",
+        )
+        malformed = load_gate_result(self.root, "artifacts/exp_t5/run_gate_bad/gate_result.json")
+        missing = load_gate_result(self.root, "artifacts/exp_t5/missing/gate_result.json")
+        unsafe = load_gate_result(self.root, "../outside/gate_result.json")
+
+        self.assertIsNotNone(valid)
+        self.assertIsNotNone(conflicting)
+        self.assertIsNotNone(malformed)
+        self.assertIsNotNone(missing)
+        self.assertIsNotNone(unsafe)
+        assert (
+            valid is not None
+            and conflicting is not None
+            and malformed is not None
+            and missing is not None
+            and unsafe is not None
+        )
+        self.assertTrue(valid["valid"])
+        self.assertFalse(valid["blocks_next_action"])
+        self.assertEqual(valid["experiment_id"], "exp_t5")
+        self.assertEqual(valid["run_id"], "run_gate_ok")
+        self.assertFalse(conflicting["valid"])
+        self.assertTrue(conflicting["blocks_next_action"])
+        self.assertEqual(conflicting["experiment_id"], "exp_other")
+        self.assertEqual(conflicting["run_id"], "run_other")
+        self.assertIn("experiment_id does not match gate result file", conflicting["schema_warnings"])
+        self.assertIn("run_id does not match gate result file", conflicting["schema_warnings"])
+        self.assertFalse(malformed["valid"])
+        self.assertTrue(malformed["blocks_next_action"])
+        self.assertIn("JSON parse error", malformed["schema_warnings"][0])
+        self.assertFalse(missing["exists"])
+        self.assertIn("does not exist", missing["schema_warnings"][0])
+        self.assertFalse(unsafe["exists"])
+        self.assertIn("relative path inside the data root", unsafe["schema_warnings"][0])
+
+    def test_gate_result_schema_reports_bad_field_shapes(self) -> None:
+        gate = normalize_gate_result(
+            {
+                "gate_type": ["dataset_check"],
+                "passed": "yes",
+                "expected": [],
+                "observed": [],
+                "fatal_failures": [],
+                "warnings": "warn",
+                "next_allowed_action": {"action": "precompute"},
+            }
+        )
+
+        self.assertFalse(gate["valid"])
+        self.assertTrue(gate["blocks_next_action"])
+        self.assertIn("gate_type must be a string", gate["schema_warnings"])
+        self.assertIn("passed must be a boolean", gate["schema_warnings"])
+        self.assertIn("expected must be a JSON object", gate["schema_warnings"])
+        self.assertIn("observed must be a JSON object", gate["schema_warnings"])
+        self.assertIn("fatal_failures must be a JSON object", gate["schema_warnings"])
+        self.assertIn("warnings must be a list", gate["schema_warnings"])
+        self.assertIn("next_allowed_action must be a string", gate["schema_warnings"])
+
+        empty_string_shapes = normalize_gate_result(
+            {
+                "gate_type": "dataset_check",
+                "passed": True,
+                "expected": "",
+                "observed": "",
+                "fatal_failures": "",
+                "warnings": "",
+            }
+        )
+
+        self.assertFalse(empty_string_shapes["valid"])
+        self.assertTrue(empty_string_shapes["blocks_next_action"])
+        self.assertIn("expected must be a JSON object", empty_string_shapes["schema_warnings"])
+        self.assertIn("observed must be a JSON object", empty_string_shapes["schema_warnings"])
+        self.assertIn("fatal_failures must be a JSON object", empty_string_shapes["schema_warnings"])
+        self.assertIn("warnings must be a list", empty_string_shapes["schema_warnings"])
 
     def test_run_summaries_use_progress_heartbeat_for_stale_and_warnings(self) -> None:
         stale_path = self.root / "artifacts" / "exp_t5" / "run_progress_stale" / "progress.json"
