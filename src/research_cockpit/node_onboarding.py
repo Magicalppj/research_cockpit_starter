@@ -16,6 +16,7 @@ from research_cockpit.gate_result_records import build_experiment_gate_context
 from research_cockpit.hierarchy_policy import hierarchy_policy
 from research_cockpit.decisions import build_decision_acceptance_checklist, build_decision_trace
 from research_cockpit.baselines import resolve_effective_baseline
+from research_cockpit.context_packs import build_next_action_scopes
 from research_cockpit.interaction_log import recent_interactions
 from research_cockpit.option_workstreams import build_option_workstream_context
 from research_cockpit.suggestions import build_action_suggestions
@@ -587,6 +588,7 @@ def _compact_node_onboarding_context(payload: dict[str, Any]) -> dict[str, Any]:
         "effective_baseline": payload.get("effective_baseline") or {},
         "blockers": payload.get("blockers", []) or [],
         "next_actions": payload.get("next_actions", []) or [],
+        "next_action_scopes": payload.get("next_action_scopes", {}) or {},
         "evidence_summary": _compact_evidence_summary(payload),
         "recommended_next_step": recommended_next_steps[0] if recommended_next_steps else None,
         "recommended_next_steps": recommended_next_steps,
@@ -648,6 +650,12 @@ def build_node_onboarding_context(
         },
         "blockers": _node_blocker_rows(nodes, path_ids + child_ids_for_node),
         "next_actions": _node_next_action_rows(nodes, path_ids + child_ids_for_node, current),
+        "next_action_scopes": build_next_action_scopes(
+            nodes,
+            current,
+            focus_node_id=node.id,
+            focus_path_ids=path_ids,
+        ),
         "relevant_suggestions": _node_relevant_suggestions(suggestions, node.id, related_ids),
         "resources": [row for row in link_rows if row.get("node_id") in related_ids],
         "recent_interactions": _node_recent_interactions(root, node.id),

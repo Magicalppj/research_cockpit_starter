@@ -13,6 +13,7 @@ from research_cockpit.commands.agent_bootstrap import agent_bootstrap_payload
 from research_cockpit.commands.lint_semantic import semantic_lint
 from research_cockpit.commands.node_context import node_context_payload
 from research_cockpit.baselines import baseline_artifact_ids, resolve_effective_baseline
+from research_cockpit.context_packs import build_next_action_scopes
 from research_cockpit.graph_core import (
     derive_focus_path,
     node_context,
@@ -69,14 +70,22 @@ def _artifact_ids_for(nodes: dict[str, Any], node_ids: list[str]) -> list[str]:
     return out
 
 
-def _compact_focus_payload(current: dict[str, Any]) -> dict[str, Any]:
+def _compact_focus_payload(nodes: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    focus_node_id = current.get("current_focus_node") or current.get("current_problem")
+    focus_path_ids = current.get("current_focus_path", []) or []
     return {
         "current_stage": current.get("current_stage"),
         "current_problem": current.get("current_problem"),
         "current_option": current.get("current_option"),
-        "current_focus_node": current.get("current_focus_node") or current.get("current_problem"),
-        "current_focus_path": current.get("current_focus_path", []) or [],
+        "current_focus_node": focus_node_id,
+        "current_focus_path": focus_path_ids,
         "next_actions": current.get("next_actions", []) or [],
+        "next_action_scopes": build_next_action_scopes(
+            nodes,
+            current,
+            focus_node_id=focus_node_id,
+            focus_path_ids=focus_path_ids,
+        ),
     }
 
 
@@ -116,7 +125,7 @@ def context_payload(
     effective_baseline = resolve_effective_baseline(nodes, node_id, current)
     artifact_ids = _artifact_ids_for(nodes, related_ids)
     artifact_ids = unique_strings([*artifact_ids, *baseline_artifact_ids(effective_baseline)])
-    global_focus = _compact_focus_payload(current)
+    global_focus = _compact_focus_payload(nodes, current)
     target_context = _target_context_payload(nodes, node_id, global_focus)
     target_differs_from_global_focus = not target_context["is_current_global_focus"]
     semantic = semantic_lint(root)

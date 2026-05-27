@@ -113,7 +113,7 @@ Focus changes write `current_state.yaml`, append `interaction_log.yaml`, and reb
 
 Passing `--next-action` replaces the current_state `next_actions` list with the repeated values supplied in this command. It does not append.
 
-Dashboard "Current Next Actions" is sourced from `current_state.yaml`, not from problem/option/experiment node-local `next_actions`. Updating a node's `next_actions` is useful for local planning, but the dashboard will not show it as current work until you run `set-focus --next-action ...` or `sync-focus-actions`.
+Dashboard "Current Next Actions" remains sourced from `current_state.yaml` for compatibility. Generated and computed context also include `next_action_scopes` so agents can distinguish `focus_next_actions`, `parent_option_next_actions`, `parent_problem_next_actions`, `global_coordinator_next_actions`, and `stale_terminal_node_next_actions`. Updating a node's `next_actions` is useful for local planning, but it will not become a global coordinator action until you run `set-focus --next-action ...` or `sync-focus-actions`.
 
 In multi-agent worktree runs, downstream agents should not use global `set-focus`. Use per-agent focus instead:
 

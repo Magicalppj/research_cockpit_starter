@@ -505,6 +505,121 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("metadata", focus_context)
         self.assertIsInstance(context["metadata"]["worktree_dirty"], bool)
 
+    def test_dashboard_splits_next_actions_by_scope(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "exp_t5"
+        current["current_focus_path"] = ["stage_text", "problem_text", "option_t5", "exp_t5"]
+        current["next_actions"] = ["Coordinator: assign GPU window."]
+        save_yaml(self.root / "current_state.yaml", current)
+
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["next_actions"] = ["Clarify failure mode."]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["children"] = ["exp_t5", "exp_done"]
+        option["next_actions"] = ["Compare T5 branch budget."]
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["next_actions"] = ["Run focused smoke."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        write_node(
+            self.root,
+            {
+                "id": "exp_done",
+                "type": "experiment",
+                "title": "Completed branch",
+                "status": "done",
+                "parent": "option_t5",
+                "next_actions": ["Move completed follow-up."],
+            },
+        )
+
+        build_dashboard(self.root)
+
+        agent_context = json.loads((self.root / "dashboards" / "agent_context_pack.json").read_text(encoding="utf-8"))
+        focus_context = json.loads((self.root / "dashboards" / "focus_context_pack.json").read_text(encoding="utf-8"))
+        current_payload = json.loads((self.root / "dashboards" / "current_state.json").read_text(encoding="utf-8"))
+        node_payload = node_context_payload(self.root, node_id="exp_t5", compact=True)
+        combined_payload = context_payload(self.root, node_id="exp_t5", compact=True)
+
+        for payload in (agent_context, focus_context, current_payload, node_payload):
+            scopes = payload["next_action_scopes"]
+            self.assertEqual([item["action"] for item in scopes["focus_next_actions"]], ["Run focused smoke."])
+            self.assertEqual(
+                [item["action"] for item in scopes["parent_option_next_actions"]],
+                ["Compare T5 branch budget."],
+            )
+            self.assertEqual(
+                [item["action"] for item in scopes["parent_problem_next_actions"]],
+                ["Clarify failure mode."],
+            )
+            self.assertEqual(
+                [item["action"] for item in scopes["global_coordinator_next_actions"]],
+                ["Coordinator: assign GPU window."],
+            )
+            self.assertEqual(scopes["stale_terminal_node_next_actions"][0]["node_id"], "exp_done")
+            self.assertTrue(scopes["stale_terminal_node_next_actions"][0]["stale"])
+            self.assertTrue(scopes["stale_terminal_node_next_actions"][0]["migration_candidate"])
+
+        self.assertEqual(agent_context["next_actions"], ["Coordinator: assign GPU window."])
+        self.assertEqual(
+            focus_context["next_actions"],
+            ["Coordinator: assign GPU window.", "Run focused smoke."],
+        )
+        self.assertIn("next_action_scopes", combined_payload["current_global_focus"])
+        self.assertIn("next_action_scopes", combined_payload["node_context"])
+
+    def test_dashboard_next_action_scopes_keep_global_only_actions_separate(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "exp_t5"
+        current["current_focus_path"] = ["stage_text", "problem_text", "option_t5", "exp_t5"]
+        current["next_actions"] = ["Coordinator-only handoff."]
+        save_yaml(self.root / "current_state.yaml", current)
+
+        context = build_agent_context(self.root, load_nodes(self.root))
+
+        scopes = context["next_action_scopes"]
+        self.assertEqual(scopes["focus_next_actions"], [])
+        self.assertEqual(scopes["parent_option_next_actions"], [])
+        self.assertEqual(scopes["parent_problem_next_actions"], [])
+        self.assertEqual(
+            [item["action"] for item in scopes["global_coordinator_next_actions"]],
+            ["Coordinator-only handoff."],
+        )
+
+    def test_next_action_scopes_mark_terminal_focus_and_parent_actions_stale(self) -> None:
+        current = load_yaml(self.root / "current_state.yaml")
+        current["current_focus_node"] = "exp_t5"
+        current["current_focus_path"] = ["stage_text", "problem_text", "option_t5", "exp_t5"]
+        save_yaml(self.root / "current_state.yaml", current)
+
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["status"] = "resolved"
+        problem["next_actions"] = ["Move resolved problem follow-up."]
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["status"] = "accepted"
+        option["next_actions"] = ["Move accepted option follow-up."]
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["next_actions"] = ["Move done experiment follow-up."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+
+        scopes = build_agent_context(self.root, load_nodes(self.root))["next_action_scopes"]
+
+        for key in ("focus_next_actions", "parent_option_next_actions", "parent_problem_next_actions"):
+            self.assertTrue(scopes[key][0]["is_terminal"])
+            self.assertTrue(scopes[key][0]["stale"])
+            self.assertTrue(scopes[key][0]["migration_candidate"])
+        stale_ids = {item["node_id"] for item in scopes["stale_terminal_node_next_actions"]}
+        self.assertEqual(stale_ids, {"exp_t5", "option_t5", "problem_text"})
+        for item in scopes["stale_terminal_node_next_actions"]:
+            self.assertEqual(
+                item["reason"].count("Terminal nodes should keep conclusions"),
+                1,
+            )
+
     def test_build_cli_json_reports_generated_files(self) -> None:
         out = subprocess.run(
             [*cli_command("build"), "--root", str(self.root), "--json"],

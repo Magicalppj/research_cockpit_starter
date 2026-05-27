@@ -28,6 +28,18 @@ from research_cockpit.storage import load_yaml, save_text
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.types import ACTIVE_WORKSTREAM_STATUSES, CONTEXT_SCHEMA_VERSION, ResearchNode
 
+TERMINAL_NEXT_ACTION_STATUSES = {
+    "accepted",
+    "archived",
+    "cancelled",
+    "done",
+    "failed",
+    "parked",
+    "rejected",
+    "resolved",
+    "superseded",
+}
+
 
 def _git_output(repo_root: Path, *args: str) -> str | None:
     try:
@@ -104,12 +116,170 @@ def _knowledge_index(nodes: dict[str, ResearchNode], node_ids: list[str]) -> lis
     return entries
 
 
+def _action_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item).strip()]
+
+
+def _node_action_entries(
+    node: ResearchNode,
+    *,
+    scope: str,
+    stale: bool = False,
+    migration_candidate: bool = False,
+    reason: str = "",
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    is_terminal = node.status in TERMINAL_NEXT_ACTION_STATUSES
+    entry_stale = stale or is_terminal
+    entry_migration_candidate = migration_candidate or is_terminal
+    entry_reason = reason
+    if is_terminal:
+        terminal_reason = "Terminal nodes should keep conclusions, not live follow-up work."
+        entry_reason = reason if terminal_reason in reason else f"{reason} {terminal_reason}".strip()
+    for action in _action_list(node.raw.get("next_actions")):
+        entries.append({
+            "scope": scope,
+            "source": "node",
+            "node_id": node.id,
+            "node_title": node.title,
+            "node_type": node.type,
+            "node_status": node.status,
+            "action": action,
+            "is_terminal": is_terminal,
+            "stale": entry_stale,
+            "migration_candidate": entry_migration_candidate,
+            "reason": entry_reason,
+        })
+    return entries
+
+
+def _current_state_action_entries(current: dict[str, Any], focus_node_id: str | None) -> list[dict[str, Any]]:
+    return [
+        {
+            "scope": "global_coordinator_next_actions",
+            "source": "current_state",
+            "node_id": "current_state",
+            "node_title": "current_state",
+            "node_type": "current_state",
+            "node_status": "",
+            "related_focus_node": focus_node_id,
+            "action": action,
+            "is_terminal": False,
+            "stale": False,
+            "migration_candidate": False,
+            "reason": "Stored in current_state.next_actions for coordinator-level handoff.",
+        }
+        for action in _action_list(current.get("next_actions"))
+    ]
+
+
+def _nearest_parent_id(
+    nodes: dict[str, ResearchNode],
+    path_ids: list[str],
+    focus_node_id: str | None,
+    node_type: str,
+) -> str | None:
+    for node_id in reversed(path_ids):
+        if node_id == focus_node_id:
+            continue
+        node = nodes.get(node_id)
+        if node and node.type == node_type:
+            return node.id
+    return None
+
+
+def build_next_action_scopes(
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any],
+    *,
+    focus_node_id: str | None = None,
+    focus_path_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    focus_node_id = focus_node_id or focus_node_id_from_current(current, nodes)
+    path_ids = [
+        str(node_id)
+        for node_id in (focus_path_ids if focus_path_ids is not None else current.get("current_focus_path", []) or [])
+        if str(node_id) in nodes
+    ]
+    if focus_node_id and focus_node_id in nodes and focus_node_id not in path_ids:
+        try:
+            path_ids = derive_focus_path(nodes, focus_node_id)
+        except ValueError:
+            path_ids = [focus_node_id]
+
+    focus_node = nodes.get(focus_node_id) if focus_node_id else None
+    parent_option_id = _nearest_parent_id(nodes, path_ids, focus_node_id, "option")
+    parent_problem_id = _nearest_parent_id(nodes, path_ids, focus_node_id, "problem")
+
+    focus_next_actions = (
+        _node_action_entries(
+            focus_node,
+            scope="focus_next_actions",
+            reason="Stored on the current focus node.",
+        )
+        if focus_node
+        else []
+    )
+    parent_option_next_actions = (
+        _node_action_entries(
+            nodes[parent_option_id],
+            scope="parent_option_next_actions",
+            reason="Stored on the nearest parent option in the focus path.",
+        )
+        if parent_option_id
+        else []
+    )
+    parent_problem_next_actions = (
+        _node_action_entries(
+            nodes[parent_problem_id],
+            scope="parent_problem_next_actions",
+            reason="Stored on the nearest parent problem in the focus path.",
+        )
+        if parent_problem_id
+        else []
+    )
+    global_coordinator_next_actions = _current_state_action_entries(current, focus_node_id)
+    stale_terminal_node_next_actions: list[dict[str, Any]] = []
+    for node in sorted(nodes.values(), key=lambda item: item.id):
+        if node.status not in TERMINAL_NEXT_ACTION_STATUSES:
+            continue
+        stale_terminal_node_next_actions.extend(_node_action_entries(
+            node,
+            scope="stale_terminal_node_next_actions",
+            stale=True,
+            migration_candidate=True,
+            reason="Terminal nodes should keep conclusions, not live follow-up work.",
+        ))
+
+    buckets = {
+        "focus_next_actions": focus_next_actions,
+        "parent_option_next_actions": parent_option_next_actions,
+        "parent_problem_next_actions": parent_problem_next_actions,
+        "global_coordinator_next_actions": global_coordinator_next_actions,
+        "stale_terminal_node_next_actions": stale_terminal_node_next_actions,
+    }
+    return {
+        "focus_node_id": focus_node_id,
+        "focus_path_ids": path_ids,
+        **buckets,
+        "counts": {key: len(value) for key, value in buckets.items()},
+    }
+
+
 def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str, Any]:
     current = load_yaml(root / "current_state.yaml")
     path = current.get("current_focus_path", []) or []
     linked_nodes = [node_context(nodes[node_id]) for node_id in path if node_id in nodes]
     current_focus_node = focus_node_id_from_current(current, nodes)
     effective_baseline = resolve_current_effective_baseline(nodes, current)
+    next_action_scopes = build_next_action_scopes(
+        nodes,
+        current,
+        focus_node_id=current_focus_node,
+        focus_path_ids=path,
+    )
 
     active_problems = [
         n for n in nodes.values()
@@ -144,6 +314,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         "current_focus_path": path,
         "open_risks": current.get("open_risks", []),
         "next_actions": current.get("next_actions", []),
+        "next_action_scopes": next_action_scopes,
         "linked_nodes": linked_nodes,
         "active_problems": [
             {
@@ -265,6 +436,12 @@ def build_focus_context(
         (current.get("next_actions", []) or [])
         + (focus_node.raw.get("next_actions", []) if focus_node else [])
     )
+    next_action_scopes = build_next_action_scopes(
+        nodes,
+        current,
+        focus_node_id=focus_node_id,
+        focus_path_ids=path_ids,
+    )
     knowledge_node_ids = (
         [focus_node_id or ""]
         + path_ids
@@ -335,6 +512,7 @@ def build_focus_context(
         "effective_baseline": effective_baseline,
         "blockers": blockers,
         "next_actions": next_actions,
+        "next_action_scopes": next_action_scopes,
         "knowledge_index": _knowledge_index(nodes, knowledge_node_ids),
         "suggested_next_actions": suggested_next_actions,
         "search_index_summary": build_search_index_summary(search_index),
@@ -353,6 +531,7 @@ def build_current_state_payload(
     current = current if current is not None else load_yaml(root / "current_state.yaml")
     focus_node_id = focus_node_id_from_current(current, nodes)
     effective_baseline = resolve_current_effective_baseline(nodes, current)
+    focus_path = current.get("current_focus_path", []) or []
     return {
         "current_stage": current.get("current_stage"),
         "current_stage_title": node_title(nodes, current.get("current_stage")),
@@ -364,10 +543,16 @@ def build_current_state_payload(
         "current_focus_node_title": node_title(nodes, focus_node_id),
         "effective_baseline": effective_baseline,
         "focus_mode": focus_mode_from_current(current),
-        "current_focus_path": current.get("current_focus_path", []) or [],
+        "current_focus_path": focus_path,
         "current_hypothesis": current.get("current_hypothesis"),
         "open_risks": current.get("open_risks", []),
         "next_actions": current.get("next_actions", []),
+        "next_action_scopes": build_next_action_scopes(
+            nodes,
+            current,
+            focus_node_id=focus_node_id,
+            focus_path_ids=focus_path,
+        ),
         "updated_at": current.get("updated_at"),
         "saved_graph_views": load_graph_views(root),
         "recent_interactions": recent_interactions(root),
@@ -407,6 +592,25 @@ def write_dashboard_markdown(root: Path, context: dict[str, Any]) -> None:
     for item in context.get("next_actions", []):
         lines.append(f"- {item}")
     lines.append("")
+    action_scopes = context.get("next_action_scopes") or {}
+    scope_titles = [
+        ("focus_next_actions", "Focus Node"),
+        ("parent_option_next_actions", "Parent Option"),
+        ("parent_problem_next_actions", "Parent Problem"),
+        ("global_coordinator_next_actions", "Global Coordinator"),
+        ("stale_terminal_node_next_actions", "Stale Terminal Nodes"),
+    ]
+    if any(action_scopes.get(key) for key, _title in scope_titles):
+        lines.append("## Next Actions By Scope\n")
+        for key, title in scope_titles:
+            entries = action_scopes.get(key) or []
+            if not entries:
+                continue
+            lines.append(f"### {title}")
+            for entry in entries:
+                source_id = entry.get("node_id") or entry.get("source")
+                lines.append(f"- `{source_id}`: {entry.get('action')}")
+        lines.append("")
     lines.append("## Active Problems\n")
     for problem in context.get("active_problems", []):
         lines.append(f"- **{problem['title']}** (`{problem['id']}`): {problem.get('summary','')}")
