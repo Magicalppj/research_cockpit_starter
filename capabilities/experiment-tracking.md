@@ -367,6 +367,7 @@ When recording several related updates, run mutating commands sequentially. Do n
 ```sh
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
+research-cockpit smoke --root research_cockpit --json
 ```
 
 For agent-readable success summaries, add `--compact` to `--json` on supported high-level mutation commands. Check `commands --json` for `supports_compact`; `complete-experiment` and `complete-experiments` both support it. The compact payload omits bulky `before`/`after` blocks. If you also pass `--show-diff`, the full diff is included and `diff_line_count` tells the agent how large it is.

@@ -103,7 +103,7 @@ Research Cockpit 提供三层能力：
 
 关键原则：
 
-- `research_cockpit/current_state.yaml` 和 `research_cockpit/graph/nodes/*.yaml` 是 truth source。
+- `research_cockpit/current_state.yaml`、`research_cockpit/graph/nodes/*.yaml`、`research_cockpit/runs/*.yaml` 和 `research_cockpit/gate_results/*.{yaml,json}` 是结构化状态的 truth source。
 - `research_cockpit/dashboards/*` 是生成文件，用 `research-cockpit build --root <root>` 生成。
 - 日常修改优先用 CLI 命令，避免直接手改 YAML 后破坏图谱关系。
 - 同一个 data root 的写操作要顺序执行，不要并发写。
@@ -218,11 +218,26 @@ research-cockpit ingest-artifact --root research_cockpit --node experiment_x --f
 research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --artifact-id artifact_experiment_x_run_x --no-build
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
+research-cockpit smoke --root research_cockpit --json
 ```
 
-默认复制到 `research_cockpit/artifacts/<node_id>/<run_id>/`，并创建 `artifact_<node_id>_<run_id>`。最后一次 truth-source 写入后运行 `validate` 和 `build`，UI、context 和 Resources 才会看到最新 finding 与 artifact；更完整的多 agent 规则见文末“并行 Agent 和 Worktree”。
+默认复制到 `research_cockpit/artifacts/<node_id>/<run_id>/`，并创建 `artifact_<node_id>_<run_id>`。最后一次 truth-source 写入后运行 `validate`、`build` 和 `smoke`，UI、context 和 Resources 才会看到最新 finding 与 artifact，并且能确认生成上下文可读；更完整的多 agent 规则见文末“并行 Agent 和 Worktree”。
 
-### 4. 显式创建或关联 artifact
+### 4. 跟踪长任务 run / gate
+
+长实验先记录具体 run，再用 `progress.json` 和 `gate_result.json` 给 agent 一个统一的状态入口。run 只表示一次执行；实验结论仍然用 finding / artifact 记录：
+
+```sh
+research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher tmux --command "python train.py" --progress-file artifacts/experiment_x/run_x/progress.json --no-build
+research-cockpit run-context --root research_cockpit --id run_x --compact --json
+research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link gate_result=gate_result.json --no-build --json --compact
+research-cockpit ingest-gate-result --root research_cockpit --id gate_x --file artifacts/experiment_x/run_x/gate_result.json --run run_x --artifact artifact_experiment_x_run_x --no-build
+research-cockpit complete-run --root research_cockpit --id run_x --status completed --no-build
+```
+
+`gate_result.json` 用于 dataset/cache/smoke/training/evaluation/preflight 等 gate。资源检查使用 `gate_type: "preflight"`；失败的 preflight 会在 context 中阻止 `full_run` 建议。launcher 输出约定和模板见 `docs/launcher-output-conventions.md` 与 `templates/launcher/`。
+
+### 5. 显式创建或关联 artifact
 
 ```sh
 research-cockpit create-artifact --print-schema
@@ -233,7 +248,7 @@ research-cockpit link-artifact --root research_cockpit --artifact artifact_x --t
 
 Artifact 的 `path` 和 `links` 会按原样存储。生成的 resource rows 会包含解析路径、解析基准和文件是否存在等信息。
 
-### 5. 收尾一个方案工作流
+### 6. 收尾一个方案工作流
 
 只有当 close-out 状态明确时再 finalize：
 
@@ -245,7 +260,7 @@ research-cockpit finalize-workstream --root research_cockpit --file finalize.yam
 
 `finalize-workstream` 不会创建 artifact、接受 decision、暂停旧分支、删除节点或编造 next actions。
 
-### 6. 把已采纳成果设为默认 baseline
+### 7. 把已采纳成果设为默认 baseline
 
 `accepted option/decision` 是历史事实，`baseline` 是某个节点及其下游 agent 默认继承的工作前提。多个方案都被接受后，不要把全部 accepted history 塞进每个 agent 上下文；由上游节点或用户显式选择默认 baseline：
 
@@ -299,6 +314,8 @@ research_cockpit/
   graph/edges.yaml
   graph/graph_views.yaml
   graph/interaction_log.yaml
+  runs/                     # run/job execution records
+  gate_results/             # standard gate metadata records and recorded gate JSON
   notes/
   artifacts/                # 长期 evidence/result bundles
   dashboards/               # build 生成
@@ -341,6 +358,8 @@ SKILL.md
 - `docs/internal-architecture.md`: 内部模块边界和依赖规则。
 - `docs/decisions/0001-layered-plugin-architecture.md`: layered plugin architecture rationale。
 - `docs/decisions/0002-canonical-artifact-store-for-worktrees.md`: 为什么 worktree 输出要 ingest 到 canonical artifact store。
+- `docs/decisions/0003-run-and-gate-sidecar-records.md`: 为什么 run/job 与 gate 记录作为实验旁路状态而不是图节点。
+- `docs/launcher-output-conventions.md`: `run_record.txt`、`progress.json`、`gate_result.json` 和 `artifact_manifest.json` 约定。
 - `capabilities/ui-dashboard.md`: Streamlit UI、React Flow 图谱和刷新行为。
 - `capabilities/graph-state.md`: 图谱状态、saved views 和 interaction log。
 - `capabilities/experiment-tracking.md`: experiment、finding、artifact 和 workstream 流程。
@@ -363,7 +382,7 @@ SKILL.md
 2. 结论已用 `complete-experiment --artifact-id <artifact_id>` 或 `update-finding --artifact-id <artifact_id>` 写入。
 3. 有用代码已 merge/cherry-pick 或保存 patch。
 4. 需要继承的正向结果已记录 decision 或 `set-baseline`。
-5. canonical root 已通过 `validate` 和 `build`。
+5. canonical root 已通过 `validate`、`build` 和 `smoke`。
 
 更多细节见 `capabilities/experiment-tracking.md`、`capabilities/integrations.md` 和 ADR-0002。
 

@@ -49,6 +49,7 @@ The plugin stores reusable code and tools. The research repo stores project-spec
 - `resources.py`: node links, linked artifacts, and local resource row extraction.
 - `interaction_log.py` and `graph_views.py`: sidecar state helpers.
 - `agent_sessions.py`, `decisions.py`, `option_workstreams.py`, and `suggestions.py`: domain logic for parallel agent sessions, decisions, option workstreams, and action suggestions.
+- `run_summaries.py`, `progress.py`, `gate_results.py`, and `gate_result_records.py`: run/job summaries, heartbeat parsing, gate schema validation, preflight normalization, and gate metadata records.
 - `search_index.py`: search index construction and query helpers.
 - `node_onboarding.py`: single-node onboarding payloads for new agents.
 - `context_packs.py`: agent/focus/current-state context payload builders and dashboard Markdown writer.

@@ -43,6 +43,8 @@ Use `manual_run_checklist.md` when no script owns the run. Fill the same fields 
 
 ## Handoff Order
 
+Use `--no-build` for mutating Research Cockpit commands during the handoff, then run one final validation/build/smoke pass.
+
 1. Create or update the run with `create-run` or `update-run`.
 2. Preserve the output directory with `ingest-artifact`.
 3. Attach `gate_result.json` with `ingest-gate-result`.

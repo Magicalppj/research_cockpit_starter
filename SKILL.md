@@ -86,6 +86,14 @@ research-cockpit create-workstream --root research_cockpit --file workstream.yam
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --json --compact
 research-cockpit context --root research_cockpit --node <node_id> --with-bootstrap --with-artifacts --compact --json
 research-cockpit assignment-view --root research_cockpit --json
+research-cockpit create-run --root research_cockpit --id <run_id> --experiment <experiment_id> --status running --launcher tmux --command "python train.py" --progress-file artifacts/<experiment_id>/<run_id>/progress.json --dry-run --json --show-diff
+research-cockpit create-run --root research_cockpit --id <run_id> --experiment <experiment_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build
+research-cockpit update-run --root research_cockpit --id <run_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build
+research-cockpit complete-run --root research_cockpit --id <run_id> --status completed --no-build
+research-cockpit run-context --root research_cockpit --id <run_id> --compact --json
+research-cockpit list-runs --root research_cockpit --experiment <experiment_id> --json --compact
+research-cockpit record-gate-result --root research_cockpit --id <gate_id> --experiment <experiment_id> --run <run_id> --type smoke_check --passed true --next-allowed-action full_run --no-build
+research-cockpit ingest-gate-result --root research_cockpit --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --artifact <artifact_id> --no-build
 research-cockpit create-artifact --root research_cockpit --id <artifact_id> --title "..." --path <path> --link-to <node_id> --dry-run --json --show-diff
 research-cockpit create-artifact --print-schema
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
@@ -100,6 +108,7 @@ research-cockpit complete-experiments --root research_cockpit --file findings.ya
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --json --compact
 research-cockpit close-current-experiment --root research_cockpit --id <experiment_id> --finding "..." --confidence medium --next-focus <next_node> --sync-agent all --json --compact
 research-cockpit create-followup-experiment --root research_cockpit --from <done_or_running_experiment_id> --id <followup_id> --title "..." --priority high --next-action "Run follow-up gate" --set-focus --json --compact
+research-cockpit migrate-terminal-next-actions --root research_cockpit --id <experiment_id> --followup-id <followup_id> --title "Follow-up gate" --dry-run --json --show-diff
 research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --dry-run --json --show-diff
 research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --json --compact
 research-cockpit finalize-workstream --print-schema
@@ -157,6 +166,8 @@ For hierarchical research branches, prefer `option -> problem -> option -> exper
 
 Use `complete-experiment --evidence-path ... --evidence-link key=value` or per-entry `complete-experiments` evidence blocks when the finding depends on result folders, plots, reports, or metrics JSON that already live at a stable path. These commands create and link an artifact from both the finding and experiment so node resources show the evidence path, but they do not copy files. If outputs were produced inside a git worktree, run `ingest-artifact` first and then record the finding with `--artifact-id`. Use `complete-experiments` for sweeps or multi-backend experiment sets. Use `create-artifact --file artifact.yaml` for stable result folders with several links or target nodes, and use `link-artifact` for attaching existing artifacts, so agents do not patch `path`, `links`, or `linked_artifacts` by hand. Artifact paths are stored exactly as provided; JSON resource rows report `resolved_target`, `resolution_base`, `resolution_attempts`, and `exists` using root parent, data root, then cwd for relative paths. If a finding has no linked artifact, the command may still succeed but JSON includes `missing_evidence_artifact`. Use `update-finding` when revising an existing finding statement, confidence, outcome, metrics, or evidence artifacts.
 
+Use run records for concrete executions and findings for conclusions. A long experiment should usually create or update a run with `create-run` / `update-run`, point it at `progress.json`, attach `gate_result.json` with `record-gate-result` or `ingest-gate-result`, and only then record conclusions with `complete-experiment` or `record-finding`. `run-context` is the narrow read path for monitor and stop details.
+
 When closing the current experiment and advancing focus in the same turn, prefer `close-current-experiment` over manually chaining `complete-experiment`, `set-focus`, and `set-agent-focus`. Use `create-followup-experiment --set-focus` for a derived queued next gate from a `done` or `running` experiment; by default it reuses the source experiment's option parent. When `--next-action` is passed with `--set-focus`, the same action is written to both the new experiment and `current_state.next_actions`.
 Generated dashboard context includes `next_action_scopes`; read it before choosing work so focus-node, parent option/problem, global coordinator, and stale terminal-node actions are not conflated.
 Done nodes should keep conclusions, not live work. If a done experiment still has real follow-up work in `next_actions`, create a small derived queued experiment with `create-followup-experiment` or clean up an older stale action with `migrate-terminal-next-actions`. Use `create-workstream` when the follow-up is a branch, not one gate.
@@ -202,7 +213,7 @@ research-cockpit smoke --root D:/main_repo/research_cockpit --json
 
 Do not use worktree-local paths as long-lived `--evidence-path` values. Keep run directories free of symlinks before `ingest-artifact`; v1 rejects symlinked files or directories instead of copying through them. Deletion is safe only after artifact files, finding/decision/baseline updates, and any useful commit/patch have been preserved outside the worktree.
 
-For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `create-artifact`, `ingest-artifact`, `complete-experiment`, `complete-experiments`, `close-current-experiment`, `create-followup-experiment`, `update-finding`, `update-workstream-fields`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `--show-diff` still includes the full diff; use it only when reviewing write content.
+For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `create-run`, `update-run`, `complete-run`, `create-artifact`, `ingest-artifact`, `record-gate-result`, `ingest-gate-result`, `complete-experiment`, `complete-experiments`, `close-current-experiment`, `create-followup-experiment`, `migrate-terminal-next-actions`, `update-finding`, `update-workstream-fields`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `--show-diff` still includes the full diff; use it only when reviewing write content.
 For legacy mutation commands without `--compact`, use `--dry-run --json --show-diff` to preview writes and keep the JSON payload focused on `changed/would_change`, affected path, before/after summary, and optional diff. Dry-run also performs mutation preflight; if `interaction_log.yaml` is malformed, it fails before showing a misleading successful preview.
 Use `commands --json --compact --workflow <graph|evidence|decision|focus|maintenance|read>` or `--name <command>` to read the short discovery manifest. It omits long examples and Python/cwd metadata; use full `commands --json` only when you need the complete command contract. If `validate` or a mutating dry-run reports malformed interaction log schema, use `repair-interaction-log --dry-run --json --show-diff`; it can drop non-mapping event items with a backup, but it refuses YAML scanner errors.
 
@@ -210,18 +221,22 @@ Run `suggest-next-actions` once before choosing work. Re-run it only after you c
 
 ## Write Boundary
 
-Allowed truth-source writes are under:
+Allowed project-state writes are under:
 
 - `research_cockpit/current_state.yaml`
 - `research_cockpit/graph/nodes/*.yaml`
 - `research_cockpit/graph/edges.yaml`
 - `research_cockpit/graph/graph_views.yaml`
 - `research_cockpit/graph/interaction_log.yaml`
+- `research_cockpit/runs/*.yaml`
+- `research_cockpit/gate_results/*.yaml`
+- `research_cockpit/gate_results/*.json`
 - `research_cockpit/notes/**/*.md`
+- `research_cockpit/artifacts/**`
 
-Agents should normally write YAML truth-source files through `research-cockpit` CLI commands. Direct YAML repair is a last-resort structural fix and must be followed by validation and dashboard rebuild.
+Agents should normally write structured state files through `research-cockpit` CLI commands. Direct YAML repair is a last-resort structural fix and must be followed by validation and dashboard rebuild.
 
-Markdown notes under `research_cockpit/notes/**/*.md` may be edited directly for human-readable detail. Keep structured findings, status, focus, decision state, `baseline`, `current_best_option`, and `next_actions` in YAML via CLI where a command exists.
+Markdown notes under `research_cockpit/notes/**/*.md` may be edited directly for human-readable detail. Artifact payloads under `research_cockpit/artifacts/**` may be copied or preserved by launcher handoff and `ingest-artifact`, but structured metadata should still be written through CLI commands. Keep structured findings, status, focus, decision state, run records, gate results, `baseline`, `current_best_option`, and `next_actions` in YAML via CLI where a command exists.
 
 Generated files under `research_cockpit/dashboards/` must be rebuilt, not hand-authored.
 

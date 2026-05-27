@@ -25,6 +25,10 @@ Workflow/domain layer
   search_index.py
   decisions.py
   option_workstreams.py
+  run_summaries.py
+  progress.py
+  gate_results.py
+  gate_result_records.py
   suggestions.py
 
 Graph and sidecar state
@@ -60,6 +64,10 @@ Commands are the public write boundary. A mutating command should validate, prep
 - `search_index.py`: indexes nodes, notes, and linked local resources.
 - `decisions.py`: decision evidence summaries, acceptance checklists, traces, and decision rows.
 - `option_workstreams.py`: option subtree, workstream context, branch comparison, and workstream rows.
+- `run_summaries.py`: run/job summaries attached to experiments, bootstrap, and option workstream context.
+- `progress.py`: standard `progress.json` heartbeat parsing and stale heartbeat warnings.
+- `gate_results.py`: standard `gate_result.json` validation, blocking semantics, and preflight resource normalization.
+- `gate_result_records.py`: sidecar metadata records that link gate files to experiments, runs, and artifacts.
 - `suggestions.py`: next-action suggestion generation and suggestion lifecycle summaries.
 
 Domain modules should work with loaded `ResearchNode` objects and plain dictionaries. They should not perform writes unless explicitly documented.
@@ -88,7 +96,7 @@ These modules should remain free of command, UI, and dashboard dependencies.
 - Use `graph_core.py` for graph traversal and node context.
 - Use `resources.py` for link/resource rows.
 - Use `context_packs.py` for context payloads.
-- Use `decisions.py`, `option_workstreams.py`, and `suggestions.py` for domain logic.
+- Use `decisions.py`, `option_workstreams.py`, `run_summaries.py`, `progress.py`, `gate_results.py`, `gate_result_records.py`, and `suggestions.py` for domain logic.
 - Use `storage.py` and `types.py` for low-level data contracts.
 
 Do not add new large domain logic to `model.py`. If a new behavior is hard to place, create a small focused module or extend the closest existing domain module.
@@ -100,7 +108,11 @@ Truth-source data lives in:
 - `<data-root>/current_state.yaml`
 - `<data-root>/graph/nodes/*.yaml`
 - `<data-root>/graph/edges.yaml` when present
-- sidecar files such as `<data-root>/graph/graph_views.yaml` and `<data-root>/interaction_log.yaml`
+- sidecar files such as `<data-root>/graph/graph_views.yaml` and `<data-root>/graph/interaction_log.yaml`
+- `<data-root>/runs/*.yaml` for concrete experiment executions
+- `<data-root>/gate_results/*.yaml` for gate metadata records
+- `<data-root>/gate_results/*.json` for gate payloads written by `record-gate-result`
+- `<data-root>/artifacts/**` for long-lived evidence payloads and ingest manifests
 
 Generated output lives in `<data-root>/dashboards/` and can be rebuilt with:
 

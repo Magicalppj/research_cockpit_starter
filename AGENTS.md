@@ -2,7 +2,8 @@
 
 ## Source Of Truth
 
-- Treat the project data root `research_cockpit/current_state.yaml` and `research_cockpit/graph/nodes/*.yaml` as the truth source.
+- Treat the project data root `research_cockpit/current_state.yaml`, `research_cockpit/graph/nodes/*.yaml`, `research_cockpit/runs/*.yaml`, `research_cockpit/gate_results/*.yaml`, and `research_cockpit/gate_results/*.json` as the truth source for structured state.
+- Treat `research_cockpit/artifacts/*` as long-lived evidence payloads, not generated dashboard context.
 - Treat `research_cockpit/dashboards/*` as generated context. Regenerate it with `research-cockpit build --root <data-root>` after YAML changes.
 - Do not infer current state from Markdown notes. Notes are long-form supporting records.
 
@@ -29,7 +30,7 @@ If the working directory is unreliable, use absolute `--root` paths.
 ## Write Rules
 
 - Prefer `research-cockpit` commands over manual YAML edits for all supported operations.
-- Use mutating CLI commands for focus, baseline, status, findings, decisions, notes, suggestions, and lifecycle cleanup.
+- Use mutating CLI commands for focus, baseline, status, findings, decisions, notes, suggestions, run records, gate results, and lifecycle cleanup.
 - Use `research-cockpit node-context` as the shortest read-only handoff when continuing work from a known node id.
 - Use `effective_baseline` from `context`/`node-context` as the default inherited option, decision, and artifact bundle; do not scan all accepted history unless asked.
 - Do not directly set a decision to `accepted`; use `research-cockpit accept-decision --root <data-root> --id <decision_id>`.

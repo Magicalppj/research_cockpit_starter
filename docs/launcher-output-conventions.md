@@ -91,13 +91,33 @@ research-cockpit complete-run --root research_cockpit --id run_x --status comple
 }
 ```
 
-Failed gates should set `passed` to `false` and put blocking details in `fatal_failures`. Warning-only gates keep `passed: true` and list warnings. After preserving the run output directory, attach the gate file:
+Failed gates should set `passed` to `false` and put blocking details in `fatal_failures`. Warning-only gates keep `passed: true` and list warnings. Preserve the run output directory first so the artifact id is stable, then attach the gate file:
 
 ```sh
 research-cockpit ingest-gate-result --root research_cockpit --id gate_x --file artifacts/experiment_x/run_x/gate_result.json --run run_x --artifact artifact_experiment_x_run_x --no-build
 ```
 
-For long-run preflight checks, use `gate_type: "preflight"` and add a `preflight` object with disk, GPU, port, cache directory, and conflicting process observations. Failed preflight gates block `full_run` in context.
+For long-run preflight checks, use `gate_type: "preflight"` and add a `preflight` object with disk, GPU, port, cache directory, and conflicting process observations. Failed preflight gates block `full_run` in context:
+
+```json
+{
+  "gate_type": "preflight",
+  "passed": false,
+  "preflight": {
+    "disk_available_gb": 120,
+    "estimated_required_gb": 800,
+    "gpu_ids": [0, 1],
+    "port_available": true,
+    "cache_dir": "cache/precompute",
+    "cache_dir_exists": true,
+    "conflicting_processes": ["python train.py"]
+  },
+  "fatal_failures": {
+    "disk": "insufficient"
+  },
+  "next_allowed_action": "full_run"
+}
+```
 
 ## `artifact_manifest.json`
 
@@ -126,8 +146,10 @@ For long-run preflight checks, use `gate_type: "preflight"` and add a `preflight
 Use link values relative to the run output directory. When the output directory is disposable, first preserve it with `ingest-artifact`; repeated `--link key=relative/path` values should come from the manifest:
 
 ```sh
-research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link metrics=outputs/metrics.json --link config=config.yaml --link gate_result=gate_result.json --json --compact
+research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link metrics=outputs/metrics.json --link config=config.yaml --link gate_result=gate_result.json --no-build --json --compact
 ```
+
+The default artifact id is `artifact_<experiment_id>_<run_id>`; use that id when attaching gate results or findings.
 
 If the run directory already lives at a stable path, create or link the artifact directly:
 
