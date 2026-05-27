@@ -102,6 +102,20 @@ research-cockpit build --root D:/main_repo/research_cockpit
 
 Use this as the normal path for multi-agent worktrees. Use inline `--evidence-path` only for files that already live at a stable path outside the disposable worktree.
 
+## Run Records
+
+Use run/job records for concrete executions of an experiment: launcher command, tmux session, pid, logs, outputs, progress file, and stop command. These records live under `research_cockpit/runs/*.yaml` and reference one experiment node.
+
+```sh
+research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher tmux --command "python train.py" --tmux-session train_x --progress-file artifacts/experiment_x/run_x/progress.json --monitor-command "tail -f artifacts/experiment_x/run_x/logs/run.log" --stop-command "tmux kill-session -t train_x" --no-build
+research-cockpit run-context --root research_cockpit --id run_x --compact --json
+research-cockpit update-run --root research_cockpit --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
+research-cockpit complete-run --root research_cockpit --id run_x --status completed --finished-at 2026-05-27T02:00:00Z --no-build
+research-cockpit list-runs --root research_cockpit --experiment experiment_x --json --compact
+```
+
+Prefer `--no-build` for frequent status updates in multi-agent workflows, then run `research-cockpit build --root research_cockpit` after batching. Use `run-context` before monitoring or stopping a known run. A completed run is not a finding; record conclusions with `complete-experiment` and preserve output directories with `ingest-artifact`.
+
 ## Artifacts
 
 Use artifact commands for result folders, review bundles, metrics directories, and other evidence objects that need their own status or links:

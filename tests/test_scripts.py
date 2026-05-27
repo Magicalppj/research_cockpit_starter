@@ -22,7 +22,7 @@ sys.path.insert(0, str(DEV_SCRIPTS_DIR))
 existing_pythonpath = os.environ.get("PYTHONPATH", "")
 os.environ["PYTHONPATH"] = str(SRC_DIR) if not existing_pythonpath else str(SRC_DIR) + os.pathsep + existing_pythonpath
 
-from research_cockpit.model import load_nodes, load_yaml, save_yaml
+from research_cockpit.model import ValidationError, load_nodes, load_yaml, save_yaml
 from research_cockpit.baselines import (
     build_accepted_decision_rows,
     build_accepted_option_rows,
@@ -47,12 +47,15 @@ from research_cockpit.commands.complete_experiments import complete_experiments
 from research_cockpit.commands.context import context_payload
 from research_cockpit.commands.create_artifact import create_artifact
 from research_cockpit.commands.create_followup_experiment import create_followup_experiment
+from research_cockpit.commands.create_run import create_run
 from research_cockpit.commands.create_workstream import create_workstream
 from research_cockpit.commands.create_note import create_note
+from research_cockpit.commands.complete_run import complete_run
 from research_cockpit.commands.finalize_workstream import finalize_workstream
 from research_cockpit.commands.ingest_artifact import ingest_artifact
 from research_cockpit.commands.import_worktree_findings import import_worktree_findings
 from research_cockpit.commands.link_artifact import link_artifact
+from research_cockpit.commands.list_runs import list_runs_payload
 from research_cockpit.commands.lint_semantic import semantic_lint
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
 from research_cockpit.commands.node_context import node_context_payload
@@ -61,6 +64,7 @@ from research_cockpit.commands.promote_decision import promote_decision
 from research_cockpit.commands.record_finding import record_finding
 from research_cockpit.commands.repair_interaction_log import repair_interaction_log
 from research_cockpit.commands.report_option_workstream import report_option_workstream
+from research_cockpit.commands.run_context import run_context_payload
 from research_cockpit.commands.set_agent_focus import set_agent_focus
 from research_cockpit.commands.set_baseline import set_baseline
 from research_cockpit.commands.set_focus import set_focus
@@ -72,6 +76,7 @@ from research_cockpit.commands.update_decision_evidence import update_decision_e
 from research_cockpit.commands.update_decision_checklist import update_decision_checklist
 from research_cockpit.commands.update_node_fields import update_node_fields
 from research_cockpit.commands.update_finding import update_finding
+from research_cockpit.commands.update_run import update_run
 from research_cockpit.commands.update_workstream_fields import update_workstream_fields
 from research_cockpit.commands.update_suggestion_state import update_suggestion_state
 from research_cockpit.commands.update_status import update_status
@@ -1920,6 +1925,225 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("definitely_missing_module_for_test", message)
         self.assertIn("pip install -e .", message)
 
+    def test_run_lifecycle_commands_create_update_complete_and_context(self) -> None:
+        result = create_run(
+            self.root,
+            run_id="run_t5_smoke",
+            experiment_id="exp_t5",
+            status="running",
+            started_at="2026-05-27T01:00:00Z",
+            launcher="tmux",
+            command="python train.py --smoke",
+            tmux_session="t5-smoke",
+            pid=1234,
+            log_root="artifacts/exp_t5/run_t5_smoke/logs",
+            output_root="artifacts/exp_t5/run_t5_smoke",
+            monitor_command="tail -f artifacts/exp_t5/run_t5_smoke/logs/run.log",
+            stop_command="tmux kill-session -t t5-smoke",
+            progress_file="artifacts/exp_t5/run_t5_smoke/progress.json",
+            config_file="configs/exp_t5_smoke.yaml",
+            rebuild_dashboard=False,
+        )
+
+        run_path = self.root / "runs" / "run_t5_smoke.yaml"
+        saved = load_yaml(run_path)
+        self.assertTrue(result["changed"])
+        self.assertEqual(saved["run_id"], "run_t5_smoke")
+        self.assertEqual(saved["status"], "running")
+        self.assertEqual(saved["experiment_id"], "exp_t5")
+        self.assertEqual(saved["pid"], 1234)
+        self.assertFalse((self.root / "dashboards").exists())
+
+        update_result = update_run(
+            self.root,
+            run_id="run_t5_smoke",
+            status="failed",
+            progress_file="artifacts/exp_t5/run_t5_smoke/progress_failed.json",
+            rebuild_dashboard=False,
+        )
+        updated = load_yaml(run_path)
+        self.assertEqual(update_result["before"]["status"], "running")
+        self.assertEqual(update_result["after"]["status"], "failed")
+        self.assertEqual(updated["status"], "failed")
+        self.assertEqual(updated["progress_file"], "artifacts/exp_t5/run_t5_smoke/progress_failed.json")
+
+        complete_result = complete_run(
+            self.root,
+            run_id="run_t5_smoke",
+            status="completed",
+            finished_at="2026-05-27T02:00:00Z",
+            rebuild_dashboard=False,
+        )
+        completed = load_yaml(run_path)
+        self.assertEqual(complete_result["after"]["status"], "completed")
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(completed["finished_at"], "2026-05-27T02:00:00Z")
+
+        list_payload = list_runs_payload(self.root, experiment_id="exp_t5")
+        self.assertEqual(list_payload["count"], 1)
+        self.assertEqual(list_payload["runs"][0]["run_id"], "run_t5_smoke")
+        self.assertEqual(list_payload["runs"][0]["experiment"]["title"], "T5 ablation")
+
+        context = run_context_payload(self.root, run_id="run_t5_smoke")
+        self.assertEqual(context["run"]["status"], "completed")
+        self.assertEqual(context["experiment"]["id"], "exp_t5")
+        self.assertEqual(context["monitor"]["progress_file"], "artifacts/exp_t5/run_t5_smoke/progress_failed.json")
+        self.assertEqual(context["control"]["stop_command"], "tmux kill-session -t t5-smoke")
+
+    def test_create_run_rejects_invalid_experiment_id(self) -> None:
+        with self.assertRaises(ValidationError) as ctx:
+            create_run(
+                self.root,
+                run_id="run_missing",
+                experiment_id="missing_experiment",
+                status="queued",
+                rebuild_dashboard=False,
+            )
+
+        self.assertIn("missing_experiment", str(ctx.exception))
+        self.assertFalse((self.root / "runs" / "run_missing.yaml").exists())
+
+    def test_complete_run_supports_cancelled_status(self) -> None:
+        create_run(
+            self.root,
+            run_id="run_cancel",
+            experiment_id="exp_t5",
+            status="running",
+            rebuild_dashboard=False,
+        )
+
+        result = complete_run(
+            self.root,
+            run_id="run_cancel",
+            status="cancelled",
+            finished_at="2026-05-27T03:00:00Z",
+            rebuild_dashboard=False,
+        )
+
+        saved = load_yaml(self.root / "runs" / "run_cancel.yaml")
+        self.assertEqual(result["after"]["status"], "cancelled")
+        self.assertEqual(saved["status"], "cancelled")
+        self.assertEqual(saved["finished_at"], "2026-05-27T03:00:00Z")
+
+    def test_complete_run_records_complete_audit_event(self) -> None:
+        create_run(
+            self.root,
+            run_id="run_audit",
+            experiment_id="exp_t5",
+            status="running",
+            rebuild_dashboard=False,
+        )
+
+        complete_run(
+            self.root,
+            run_id="run_audit",
+            status="failed",
+            finished_at="2026-05-27T04:00:00Z",
+            rebuild_dashboard=False,
+        )
+
+        event = interaction_events(self.root)[-1]
+        self.assertEqual(event["kind"], "complete_run")
+        self.assertIn("complete-run", event["command"])
+        self.assertEqual(event["after"]["status"], "failed")
+
+    def test_run_lifecycle_cli_supports_json_compact_and_no_build(self) -> None:
+        create_out = subprocess.run(
+            [
+                *cli_command("create-run"),
+                "--root",
+                str(self.root),
+                "--id",
+                "run_cli",
+                "--experiment",
+                "exp_t5",
+                "--status",
+                "running",
+                "--launcher",
+                "shell",
+                "--command",
+                "python run.py",
+                "--monitor-command",
+                "tail -f run.log",
+                "--stop-command",
+                "pkill -f run.py",
+                "--no-build",
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        create_payload = json.loads(create_out.stdout)
+
+        self.assertEqual(create_out.returncode, 0, create_out.stdout + create_out.stderr)
+        self.assertTrue(create_payload["ok"])
+        self.assertEqual(create_payload["target"], "run_cli")
+        self.assertTrue(create_payload["changed"])
+        self.assertEqual(create_payload["created"], ["run_cli"])
+        self.assertFalse((self.root / "dashboards").exists())
+
+        context_out = subprocess.run(
+            [
+                *cli_command("run-context"),
+                "--root",
+                str(self.root),
+                "--id",
+                "run_cli",
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        context_payload = json.loads(context_out.stdout)
+
+        self.assertEqual(context_out.returncode, 0, context_out.stdout + context_out.stderr)
+        self.assertEqual(context_payload["run_id"], "run_cli")
+        self.assertEqual(context_payload["status"], "running")
+        self.assertEqual(context_payload["experiment_id"], "exp_t5")
+        self.assertEqual(context_payload["monitor_command"], "tail -f run.log")
+        self.assertEqual(context_payload["stop_command"], "pkill -f run.py")
+
+        list_out = subprocess.run(
+            [
+                *cli_command("list-runs"),
+                "--root",
+                str(self.root),
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        list_payload = json.loads(list_out.stdout)
+
+        self.assertEqual(list_out.returncode, 0, list_out.stdout + list_out.stderr)
+        self.assertEqual(list_payload["count"], 1)
+        self.assertEqual(list_payload["runs"], ["run_cli"])
+
+    def test_run_read_commands_accept_compact_without_json(self) -> None:
+        create_run(
+            self.root,
+            run_id="run_human_compact",
+            experiment_id="exp_t5",
+            status="running",
+            rebuild_dashboard=False,
+        )
+
+        for command in (
+            [*cli_command("list-runs"), "--root", str(self.root), "--compact"],
+            [*cli_command("run-context"), "--root", str(self.root), "--id", "run_human_compact", "--compact"],
+        ):
+            with self.subTest(command=command[3]):
+                out = subprocess.run(command, capture_output=True, text=True, check=False)
+
+                self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+                self.assertIn("run_human_compact", out.stdout)
+
     def test_list_agent_commands_manifest_marks_mutating_commands(self) -> None:
         manifest = agent_command_manifest()
         by_name = {item["name"]: item for item in manifest}
@@ -2075,6 +2299,26 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["ingest-artifact"]["supports_compact"])
         self.assertIn("run_id", by_name["ingest-artifact"]["fields_supported"])
         self.assertIn("agent", by_name["ingest-artifact"]["fields_supported"])
+        self.assertIn("create-run", by_name)
+        self.assertTrue(by_name["create-run"]["mutating"])
+        self.assertTrue(by_name["create-run"]["supports_json"])
+        self.assertTrue(by_name["create-run"]["supports_dry_run"])
+        self.assertTrue(by_name["create-run"]["supports_no_build"])
+        self.assertTrue(by_name["create-run"]["supports_compact"])
+        self.assertTrue(by_name["create-run"]["supports_show_diff"])
+        self.assertIn("tmux_session", by_name["create-run"]["fields_supported"])
+        self.assertIn("progress_file", by_name["create-run"]["fields_supported"])
+        self.assertTrue(by_name["update-run"]["mutating"])
+        self.assertTrue(by_name["update-run"]["supports_dry_run"])
+        self.assertTrue(by_name["update-run"]["supports_no_build"])
+        self.assertTrue(by_name["complete-run"]["mutating"])
+        self.assertTrue(by_name["complete-run"]["supports_dry_run"])
+        self.assertTrue(by_name["list-runs"]["supports_json"])
+        self.assertTrue(by_name["list-runs"]["supports_compact"])
+        self.assertFalse(by_name["list-runs"]["mutating"])
+        self.assertTrue(by_name["run-context"]["supports_json"])
+        self.assertTrue(by_name["run-context"]["supports_compact"])
+        self.assertFalse(by_name["run-context"]["mutating"])
         self.assertTrue(by_name["promote-decision"]["supports_json"])
         self.assertTrue(by_name["promote-decision"]["supports_dry_run"])
         self.assertTrue(by_name["accept-decision"]["supports_json"])
