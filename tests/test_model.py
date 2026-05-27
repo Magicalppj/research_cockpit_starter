@@ -40,6 +40,7 @@ from research_cockpit.model import (
     load_graph_views,
     load_interaction_log,
     load_explicit_edges,
+    load_runs,
     load_yaml,
     load_nodes,
     node_context,
@@ -156,6 +157,141 @@ class ModelValidationTests(unittest.TestCase):
 
         self.assertIn("bad_problem", str(ctx.exception))
         self.assertIn("invalid status", str(ctx.exception))
+
+    def test_run_records_are_loaded_and_validated(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_t5_smoke.yaml",
+            {
+                "run_id": "run_t5_smoke",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "started_at": "2026-05-27T09:00:00Z",
+                "launcher": "tmux",
+                "command": "python train.py --smoke",
+                "tmux_session": "t5-smoke",
+                "pid": 1234,
+                "log_root": "artifacts/exp_t5/run_t5_smoke/logs",
+                "output_root": "artifacts/exp_t5/run_t5_smoke",
+                "monitor_command": "tail -f artifacts/exp_t5/run_t5_smoke/logs/run.log",
+                "stop_command": "tmux kill-session -t t5-smoke",
+                "progress_file": "artifacts/exp_t5/run_t5_smoke/progress.json",
+                "config_file": "configs/exp_t5_smoke.yaml",
+            },
+        )
+
+        runs = load_runs(self.root)
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertEqual(errors, [])
+        self.assertEqual(runs["run_t5_smoke"].experiment_id, "exp_t5")
+        self.assertEqual(runs["run_t5_smoke"].launcher, "tmux")
+        self.assertEqual(runs["run_t5_smoke"].command, "python train.py --smoke")
+        self.assertEqual(runs["run_t5_smoke"].tmux_session, "t5-smoke")
+        self.assertEqual(runs["run_t5_smoke"].pid, 1234)
+        self.assertEqual(runs["run_t5_smoke"].progress_file, "artifacts/exp_t5/run_t5_smoke/progress.json")
+
+    def test_run_records_accept_all_lifecycle_statuses(self) -> None:
+        for status in ("queued", "running", "completed", "failed", "cancelled"):
+            with self.subTest(status=status):
+                save_yaml(
+                    self.root / "runs" / "run_t5_lifecycle.yaml",
+                    {
+                        "run_id": "run_t5_lifecycle",
+                        "status": status,
+                        "experiment_id": "exp_t5",
+                    },
+                )
+
+                errors = validate_cockpit(self.root, load_nodes(self.root))
+
+                self.assertEqual(errors, [])
+
+    def test_validate_rejects_run_missing_run_id(self) -> None:
+        save_yaml(
+            self.root / "runs" / "missing_id.yaml",
+            {
+                "status": "running",
+                "experiment_id": "exp_t5",
+            },
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, load_nodes(self.root), raise_on_error=True)
+
+        self.assertIn("runs/missing_id.yaml", str(ctx.exception))
+        self.assertIn("missing required field 'run_id'", str(ctx.exception))
+
+    def test_validate_returns_run_load_errors_without_raise(self) -> None:
+        save_yaml(
+            self.root / "runs" / "missing_id.yaml",
+            {
+                "status": "running",
+                "experiment_id": "exp_t5",
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("runs/missing_id.yaml: missing required field 'run_id'" in error for error in errors))
+
+    def test_validate_rejects_run_invalid_status(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_t5_smoke.yaml",
+            {
+                "run_id": "run_t5_smoke",
+                "status": "stalled",
+                "experiment_id": "exp_t5",
+            },
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, load_nodes(self.root), raise_on_error=True)
+
+        self.assertIn("run_t5_smoke: invalid run status 'stalled'", str(ctx.exception))
+
+    def test_validate_returns_run_validation_errors_without_raise(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_t5_smoke.yaml",
+            {
+                "run_id": "run_t5_smoke",
+                "status": "stalled",
+                "experiment_id": "exp_t5",
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("run_t5_smoke: invalid run status 'stalled'" in error for error in errors))
+
+    def test_validate_rejects_run_missing_experiment(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_missing_exp.yaml",
+            {
+                "run_id": "run_missing_exp",
+                "status": "running",
+                "experiment_id": "missing_exp",
+            },
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, load_nodes(self.root), raise_on_error=True)
+
+        self.assertIn("run_missing_exp: experiment_id references missing node 'missing_exp'", str(ctx.exception))
+
+    def test_validate_rejects_run_non_experiment_reference(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_bad_ref.yaml",
+            {
+                "run_id": "run_bad_ref",
+                "status": "running",
+                "experiment_id": "option_t5",
+            },
+        )
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, load_nodes(self.root), raise_on_error=True)
+
+        self.assertIn("run_bad_ref: experiment_id references 'option_t5' with type 'option'", str(ctx.exception))
 
     def test_unknown_parent_reports_reference(self) -> None:
         write_node(

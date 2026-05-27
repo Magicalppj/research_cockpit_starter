@@ -69,6 +69,7 @@ VALID_SUGGESTION_LIFECYCLE_STATES = {"active", "dismissed", "completed"}
 VALID_WORKSTREAM_STATUSES = {"claimed", "in_progress", "blocked", "reported", "released"}
 ACTIVE_WORKSTREAM_STATUSES = {"claimed", "in_progress", "blocked"}
 VALID_WORKSTREAM_RECOMMENDATIONS = {"accept", "reject", "continue"}
+VALID_RUN_STATUSES = {"queued", "running", "completed", "failed", "cancelled"}
 CONTEXT_SCHEMA_VERSION = "agent_context_v1"
 
 SEARCH_NODE_TEXT_FIELDS = (
@@ -198,6 +199,51 @@ class ResearchNode:
         )
 
 
+@dataclass
+class RunRecord:
+    run_id: str
+    status: str
+    experiment_id: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    launcher: str | None = None
+    command: str | None = None
+    tmux_session: str | None = None
+    pid: int | str | None = None
+    log_root: str | None = None
+    output_root: str | None = None
+    monitor_command: str | None = None
+    stop_command: str | None = None
+    progress_file: str | None = None
+    config_file: str | None = None
+    raw: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RunRecord":
+        def optional_str(key: str) -> str | None:
+            value = data.get(key)
+            return None if value is None else str(value)
+
+        return cls(
+            run_id=str(data["run_id"]),
+            status=str(data.get("status", "")),
+            experiment_id=str(data.get("experiment_id", "")),
+            started_at=optional_str("started_at"),
+            finished_at=optional_str("finished_at"),
+            launcher=optional_str("launcher"),
+            command=optional_str("command"),
+            tmux_session=optional_str("tmux_session"),
+            pid=data.get("pid"),
+            log_root=optional_str("log_root"),
+            output_root=optional_str("output_root"),
+            monitor_command=optional_str("monitor_command"),
+            stop_command=optional_str("stop_command"),
+            progress_file=optional_str("progress_file"),
+            config_file=optional_str("config_file"),
+            raw=data,
+        )
+
+
 def load_nodes(root: Path) -> dict[str, ResearchNode]:
     node_dir = root / "graph" / "nodes"
     nodes: dict[str, ResearchNode] = {}
@@ -213,6 +259,30 @@ def load_nodes(root: Path) -> dict[str, ResearchNode]:
             raise ValidationError([f"{path}: duplicate node id {node.id!r}"])
         nodes[node.id] = node
     return nodes
+
+
+def load_runs(root: Path) -> dict[str, RunRecord]:
+    run_dir = root / "runs"
+    runs: dict[str, RunRecord] = {}
+    if not run_dir.exists():
+        return runs
+    for path in sorted(run_dir.glob("*.yaml")):
+        data = load_yaml(path)
+        if not data:
+            continue
+        rel_path = f"runs/{path.name}"
+        if not isinstance(data, dict):
+            raise ValidationError([f"{rel_path}: run record must be a mapping"])
+        if data.get("run_id") in (None, ""):
+            raise ValidationError([f"{rel_path}: missing required field 'run_id'"])
+        try:
+            run = RunRecord.from_dict(data)
+        except KeyError as exc:
+            raise ValidationError([f"{rel_path}: missing required field {exc.args[0]!r}"]) from exc
+        if run.run_id in runs:
+            raise ValidationError([f"{rel_path}: duplicate run id {run.run_id!r}"])
+        runs[run.run_id] = run
+    return runs
 
 
 def load_explicit_edges(root: Path) -> list[dict[str, Any]]:
@@ -855,6 +925,26 @@ def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
     return errors
 
 
+def validate_runs(runs: dict[str, RunRecord], nodes: dict[str, ResearchNode]) -> list[str]:
+    errors: list[str] = []
+    for run in runs.values():
+        if not run.run_id:
+            errors.append("run has empty run_id")
+        if run.status not in VALID_RUN_STATUSES:
+            allowed = ", ".join(sorted(VALID_RUN_STATUSES))
+            errors.append(f"{run.run_id}: invalid run status {run.status!r}; allowed: {allowed}")
+        if not run.experiment_id:
+            errors.append(f"{run.run_id}: experiment_id is required")
+        elif run.experiment_id not in nodes:
+            errors.append(f"{run.run_id}: experiment_id references missing node {run.experiment_id!r}")
+        elif nodes[run.experiment_id].type != "experiment":
+            errors.append(
+                f"{run.run_id}: experiment_id references {run.experiment_id!r} "
+                f"with type {nodes[run.experiment_id].type!r}; expected 'experiment'"
+            )
+    return errors
+
+
 def validate_current_state(
     current: dict[str, Any],
     nodes: dict[str, ResearchNode],
@@ -998,15 +1088,25 @@ def validate_cockpit(
     current: dict[str, Any] | None = None,
     explicit_edges: list[dict[str, Any]] | None = None,
     *,
+    runs: dict[str, RunRecord] | None = None,
     include_interaction_log: bool = False,
     raise_on_error: bool = False,
 ) -> list[str]:
     nodes = nodes if nodes is not None else load_nodes(root)
     current = current if current is not None else load_yaml(root / "current_state.yaml")
     explicit_edges = explicit_edges if explicit_edges is not None else load_explicit_edges(root)
+    run_load_errors: list[str] = []
+    if runs is None:
+        try:
+            runs = load_runs(root)
+        except ValidationError as exc:
+            runs = {}
+            run_load_errors = exc.errors
     errors = validate_nodes(nodes)
     errors.extend(validate_explicit_edges(nodes, explicit_edges))
     errors.extend(validate_current_state(current, nodes, explicit_edges))
+    errors.extend(run_load_errors)
+    errors.extend(validate_runs(runs, nodes))
     if include_interaction_log:
         errors.extend(validate_interaction_log(root))
     if errors and raise_on_error:
