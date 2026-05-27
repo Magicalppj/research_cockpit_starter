@@ -20,6 +20,8 @@ COMPACT_GATE_FIELDS = (
     "fatal_failures",
     "warnings",
     "schema_warnings",
+    "preflight",
+    "blocked_actions",
     "experiment_id",
     "run_id",
     "artifact_id",

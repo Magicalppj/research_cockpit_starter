@@ -612,6 +612,7 @@ COMMANDS: list[dict[str, object]] = [
             "expected",
             "observed",
             "fatal_failures",
+            "preflight",
             "warnings",
             "next_allowed_action",
             "artifact_id",

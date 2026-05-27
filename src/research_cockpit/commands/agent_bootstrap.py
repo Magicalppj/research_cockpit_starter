@@ -127,6 +127,9 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
                     "research-cockpit update-run --root <root> --id <run_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build",
                     "research-cockpit complete-run --root <root> --id <run_id> --status completed --no-build",
                 ],
+                "gates": [
+                    "research-cockpit record-gate-result --root <root> --id <gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json \"{}\" --fatal-json \"{}\" --next-allowed-action full_run --no-build",
+                ],
                 "next_actions": [
                     "research-cockpit migrate-terminal-next-actions --root <root> --id <done_experiment_id> --followup-id <followup_id> --title \"...\" --dry-run --json --show-diff",
                     "research-cockpit update-node-fields --root <root> --id <node_id> --clear-next-actions --next-action \"...\" --no-build",
@@ -147,6 +150,7 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
             "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path artifacts/<node_id>/<run_id> --link-to <node_id> --no-build",
             "research-cockpit ingest-artifact --root <root> --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --dry-run --json --show-diff",
             "research-cockpit record-gate-result --root <root> --id <gate_id> --experiment <experiment_id> --run <run_id> --type smoke_check --passed false --fatal-json \"{}\" --no-build",
+            "research-cockpit record-gate-result --root <root> --id <preflight_gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json \"{}\" --fatal-json \"{}\" --next-allowed-action full_run --no-build",
             "research-cockpit ingest-gate-result --root <root> --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --artifact <artifact_id> --no-build",
             "research-cockpit set-baseline --root <root> --node <node_id> --option <option_id> --decision <decision_id> --no-build",
             "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --artifact-id <artifact_id> --no-build",

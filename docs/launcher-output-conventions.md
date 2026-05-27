@@ -97,6 +97,8 @@ Failed gates should set `passed` to `false` and put blocking details in `fatal_f
 research-cockpit ingest-gate-result --root research_cockpit --id gate_x --file artifacts/experiment_x/run_x/gate_result.json --run run_x --artifact artifact_experiment_x_run_x --no-build
 ```
 
+For long-run preflight checks, use `gate_type: "preflight"` and add a `preflight` object with disk, GPU, port, cache directory, and conflicting process observations. Failed preflight gates block `full_run` in context.
+
 ## `artifact_manifest.json`
 
 `artifact_manifest.json` tells an agent which files in the run directory are evidence rather than scratch output:

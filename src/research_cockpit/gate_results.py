@@ -6,6 +6,23 @@ from typing import Any
 
 
 GATE_RESULT_SCHEMA_VERSION = "gate_result_v1"
+PREFLIGHT_NUMERIC_FIELDS = {
+    "disk_available_gb",
+    "estimated_required_gb",
+    "cache_available_gb",
+    "estimated_cache_required_gb",
+}
+PREFLIGHT_INTEGER_FIELDS = {"port"}
+PREFLIGHT_BOOLEAN_FIELDS = {"port_available", "cache_dir_exists", "cache_writable"}
+PREFLIGHT_TEXT_FIELDS = {"cache_dir", "port_host"}
+PREFLIGHT_LIST_FIELDS = {"gpu_ids", "conflicting_processes"}
+PREFLIGHT_FIELDS = (
+    PREFLIGHT_NUMERIC_FIELDS
+    | PREFLIGHT_INTEGER_FIELDS
+    | PREFLIGHT_BOOLEAN_FIELDS
+    | PREFLIGHT_TEXT_FIELDS
+    | PREFLIGHT_LIST_FIELDS
+)
 
 
 def _optional_text(data: dict[str, Any], field: str, warnings: list[str]) -> str | None:
@@ -37,6 +54,52 @@ def _optional_warnings(data: dict[str, Any], warnings: list[str]) -> list[str]:
         warnings.append("warnings must be a list")
         return []
     return [str(item) for item in value if str(item).strip()]
+
+
+def _optional_preflight(data: dict[str, Any], warnings: list[str]) -> dict[str, Any]:
+    raw: dict[str, Any] = {}
+    nested = data.get("preflight")
+    if nested not in (None, ""):
+        if isinstance(nested, dict):
+            raw.update(nested)
+        else:
+            warnings.append("preflight must be a JSON object")
+    for field in PREFLIGHT_FIELDS:
+        if field in data:
+            raw[field] = data[field]
+    if not raw:
+        return {}
+
+    normalized: dict[str, Any] = {}
+    for field, value in raw.items():
+        if field in PREFLIGHT_NUMERIC_FIELDS:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                warnings.append(f"{field} must be a number")
+            else:
+                normalized[field] = value
+        elif field in PREFLIGHT_INTEGER_FIELDS:
+            if isinstance(value, bool) or not isinstance(value, int):
+                warnings.append(f"{field} must be an integer")
+            else:
+                normalized[field] = value
+        elif field in PREFLIGHT_BOOLEAN_FIELDS:
+            if not isinstance(value, bool):
+                warnings.append(f"{field} must be a boolean")
+            else:
+                normalized[field] = value
+        elif field in PREFLIGHT_TEXT_FIELDS:
+            if not isinstance(value, str):
+                warnings.append(f"{field} must be a string")
+            elif value.strip():
+                normalized[field] = value.strip()
+        elif field in PREFLIGHT_LIST_FIELDS:
+            if not isinstance(value, list):
+                warnings.append(f"{field} must be a list")
+            else:
+                normalized[field] = value
+        else:
+            normalized[field] = value
+    return normalized
 
 
 def _resolve_gate_result_path(root: Path, gate_result_file: str) -> tuple[Path | None, list[str]]:
@@ -96,6 +159,7 @@ def normalize_gate_result(
     fatal_failures = _optional_mapping(data, "fatal_failures", schema_warnings)
     gate_warnings = _optional_warnings(data, schema_warnings)
     next_allowed_action = _optional_text(data, "next_allowed_action", schema_warnings)
+    preflight = _optional_preflight(data, schema_warnings)
     file_experiment_id = _optional_text(data, "experiment_id", schema_warnings)
     file_run_id = _optional_text(data, "run_id", schema_warnings)
     if experiment_id and file_experiment_id and experiment_id != file_experiment_id:
@@ -107,6 +171,7 @@ def normalize_gate_result(
 
     valid = not schema_warnings
     blocks_next_action = not valid or passed is not True or bool(fatal_failures)
+    blocked_actions = ["full_run"] if gate_type == "preflight" and blocks_next_action else []
     payload: dict[str, Any] = {
         "schema_version": GATE_RESULT_SCHEMA_VERSION,
         "path": path,
@@ -119,9 +184,11 @@ def normalize_gate_result(
         "fatal_failures": fatal_failures,
         "warnings": gate_warnings,
         "next_allowed_action": next_allowed_action,
+        "preflight": preflight,
         "experiment_id": linked_experiment_id,
         "run_id": linked_run_id,
         "blocks_next_action": blocks_next_action,
+        "blocked_actions": blocked_actions,
         "schema_warnings": schema_warnings,
     }
     return {key: value for key, value in payload.items() if value not in (None, "", [], {})}

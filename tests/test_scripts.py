@@ -2626,6 +2626,85 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(fatal["valid"])
         self.assertTrue(fatal["blocks_next_action"])
 
+    def test_gate_result_schema_normalizes_preflight_resource_fields(self) -> None:
+        passed = normalize_gate_result(
+            {
+                "gate_type": "preflight",
+                "passed": True,
+                "disk_available_gb": 1200,
+                "estimated_required_gb": 800,
+                "gpu_ids": [0, 1],
+                "port": 7860,
+                "port_available": True,
+                "cache_dir": "cache/precompute",
+                "cache_dir_exists": True,
+                "cache_available_gb": 500,
+                "conflicting_processes": [],
+                "next_allowed_action": "full_run",
+            }
+        )
+        failed = normalize_gate_result(
+            {
+                "gate_type": "preflight",
+                "passed": False,
+                "preflight": {
+                    "disk_available_gb": 100,
+                    "estimated_required_gb": 800,
+                    "gpu_ids": [],
+                    "port_available": False,
+                    "cache_dir": "cache/precompute",
+                    "cache_dir_exists": False,
+                    "conflicting_processes": ["pid 1234"],
+                },
+                "fatal_failures": {"disk": "insufficient"},
+                "next_allowed_action": "full_run",
+            }
+        )
+
+        self.assertTrue(passed["valid"])
+        self.assertFalse(passed["blocks_next_action"])
+        self.assertEqual(passed["preflight"]["disk_available_gb"], 1200)
+        self.assertEqual(passed["preflight"]["estimated_required_gb"], 800)
+        self.assertEqual(passed["preflight"]["gpu_ids"], [0, 1])
+        self.assertEqual(passed["preflight"]["port"], 7860)
+        self.assertTrue(passed["preflight"]["port_available"])
+        self.assertEqual(passed["preflight"]["cache_dir"], "cache/precompute")
+        self.assertTrue(passed["preflight"]["cache_dir_exists"])
+        self.assertEqual(passed["preflight"]["cache_available_gb"], 500)
+        self.assertEqual(passed["preflight"]["conflicting_processes"], [])
+        self.assertEqual(passed["next_allowed_action"], "full_run")
+        self.assertTrue(failed["valid"])
+        self.assertTrue(failed["blocks_next_action"])
+        self.assertEqual(failed["blocked_actions"], ["full_run"])
+        self.assertEqual(failed["preflight"]["conflicting_processes"], ["pid 1234"])
+
+    def test_gate_result_schema_reports_bad_preflight_field_shapes(self) -> None:
+        gate = normalize_gate_result(
+            {
+                "gate_type": "preflight",
+                "passed": True,
+                "preflight": [],
+                "disk_available_gb": "lots",
+                "gpu_ids": "0,1",
+                "port": "7860",
+                "port_available": "yes",
+                "cache_dir": 42,
+                "cache_dir_exists": "true",
+                "conflicting_processes": "none",
+            }
+        )
+
+        self.assertFalse(gate["valid"])
+        self.assertTrue(gate["blocks_next_action"])
+        self.assertIn("preflight must be a JSON object", gate["schema_warnings"])
+        self.assertIn("disk_available_gb must be a number", gate["schema_warnings"])
+        self.assertIn("gpu_ids must be a list", gate["schema_warnings"])
+        self.assertIn("port must be an integer", gate["schema_warnings"])
+        self.assertIn("port_available must be a boolean", gate["schema_warnings"])
+        self.assertIn("cache_dir must be a string", gate["schema_warnings"])
+        self.assertIn("cache_dir_exists must be a boolean", gate["schema_warnings"])
+        self.assertIn("conflicting_processes must be a list", gate["schema_warnings"])
+
     def test_gate_result_schema_reports_malformed_and_unsafe_files(self) -> None:
         malformed_path = self.root / "artifacts" / "exp_t5" / "run_gate_bad" / "gate_result.json"
         malformed_path.parent.mkdir(parents=True)
@@ -2776,6 +2855,51 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(run_context["gate_results"]["latest"]["blocks_next_action"])
         self.assertEqual(node_context["gate_summary"]["latest_gate_id"], "gate_t5_dataset")
         self.assertEqual(agent_context["gate_overview"]["total_count"], 1)
+
+    def test_record_gate_result_writes_preflight_fields_and_blocks_full_run(self) -> None:
+        create_run(
+            self.root,
+            run_id="run_t5_preflight",
+            experiment_id="exp_t5",
+            status="queued",
+            rebuild_dashboard=False,
+        )
+
+        result = record_gate_result(
+            self.root,
+            gate_id="gate_t5_preflight",
+            experiment_id="exp_t5",
+            run_id="run_t5_preflight",
+            gate_type="preflight",
+            passed=False,
+            preflight={
+                "disk_available_gb": 100,
+                "estimated_required_gb": 800,
+                "gpu_ids": [0],
+                "port_available": True,
+                "cache_dir": "cache/precompute",
+                "cache_dir_exists": True,
+                "conflicting_processes": ["python train.py"],
+            },
+            fatal_failures={"disk": "insufficient"},
+            next_allowed_action="full_run",
+            rebuild_dashboard=False,
+        )
+
+        saved_gate = json.loads((self.root / "gate_results" / "gate_t5_preflight.json").read_text(encoding="utf-8"))
+        run_context = run_context_payload(self.root, run_id="run_t5_preflight", compact=True)
+        experiment_context = node_context_payload(self.root, node_id="exp_t5")
+
+        self.assertTrue(result["gate_result"]["blocks_next_action"])
+        self.assertEqual(result["gate_result"]["blocked_actions"], ["full_run"])
+        self.assertEqual(saved_gate["preflight"]["disk_available_gb"], 100)
+        self.assertEqual(saved_gate["preflight"]["cache_dir"], "cache/precompute")
+        self.assertEqual(run_context["gate_results"]["latest"]["preflight"]["estimated_required_gb"], 800)
+        self.assertEqual(run_context["gate_results"]["latest"]["blocked_actions"], ["full_run"])
+        self.assertEqual(
+            experiment_context["type_context"]["gate_results"]["blocking"][0]["blocked_actions"],
+            ["full_run"],
+        )
 
     def test_ingest_gate_result_links_artifact_file_and_surfaces_blocking_gate(self) -> None:
         gate_path = self.root / "artifacts" / "exp_t5" / "run_t5_gate_failed" / "gate_result.json"

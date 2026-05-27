@@ -82,6 +82,7 @@ def record_gate_result(
     expected: dict[str, Any] | None = None,
     observed: dict[str, Any] | None = None,
     fatal_failures: dict[str, Any] | None = None,
+    preflight: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
     next_allowed_action: str | None = None,
     artifact_id: str | None = None,
@@ -118,6 +119,8 @@ def record_gate_result(
         "warnings": warnings or [],
         "experiment_id": linked_experiment_id,
     }
+    if preflight:
+        gate_payload["preflight"] = preflight
     if linked_run_id:
         gate_payload["run_id"] = linked_run_id
     if next_allowed_action:
@@ -205,6 +208,7 @@ def main() -> None:
     parser.add_argument("--expected-json")
     parser.add_argument("--observed-json")
     parser.add_argument("--fatal-json", dest="fatal_failures_json")
+    parser.add_argument("--preflight-json")
     parser.add_argument("--warning", action="append", dest="warnings")
     parser.add_argument("--next-allowed-action")
     parser.add_argument("--artifact", "--artifact-id", dest="artifact_id")
@@ -228,6 +232,7 @@ def main() -> None:
             expected=_parse_json_object(args.expected_json, "--expected-json"),
             observed=_parse_json_object(args.observed_json, "--observed-json"),
             fatal_failures=_parse_json_object(args.fatal_failures_json, "--fatal-json"),
+            preflight=_parse_json_object(args.preflight_json, "--preflight-json"),
             warnings=args.warnings,
             next_allowed_action=args.next_allowed_action,
             artifact_id=args.artifact_id,

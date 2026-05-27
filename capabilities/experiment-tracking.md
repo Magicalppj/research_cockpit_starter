@@ -200,10 +200,33 @@ Standard `gate_result.json` files should use this machine-readable shape:
 
 `gate_type` is a required string, `passed` is a required boolean, and `expected`, `observed`, and `fatal_failures` are JSON objects. Warning-only gates report `blocks_next_action: false`. A failed gate, malformed gate file, or non-empty `fatal_failures` reports `blocks_next_action: true` so later ingest/context workflows can block or override the next action explicitly. Gate files may also include `experiment_id` and `run_id` so later ingest/context commands can link them back to the execution that produced them.
 
+Use `gate_type: preflight` for long-run resource checks. Put resource fields in a `preflight` object or at the gate file top level: `disk_available_gb`, `estimated_required_gb`, `gpu_ids`, `port`, `port_available`, `cache_dir`, `cache_dir_exists`, `cache_available_gb`, and `conflicting_processes`. Failed preflight gates expose `blocked_actions: ["full_run"]` in context so agents do not recommend expensive full runs before the resource issue is cleared.
+
+```json
+{
+  "gate_type": "preflight",
+  "passed": false,
+  "preflight": {
+    "disk_available_gb": 120,
+    "estimated_required_gb": 800,
+    "gpu_ids": [0, 1],
+    "port_available": true,
+    "cache_dir": "cache/precompute",
+    "cache_dir_exists": true,
+    "conflicting_processes": ["python train.py"]
+  },
+  "fatal_failures": {
+    "disk": "insufficient"
+  },
+  "next_allowed_action": "full_run"
+}
+```
+
 Use `record-gate-result` when Research Cockpit should write the standard gate file:
 
 ```sh
 research-cockpit record-gate-result --root research_cockpit --id gate_x --experiment experiment_x --run run_x --type smoke_check --passed false --fatal-json '{"exit_code":1}' --next-allowed-action inspect_logs --no-build
+research-cockpit record-gate-result --root research_cockpit --id preflight_x --experiment experiment_x --run run_x --type preflight --passed false --preflight-json '{"disk_available_gb":120,"estimated_required_gb":800,"gpu_ids":[0,1],"port_available":true,"cache_dir":"cache/precompute","cache_dir_exists":true,"conflicting_processes":["python train.py"]}' --fatal-json '{"disk":"insufficient"}' --next-allowed-action full_run --no-build
 ```
 
 Use `ingest-gate-result` when a launcher or artifact bundle already produced `gate_result.json`:
