@@ -73,6 +73,7 @@ def _first_text(value: Any, *, limit: int = 120) -> str | None:
 def _experiment_summaries(payload: dict[str, Any], raw_nodes: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     raw_nodes = raw_nodes or {}
     run_summaries = payload.get("run_summaries_by_experiment", {})
+    gate_summaries = payload.get("gate_summaries_by_experiment", {})
     by_id = {
         str(node.get("id")): node
         for node in payload.get("subtree_nodes", [])
@@ -106,6 +107,9 @@ def _experiment_summaries(payload: dict[str, Any], raw_nodes: dict[str, Any] | N
         run_summary = run_summaries.get(str(experiment_id)) if isinstance(run_summaries, dict) else None
         if isinstance(run_summary, dict) and run_summary.get("total_count", 0):
             summary["run_summary"] = run_summary
+        gate_summary = gate_summaries.get(str(experiment_id)) if isinstance(gate_summaries, dict) else None
+        if isinstance(gate_summary, dict) and gate_summary.get("total_count", 0):
+            summary["gate_summary"] = gate_summary
         summaries.append(summary)
     return summaries
 

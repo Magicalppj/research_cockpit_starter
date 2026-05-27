@@ -17,6 +17,7 @@ from research_cockpit.model import (
     load_yaml,
     validate_cockpit,
 )
+from research_cockpit.gate_result_records import build_run_gate_context
 from research_cockpit.progress import load_progress_heartbeat
 
 
@@ -31,11 +32,14 @@ def run_context_payload(root: Path, *, run_id: str, compact: bool = False) -> di
     if normalized_id not in runs:
         raise FileNotFoundError(run_path(root, normalized_id))
     run = runs[normalized_id]
+    gate_results = build_run_gate_context(root, normalized_id)
     if compact:
         payload = compact_run_payload(run, nodes)
         progress = load_progress_heartbeat(root, run.progress_file)
         if progress:
             payload["progress"] = progress
+        if gate_results["summary"]["total_count"]:
+            payload["gate_results"] = gate_results
         return payload
 
     experiment = nodes[run.experiment_id]
@@ -58,6 +62,7 @@ def run_context_payload(root: Path, *, run_id: str, compact: bool = False) -> di
             "tmux_session": run.tmux_session,
             "pid": run.pid,
         },
+        "gate_results": gate_results,
     }
 
 
@@ -80,6 +85,12 @@ def _print_human(payload: dict) -> None:
         safe_print(f"Progress: {detail}")
     if control.get("stop_command"):
         safe_print(f"Stop: {control['stop_command']}")
+    gate_results = payload.get("gate_results") or {}
+    gate_summary = gate_results.get("summary") or {}
+    if gate_summary.get("total_count"):
+        latest = gate_results.get("latest") or {}
+        state = "blocked" if latest.get("blocks_next_action") else "passed"
+        safe_print(f"Gate: {latest.get('gate_type') or latest.get('gate_id')} ({state})")
 
 
 def main() -> None:

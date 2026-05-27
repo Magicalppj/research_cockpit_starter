@@ -36,6 +36,7 @@ _MISSING_DEPENDENCIES = missing_runtime_dependencies()
 if not _MISSING_DEPENDENCIES:
     from research_cockpit.baselines import resolve_current_effective_baseline
     from research_cockpit.context_packs import build_context_metadata
+    from research_cockpit.gate_result_records import build_gate_overview
     from research_cockpit.hierarchy_policy import hierarchy_policy
     from research_cockpit.model import (
         build_search_index,
@@ -109,6 +110,8 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
             "research-cockpit create-workstream --root <root> --file workstream.yaml --dry-run --json --show-diff",
             "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path artifacts/<node_id>/<run_id> --link-to <node_id> --no-build",
             "research-cockpit ingest-artifact --root <root> --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --dry-run --json --show-diff",
+            "research-cockpit record-gate-result --root <root> --id <gate_id> --experiment <experiment_id> --run <run_id> --type smoke_check --passed false --fatal-json \"{}\" --no-build",
+            "research-cockpit ingest-gate-result --root <root> --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --artifact <artifact_id> --no-build",
             "research-cockpit set-baseline --root <root> --node <node_id> --option <option_id> --decision <decision_id> --no-build",
             "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --artifact-id <artifact_id> --no-build",
             "research-cockpit complete-experiments --root <root> --file findings.yaml --no-build",
@@ -165,6 +168,7 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
         "semantic_warnings": semantic["warnings"],
         "mutation_guidance": _mutation_guidance(nodes, current),
         "run_overview": build_run_overview(root, nodes),
+        "gate_overview": build_gate_overview(root),
         "search_summary": build_search_index_summary(search_index),
         "git": {
             "source_git_commit": metadata["source_git_commit"],

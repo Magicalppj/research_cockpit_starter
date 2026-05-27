@@ -17,6 +17,7 @@ from research_cockpit.graph_core import (
     node_title,
     unique_strings,
 )
+from research_cockpit.gate_result_records import build_gate_overview
 from research_cockpit.graph_views import load_graph_views
 from research_cockpit.interaction_log import interaction_log_warnings, recent_interactions
 from research_cockpit.option_workstreams import build_option_workstream_context, build_option_workstream_rows
@@ -183,6 +184,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         ],
         "assignment_view": build_assignment_view(nodes),
         "run_overview": build_run_overview(root, nodes),
+        "gate_overview": build_gate_overview(root),
         "saved_graph_views": load_graph_views(root),
         "recent_interactions": recent_interactions(root),
         "warnings": interaction_log_warnings(root),

@@ -33,6 +33,22 @@ def yaml_change_diff(changes: list[tuple[Path, dict[str, Any] | None, dict[str, 
     return "".join(chunks)
 
 
+def text_change_diff(changes: list[tuple[Path, str | None, str | None]]) -> str:
+    chunks: list[str] = []
+    for path, before, after in changes:
+        before_text = (before or "").splitlines(keepends=True)
+        after_text = (after or "").splitlines(keepends=True)
+        chunks.extend(
+            difflib.unified_diff(
+                before_text,
+                after_text,
+                fromfile=f"{path}:before",
+                tofile=f"{path}:after",
+            )
+        )
+    return "".join(chunks)
+
+
 def safe_print(text: object = "", *, end: str = "\n") -> None:
     payload = f"{text}{end}"
     try:

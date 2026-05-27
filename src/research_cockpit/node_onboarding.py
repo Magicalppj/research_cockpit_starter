@@ -12,6 +12,7 @@ from research_cockpit.graph_core import (
     node_id_by_type_in_path,
     ordered_node_contexts,
 )
+from research_cockpit.gate_result_records import build_experiment_gate_context
 from research_cockpit.hierarchy_policy import hierarchy_policy
 from research_cockpit.decisions import build_decision_acceptance_checklist, build_decision_trace
 from research_cockpit.baselines import resolve_effective_baseline
@@ -169,6 +170,7 @@ def _experiment_context(
         "missing_evidence": missing_evidence,
         "related_decisions": ordered_node_contexts(nodes, decision_ids),
         "runs": build_experiment_run_context(root, nodes, experiment.id),
+        "gate_results": build_experiment_gate_context(root, experiment.id),
         "hierarchy_policy": hierarchy_policy(parent_option_id=option_id, source_experiment_id=experiment.id),
         "suggested_commands": {
             "mark_running": _rooted_cli_command(
@@ -596,6 +598,9 @@ def _compact_node_onboarding_context(payload: dict[str, Any]) -> dict[str, Any]:
         runs = type_context.get("runs")
         if isinstance(runs, dict):
             out["run_summary"] = runs.get("summary", {})
+        gates = type_context.get("gate_results")
+        if isinstance(gates, dict):
+            out["gate_summary"] = gates.get("summary", {})
     return out
 
 

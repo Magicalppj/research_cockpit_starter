@@ -30,6 +30,7 @@ from research_cockpit.resources import build_link_rows
 from research_cockpit.decisions import build_decision_acceptance_checklists
 from research_cockpit.mutation_lock import mutation_lock
 from research_cockpit.option_workstreams import build_option_workstream_rows
+from research_cockpit.gate_result_records import gate_result_signature
 from research_cockpit.run_summaries import run_progress_signature, run_staleness_signature
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.storage import save_text
@@ -49,6 +50,9 @@ def _truth_source_files(root: Path) -> list[Path]:
     runs = root / "runs"
     if runs.exists():
         files.extend(path for path in runs.rglob("*.yaml") if path.is_file())
+    gate_results = root / "gate_results"
+    if gate_results.exists():
+        files.extend(path for path in gate_results.rglob("*.yaml") if path.is_file())
     return sorted(files)
 
 
@@ -64,11 +68,12 @@ def truth_source_signature(root: Path) -> tuple[tuple[str, int, int], ...]:
     return tuple(items)
 
 
-def dashboard_watch_signature(root: Path, *, now: Any | None = None) -> tuple[object, object, object]:
+def dashboard_watch_signature(root: Path, *, now: Any | None = None) -> tuple[object, object, object, object]:
     return (
         truth_source_signature(root),
         run_staleness_signature(root, now=now),
         run_progress_signature(root, now=now),
+        gate_result_signature(root),
     )
 
 
@@ -135,7 +140,7 @@ def build_dashboard_once(root: Path, *, json_output: bool = False) -> dict:
 
 
 def watch_dashboard(root: Path, *, interval: float, max_iterations: int | None, json_output: bool) -> None:
-    last_signature: tuple[object, object, object] | None = None
+    last_signature: tuple[object, ...] | None = None
     iteration = 0
     while max_iterations is None or iteration < max_iterations:
         iteration += 1

@@ -15,6 +15,7 @@ from research_cockpit.graph_core import (
 )
 from research_cockpit.hierarchy_policy import hierarchy_policy
 from research_cockpit.types import ACTIVE_WORKSTREAM_STATUSES, ResearchNode
+from research_cockpit.gate_result_records import build_gate_summaries_by_experiment
 from research_cockpit.run_summaries import build_run_summaries_by_experiment
 
 
@@ -98,6 +99,7 @@ def build_option_workstream_context(
     option = nodes[option_id]
     problem_id = upstream_problem_id(nodes, option_id)
     evidence = build_decision_evidence_bundle(nodes, option_id, locale=normalize_locale(locale, current))
+    gate_summaries = build_gate_summaries_by_experiment(root, subtree["experiment_ids"])
     next_actions: list[str] = []
     blockers: list[str] = []
     for node_id in subtree["node_ids"]:
@@ -115,6 +117,7 @@ def build_option_workstream_context(
         "options": ordered_node_contexts(nodes, subtree["option_ids"]),
         "experiments": ordered_node_contexts(nodes, subtree["experiment_ids"]),
         "run_summaries_by_experiment": build_run_summaries_by_experiment(root, nodes, subtree["experiment_ids"]),
+        "gate_summaries_by_experiment": gate_summaries,
         "decisions": ordered_node_contexts(nodes, subtree["decision_ids"]),
         "evidence_summary": {
             **evidence,

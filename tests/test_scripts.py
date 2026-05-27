@@ -55,6 +55,7 @@ from research_cockpit.commands.complete_run import complete_run
 from research_cockpit.commands.finalize_workstream import finalize_workstream
 from research_cockpit.commands.ingest_artifact import ingest_artifact
 from research_cockpit.commands.import_worktree_findings import import_worktree_findings
+from research_cockpit.commands.ingest_gate_result import ingest_gate_result
 from research_cockpit.commands.link_artifact import link_artifact
 from research_cockpit.commands.list_runs import list_runs_payload
 from research_cockpit.commands.lint_semantic import semantic_lint
@@ -62,6 +63,7 @@ from research_cockpit.commands.list_agent_commands import agent_command_manifest
 from research_cockpit.commands.node_context import node_context_payload
 from research_cockpit.commands.option_workstream_context import compact_option_workstream_context, option_workstream_context_payload
 from research_cockpit.commands.promote_decision import promote_decision
+from research_cockpit.commands.record_gate_result import record_gate_result
 from research_cockpit.commands.record_finding import record_finding
 from research_cockpit.commands.repair_interaction_log import repair_interaction_log
 from research_cockpit.commands.report_option_workstream import report_option_workstream
@@ -2565,6 +2567,295 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("observed must be a JSON object", empty_string_shapes["schema_warnings"])
         self.assertIn("fatal_failures must be a JSON object", empty_string_shapes["schema_warnings"])
         self.assertIn("warnings must be a list", empty_string_shapes["schema_warnings"])
+
+    def test_record_gate_result_writes_standard_file_and_context_summary(self) -> None:
+        create_run(
+            self.root,
+            run_id="run_t5_gate",
+            experiment_id="exp_t5",
+            status="running",
+            rebuild_dashboard=False,
+        )
+
+        result = record_gate_result(
+            self.root,
+            gate_id="gate_t5_dataset",
+            experiment_id="exp_t5",
+            run_id="run_t5_gate",
+            gate_type="dataset_check",
+            passed=True,
+            expected={"rows": 100},
+            observed={"rows": 100},
+            warnings=["class imbalance is high"],
+            next_allowed_action="precompute",
+            rebuild_dashboard=False,
+            show_diff=True,
+        )
+
+        gate_file = self.root / "gate_results" / "gate_t5_dataset.json"
+        record_file = self.root / "gate_results" / "gate_t5_dataset.yaml"
+        saved_gate = json.loads(gate_file.read_text(encoding="utf-8"))
+        saved_record = load_yaml(record_file)
+        run_context = run_context_payload(self.root, run_id="run_t5_gate", compact=True)
+        node_context = node_context_payload(self.root, node_id="exp_t5", compact=True)
+        agent_context = build_agent_context(self.root, load_nodes(self.root))
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["gate_id"], "gate_t5_dataset")
+        self.assertEqual(saved_gate["gate_type"], "dataset_check")
+        self.assertTrue(saved_gate["passed"])
+        self.assertEqual(saved_record["gate_result_file"], "gate_results/gate_t5_dataset.json")
+        self.assertEqual(saved_record["experiment_id"], "exp_t5")
+        self.assertEqual(saved_record["run_id"], "run_t5_gate")
+        self.assertIn("gate_t5_dataset.yaml", result["diff"])
+        self.assertIn("gate_t5_dataset.json", result["diff"])
+        self.assertEqual(run_context["gate_results"]["summary"]["total_count"], 1)
+        self.assertFalse(run_context["gate_results"]["latest"]["blocks_next_action"])
+        self.assertEqual(node_context["gate_summary"]["latest_gate_id"], "gate_t5_dataset")
+        self.assertEqual(agent_context["gate_overview"]["total_count"], 1)
+
+    def test_ingest_gate_result_links_artifact_file_and_surfaces_blocking_gate(self) -> None:
+        gate_path = self.root / "artifacts" / "exp_t5" / "run_t5_gate_failed" / "gate_result.json"
+        gate_path.parent.mkdir(parents=True)
+        gate_path.write_text(
+            json.dumps(
+                {
+                    "gate_type": "smoke_check",
+                    "passed": False,
+                    "expected": {"exit_code": 0},
+                    "observed": {"exit_code": 1},
+                    "fatal_failures": {"exit_code": 1},
+                    "warnings": [],
+                    "next_allowed_action": "inspect_logs",
+                }
+            ),
+            encoding="utf-8",
+        )
+        create_run(
+            self.root,
+            run_id="run_t5_gate_failed",
+            experiment_id="exp_t5",
+            status="failed",
+            rebuild_dashboard=False,
+        )
+        create_artifact(
+            self.root,
+            artifact_id="artifact_t5_gate_failed",
+            title="T5 gate failed bundle",
+            status="done",
+            path="artifacts/exp_t5/run_t5_gate_failed",
+            links={"gate_result": "artifacts/exp_t5/run_t5_gate_failed/gate_result.json"},
+            link_to=["exp_t5"],
+            rebuild_dashboard=False,
+        )
+
+        result = ingest_gate_result(
+            self.root,
+            gate_id="gate_t5_smoke_failed",
+            gate_result_file="artifacts/exp_t5/run_t5_gate_failed/gate_result.json",
+            run_id="run_t5_gate_failed",
+            artifact_id="artifact_t5_gate_failed",
+            rebuild_dashboard=False,
+        )
+
+        saved_record = load_yaml(self.root / "gate_results" / "gate_t5_smoke_failed.yaml")
+        run_context = run_context_payload(self.root, run_id="run_t5_gate_failed", compact=True)
+        experiment_context = node_context_payload(self.root, node_id="exp_t5")
+        agent_context = build_agent_context(self.root, load_nodes(self.root))
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["experiment_id"], "exp_t5")
+        self.assertEqual(saved_record["artifact_id"], "artifact_t5_gate_failed")
+        self.assertEqual(run_context["gate_results"]["summary"]["blocking_count"], 1)
+        self.assertTrue(run_context["gate_results"]["latest"]["blocks_next_action"])
+        self.assertEqual(run_context["gate_results"]["latest"]["artifact_id"], "artifact_t5_gate_failed")
+        self.assertEqual(
+            experiment_context["type_context"]["gate_results"]["blocking"][0]["gate_id"],
+            "gate_t5_smoke_failed",
+        )
+        self.assertEqual(agent_context["gate_overview"]["blocking_count"], 1)
+
+    def test_ingest_gate_result_allows_malformed_existing_file_as_blocking_context(self) -> None:
+        gate_path = self.root / "artifacts" / "exp_t5" / "run_t5_gate_malformed" / "gate_result.json"
+        gate_path.parent.mkdir(parents=True)
+        gate_path.write_text("{", encoding="utf-8")
+
+        result = ingest_gate_result(
+            self.root,
+            gate_id="gate_t5_malformed",
+            gate_result_file="artifacts/exp_t5/run_t5_gate_malformed/gate_result.json",
+            experiment_id="exp_t5",
+            rebuild_dashboard=False,
+        )
+        experiment_context = node_context_payload(self.root, node_id="exp_t5")
+
+        self.assertTrue(result["changed"])
+        self.assertTrue(result["gate_result"]["blocks_next_action"])
+        self.assertIn("JSON parse error", result["gate_result"]["schema_warnings"][0])
+        self.assertEqual(
+            experiment_context["type_context"]["gate_results"]["blocking"][0]["gate_id"],
+            "gate_t5_malformed",
+        )
+
+    def test_gate_result_commands_reject_missing_unsafe_or_mismatched_artifacts(self) -> None:
+        create_run(
+            self.root,
+            run_id="run_t5_gate_reject",
+            experiment_id="exp_t5",
+            status="running",
+            rebuild_dashboard=False,
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_other",
+                "type": "experiment",
+                "title": "Other experiment",
+                "status": "planned",
+                "parent": "option_t5",
+                "linked_artifacts": ["artifact_other_gate"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_other_gate",
+                "type": "artifact",
+                "title": "Other gate bundle",
+                "status": "done",
+                "path": "artifacts/exp_other/run_gate",
+                "links": {
+                    "gate_result": "artifacts/exp_other/run_gate/gate_result.json",
+                },
+            },
+        )
+
+        with self.assertRaises((ValueError, FileNotFoundError)):
+            ingest_gate_result(
+                self.root,
+                gate_id="gate_missing",
+                gate_result_file="artifacts/exp_t5/missing_gate_result.json",
+                experiment_id="exp_t5",
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(ValueError):
+            ingest_gate_result(
+                self.root,
+                gate_id="gate_unsafe",
+                gate_result_file="../outside/gate_result.json",
+                experiment_id="exp_t5",
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(ValueError):
+            record_gate_result(
+                self.root,
+                gate_id="gate_bad_path",
+                experiment_id="exp_t5",
+                gate_type="smoke_check",
+                passed=True,
+                gate_result_file="graph/nodes/gate_bad_path.yaml",
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(ValueError):
+            record_gate_result(
+                self.root,
+                gate_id="gate_bad_artifact",
+                experiment_id="exp_t5",
+                gate_type="smoke_check",
+                passed=True,
+                artifact_id="artifact_other_gate",
+                rebuild_dashboard=False,
+            )
+
+        gate_path = self.root / "artifacts" / "exp_t5" / "run_t5_gate_reject" / "gate_result.json"
+        gate_path.parent.mkdir(parents=True)
+        gate_path.write_text(
+            json.dumps({"gate_type": "smoke_check", "passed": True}),
+            encoding="utf-8",
+        )
+        with self.assertRaises(ValueError):
+            ingest_gate_result(
+                self.root,
+                gate_id="gate_ingest_bad_artifact",
+                gate_result_file="artifacts/exp_t5/run_t5_gate_reject/gate_result.json",
+                run_id="run_t5_gate_reject",
+                artifact_id="artifact_other_gate",
+                rebuild_dashboard=False,
+            )
+
+    def test_gate_context_blocks_manual_records_with_disallowed_paths(self) -> None:
+        save_yaml(
+            self.root / "gate_results" / "gate_t5_manual_bad.yaml",
+            {
+                "schema_version": "gate_result_record_v1",
+                "gate_id": "gate_t5_manual_bad",
+                "experiment_id": "exp_t5",
+                "gate_result_file": "current_state.json",
+                "recorded_at": "2026-05-27T00:00:00Z",
+            },
+        )
+
+        experiment_context = node_context_payload(self.root, node_id="exp_t5")
+        gate_context = experiment_context["type_context"]["gate_results"]
+        signature_text = str(dashboard_watch_signature(self.root))
+
+        self.assertEqual(gate_context["summary"]["blocking_count"], 1)
+        self.assertEqual(gate_context["blocking"][0]["gate_id"], "gate_t5_manual_bad")
+        self.assertIn("gate_result_file must live under gate_results/ or artifacts/", gate_context["warnings"][0])
+        self.assertIn("gate_result_file must live under gate_results/ or artifacts/", gate_context["blocking"][0]["schema_warnings"][0])
+        self.assertIn("current_state.json", signature_text)
+        self.assertIn("invalid", signature_text)
+
+    def test_gate_context_filters_warnings_to_requested_scope(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "exp_other_gate_scope",
+                "type": "experiment",
+                "title": "Other scoped gate experiment",
+                "status": "planned",
+                "parent": "option_t5",
+            },
+        )
+        save_yaml(
+            self.root / "gate_results" / "gate_other_manual_bad.yaml",
+            {
+                "schema_version": "gate_result_record_v1",
+                "gate_id": "gate_other_manual_bad",
+                "experiment_id": "exp_other_gate_scope",
+                "gate_result_file": "current_state.json",
+                "recorded_at": "2026-05-27T00:00:00Z",
+            },
+        )
+
+        experiment_context = node_context_payload(self.root, node_id="exp_t5")
+        other_context = node_context_payload(self.root, node_id="exp_other_gate_scope")
+
+        self.assertEqual(experiment_context["type_context"]["gate_results"]["warnings"], [])
+        self.assertEqual(other_context["type_context"]["gate_results"]["summary"]["blocking_count"], 1)
+        self.assertIn(
+            "gate_result_file must live under gate_results/ or artifacts/",
+            other_context["type_context"]["gate_results"]["warnings"][0],
+        )
+
+    def test_gate_context_blocks_manual_records_missing_gate_result_file(self) -> None:
+        save_yaml(
+            self.root / "gate_results" / "gate_t5_missing_file.yaml",
+            {
+                "schema_version": "gate_result_record_v1",
+                "gate_id": "gate_t5_missing_file",
+                "experiment_id": "exp_t5",
+                "recorded_at": "2026-05-27T00:00:00Z",
+            },
+        )
+
+        experiment_context = node_context_payload(self.root, node_id="exp_t5")
+        gate_context = experiment_context["type_context"]["gate_results"]
+
+        self.assertEqual(gate_context["summary"]["blocking_count"], 1)
+        self.assertEqual(gate_context["blocking"][0]["gate_id"], "gate_t5_missing_file")
+        self.assertIn("missing gate_result_file", gate_context["warnings"][0])
+        self.assertIn("missing gate_result_file", gate_context["blocking"][0]["schema_warnings"][0])
 
     def test_run_summaries_use_progress_heartbeat_for_stale_and_warnings(self) -> None:
         stale_path = self.root / "artifacts" / "exp_t5" / "run_progress_stale" / "progress.json"

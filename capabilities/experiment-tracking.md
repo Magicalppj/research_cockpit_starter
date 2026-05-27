@@ -150,6 +150,20 @@ Standard `gate_result.json` files should use this machine-readable shape:
 
 `gate_type` is a required string, `passed` is a required boolean, and `expected`, `observed`, and `fatal_failures` are JSON objects. Warning-only gates report `blocks_next_action: false`. A failed gate, malformed gate file, or non-empty `fatal_failures` reports `blocks_next_action: true` so later ingest/context workflows can block or override the next action explicitly. Gate files may also include `experiment_id` and `run_id` so later ingest/context commands can link them back to the execution that produced them.
 
+Use `record-gate-result` when Research Cockpit should write the standard gate file:
+
+```sh
+research-cockpit record-gate-result --root research_cockpit --id gate_x --experiment experiment_x --run run_x --type smoke_check --passed false --fatal-json '{"exit_code":1}' --next-allowed-action inspect_logs --no-build
+```
+
+Use `ingest-gate-result` when a launcher or artifact bundle already produced `gate_result.json`:
+
+```sh
+research-cockpit ingest-gate-result --root research_cockpit --id gate_x --file artifacts/experiment_x/run_x/gate_result.json --run run_x --artifact artifact_x --no-build
+```
+
+Both commands create a `gate_results/<gate_id>.yaml` metadata record. `record-gate-result` also writes the JSON payload, while `ingest-gate-result` only links an existing file. `run-context --json` and experiment `node-context --json` expose compact gate details including latest gate state, blocking gates, warnings, and linked artifact id when present. Option workstream summaries, bootstrap, and dashboard context expose aggregate gate counts and gate ids so agents can decide when to read the narrower run or node context.
+
 ## Artifacts
 
 Use artifact commands for result folders, review bundles, metrics directories, and other evidence objects that need their own status or links:
