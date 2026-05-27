@@ -118,6 +118,22 @@ Prefer `--no-build` for frequent status updates in multi-agent workflows, then r
 
 `bootstrap`, `node-context` for experiment nodes, and `option-workstream-context --compact --json` include short run summaries so agents can see active, failed, stale, and recently completed executions without reading every run file. Use `run-context` for full operational details.
 
+Standard `progress.json` heartbeat files should be JSON objects with this shape:
+
+```json
+{
+  "status": "running",
+  "completed_steps": 12,
+  "total_steps": 64,
+  "last_update": "2026-05-26T16:30:00Z",
+  "current_stage": "synthesis",
+  "latest_artifact": "artifacts/experiment_x/run_x/partial.json",
+  "warnings": []
+}
+```
+
+`total_steps` may be omitted or null when the total is unknown. `last_update` should be an ISO-8601 timestamp; active heartbeats are considered stale after 60 minutes without an update. `run-context --json` reads a run's relative `progress_file` and exposes normalized progress, percent complete when possible, heartbeat warnings, and schema warnings. Missing or malformed progress files produce warnings instead of blocking run context.
+
 ## Artifacts
 
 Use artifact commands for result folders, review bundles, metrics directories, and other evidence objects that need their own status or links:

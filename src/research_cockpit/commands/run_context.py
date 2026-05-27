@@ -17,6 +17,7 @@ from research_cockpit.model import (
     load_yaml,
     validate_cockpit,
 )
+from research_cockpit.progress import load_progress_heartbeat
 
 
 def run_context_payload(root: Path, *, run_id: str, compact: bool = False) -> dict:
@@ -31,19 +32,27 @@ def run_context_payload(root: Path, *, run_id: str, compact: bool = False) -> di
         raise FileNotFoundError(run_path(root, normalized_id))
     run = runs[normalized_id]
     if compact:
-        return compact_run_payload(run, nodes)
+        payload = compact_run_payload(run, nodes)
+        progress = load_progress_heartbeat(root, run.progress_file)
+        if progress:
+            payload["progress"] = progress
+        return payload
 
     experiment = nodes[run.experiment_id]
+    progress = load_progress_heartbeat(root, run.progress_file)
+    monitor = {
+        "monitor_command": run.monitor_command,
+        "progress_file": run.progress_file,
+        "log_root": run.log_root,
+        "output_root": run.output_root,
+    }
+    if progress:
+        monitor["progress"] = progress
     return {
         "root": str(root),
         "run": run_payload(run, nodes),
         "experiment": experiment_summary(experiment),
-        "monitor": {
-            "monitor_command": run.monitor_command,
-            "progress_file": run.progress_file,
-            "log_root": run.log_root,
-            "output_root": run.output_root,
-        },
+        "monitor": monitor,
         "control": {
             "stop_command": run.stop_command,
             "tmux_session": run.tmux_session,
@@ -59,6 +68,16 @@ def _print_human(payload: dict) -> None:
     control = payload.get("control", {})
     if monitor.get("monitor_command"):
         safe_print(f"Monitor: {monitor['monitor_command']}")
+    progress = monitor.get("progress") or payload.get("progress")
+    if progress:
+        schema_warnings = progress.get("schema_warnings") or []
+        if schema_warnings:
+            detail = f"unavailable ({schema_warnings[0]})"
+        else:
+            detail = progress.get("current_stage") or progress.get("status") or "progress"
+        if "percent_complete" in progress:
+            detail = f"{detail} ({progress['percent_complete']}%)"
+        safe_print(f"Progress: {detail}")
     if control.get("stop_command"):
         safe_print(f"Stop: {control['stop_command']}")
 

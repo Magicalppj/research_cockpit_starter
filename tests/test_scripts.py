@@ -85,6 +85,7 @@ from research_cockpit.context_packs import build_agent_context
 from research_cockpit.graph_views import upsert_graph_view
 from research_cockpit.mutation_lock import MutationError, mutation_lock
 from research_cockpit.mutation_runtime import finish_mutation
+from research_cockpit.progress import load_progress_heartbeat
 from research_cockpit.resources import build_link_rows
 from workflow_metrics import workflow_metrics
 
@@ -2109,6 +2110,176 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(context["experiment"]["id"], "exp_t5")
         self.assertEqual(context["monitor"]["progress_file"], "artifacts/exp_t5/run_t5_smoke/progress_failed.json")
         self.assertEqual(context["control"]["stop_command"], "tmux kill-session -t t5-smoke")
+
+    def test_progress_heartbeat_schema_supports_unknown_total_and_stale(self) -> None:
+        progress_path = self.root / "artifacts" / "exp_t5" / "run_t5" / "progress.json"
+        progress_path.parent.mkdir(parents=True)
+        progress_path.write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "completed_steps": 12,
+                    "total_steps": None,
+                    "last_update": "2026-05-27T00:00:00Z",
+                    "current_stage": "synthesis",
+                    "latest_artifact": "artifacts/exp_t5/run_t5/partial.json",
+                    "warnings": ["cache warmup slower than expected"],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        progress = load_progress_heartbeat(
+            self.root,
+            "artifacts/exp_t5/run_t5/progress.json",
+            now=datetime(2026, 5, 27, 2, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertIsNotNone(progress)
+        assert progress is not None
+        self.assertEqual(progress["schema_version"], "progress_heartbeat_v1")
+        self.assertEqual(progress["status"], "running")
+        self.assertEqual(progress["completed_steps"], 12)
+        self.assertNotIn("percent_complete", progress)
+        self.assertTrue(progress["possibly_stale"])
+        self.assertEqual(progress["current_stage"], "synthesis")
+        self.assertEqual(progress["latest_artifact"], "artifacts/exp_t5/run_t5/partial.json")
+        self.assertEqual(progress["warnings"], ["cache warmup slower than expected"])
+
+    def test_progress_heartbeat_reports_missing_and_malformed_files(self) -> None:
+        malformed_path = self.root / "artifacts" / "exp_t5" / "run_bad" / "progress.json"
+        malformed_path.parent.mkdir(parents=True)
+        malformed_path.write_text("{", encoding="utf-8")
+
+        malformed = load_progress_heartbeat(self.root, "artifacts/exp_t5/run_bad/progress.json")
+        missing = load_progress_heartbeat(self.root, "artifacts/exp_t5/missing/progress.json")
+        unsafe = load_progress_heartbeat(self.root, "../outside/progress.json")
+
+        self.assertIsNotNone(malformed)
+        self.assertIsNotNone(missing)
+        self.assertIsNotNone(unsafe)
+        assert malformed is not None and missing is not None and unsafe is not None
+        self.assertTrue(malformed["exists"])
+        self.assertIn("JSON parse error", malformed["schema_warnings"][0])
+        self.assertFalse(missing["exists"])
+        self.assertIn("does not exist", missing["schema_warnings"][0])
+        self.assertFalse(unsafe["exists"])
+        self.assertIn("relative path inside the data root", unsafe["schema_warnings"][0])
+
+    def test_progress_heartbeat_rejects_paths_resolving_outside_root(self) -> None:
+        external_dir = self.tmp_root / "external_progress"
+        external_dir.mkdir()
+        link_dir = self.root / "artifacts" / "linked_progress"
+        link_dir.parent.mkdir(parents=True)
+        try:
+            os.symlink(external_dir, link_dir, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink unavailable: {exc}")
+
+        progress = load_progress_heartbeat(self.root, "artifacts/linked_progress/progress.json")
+
+        self.assertIsNotNone(progress)
+        assert progress is not None
+        self.assertFalse(progress["exists"])
+        self.assertIn("resolve inside the data root", progress["schema_warnings"][0])
+
+    def test_progress_heartbeat_reports_path_resolution_errors(self) -> None:
+        with patch("research_cockpit.progress.Path.resolve", side_effect=RuntimeError("symlink loop")):
+            progress = load_progress_heartbeat(self.root, "artifacts/exp_t5/progress.json")
+
+        self.assertIsNotNone(progress)
+        assert progress is not None
+        self.assertFalse(progress["exists"])
+        self.assertIn("could not be resolved inside the data root", progress["schema_warnings"][0])
+
+    def test_progress_heartbeat_rejects_fractional_steps_and_non_string_fields(self) -> None:
+        progress_path = self.root / "artifacts" / "exp_t5" / "run_invalid" / "progress.json"
+        progress_path.parent.mkdir(parents=True)
+        progress_path.write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "completed_steps": 1.9,
+                    "total_steps": 4,
+                    "last_update": "2026-05-27T00:00:00Z",
+                    "current_stage": {"name": "train"},
+                    "latest_artifact": ["artifact.json"],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        progress = load_progress_heartbeat(self.root, "artifacts/exp_t5/run_invalid/progress.json")
+
+        self.assertIsNotNone(progress)
+        assert progress is not None
+        self.assertNotIn("completed_steps", progress)
+        self.assertNotIn("percent_complete", progress)
+        self.assertNotIn("current_stage", progress)
+        self.assertNotIn("latest_artifact", progress)
+        self.assertIn("completed_steps must be an integer", progress["schema_warnings"])
+        self.assertIn("current_stage must be a string", progress["schema_warnings"])
+        self.assertIn("latest_artifact must be a string", progress["schema_warnings"])
+
+    def test_run_context_includes_progress_heartbeat_summary(self) -> None:
+        progress_path = self.root / "artifacts" / "exp_t5" / "run_t5_progress" / "progress.json"
+        progress_path.parent.mkdir(parents=True)
+        progress_path.write_text(
+            json.dumps(
+                {
+                    "status": "running",
+                    "completed_steps": 2,
+                    "total_steps": 4,
+                    "last_update": "2999-01-01T00:00:00Z",
+                    "current_stage": "train",
+                    "warnings": [],
+                }
+            ),
+            encoding="utf-8",
+        )
+        create_run(
+            self.root,
+            run_id="run_t5_progress",
+            experiment_id="exp_t5",
+            status="running",
+            progress_file="artifacts/exp_t5/run_t5_progress/progress.json",
+            rebuild_dashboard=False,
+        )
+
+        context = run_context_payload(self.root, run_id="run_t5_progress")
+        compact = run_context_payload(self.root, run_id="run_t5_progress", compact=True)
+
+        self.assertEqual(context["monitor"]["progress"]["percent_complete"], 50.0)
+        self.assertEqual(context["monitor"]["progress"]["current_stage"], "train")
+        self.assertFalse(context["monitor"]["progress"]["possibly_stale"])
+        self.assertEqual(compact["progress"]["percent_complete"], 50.0)
+
+    def test_run_context_surfaces_progress_schema_warnings(self) -> None:
+        progress_path = self.root / "artifacts" / "exp_t5" / "run_bad_progress" / "progress.json"
+        progress_path.parent.mkdir(parents=True)
+        progress_path.write_text("{", encoding="utf-8")
+        create_run(
+            self.root,
+            run_id="run_bad_progress",
+            experiment_id="exp_t5",
+            status="running",
+            progress_file="artifacts/exp_t5/run_bad_progress/progress.json",
+            rebuild_dashboard=False,
+        )
+
+        context = run_context_payload(self.root, run_id="run_bad_progress")
+        compact = run_context_payload(self.root, run_id="run_bad_progress", compact=True)
+        human = subprocess.run(
+            [*cli_command("run-context"), "--root", str(self.root), "--id", "run_bad_progress"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertIn("JSON parse error", context["monitor"]["progress"]["schema_warnings"][0])
+        self.assertIn("JSON parse error", compact["progress"]["schema_warnings"][0])
+        self.assertEqual(human.returncode, 0, human.stdout + human.stderr)
+        self.assertIn("Progress: unavailable", human.stdout)
 
     def test_create_run_rejects_invalid_experiment_id(self) -> None:
         with self.assertRaises(ValidationError) as ctx:
