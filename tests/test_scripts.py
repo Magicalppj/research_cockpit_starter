@@ -2051,6 +2051,15 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("search_summary", payload)
         self.assertIn("mutation_guidance", payload)
         self.assertIn("apply-graph-plan", " ".join(payload["mutation_guidance"]["command_skeletons"]))
+        batch_mode = payload["mutation_guidance"]["multi_agent_batch_mode"]
+        self.assertIn("coordinator", batch_mode["default"])
+        self.assertIn("does not replace validate/smoke", batch_mode["default"])
+        self.assertIn("commands --json --compact", " ".join(batch_mode["rules"]))
+        self.assertIn("smoke --root <root> --json", " ".join(batch_mode["finish_commands"]))
+        self.assertIn("record-finding", " ".join(batch_mode["examples"]["findings"]))
+        self.assertIn("ingest-artifact", " ".join(batch_mode["examples"]["artifacts"]))
+        self.assertIn("update-run", " ".join(batch_mode["examples"]["runs"]))
+        self.assertIn("sync-focus-actions", " ".join(batch_mode["examples"]["next_actions"]))
         hierarchy = payload["mutation_guidance"]["hierarchy_policy"]
         self.assertEqual(hierarchy["default_branch_shape"], "option -> problem -> option -> experiment/decision")
         self.assertIn("create-workstream", hierarchy["recommended_command"])
@@ -3179,6 +3188,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["complete-experiment"]["supports_dry_run"])
         self.assertTrue(by_name["complete-experiment"]["supports_no_build"])
         self.assertTrue(by_name["complete-experiment"]["supports_compact"])
+        self.assertEqual(by_name["complete-experiment"]["batch_policy"]["mode"], "serial_no_build")
+        self.assertTrue(by_name["complete-experiment"]["batch_policy"]["use_no_build"])
+        self.assertIn(
+            "smoke --root <root> --json",
+            " ".join(by_name["complete-experiment"]["batch_policy"]["finish_commands"]),
+        )
         self.assertIn("evidence_path", by_name["complete-experiment"]["fields_supported"])
         self.assertNotIn("next_actions", by_name["complete-experiment"]["fields_supported"])
         self.assertNotIn("evidence_artifact_id", by_name["complete-experiment"]["fields_supported"])
@@ -3289,7 +3304,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["build"]["supports_watch"])
         self.assertTrue(by_name["build"]["writes_generated_files"])
         self.assertFalse(by_name["build"]["writes_truth_source"])
+        self.assertEqual(by_name["build"]["batch_policy"]["mode"], "generated_build")
+        self.assertIn("--watch", by_name["build"]["supported_flags"])
+        self.assertIn("--interval", by_name["build"]["supported_flags"])
+        self.assertIn("--max-iterations", by_name["build"]["supported_flags"])
         self.assertTrue(by_name["validate"]["safe_in_plan_mode"])
+        self.assertEqual(by_name["validate"]["batch_policy"]["mode"], "read_only")
         self.assertFalse(by_name["update-node-fields"]["safe_in_plan_mode"])
         for command in manifest:
             if command["mutating"]:

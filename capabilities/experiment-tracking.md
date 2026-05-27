@@ -45,6 +45,54 @@ Use `context` as the default handoff for a known option or experiment. Use compa
 The compact payload includes `experiment_summaries` with each experiment id, title, status, result summary, success criteria count, first success criterion, metric count, finding count, and linked artifact count. Use full context or `node-context` only when the exact complete field text matters.
 Use `assignment-view` when assigning parallel agents. It lists high-priority queued/running experiment nodes with `owner`, `ready_for_agent`, `depends_on`, `blocked_by`, key artifacts, and first `next_action`. Keep `priority` as coarse urgency and use `order` or `rank` for stable dispatch order.
 
+## Multi-Agent Batch Updates
+
+In multi-agent workflows, each agent should mutate the canonical `research_cockpit/` root sequentially with `--no-build` on supported write commands. A coordinator or final handoff step should then run one validation/build/smoke pass:
+
+```sh
+research-cockpit validate --root research_cockpit --json
+research-cockpit build --root research_cockpit
+research-cockpit smoke --root research_cockpit --json
+```
+
+Use `research-cockpit commands --json --compact --name <command>` to check `supports_no_build`, `can_batch`, and `batch_policy.mode` before choosing a write path. Prefer file-based batch commands such as `apply-graph-plan`, `create-workstream`, and `complete-experiments` when several changes share one intent; otherwise run smaller commands one after another.
+
+An optional `research-cockpit build --root research_cockpit --watch --interval 5 --json` process can keep generated dashboards fresh during a batch, but it only runs dashboard builds. It does not replace the final `validate` and `smoke` checks.
+
+Consecutive finding updates:
+
+```sh
+research-cockpit record-finding --root research_cockpit --experiment experiment_a --statement "..." --confidence medium --artifact-id artifact_a --no-build
+research-cockpit complete-experiment --root research_cockpit --id experiment_b --finding "..." --confidence medium --artifact-id artifact_b --no-build
+research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build
+```
+
+Artifact capture and linking:
+
+```sh
+research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from ../worktrees/agent_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --no-build
+research-cockpit create-artifact --root research_cockpit --id artifact_x --title "Review bundle" --path artifacts/experiment_x/run_x --link-to experiment_x --no-build
+research-cockpit link-artifact --root research_cockpit --artifact artifact_x --to option_x --no-build
+```
+
+Run/job status updates:
+
+```sh
+research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
+research-cockpit update-run --root research_cockpit --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
+research-cockpit complete-run --root research_cockpit --id run_x --status completed --no-build
+```
+
+Next action updates:
+
+```sh
+research-cockpit update-node-fields --root research_cockpit --id experiment_x --clear-next-actions --next-action "Review metrics" --next-action "Draft decision" --no-build
+research-cockpit sync-focus-actions --root research_cockpit --from-node experiment_x --no-build
+research-cockpit update-suggestion-state --root research_cockpit --id sg_x --state completed --reason "Recorded in experiment_x" --no-build
+```
+
+Do not parallelize mutating commands against the same root. If a mutation conflict is reported, reread compact context and retry the stale command.
+
 Report a workstream:
 
 ```sh

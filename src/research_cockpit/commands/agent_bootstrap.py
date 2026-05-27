@@ -15,6 +15,11 @@ REQUIRED_MODULES = {
     "networkx": "networkx",
     "yaml": "PyYAML",
 }
+BATCH_FINISH_COMMANDS = [
+    "research-cockpit validate --root <root> --json",
+    "research-cockpit build --root <root>",
+    "research-cockpit smoke --root <root> --json",
+]
 
 
 def missing_runtime_dependencies(required: dict[str, str] = REQUIRED_MODULES) -> list[str]:
@@ -98,7 +103,37 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
         "current_focus_node": focus_node_id,
         "current_best_option": current_best_option,
         "pause_candidate_options": sorted(pause_candidates),
-        "batching": "Use --dry-run --json --show-diff first, then run mutating commands with --no-build and finish with validate --json plus build.",
+        "batching": "Use --dry-run --json --show-diff first, run mutating commands sequentially with --no-build, then let the coordinator or final handoff run validate, build, and smoke once. A build watcher only refreshes generated dashboards.",
+        "multi_agent_batch_mode": {
+            "default": "Agents mutate only the canonical root, use --no-build on supported writes, and leave final validate/build/smoke to a coordinator or final handoff. An optional build watcher only refreshes generated dashboards and does not replace validate/smoke.",
+            "rules": [
+                "Do not parallelize mutating commands against the same data root.",
+                "Use commands --json --compact to check supports_no_build and batch_policy before choosing a command.",
+                "Run lightweight read checks such as validate --json after local batches when useful.",
+                "On mutation conflict, reread compact context and retry the stale command.",
+            ],
+            "finish_commands": BATCH_FINISH_COMMANDS,
+            "examples": {
+                "findings": [
+                    "research-cockpit record-finding --root <root> --experiment <experiment_id> --statement \"...\" --confidence medium --artifact-id <artifact_id> --no-build",
+                    "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --artifact-id <artifact_id> --no-build",
+                ],
+                "artifacts": [
+                    "research-cockpit ingest-artifact --root <root> --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --no-build",
+                    "research-cockpit link-artifact --root <root> --artifact <artifact_id> --to <node_id> --no-build",
+                ],
+                "runs": [
+                    "research-cockpit create-run --root <root> --id <run_id> --experiment <experiment_id> --status running --no-build",
+                    "research-cockpit update-run --root <root> --id <run_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build",
+                    "research-cockpit complete-run --root <root> --id <run_id> --status completed --no-build",
+                ],
+                "next_actions": [
+                    "research-cockpit update-node-fields --root <root> --id <node_id> --clear-next-actions --next-action \"...\" --no-build",
+                    "research-cockpit sync-focus-actions --root <root> --from-node <node_id> --no-build",
+                    "research-cockpit update-suggestion-state --root <root> --id <suggestion_id> --state completed --reason \"...\" --no-build",
+                ],
+            },
+        },
         "hierarchy_policy": hierarchy_policy(parent_option_id=current.get("current_option") or current_best_option),
         "command_skeletons": [
             "research-cockpit init --root <root> --build --json",

@@ -27,6 +27,7 @@ COMPACT_COMMAND_KEYS = {
     "supported_flags",
     "unsupported_flags",
     "can_batch",
+    "batch_policy",
     "requires_serial_mutation",
     "conflict_policy",
     "schema_command",
@@ -34,6 +35,11 @@ COMPACT_COMMAND_KEYS = {
     "target_aliases",
     "status_aliases",
 }
+BATCH_FINISH_COMMANDS = [
+    "research-cockpit validate --root <root> --json",
+    "research-cockpit build --root <root>",
+    "research-cockpit smoke --root <root> --json",
+]
 
 WORKFLOW_TAGS_BY_COMMAND = {
     "init": ["maintenance"],
@@ -930,7 +936,32 @@ def _flag_support(row: dict[str, object]) -> tuple[list[str], list[str]]:
             supported.append(flag)
         else:
             unsupported.append(flag)
+    if bool(row.get("supports_watch")):
+        supported.extend(["--watch", "--interval", "--max-iterations"])
     return sorted(supported), sorted(unsupported)
+
+
+def _batch_policy(
+    *,
+    mutating: bool,
+    supports_no_build: bool,
+    writes_truth_source: bool,
+    writes_generated_files: bool,
+) -> dict[str, object]:
+    if not mutating:
+        mode = "read_only"
+    elif supports_no_build and writes_truth_source:
+        mode = "serial_no_build"
+    elif writes_generated_files and not writes_truth_source:
+        mode = "generated_build"
+    else:
+        mode = "single_mutation"
+    return {
+        "mode": mode,
+        "use_no_build": bool(supports_no_build and writes_truth_source),
+        "serial_required": bool(mutating),
+        "finish_commands": BATCH_FINISH_COMMANDS if mode == "serial_no_build" else [],
+    }
 
 
 def agent_command_manifest(
@@ -965,6 +996,12 @@ def agent_command_manifest(
             "writes_truth_source": writes_truth_source,
             "writes_generated_files": writes_generated_files,
             "can_batch": bool(command.get("can_batch", supports_no_build)),
+            "batch_policy": _batch_policy(
+                mutating=mutating,
+                supports_no_build=supports_no_build,
+                writes_truth_source=writes_truth_source,
+                writes_generated_files=writes_generated_files,
+            ),
             "requires_serial_mutation": mutating,
             "conflict_policy": CONFLICT_POLICY if mutating else "",
             "safe_in_plan_mode": bool(command.get("safe_in_plan_mode", not mutating)),
