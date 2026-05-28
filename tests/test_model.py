@@ -48,6 +48,7 @@ from research_cockpit.model import (
     node_context,
     save_yaml,
     search_knowledge,
+    unique_strings,
     upsert_graph_view,
     validate_cockpit,
 )
@@ -613,6 +614,7 @@ class ModelValidationTests(unittest.TestCase):
         option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
         option["agent_workstream"] = {
             "owner": "agent_t5",
+            "session_id": "session_t5",
             "status": "claimed",
             "objective": "Evaluate T5 path",
         }
@@ -637,12 +639,18 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(graph_nodes["problem_text"]["stage_id"], "stage_text")
         self.assertEqual(graph_nodes["option_t5"]["problem_id"], "problem_text")
         self.assertEqual(graph_nodes["exp_t5"]["option_workstream_id"], "option_t5")
+        self.assertEqual(graph_nodes["exp_t5"]["agent_owner"], "agent_t5")
+        self.assertEqual(graph_nodes["exp_t5"]["agent_session_id"], "session_t5")
         self.assertTrue(graph_nodes["problem_text"]["has_blockers"])
         self.assertTrue(graph_nodes["exp_t5"]["has_evidence"])
         self.assertFalse(graph_nodes["decision_t5"]["has_evidence"])
         self.assertTrue(graph_nodes["option_t5"]["in_current_branch"])
         self.assertIn("stage_text", graph["available_filters"]["stages"])
         self.assertIn("option_t5", graph["available_filters"]["workstreams"])
+        self.assertIn("agent_t5", graph["available_filters"]["agents"])
+
+    def test_model_reexports_unique_strings_for_compatibility(self) -> None:
+        self.assertEqual(unique_strings(["a", "b", "a", "", None]), ["a", "b"])
 
     def test_interaction_log_appends_events(self) -> None:
         event = append_interaction_log(

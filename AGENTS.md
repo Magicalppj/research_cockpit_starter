@@ -18,20 +18,22 @@
 
 ## Read Order
 
-1. Run `research-cockpit bootstrap --root <data-root> --json`.
-2. Read `<data-root>/dashboards/agent_context_pack.json`.
-3. Read `<data-root>/dashboards/focus_context_pack.json` for local focus.
-4. If assigned a specific node id, run `research-cockpit node-context --root <data-root> --id <node_id> --json`.
-5. Use `research-cockpit search --root <data-root> --query "..." --json` when more context is needed.
-6. Use `research-cockpit commands --json` to choose safe workflow commands.
+Choose one startup path instead of chaining every context command.
 
-If the working directory is unreliable, use absolute `--root` paths.
+1. If assigned a specific node id, run `research-cockpit context --root <data-root> --id <node_id> --with-bootstrap --with-artifacts --compact --json`.
+2. If the target is unknown or the task is global triage, run `research-cockpit bootstrap --root <data-root> --json`.
+3. If continuing an older minimal handoff, use `research-cockpit node-context --root <data-root> --id <node_id> --compact --json`.
+4. Read `<data-root>/dashboards/agent_context_pack.json` and `<data-root>/dashboards/focus_context_pack.json` only when generated dashboard context or a broad focus scan is needed.
+5. Use `research-cockpit search --root <data-root> --query "..." --json` when more context is needed.
+6. Use `research-cockpit commands --json --compact` to choose safe workflow commands.
+
+Do not run both `bootstrap` and `context --with-bootstrap` for normal known-node work. If the working directory is unreliable, use absolute `--root` paths.
 
 ## Write Rules
 
 - Prefer `research-cockpit` commands over manual YAML edits for all supported operations.
 - Use mutating CLI commands for focus, baseline, status, findings, decisions, notes, suggestions, run records, gate results, and lifecycle cleanup.
-- Use `research-cockpit node-context` as the shortest read-only handoff when continuing work from a known node id.
+- Use `research-cockpit context --id <node_id> --with-bootstrap --with-artifacts --compact --json` as the default read-only handoff when continuing work from a known node id.
 - Use `effective_baseline` from `context`/`node-context` as the default inherited option, decision, and artifact bundle; do not scan all accepted history unless asked.
 - Do not directly set a decision to `accepted`; use `research-cockpit accept-decision --root <data-root> --id <decision_id>`.
 - Do not execute a suggested command just because it appears in Action Guidance. Queue, dismiss, or complete suggestions only when asked.
@@ -57,4 +59,5 @@ python dev/scripts/run_skill_release_check.py --json --skip-mutating
 
 - Set `RESEARCH_COCKPIT_ROOT` when commands should default to a specific data root.
 - If `research-cockpit bootstrap` reports missing modules, run `python -m pip install -e .` from the plugin root or use an interpreter with the listed requirements installed.
+- Markdown files are UTF-8. In Windows PowerShell, use `Get-Content -Encoding UTF8 -Path <file>` if Chinese text appears garbled.
 - Do not commit local absolute paths, usernames, virtual environment paths, or machine-specific interpreter paths.

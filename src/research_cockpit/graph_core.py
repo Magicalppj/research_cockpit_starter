@@ -543,15 +543,23 @@ def _graph_interaction_metadata(
         problem_id = node_id_by_type_in_path(nodes, path, "problem", nearest=True)
         option_id = node_id_by_type_in_path(nodes, path, "option", nearest=True)
         upstream_problem_id = None
+        agent_owner = None
+        agent_session_id = None
         if option_id and option_id in nodes:
             option_path = safe_node_path(nodes, option_id, topology=topology)
             upstream_problem_id = node_id_by_type_in_path(nodes, option_path, "problem", nearest=True)
+            workstream = nodes[option_id].raw.get("agent_workstream")
+            if isinstance(workstream, dict):
+                agent_owner = workstream.get("owner")
+                agent_session_id = workstream.get("session_id")
 
         metadata[node.id] = {
             "stage_id": stage_id,
             "problem_id": problem_id,
             "option_workstream_id": option_id,
             "option_workstream_upstream_problem_id": upstream_problem_id,
+            "agent_owner": agent_owner,
+            "agent_session_id": agent_session_id,
             "in_current_branch": node.id in current_branch_ids,
             "has_blockers": bool(node.raw.get("blockers")),
             "has_next_actions": bool(node.raw.get("next_actions")),
@@ -568,6 +576,7 @@ def _graph_available_filters(nodes: list[dict[str, Any]]) -> dict[str, list[str]
         "problems": "problem_id",
         "focus_roles": "focus_role",
         "workstreams": "option_workstream_id",
+        "agents": "agent_owner",
         "priorities": "priority",
     }
     out: dict[str, list[str]] = {}

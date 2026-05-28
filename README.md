@@ -361,6 +361,7 @@ SKILL.md
 - `docs/decisions/0002-canonical-artifact-store-for-worktrees.md`: 为什么 worktree 输出要 ingest 到 canonical artifact store。
 - `docs/decisions/0003-run-and-gate-sidecar-records.md`: 为什么 run/job 与 gate 记录作为实验旁路状态而不是图节点。
 - `docs/launcher-output-conventions.md`: `run_record.txt`、`progress.json`、`gate_result.json` 和 `artifact_manifest.json` 约定。
+- `docs/plans/2026-05-28-dashboard-build-performance.md`: 大图 dashboard build/profile 优化结果和后续增量构建计划。
 - `capabilities/ui-dashboard.md`: Streamlit UI、React Flow 图谱和刷新行为。
 - `capabilities/graph-state.md`: 图谱状态、saved views 和 interaction log。
 - `capabilities/experiment-tracking.md`: experiment、finding、artifact 和 workstream 流程。

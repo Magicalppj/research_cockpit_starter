@@ -145,11 +145,9 @@ class UiRenderingTests(unittest.TestCase):
             with (
                 patch("research_cockpit.ui.app.graph_to_json", side_effect=AssertionError("rebuilt graph")),
                 patch("research_cockpit.ui.app.build_agent_context", side_effect=AssertionError("rebuilt context")),
-                patch("research_cockpit.ui.app.build_link_rows", side_effect=AssertionError("rebuilt links")),
-                patch("research_cockpit.ui.app.build_search_index", side_effect=AssertionError("rebuilt search")),
                 patch(
-                    "research_cockpit.ui.app.build_option_workstream_rows",
-                    side_effect=AssertionError("rebuilt option workstreams"),
+                    "research_cockpit.ui.app.build_dashboard_read_models",
+                    side_effect=AssertionError("rebuilt read models"),
                 ),
             ):
                 loaded = _load_graph_data(root)
@@ -179,12 +177,15 @@ class UiRenderingTests(unittest.TestCase):
             build_dashboard(root)
             (root / "dashboards" / "search_index.json").unlink()
 
-            with patch("research_cockpit.ui.app.build_search_index", wraps=ui_app.build_search_index) as search_builder:
+            with patch(
+                "research_cockpit.ui.app.build_dashboard_read_models",
+                wraps=ui_app.build_dashboard_read_models,
+            ) as read_model_builder:
                 loaded = _load_graph_data(root)
 
         self.assertTrue(loaded[2]["nodes"])
         self.assertIsInstance(loaded[8], list)
-        self.assertGreater(search_builder.call_count, 0)
+        self.assertGreater(read_model_builder.call_count, 0)
         self.assertFalse(loaded[11]["available"])
         self.assertIn("dashboards/search_index.json", loaded[11]["missing"])
 
@@ -236,14 +237,17 @@ class UiRenderingTests(unittest.TestCase):
 
             with (
                 patch("research_cockpit.ui.app.graph_to_json", wraps=ui_app.graph_to_json) as graph_builder,
-                patch("research_cockpit.ui.app.build_search_index", wraps=ui_app.build_search_index) as search_builder,
+                patch(
+                    "research_cockpit.ui.app.build_dashboard_read_models",
+                    wraps=ui_app.build_dashboard_read_models,
+                ) as read_model_builder,
             ):
                 loaded = _load_graph_data(root)
 
         self.assertTrue(loaded[2]["nodes"])
         self.assertIsInstance(loaded[8], list)
         self.assertGreater(graph_builder.call_count, 0)
-        self.assertGreater(search_builder.call_count, 0)
+        self.assertGreater(read_model_builder.call_count, 0)
         self.assertTrue(loaded[11]["available"])
         self.assertTrue(loaded[11]["stale"])
 

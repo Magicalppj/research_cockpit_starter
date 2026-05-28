@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed todo list. Do not implement directly from this document without first choosing a slice and reviewing the current code paths.
+Historical implementation plan. The core run/job, progress heartbeat, gate result, multi-agent no-build, next action scope, launcher convention, and preflight gate workflows have been implemented. Keep this document as the rationale and backlog record; for current agent instructions, prefer `SKILL.md`, `capabilities/experiment-tracking.md`, `capabilities/focus-context.md`, `docs/launcher-output-conventions.md`, and ADR-0003.
 
 ## Date
 
@@ -12,7 +12,28 @@ Proposed todo list. Do not implement directly from this document without first c
 
 Downstream agents report that Research Cockpit already works well for structured research state: nodes, findings, artifacts, and next actions. The main gap is operational visibility for long-running experiments, multi-agent updates, and background jobs. The requested direction is to evolve from research state recording toward a lightweight research operations system.
 
-This plan records the optimization backlog only. It intentionally does not change runtime code, schemas, CLI behavior, or dashboards.
+This document originally recorded the optimization backlog before implementation. It now documents why the current run/gate operations model exists and which follow-up questions remain. Do not treat the candidate command lists below as unimplemented work without first checking `research-cockpit commands --json --compact`.
+
+## Implementation Status
+
+Implemented:
+
+- Run/job sidecar records under `research_cockpit/runs/*.yaml`.
+- Run lifecycle commands: `create-run`, `update-run`, `complete-run`, `list-runs`, and `run-context`.
+- Run summaries in bootstrap, experiment node context, option workstream context, dashboard context, and UI data.
+- Standard `progress.json` heartbeat parsing, stale heartbeat warnings, and malformed-file warnings.
+- Standard `gate_result.json` validation, blocking semantics, preflight normalization, and gate metadata records.
+- Gate commands: `record-gate-result` and `ingest-gate-result`.
+- Multi-agent mutation guidance using serial writes, `--no-build`, compact command discovery, final `validate`/`build`/`smoke`, and optional `build --watch`.
+- Scoped next actions via `next_action_scopes` and terminal action migration with `migrate-terminal-next-actions`.
+- Launcher output conventions and starter templates for `run_record.txt`, `progress.json`, `gate_result.json`, and `artifact_manifest.json`.
+- Preflight gate fields for disk, GPU, port, cache directory, and conflicting processes.
+
+Deferred or ongoing:
+
+- Run and gate records remain sidecar execution state, not graph nodes. See `docs/decisions/0003-run-and-gate-sidecar-records.md`.
+- Additional dashboard build performance work is tracked separately in `docs/plans/2026-05-28-dashboard-build-performance.md`.
+- Background building is currently the `build --watch` CLI workflow, not a persistent daemon or external service.
 
 ## Goals
 
@@ -358,19 +379,13 @@ Acceptance criteria:
 
 ## Open Questions
 
-- Should run/job records live under `research_cockpit/runs/*.yaml`, under each experiment, or in a dedicated graph-adjacent truth-source directory?
-- Should runs ever appear as graph nodes, or only as experiment detail records?
-- What heartbeat stale threshold should be the default?
-- Should gate result ingestion create artifacts automatically, or only link existing artifact records?
-- Should background building be core CLI functionality or a dev/operator helper script?
-- How strict should validation be for terminal nodes carrying `next_actions`?
+- Resolved: run/job records live under `research_cockpit/runs/*.yaml`.
+- Resolved: runs and gates are experiment detail sidecars by default, not graph nodes.
+- Resolved for v1: gate ingestion links existing artifact records instead of automatically creating artifacts.
+- Resolved for v1: background building is a polling `build --watch` CLI workflow.
+- Remaining: whether future UI versions should optionally visualize run/gate sidecars as graph overlays without turning them into nodes.
+- Remaining: whether terminal-node `next_actions` should become a hard validation error or stay a semantic lint/migration workflow.
 
 ## Suggested First Slice
 
-Start with Phase 1 and implement only the run/job foundation:
-
-1. Add the run record model and validation.
-2. Add minimal run lifecycle CLI commands.
-3. Surface run summaries in experiment context.
-
-This slice is enough to solve the immediate observability gap without changing launcher behavior, dashboard build workflow, or gate semantics.
+Completed. New work should choose a remaining refinement from the open questions above or from the dashboard performance plan, then review the current code paths before changing behavior.

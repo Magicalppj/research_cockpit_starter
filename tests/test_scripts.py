@@ -179,6 +179,17 @@ class ScriptBehaviorTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp_root, ignore_errors=True)
 
+    def run_dev_script(self, script_name: str, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(DEV_SCRIPTS_DIR / script_name), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def generate_large_fixture(self, root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return self.run_dev_script("generate_large_cockpit_fixture.py", "--root", str(root), *args)
+
     def test_add_node_uses_type_default_status_and_validates_parent(self) -> None:
         add_node(
             self.root,
@@ -708,27 +719,18 @@ class ScriptBehaviorTests(unittest.TestCase):
 
     def test_generate_large_cockpit_fixture_cli_creates_valid_profile_fixture(self) -> None:
         fixture_root = self.tmp_root / "perf_fixture"
-        generator = DEV_SCRIPTS_DIR / "generate_large_cockpit_fixture.py"
 
-        out = subprocess.run(
-            [
-                sys.executable,
-                str(generator),
-                "--root",
-                str(fixture_root),
-                "--nodes",
-                "24",
-                "--links-per-node",
-                "2",
-                "--note-count",
-                "3",
-                "--resource-count",
-                "4",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        out = self.generate_large_fixture(
+            fixture_root,
+            "--nodes",
+            "24",
+            "--links-per-node",
+            "2",
+            "--note-count",
+            "3",
+            "--resource-count",
+            "4",
+            "--json",
         )
 
         self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
@@ -810,25 +812,17 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(smoke_payload["ok"])
 
         second_root = self.tmp_root / "perf_fixture_second"
-        second = subprocess.run(
-            [
-                sys.executable,
-                str(generator),
-                "--root",
-                str(second_root),
-                "--nodes",
-                "24",
-                "--links-per-node",
-                "2",
-                "--note-count",
-                "3",
-                "--resource-count",
-                "4",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        second = self.generate_large_fixture(
+            second_root,
+            "--nodes",
+            "24",
+            "--links-per-node",
+            "2",
+            "--note-count",
+            "3",
+            "--resource-count",
+            "4",
+            "--json",
         )
         self.assertEqual(second.returncode, 0, second.stderr or second.stdout)
         for relative_path in (
@@ -845,30 +839,21 @@ class ScriptBehaviorTests(unittest.TestCase):
             )
 
     def test_generate_large_cockpit_fixture_force_only_replaces_marked_fixture(self) -> None:
-        generator = DEV_SCRIPTS_DIR / "generate_large_cockpit_fixture.py"
         unsafe_root = self.tmp_root / "not_a_fixture"
         unsafe_root.mkdir()
         keep_path = unsafe_root / "keep.txt"
         keep_path.write_text("do not delete", encoding="utf-8")
 
-        unsafe = subprocess.run(
-            [
-                sys.executable,
-                str(generator),
-                "--root",
-                str(unsafe_root),
-                "--nodes",
-                "5",
-                "--note-count",
-                "1",
-                "--resource-count",
-                "1",
-                "--force",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        unsafe = self.generate_large_fixture(
+            unsafe_root,
+            "--nodes",
+            "5",
+            "--note-count",
+            "1",
+            "--resource-count",
+            "1",
+            "--force",
+            "--json",
         )
         unsafe_payload = json.loads(unsafe.stdout)
         self.assertNotEqual(unsafe.returncode, 0, unsafe.stdout + unsafe.stderr)
@@ -877,46 +862,30 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(keep_path.exists())
 
         fixture_root = self.tmp_root / "replaceable_fixture"
-        first = subprocess.run(
-            [
-                sys.executable,
-                str(generator),
-                "--root",
-                str(fixture_root),
-                "--nodes",
-                "5",
-                "--note-count",
-                "1",
-                "--resource-count",
-                "1",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        first = self.generate_large_fixture(
+            fixture_root,
+            "--nodes",
+            "5",
+            "--note-count",
+            "1",
+            "--resource-count",
+            "1",
+            "--json",
         )
         self.assertEqual(first.returncode, 0, first.stderr or first.stdout)
         stale_path = fixture_root / "stale.txt"
         stale_path.write_text("replace me", encoding="utf-8")
 
-        second = subprocess.run(
-            [
-                sys.executable,
-                str(generator),
-                "--root",
-                str(fixture_root),
-                "--nodes",
-                "6",
-                "--note-count",
-                "1",
-                "--resource-count",
-                "1",
-                "--force",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        second = self.generate_large_fixture(
+            fixture_root,
+            "--nodes",
+            "6",
+            "--note-count",
+            "1",
+            "--resource-count",
+            "1",
+            "--force",
+            "--json",
         )
         second_payload = json.loads(second.stdout)
         self.assertEqual(second.returncode, 0, second.stderr or second.stdout)
@@ -926,44 +895,28 @@ class ScriptBehaviorTests(unittest.TestCase):
 
     def test_benchmark_build_cli_reports_profile_statistics(self) -> None:
         fixture_root = self.tmp_root / "benchmark_fixture"
-        generator = DEV_SCRIPTS_DIR / "generate_large_cockpit_fixture.py"
-        benchmark = DEV_SCRIPTS_DIR / "benchmark_build.py"
 
-        generated = subprocess.run(
-            [
-                sys.executable,
-                str(generator),
-                "--root",
-                str(fixture_root),
-                "--nodes",
-                "12",
-                "--links-per-node",
-                "1",
-                "--note-count",
-                "2",
-                "--resource-count",
-                "2",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        generated = self.generate_large_fixture(
+            fixture_root,
+            "--nodes",
+            "12",
+            "--links-per-node",
+            "1",
+            "--note-count",
+            "2",
+            "--resource-count",
+            "2",
+            "--json",
         )
         self.assertEqual(generated.returncode, 0, generated.stderr or generated.stdout)
 
-        out = subprocess.run(
-            [
-                sys.executable,
-                str(benchmark),
-                "--root",
-                str(fixture_root),
-                "--runs",
-                "2",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        out = self.run_dev_script(
+            "benchmark_build.py",
+            "--root",
+            str(fixture_root),
+            "--runs",
+            "2",
+            "--json",
         )
 
         self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
@@ -988,20 +941,14 @@ class ScriptBehaviorTests(unittest.TestCase):
             self.assertIsInstance(run["stages"], list)
         self.assertTrue((fixture_root / "dashboards" / "build_profile.json").exists())
 
-        light = subprocess.run(
-            [
-                sys.executable,
-                str(benchmark),
-                "--root",
-                str(fixture_root),
-                "--runs",
-                "1",
-                "--skip-resource-search",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        light = self.run_dev_script(
+            "benchmark_build.py",
+            "--root",
+            str(fixture_root),
+            "--runs",
+            "1",
+            "--skip-resource-search",
+            "--json",
         )
         light_payload = json.loads(light.stdout)
 
@@ -1011,21 +958,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertGreaterEqual(light_payload["summary"]["counts"]["search_resource_disabled_count"], 1)
 
     def test_benchmark_build_cli_rejects_zero_runs(self) -> None:
-        benchmark = DEV_SCRIPTS_DIR / "benchmark_build.py"
-
-        out = subprocess.run(
-            [
-                sys.executable,
-                str(benchmark),
-                "--root",
-                str(self.root),
-                "--runs",
-                "0",
-                "--json",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
+        out = self.run_dev_script(
+            "benchmark_build.py",
+            "--root",
+            str(self.root),
+            "--runs",
+            "0",
+            "--json",
         )
         payload = json.loads(out.stdout)
 

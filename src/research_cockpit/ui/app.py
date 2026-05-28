@@ -17,7 +17,7 @@ except ModuleNotFoundError:
 RESEARCH_ROOT = default_data_root()
 COMMAND_LANGUAGE = "bash"
 
-from research_cockpit.context_packs import build_agent_context
+from research_cockpit.context_packs import build_agent_context, build_dashboard_read_models
 from research_cockpit.baselines import (
     build_accepted_decision_rows,
     build_accepted_option_rows,
@@ -26,7 +26,6 @@ from research_cockpit.baselines import (
 )
 from research_cockpit.model import (
     build_experiment_matrix,
-    build_search_index,
     build_search_index_summary,
     graph_to_json,
     load_explicit_edges,
@@ -34,7 +33,6 @@ from research_cockpit.model import (
     load_yaml,
     validate_cockpit,
 )
-from research_cockpit.resources import build_link_rows
 from research_cockpit.decisions import (
     build_decision_acceptance_checklist,
     build_decision_evidence_summary,
@@ -42,7 +40,7 @@ from research_cockpit.decisions import (
     build_decision_trace,
 )
 from research_cockpit.graph_views import load_graph_views, upsert_graph_view
-from research_cockpit.option_workstreams import build_branch_comparison, build_option_workstream_rows
+from research_cockpit.option_workstreams import build_branch_comparison
 from research_cockpit.suggestions import (
     build_action_suggestions,
     build_suggestion_lifecycle_rows,
@@ -212,12 +210,20 @@ def _load_graph_data(root: Path):
         search_index = dashboard_payloads["search_index"]
         option_workstreams = dashboard_payloads["option_workstreams"]
     else:
-        graph = graph_to_json(nodes, current.get("current_focus_path", []), current, explicit_edges, include_raw=False)
-        context = build_agent_context(root, nodes)
-        link_rows = build_link_rows(root, nodes)
-        action_suggestions = build_action_suggestions(root, nodes, current, link_rows)
-        search_index = build_search_index(root, nodes, current, link_rows=link_rows)
-        option_workstreams = build_option_workstream_rows(nodes, current)
+        read_models = build_dashboard_read_models(root, nodes, current)
+        graph = graph_to_json(
+            nodes,
+            current.get("current_focus_path", []),
+            current,
+            explicit_edges,
+            topology=read_models.topology,
+            include_raw=False,
+        )
+        context = build_agent_context(root, nodes, current=current, read_models=read_models)
+        link_rows = read_models.linked_resources
+        action_suggestions = read_models.action_suggestions
+        search_index = read_models.search_index
+        option_workstreams = read_models.option_workstreams
     saved_graph_views = load_graph_views(root)
     all_action_suggestions = build_action_suggestions(
         root,

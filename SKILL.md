@@ -24,7 +24,7 @@ Research Cockpit stores project-local research state in a repository `research_c
 Known node handoff:
 
 ```sh
-research-cockpit context --root research_cockpit --node <node_id> --with-bootstrap --with-artifacts --compact --json
+research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
 ```
 
 Global triage:
@@ -71,6 +71,7 @@ Use `promising` only for an `option` that has positive signal but is not yet acc
 - Installation shape, CLI, wrappers, environment variables, and agent integration: `capabilities/integrations.md`
 - Validation failures, release checks, dependency issues, and recovery: `capabilities/troubleshooting.md`
 - Launcher output files and starter templates for shell, Python, scheduler, and manual experiment runs: `docs/launcher-output-conventions.md`, `templates/launcher/`
+- Dashboard build profiling, large-graph refresh behavior, and deferred incremental-build plan: `docs/plans/2026-05-28-dashboard-build-performance.md`
 
 Read only the capability files needed for the current task.
 
@@ -84,7 +85,7 @@ research-cockpit apply-graph-plan --root research_cockpit --file graph_update.ya
 research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --json --compact
-research-cockpit context --root research_cockpit --node <node_id> --with-bootstrap --with-artifacts --compact --json
+research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
 research-cockpit assignment-view --root research_cockpit --json
 research-cockpit create-run --root research_cockpit --id <run_id> --experiment <experiment_id> --status running --launcher tmux --command "python train.py" --progress-file artifacts/<experiment_id>/<run_id>/progress.json --dry-run --json --show-diff
 research-cockpit create-run --root research_cockpit --id <run_id> --experiment <experiment_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build

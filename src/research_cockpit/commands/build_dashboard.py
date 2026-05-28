@@ -194,6 +194,66 @@ def _search_index_profile_metrics(search_index: list[dict[str, Any]]) -> dict[st
     }
 
 
+def _write_dashboard_outputs(
+    root: Path,
+    outputs: list[Path],
+    *,
+    graph_json: dict[str, Any],
+    context: dict[str, Any],
+    focus_context: dict[str, Any],
+    current_payload: dict[str, Any],
+    experiment_matrix: dict[str, Any],
+    linked_resources: list[dict[str, Any]],
+    action_suggestions: list[dict[str, Any]],
+    search_index: list[dict[str, Any]],
+    decision_checklists: list[dict[str, Any]],
+    option_workstreams: list[dict[str, Any]],
+    assignment_view: dict[str, Any],
+) -> None:
+    save_text(outputs[0], json.dumps(graph_json, indent=2, ensure_ascii=False))
+    save_text(outputs[1], json.dumps(context, indent=2, ensure_ascii=False))
+    save_text(outputs[2], json.dumps(focus_context, indent=2, ensure_ascii=False))
+    write_dashboard_markdown(root, context)
+    save_text(outputs[4], json.dumps(current_payload, indent=2, ensure_ascii=False))
+    save_text(outputs[5], json.dumps(experiment_matrix, indent=2, ensure_ascii=False))
+    save_text(outputs[6], json.dumps(linked_resources, indent=2, ensure_ascii=False))
+    save_text(outputs[7], json.dumps(action_suggestions, indent=2, ensure_ascii=False))
+    save_text(outputs[8], json.dumps(search_index, indent=2, ensure_ascii=False))
+    save_text(outputs[9], json.dumps(decision_checklists, indent=2, ensure_ascii=False))
+    save_text(outputs[10], json.dumps(option_workstreams, indent=2, ensure_ascii=False))
+    save_text(outputs[11], json.dumps(assignment_view, indent=2, ensure_ascii=False))
+
+
+def _dashboard_counts(
+    *,
+    nodes: dict[str, Any],
+    graph_json: dict[str, Any],
+    linked_resources: list[dict[str, Any]],
+    action_suggestions: list[dict[str, Any]],
+    search_index: list[dict[str, Any]],
+    decision_checklists: list[dict[str, Any]],
+    option_workstreams: list[dict[str, Any]],
+    assignment_view: dict[str, Any],
+    include_resource_search: bool,
+    include_profile_metrics: bool,
+) -> dict[str, int]:
+    counts = {
+        "node_count": len(nodes),
+        "edge_count": len(graph_json.get("edges", [])),
+        "linked_resource_count": len(linked_resources),
+        "action_suggestion_count": len(action_suggestions),
+        "search_index_entry_count": len(search_index),
+        "decision_checklist_count": len(decision_checklists),
+        "option_workstream_count": len(option_workstreams),
+        "assignment_count": len(assignment_view.get("assignments", [])),
+        "search_resource_text_enabled": 1 if include_resource_search else 0,
+    }
+    if include_profile_metrics:
+        counts.update(_graph_view_payload_size_metrics(graph_json, nodes))
+        counts.update(_search_index_profile_metrics(search_index))
+    return counts
+
+
 def _build_dashboard_payload(
     root: Path,
     *,
@@ -275,35 +335,37 @@ def _build_dashboard_payload(
     dash.mkdir(parents=True, exist_ok=True)
     outputs = _dashboard_outputs(root)
 
-    def write_outputs() -> None:
-        save_text(outputs[0], json.dumps(graph_json, indent=2, ensure_ascii=False))
-        save_text(outputs[1], json.dumps(context, indent=2, ensure_ascii=False))
-        save_text(outputs[2], json.dumps(focus_context, indent=2, ensure_ascii=False))
-        write_dashboard_markdown(root, context)
-        save_text(outputs[4], json.dumps(current_payload, indent=2, ensure_ascii=False))
-        save_text(outputs[5], json.dumps(experiment_matrix, indent=2, ensure_ascii=False))
-        save_text(outputs[6], json.dumps(linked_resources, indent=2, ensure_ascii=False))
-        save_text(outputs[7], json.dumps(action_suggestions, indent=2, ensure_ascii=False))
-        save_text(outputs[8], json.dumps(search_index, indent=2, ensure_ascii=False))
-        save_text(outputs[9], json.dumps(decision_checklists, indent=2, ensure_ascii=False))
-        save_text(outputs[10], json.dumps(option_workstreams, indent=2, ensure_ascii=False))
-        save_text(outputs[11], json.dumps(assignment_view, indent=2, ensure_ascii=False))
-
-    _profiled(profiler, "write_outputs", write_outputs)
-    counts = {
-        "node_count": len(nodes),
-        "edge_count": len(graph_json.get("edges", [])),
-        "linked_resource_count": len(linked_resources),
-        "action_suggestion_count": len(action_suggestions),
-        "search_index_entry_count": len(search_index),
-        "decision_checklist_count": len(decision_checklists),
-        "option_workstream_count": len(option_workstreams),
-        "assignment_count": len(assignment_view.get("assignments", [])),
-        "search_resource_text_enabled": 1 if include_resource_search else 0,
-    }
-    if profiler is not None:
-        counts.update(_graph_view_payload_size_metrics(graph_json, nodes))
-        counts.update(_search_index_profile_metrics(search_index))
+    _profiled(
+        profiler,
+        "write_outputs",
+        lambda: _write_dashboard_outputs(
+            root,
+            outputs,
+            graph_json=graph_json,
+            context=context,
+            focus_context=focus_context,
+            current_payload=current_payload,
+            experiment_matrix=experiment_matrix,
+            linked_resources=linked_resources,
+            action_suggestions=action_suggestions,
+            search_index=search_index,
+            decision_checklists=decision_checklists,
+            option_workstreams=option_workstreams,
+            assignment_view=assignment_view,
+        ),
+    )
+    counts = _dashboard_counts(
+        nodes=nodes,
+        graph_json=graph_json,
+        linked_resources=linked_resources,
+        action_suggestions=action_suggestions,
+        search_index=search_index,
+        decision_checklists=decision_checklists,
+        option_workstreams=option_workstreams,
+        assignment_view=assignment_view,
+        include_resource_search=include_resource_search,
+        include_profile_metrics=profiler is not None,
+    )
     return {"outputs": outputs, "counts": counts}
 
 

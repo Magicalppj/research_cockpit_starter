@@ -54,6 +54,51 @@ class DashboardReadModels:
     topology: GraphTopology | None = None
 
 
+def _resource_context_models(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any],
+    *,
+    read_models: DashboardReadModels | None = None,
+    topology: GraphTopology | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    if read_models is not None:
+        return read_models.linked_resources, read_models.action_suggestions, read_models.search_index
+    link_rows = build_link_rows(root, nodes)
+    action_suggestions = build_action_suggestions(root, nodes, current, link_rows)
+    search_index = build_search_index(root, nodes, current, link_rows=link_rows, topology=topology)
+    return link_rows, action_suggestions, search_index
+
+
+def build_dashboard_read_models(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any],
+    *,
+    topology: GraphTopology | None = None,
+    include_resource_text: bool = True,
+) -> DashboardReadModels:
+    topology = topology or GraphTopology.from_nodes(nodes)
+    linked_resources = build_link_rows(root, nodes)
+    action_suggestions = build_action_suggestions(root, nodes, current, linked_resources)
+    search_index = build_search_index(
+        root,
+        nodes,
+        current,
+        link_rows=linked_resources,
+        topology=topology,
+        include_resource_text=include_resource_text,
+    )
+    return DashboardReadModels(
+        linked_resources=linked_resources,
+        action_suggestions=action_suggestions,
+        search_index=search_index,
+        option_workstreams=build_option_workstream_rows(nodes, current, topology=topology),
+        assignment_view=build_assignment_view(nodes),
+        topology=topology,
+    )
+
+
 def _git_output(repo_root: Path, *args: str) -> str | None:
     try:
         result = subprocess.run(
@@ -313,17 +358,18 @@ def build_agent_context(
         n for n in nodes.values()
         if n.type == "decision" and n.status == "proposed"
     ]
+    link_rows, action_suggestions, search_index = _resource_context_models(
+        root,
+        nodes,
+        current,
+        read_models=read_models,
+        topology=read_models.topology if read_models else None,
+    )
     if read_models is not None:
-        search_index = read_models.search_index
         option_workstreams = read_models.option_workstreams
-        link_rows = read_models.linked_resources
-        action_suggestions = read_models.action_suggestions
         assignment_view = read_models.assignment_view
     else:
-        link_rows = build_link_rows(root, nodes)
-        search_index = build_search_index(root, nodes, current, link_rows=link_rows)
         option_workstreams = build_option_workstream_rows(nodes, current)
-        action_suggestions = build_action_suggestions(root, nodes, current, link_rows)
         assignment_view = build_assignment_view(nodes)
 
     return {
@@ -488,14 +534,13 @@ def build_focus_context(
         + artifact_ids
     )
 
-    if read_models is not None:
-        link_rows = read_models.linked_resources
-        action_suggestions = read_models.action_suggestions
-        search_index = read_models.search_index
-    else:
-        link_rows = build_link_rows(root, nodes)
-        action_suggestions = build_action_suggestions(root, nodes, current, link_rows)
-        search_index = build_search_index(root, nodes, current, link_rows=link_rows)
+    link_rows, action_suggestions, search_index = _resource_context_models(
+        root,
+        nodes,
+        current,
+        read_models=read_models,
+        topology=topology,
+    )
     suggested_next_actions = [
         suggestion
         for suggestion in action_suggestions
