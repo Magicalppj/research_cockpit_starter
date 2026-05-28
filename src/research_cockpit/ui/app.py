@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -108,6 +110,16 @@ from research_cockpit.commands.update_suggestion_state import update_suggestion_
 st.set_page_config(page_title="Research Cockpit", layout="wide")
 
 
+_DASHBOARD_JSON_FILES = {
+    "graph": "graph_view.json",
+    "context": "agent_context_pack.json",
+    "link_rows": "linked_resources.json",
+    "action_suggestions": "next_action_suggestions.json",
+    "search_index": "search_index.json",
+    "option_workstreams": "option_workstreams.json",
+}
+
+
 def _baseline_ref_label(ref: object) -> str:
     if isinstance(ref, dict):
         node_id = str(ref.get("id") or "")
@@ -123,7 +135,13 @@ def _truth_source_revision(root: Path) -> tuple[tuple[str, int, int], ...]:
     current_state = root / "current_state.yaml"
     if current_state.is_file():
         paths.append(current_state)
-    for directory, pattern in ((root / "graph", "**/*.yaml"), (root / "notes", "**/*.md")):
+    for directory, pattern in (
+        (root / "graph", "**/*.yaml"),
+        (root / "notes", "**/*.md"),
+        (root / "runs", "**/*.yaml"),
+        (root / "gate_results", "**/*.yaml"),
+        (root / "gate_results", "**/*.json"),
+    ):
         if directory.exists():
             paths.extend(path for path in directory.glob(pattern) if path.is_file())
 
@@ -134,20 +152,73 @@ def _truth_source_revision(root: Path) -> tuple[tuple[str, int, int], ...]:
     return tuple(revision)
 
 
-@st.cache_data(show_spinner=False)
-def _load_graph_data_cached(root_value: str, revision: tuple[tuple[str, int, int], ...]):
-    root = Path(root_value)
+def _dashboard_revision(root: Path) -> tuple[tuple[str, int, int], ...]:
+    dash = root / "dashboards"
+    revision = []
+    for filename in sorted(_DASHBOARD_JSON_FILES.values()):
+        path = dash / filename
+        if path.is_file():
+            stat = path.stat()
+            revision.append((path.relative_to(root).as_posix(), stat.st_mtime_ns, stat.st_size))
+    return tuple(revision)
+
+
+def dashboard_staleness(root: Path) -> dict[str, Any]:
+    truth_revision = _truth_source_revision(root)
+    dashboard_revision = _dashboard_revision(root)
+    dash = root / "dashboards"
+    missing = [
+        f"dashboards/{filename}"
+        for filename in sorted(_DASHBOARD_JSON_FILES.values())
+        if not (dash / filename).is_file()
+    ]
+    latest_truth_mtime = max((item[1] for item in truth_revision), default=0)
+    oldest_dashboard_mtime = min((item[1] for item in dashboard_revision), default=0)
+    available = not missing
+    stale = available and latest_truth_mtime > oldest_dashboard_mtime
+    return {
+        "available": available,
+        "stale": stale,
+        "missing": missing,
+        "latest_truth_mtime_ns": latest_truth_mtime,
+        "oldest_dashboard_mtime_ns": oldest_dashboard_mtime,
+        "recommended_command": f"research-cockpit build --root {root}",
+    }
+
+
+def _load_dashboard_json_files(root: Path) -> dict[str, Any] | None:
+    dash = root / "dashboards"
+    payloads: dict[str, Any] = {}
+    try:
+        for key, filename in _DASHBOARD_JSON_FILES.items():
+            payloads[key] = json.loads((dash / filename).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payloads
+
+
+def _load_graph_data(root: Path):
     nodes = load_nodes(root)
     current = load_yaml(root / "current_state.yaml")
     explicit_edges = load_explicit_edges(root)
     validation_errors = validate_cockpit(root, nodes, current, explicit_edges)
-    graph = graph_to_json(nodes, current.get("current_focus_path", []), current, explicit_edges)
-    context = build_agent_context(root, nodes)
-    link_rows = build_link_rows(root, nodes)
-    search_index = build_search_index(root, nodes, current)
-    option_workstreams = build_option_workstream_rows(nodes, current)
+    dashboard_status = dashboard_staleness(root)
+    dashboard_payloads = None if dashboard_status["stale"] else _load_dashboard_json_files(root)
+    if dashboard_payloads is not None:
+        graph = dashboard_payloads["graph"]
+        context = dashboard_payloads["context"]
+        link_rows = dashboard_payloads["link_rows"]
+        action_suggestions = dashboard_payloads["action_suggestions"]
+        search_index = dashboard_payloads["search_index"]
+        option_workstreams = dashboard_payloads["option_workstreams"]
+    else:
+        graph = graph_to_json(nodes, current.get("current_focus_path", []), current, explicit_edges, include_raw=False)
+        context = build_agent_context(root, nodes)
+        link_rows = build_link_rows(root, nodes)
+        action_suggestions = build_action_suggestions(root, nodes, current, link_rows)
+        search_index = build_search_index(root, nodes, current, link_rows=link_rows)
+        option_workstreams = build_option_workstream_rows(nodes, current)
     saved_graph_views = load_graph_views(root)
-    action_suggestions = build_action_suggestions(root, nodes, current, link_rows)
     all_action_suggestions = build_action_suggestions(
         root,
         nodes,
@@ -167,11 +238,26 @@ def _load_graph_data_cached(root_value: str, revision: tuple[tuple[str, int, int
         search_index,
         option_workstreams,
         saved_graph_views,
+        dashboard_status,
     )
 
 
+@st.cache_data(show_spinner=False)
+def _load_graph_data_cached(
+    root_value: str,
+    truth_revision: tuple[tuple[str, int, int], ...],
+    dashboard_revision: tuple[tuple[str, int, int], ...],
+):
+    root = Path(root_value)
+    return _load_graph_data(root)
+
+
 def load_graph_data():
-    return _load_graph_data_cached(str(RESEARCH_ROOT), _truth_source_revision(RESEARCH_ROOT))
+    return _load_graph_data_cached(
+        str(RESEARCH_ROOT),
+        _truth_source_revision(RESEARCH_ROOT),
+        _dashboard_revision(RESEARCH_ROOT),
+    )
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
@@ -1648,6 +1734,7 @@ def main() -> None:
         search_index,
         option_workstreams,
         saved_graph_views,
+        dashboard_status,
     ) = load_graph_data()
 
     with st.sidebar:
@@ -1678,6 +1765,11 @@ def main() -> None:
             st.error(f"{len(validation_errors)} {text['issues']}")
         else:
             st.success(text["valid"])
+        if dashboard_status.get("stale"):
+            st.warning(
+                "Generated dashboard files are older than truth-source files. "
+                f"Run `{dashboard_status['recommended_command']}` to refresh."
+            )
 
     if page_key != "research_graph":
         st.title(text["page_title"])

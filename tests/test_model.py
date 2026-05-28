@@ -7,6 +7,8 @@ from datetime import date
 from pathlib import Path
 import os
 import sys
+from unittest.mock import patch
+import yaml
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT_DIR
@@ -49,6 +51,8 @@ from research_cockpit.model import (
     upsert_graph_view,
     validate_cockpit,
 )
+from research_cockpit.graph_core import GraphTopology
+from research_cockpit.types import ResearchNode
 
 
 def write_node(root: Path, data: dict) -> None:
@@ -132,6 +136,30 @@ class ModelValidationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_load_yaml_rejects_unsafe_python_tags(self) -> None:
+        unsafe = self.root / "unsafe.yaml"
+        unsafe.write_text("value: !!python/object/apply:os.system ['echo unsafe']\n", encoding="utf-8")
+
+        with self.assertRaises(yaml.YAMLError):
+            load_yaml(unsafe)
+
+    def test_load_yaml_safe_loader_fallback_rejects_unsafe_python_tags(self) -> None:
+        import research_cockpit.storage as storage
+
+        unsafe = self.root / "unsafe_fallback.yaml"
+        unsafe.write_text("value: !!python/object/apply:os.system ['echo unsafe']\n", encoding="utf-8")
+
+        with (
+            patch.object(storage, "_SAFE_LOADER", yaml.SafeLoader),
+            patch.object(storage, "_SAFE_DUMPER", yaml.SafeDumper),
+        ):
+            with self.assertRaises(yaml.YAMLError):
+                load_yaml(unsafe)
+            fallback = self.root / "fallback.yaml"
+            save_yaml(fallback, {"name": "T5", "items": ["alpha", "beta"]})
+
+            self.assertEqual(load_yaml(fallback), {"name": "T5", "items": ["alpha", "beta"]})
 
     def test_valid_sample_cockpit_passes_validation(self) -> None:
         nodes = load_nodes(self.root)
@@ -337,6 +365,18 @@ class ModelValidationTests(unittest.TestCase):
         self.assertIn(("stage_text", "problem_text"), edge_pairs)
         self.assertIn(("problem_text", "option_t5"), edge_pairs)
 
+    def test_graph_json_can_omit_raw_node_payload(self) -> None:
+        nodes = load_nodes(self.root)
+
+        default_graph = graph_to_json(nodes, ["stage_text", "problem_text", "option_t5"])
+        slim_graph = graph_to_json(nodes, ["stage_text", "problem_text", "option_t5"], include_raw=False)
+
+        self.assertIn("raw", default_graph["nodes"][0])
+        self.assertNotIn("raw", slim_graph["nodes"][0])
+        self.assertEqual(default_graph["nodes"][0]["id"], slim_graph["nodes"][0]["id"])
+        self.assertEqual(default_graph["nodes"][0]["label"], slim_graph["nodes"][0]["label"])
+        self.assertEqual(default_graph["edges"], slim_graph["edges"])
+
     def test_derive_focus_path_follows_parent_chain(self) -> None:
         nodes = load_nodes(self.root)
 
@@ -348,6 +388,51 @@ class ModelValidationTests(unittest.TestCase):
             derive_focus_path(nodes, "decision_t5"),
             ["stage_text", "problem_text", "option_t5", "decision_t5"],
         )
+
+    def test_graph_topology_precomputes_children_parents_and_paths(self) -> None:
+        nodes = load_nodes(self.root)
+        topology = GraphTopology.from_nodes(nodes)
+
+        self.assertEqual(topology.parent_by_node["option_t5"], "problem_text")
+        self.assertEqual(topology.children_by_parent["problem_text"], ["option_t5"])
+        self.assertEqual(
+            topology.path_by_node["exp_t5"],
+            ["stage_text", "problem_text", "option_t5", "exp_t5"],
+        )
+        self.assertEqual(topology.child_ids("option_t5"), ["exp_t5", "decision_t5"])
+        self.assertEqual(topology.derive_path("decision_t5"), ["stage_text", "problem_text", "option_t5", "decision_t5"])
+
+    def test_graph_topology_handles_deep_reverse_loaded_parent_chain(self) -> None:
+        depth = 1200
+        nodes = {
+            f"node_{index:04d}": ResearchNode(
+                id=f"node_{index:04d}",
+                type="experiment",
+                title=f"Node {index}",
+                parent=f"node_{index - 1:04d}" if index > 0 else None,
+                children=[f"node_{index + 1:04d}"] if index < depth - 1 else [],
+            )
+            for index in reversed(range(depth))
+        }
+
+        topology = GraphTopology.from_nodes(nodes)
+
+        self.assertEqual(len(topology.derive_path("node_1199")), depth)
+        self.assertEqual(topology.derive_path("node_1199")[0], "node_0000")
+        self.assertEqual(topology.derive_path("node_1199")[-1], "node_1199")
+
+    def test_graph_topology_reports_parent_cycle(self) -> None:
+        nodes = {
+            "node_a": ResearchNode(id="node_a", type="option", title="A", parent="node_b"),
+            "node_b": ResearchNode(id="node_b", type="option", title="B", parent="node_a"),
+        }
+
+        topology = GraphTopology.from_nodes(nodes)
+
+        with self.assertRaises(ValueError) as ctx:
+            topology.derive_path("node_a")
+
+        self.assertIn("parent cycle", str(ctx.exception))
 
     def test_derive_focus_path_reports_missing_parent(self) -> None:
         write_node(
@@ -366,6 +451,27 @@ class ModelValidationTests(unittest.TestCase):
             derive_focus_path(nodes, "exp_orphan")
 
         self.assertIn("missing_option", str(ctx.exception))
+
+    def test_graph_topology_preserves_missing_parent_errors_and_safe_paths(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "exp_orphan",
+                "type": "experiment",
+                "title": "Orphan run",
+                "status": "planned",
+                "parent": "missing_option",
+            },
+        )
+        nodes = load_nodes(self.root)
+        topology = GraphTopology.from_nodes(nodes)
+
+        with self.assertRaises(ValueError) as ctx:
+            topology.derive_path("exp_orphan")
+
+        self.assertIn("missing_option", str(ctx.exception))
+        self.assertEqual(topology.safe_path("exp_orphan"), ["exp_orphan"])
+
 
     def test_explicit_edges_are_loaded_validated_and_deduplicated(self) -> None:
         save_yaml(
@@ -711,6 +817,30 @@ class ModelValidationTests(unittest.TestCase):
         self.assertFalse(by_kind[("artifact_fig", "path", "path")]["exists"])
         self.assertEqual(context["links"][0]["target"], "notes/problems/problem_text.md")
 
+    def test_link_rows_cache_repeated_target_resolution(self) -> None:
+        resource_path = self.root / "resources" / "shared.txt"
+        resource_path.parent.mkdir(parents=True, exist_ok=True)
+        resource_path.write_text("shared resource\n", encoding="utf-8")
+        for node_id in ("stage_text", "problem_text", "option_t5", "exp_t5"):
+            data = load_yaml(self.root / "graph" / "nodes" / f"{node_id}.yaml")
+            data["links"] = {"shared": "resources/shared.txt"}
+            save_yaml(self.root / "graph" / "nodes" / f"{node_id}.yaml", data)
+        nodes = load_nodes(self.root)
+
+        import research_cockpit.resources as resources
+
+        with patch("research_cockpit.resources._target_resolution", wraps=resources._target_resolution) as resolver:
+            rows = build_link_rows(self.root, nodes)
+
+        shared_rows = [row for row in rows if row.get("target") == "resources/shared.txt"]
+        shared_calls = [
+            call for call in resolver.call_args_list
+            if call.args[1:] == ("link", "resources/shared.txt", nodes)
+        ]
+        self.assertEqual(len(shared_rows), 4)
+        self.assertTrue(all(row["exists"] for row in shared_rows))
+        self.assertEqual(len(shared_calls), 1)
+
     def test_search_index_links_notes_and_indexes_unlinked_notes(self) -> None:
         linked_note = self.root / "notes" / "problems" / "problem_text.md"
         linked_note.parent.mkdir(parents=True, exist_ok=True)
@@ -766,6 +896,77 @@ class ModelValidationTests(unittest.TestCase):
         self.assertTrue(all(item["source"] == "resource" for item in results))
         self.assertTrue(all(item["is_focus_related"] for item in results))
 
+    def test_search_index_can_skip_resource_text_reads(self) -> None:
+        resource_path = self.root / "resources" / "problem_context.txt"
+        resource_path.parent.mkdir(parents=True, exist_ok=True)
+        resource_path.write_text("Resource needle should not be read.\n", encoding="utf-8")
+        note_path = self.root / "notes" / "problems" / "problem_text.md"
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.write_text("# Problem Note\nNote needle stays searchable.\n", encoding="utf-8")
+
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["links"] = {
+            "context": "resources/problem_context.txt",
+            "notes": "notes/problems/problem_text.md",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        with patch("research_cockpit.search_index._read_resource_text", side_effect=AssertionError("resource read")):
+            index = build_search_index(self.root, nodes, current, include_resource_text=False)
+        entry = next(item for item in index if item.get("path") == "resources/problem_context.txt")
+        summary = build_search_index_summary(index)
+        resource_results = search_knowledge(index, "Resource needle", sources={"resource"})
+        note_results = search_knowledge(index, "Note needle", sources={"note"})
+
+        self.assertEqual(entry["skip_reason"], "resource_search_disabled")
+        self.assertEqual(entry["bytes_read"], 0)
+        self.assertEqual(summary["resource_count"], 0)
+        self.assertGreaterEqual(summary["resource_skipped_count"], 1)
+        self.assertEqual(summary["resource_search_disabled_count"], 1)
+        self.assertEqual(resource_results, [])
+        self.assertEqual(note_results[0]["entry_id"], "note:notes/problems/problem_text.md")
+
+    def test_search_index_caches_repeated_resource_text_reads(self) -> None:
+        resource_path = self.root / "resources" / "shared_context.txt"
+        resource_path.parent.mkdir(parents=True, exist_ok=True)
+        resource_path.write_text("Shared resource needle.\n", encoding="utf-8")
+        for node_id in ("stage_text", "problem_text", "option_t5", "exp_t5"):
+            data = load_yaml(self.root / "graph" / "nodes" / f"{node_id}.yaml")
+            data["links"] = {"shared": "resources/shared_context.txt"}
+            save_yaml(self.root / "graph" / "nodes" / f"{node_id}.yaml", data)
+        nodes = load_nodes(self.root)
+        current = load_yaml(self.root / "current_state.yaml")
+
+        import research_cockpit.search_index as search_index_module
+
+        with patch(
+            "research_cockpit.search_index._read_resource_text",
+            wraps=search_index_module._read_resource_text,
+        ) as reader:
+            index = build_search_index(self.root, nodes, current)
+        shared_entries = [entry for entry in index if entry.get("path") == "resources/shared_context.txt"]
+        shared_reads = [call for call in reader.call_args_list if call.args[0] == resource_path.resolve()]
+        results = search_knowledge(index, "Shared resource needle", sources={"resource"})
+
+        self.assertEqual(len(shared_entries), 4)
+        self.assertEqual(len(shared_reads), 1)
+        self.assertGreaterEqual(len(results), 1)
+
+    def test_search_index_summary_deduplicates_resource_bytes_read_by_path(self) -> None:
+        index = [
+            {"source": "resource", "path": "resources/shared.txt", "bytes_read": 12},
+            {"source": "resource", "path": "resources/shared.txt", "bytes_read": 12},
+            {"source": "resource", "path": "resources/other.txt", "bytes_read": 7},
+        ]
+
+        summary = build_search_index_summary(index)
+
+        self.assertEqual(summary["resource_count"], 3)
+        self.assertEqual(summary["resource_unique_count"], 2)
+        self.assertEqual(summary["resource_bytes_read"], 19)
+
     def test_search_index_tracks_skipped_resources_without_searching_them(self) -> None:
         png_path = self.root / "figures" / "plot.png"
         png_path.parent.mkdir(parents=True, exist_ok=True)
@@ -818,6 +1019,7 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(entry["bytes_read"], 128 * 1024)
         self.assertGreaterEqual(summary["resource_count"], 1)
         self.assertEqual(summary["resource_truncated_count"], 1)
+        self.assertGreaterEqual(summary["resource_bytes_read"], 128 * 1024)
         self.assertGreaterEqual(summary["focus_resource_count"], 1)
         self.assertEqual(results[0]["source"], "resource")
 
@@ -1238,6 +1440,49 @@ class ModelValidationTests(unittest.TestCase):
         self.assertIn("problem_sub", subtree["problem_ids"])
         self.assertIn("option_sub", subtree["option_ids"])
         self.assertIn("exp_sub", subtree["experiment_ids"])
+
+    def test_option_workstream_rows_use_supplied_graph_topology(self) -> None:
+        nodes = load_nodes(self.root)
+        topology = GraphTopology.from_nodes(nodes)
+
+        with patch("research_cockpit.option_workstreams.child_ids", side_effect=AssertionError("duplicate child scan")):
+            rows = build_option_workstream_rows(nodes, topology=topology)
+
+        self.assertEqual(rows[0]["option_id"], "option_t5")
+        self.assertEqual(rows[0]["experiment_count"], 1)
+
+    def test_option_workstream_helpers_handle_deep_topology_without_recursion(self) -> None:
+        depth = 1200
+        nodes: dict[str, ResearchNode] = {}
+        for index in range(depth):
+            node_id = f"node_{index:04d}"
+            parent_id = f"node_{index - 1:04d}" if index > 0 else None
+            child_id = f"node_{index + 1:04d}" if index < depth - 1 else None
+            nodes[node_id] = ResearchNode(
+                id=node_id,
+                type="option" if index % 2 == 0 else "problem",
+                title=f"Node {index}",
+                status="open",
+                parent=parent_id,
+                children=[child_id] if child_id else [],
+            )
+        nodes["exp_deep"] = ResearchNode(
+            id="exp_deep",
+            type="experiment",
+            title="Deep experiment",
+            status="done",
+            parent=f"node_{depth - 1:04d}",
+        )
+        nodes[f"node_{depth - 1:04d}"].children.append("exp_deep")
+        topology = GraphTopology.from_nodes(dict(reversed(list(nodes.items()))))
+
+        subtree = build_option_subtree(nodes, "node_0000", topology=topology)
+        rows = build_option_workstream_rows(nodes, topology=topology)
+
+        self.assertEqual(subtree["node_ids"][0], "node_0000")
+        self.assertIn("exp_deep", subtree["experiment_ids"])
+        self.assertEqual(rows[0]["option_id"], "node_0000")
+        self.assertEqual(rows[0]["experiment_count"], 1)
 
     def test_option_workstream_context_summarizes_recursive_evidence(self) -> None:
         write_node(

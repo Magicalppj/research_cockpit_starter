@@ -6,12 +6,15 @@ import os
 import tempfile
 import yaml
 
+_SAFE_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_SAFE_DUMPER = getattr(yaml, "CSafeDumper", yaml.SafeDumper)
+
 
 def load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        return yaml.load(f, Loader=_SAFE_LOADER) or {}
 
 
 def save_yaml(path: Path, data: dict[str, Any]) -> None:
@@ -20,7 +23,7 @@ def save_yaml(path: Path, data: dict[str, Any]) -> None:
     temp_path = Path(temp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, allow_unicode=True, sort_keys=False)
+            yaml.dump(data, f, Dumper=_SAFE_DUMPER, allow_unicode=True, sort_keys=False)
         temp_path.replace(path)
     finally:
         try:

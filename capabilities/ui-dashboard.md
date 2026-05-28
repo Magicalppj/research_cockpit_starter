@@ -32,6 +32,8 @@ React Flow is the default graph renderer. PyVis remains available as a legacy fa
 
 Use `Refresh` when a background agent has changed YAML. Refresh reruns Streamlit and reloads the current graph data without rebuilding the React bundle.
 
+The UI prefers fresh generated dashboard JSON for fast refresh. If dashboard files are missing, malformed, or older than truth-source YAML/notes/runs/gates, it falls back to live builders and shows a stale-dashboard warning with the recommended `research-cockpit build --root <root>` command. For large or multi-agent roots, keep `research-cockpit build --root <canonical_root> --watch --interval 5 --json` running from the main repository so Refresh usually only reloads generated files.
+
 ## Baselines / Accepted
 
 Use the Baselines / Accepted page to review default baselines, accepted options, and accepted decisions without expanding all accepted history into agent context. Baseline rows are scoped per problem and do not reuse the global `current_state.current_option` as every problem's default. The page is read-only in v1: it generates `set-baseline`, `context`, and `node-context` commands for review instead of writing YAML directly.

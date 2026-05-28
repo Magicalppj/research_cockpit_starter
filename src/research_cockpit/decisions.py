@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from research_cockpit.graph_core import (
+    GraphTopology,
     derive_focus_path,
     node_context,
     node_id_by_type_in_path,
@@ -30,21 +31,26 @@ def has_experiment_evidence(experiment: ResearchNode) -> bool:
     )
 
 
-def evidence_experiment_ids(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
+def evidence_experiment_ids(
+    nodes: dict[str, ResearchNode],
+    node_id: str,
+    *,
+    topology: GraphTopology | None = None,
+) -> list[str]:
     if node_id not in nodes:
         return []
     node = nodes[node_id]
     if node.type == "experiment":
         return [node.id]
     if node.type == "option":
-        return experiment_ids_for_option(nodes, node.id)
+        return experiment_ids_for_option(nodes, node.id, topology=topology)
     if node.type != "decision":
         return []
 
     experiment_ids = unique_strings(node.raw.get("supporting_experiments", []) or [])
     option_id = node.parent if node.parent in nodes and nodes[node.parent].type == "option" else None
     if option_id:
-        experiment_ids = unique_strings(experiment_ids + experiment_ids_for_option(nodes, str(option_id)))
+        experiment_ids = unique_strings(experiment_ids + experiment_ids_for_option(nodes, str(option_id), topology=topology))
     return [experiment_id for experiment_id in experiment_ids if experiment_id in nodes and nodes[experiment_id].type == "experiment"]
 
 
@@ -271,6 +277,8 @@ def build_decision_evidence_bundle(
     option_id: str,
     supporting_experiments: list[str] | None = None,
     locale: str | None = None,
+    *,
+    topology: GraphTopology | None = None,
 ) -> dict[str, Any]:
     if option_id not in nodes:
         raise ValueError(f"Option node does not exist: {option_id}")
@@ -281,7 +289,7 @@ def build_decision_evidence_bundle(
     _validate_experiment_refs(nodes, manual_ids, "supporting_experiments")
     automatic_ids = [
         experiment_id
-        for experiment_id in experiment_ids_for_option(nodes, option_id)
+        for experiment_id in experiment_ids_for_option(nodes, option_id, topology=topology)
         if has_experiment_evidence(nodes[experiment_id])
     ]
     experiment_ids = unique_strings(manual_ids + automatic_ids)
@@ -339,8 +347,13 @@ def build_decision_evidence_bundle(
     }
 
 
-def build_decision_evidence_summary(nodes: dict[str, ResearchNode], node_id: str) -> dict[str, Any]:
-    experiment_ids = evidence_experiment_ids(nodes, node_id)
+def build_decision_evidence_summary(
+    nodes: dict[str, ResearchNode],
+    node_id: str,
+    *,
+    topology: GraphTopology | None = None,
+) -> dict[str, Any]:
+    experiment_ids = evidence_experiment_ids(nodes, node_id, topology=topology)
     findings_count = 0
     latest_finding: str | None = None
     outcome_counts: dict[str, int] = {}

@@ -138,6 +138,21 @@ def _target_resolution(root: Path, kind: str, target: str, nodes: dict[str, Rese
 
 def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    resolution_cache: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def resolve_target(kind: str, target: str) -> dict[str, Any]:
+        key = (kind, target)
+        if key not in resolution_cache:
+            resolution_cache[key] = _target_resolution(root, kind, target, nodes)
+        return resolution_cache[key]
+
+    def row_resolution(resolution: dict[str, Any]) -> dict[str, Any]:
+        copied = dict(resolution)
+        attempts = copied.get("resolution_attempts")
+        if isinstance(attempts, list):
+            copied["resolution_attempts"] = list(attempts)
+        return copied
+
     for node in sorted(nodes.values(), key=lambda item: item.id):
         entries = node_link_entries(node)
         for artifact_id in node_artifact_ids(node):
@@ -146,7 +161,7 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
         for entry in entries:
             target = entry["target"]
             kind = entry["kind"]
-            resolution = _target_resolution(root, kind, target, nodes)
+            resolution = resolve_target(kind, target)
             rows.append({
                 "node_id": node.id,
                 "node_title": node.title,
@@ -154,16 +169,11 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
                 "kind": kind,
                 "label": entry["label"],
                 "target": target,
-                **resolution,
+                **row_resolution(resolution),
             })
             if kind == "linked_artifact" and target in nodes and nodes[target].type == "artifact":
                 for artifact_entry in node_link_entries(nodes[target]):
-                    artifact_resolution = _target_resolution(
-                        root,
-                        artifact_entry["kind"],
-                        artifact_entry["target"],
-                        nodes,
-                    )
+                    artifact_resolution = resolve_target(artifact_entry["kind"], artifact_entry["target"])
                     rows.append({
                         "node_id": node.id,
                         "node_title": node.title,
@@ -172,6 +182,6 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
                         "kind": artifact_entry["kind"],
                         "label": f"{target}:{artifact_entry['label']}",
                         "target": artifact_entry["target"],
-                        **artifact_resolution,
+                        **row_resolution(artifact_resolution),
                     })
     return rows

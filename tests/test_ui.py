@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import shutil
+import tempfile
+import time
 import os
 from pathlib import Path
 import sys
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT_DIR
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
-from research_cockpit.ui.app import build_pyvis_html, get_text
+import research_cockpit.ui.app as ui_app
+from research_cockpit.commands.build_dashboard import build_dashboard
+from research_cockpit.ui.app import _load_graph_data, build_pyvis_html, dashboard_staleness, get_text
 from research_cockpit.baselines import (
     build_accepted_decision_rows,
     build_accepted_option_rows,
@@ -71,6 +77,14 @@ from research_cockpit.ui.view_helpers import (
 from research_cockpit.ui.graph_component import graph_component_build_available
 
 
+def copy_demo_research_cockpit_without_dashboards(target: Path) -> None:
+    shutil.copytree(
+        ROOT_DIR / "examples" / "demo_research_cockpit",
+        target,
+        ignore=shutil.ignore_patterns("dashboards"),
+    )
+
+
 class UiRenderingTests(unittest.TestCase):
     def test_update_decision_checklist_label_is_localized(self) -> None:
         text = get_text("中文")
@@ -114,9 +128,124 @@ class UiRenderingTests(unittest.TestCase):
 
         self.assertIn("@st.cache_data", source)
         self.assertIn("def _truth_source_revision", source)
-        self.assertIn("revision: tuple[tuple[str, int, int], ...]", source)
-        self.assertIn("_load_graph_data_cached(str(RESEARCH_ROOT), _truth_source_revision(RESEARCH_ROOT))", source)
+        self.assertIn("def _dashboard_revision", source)
+        self.assertIn("truth_revision: tuple[tuple[str, int, int], ...]", source)
+        self.assertIn("_truth_source_revision(RESEARCH_ROOT)", source)
+        self.assertIn("_dashboard_revision(RESEARCH_ROOT)", source)
         self.assertIn("_load_graph_data_cached.clear()", source)
+
+    def test_graph_data_load_prefers_generated_dashboard_files(self) -> None:
+        tmp_parent = ROOT_DIR / ".test_tmp" / "ui_dashboard_loader"
+        tmp_parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=tmp_parent) as temp_dir:
+            root = Path(temp_dir) / "research_cockpit"
+            copy_demo_research_cockpit_without_dashboards(root)
+            build_dashboard(root)
+
+            with (
+                patch("research_cockpit.ui.app.graph_to_json", side_effect=AssertionError("rebuilt graph")),
+                patch("research_cockpit.ui.app.build_agent_context", side_effect=AssertionError("rebuilt context")),
+                patch("research_cockpit.ui.app.build_link_rows", side_effect=AssertionError("rebuilt links")),
+                patch("research_cockpit.ui.app.build_search_index", side_effect=AssertionError("rebuilt search")),
+                patch(
+                    "research_cockpit.ui.app.build_option_workstream_rows",
+                    side_effect=AssertionError("rebuilt option workstreams"),
+                ),
+            ):
+                loaded = _load_graph_data(root)
+
+        graph = loaded[2]
+        context = loaded[3]
+        validation_errors = loaded[4]
+        link_rows = loaded[5]
+        search_index = loaded[8]
+        dashboard_status = loaded[11]
+
+        self.assertFalse(validation_errors)
+        self.assertTrue(graph["nodes"])
+        self.assertNotIn("raw", graph["nodes"][0])
+        self.assertIn("metadata", context)
+        self.assertIsInstance(link_rows, list)
+        self.assertIsInstance(search_index, list)
+        self.assertTrue(dashboard_status["available"])
+        self.assertFalse(dashboard_status["stale"])
+
+    def test_graph_data_load_falls_back_when_dashboard_file_missing(self) -> None:
+        tmp_parent = ROOT_DIR / ".test_tmp" / "ui_dashboard_missing_file"
+        tmp_parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=tmp_parent) as temp_dir:
+            root = Path(temp_dir) / "research_cockpit"
+            copy_demo_research_cockpit_without_dashboards(root)
+            build_dashboard(root)
+            (root / "dashboards" / "search_index.json").unlink()
+
+            with patch("research_cockpit.ui.app.build_search_index", wraps=ui_app.build_search_index) as search_builder:
+                loaded = _load_graph_data(root)
+
+        self.assertTrue(loaded[2]["nodes"])
+        self.assertIsInstance(loaded[8], list)
+        self.assertGreater(search_builder.call_count, 0)
+        self.assertFalse(loaded[11]["available"])
+        self.assertIn("dashboards/search_index.json", loaded[11]["missing"])
+
+    def test_graph_data_load_falls_back_when_dashboard_json_is_invalid(self) -> None:
+        tmp_parent = ROOT_DIR / ".test_tmp" / "ui_dashboard_invalid_json"
+        tmp_parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=tmp_parent) as temp_dir:
+            root = Path(temp_dir) / "research_cockpit"
+            copy_demo_research_cockpit_without_dashboards(root)
+            build_dashboard(root)
+            (root / "dashboards" / "graph_view.json").write_text("{", encoding="utf-8")
+
+            with patch("research_cockpit.ui.app.graph_to_json", wraps=ui_app.graph_to_json) as graph_builder:
+                loaded = _load_graph_data(root)
+
+        self.assertTrue(loaded[2]["nodes"])
+        self.assertGreater(graph_builder.call_count, 0)
+        self.assertTrue(loaded[11]["available"])
+
+    def test_dashboard_staleness_marks_truth_source_newer_than_dashboard(self) -> None:
+        tmp_parent = ROOT_DIR / ".test_tmp" / "ui_dashboard_staleness"
+        tmp_parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=tmp_parent) as temp_dir:
+            root = Path(temp_dir) / "research_cockpit"
+            copy_demo_research_cockpit_without_dashboards(root)
+            build_dashboard(root)
+
+            fresh = dashboard_staleness(root)
+            current_state = root / "current_state.yaml"
+            future = time.time() + 5
+            os.utime(current_state, (future, future))
+            stale = dashboard_staleness(root)
+
+        self.assertTrue(fresh["available"])
+        self.assertFalse(fresh["stale"])
+        self.assertTrue(stale["stale"])
+        self.assertIn("research-cockpit build --root", stale["recommended_command"])
+
+    def test_graph_data_load_falls_back_when_dashboard_is_stale(self) -> None:
+        tmp_parent = ROOT_DIR / ".test_tmp" / "ui_dashboard_stale_fallback"
+        tmp_parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=tmp_parent) as temp_dir:
+            root = Path(temp_dir) / "research_cockpit"
+            copy_demo_research_cockpit_without_dashboards(root)
+            build_dashboard(root)
+            current_state = root / "current_state.yaml"
+            future = time.time() + 5
+            os.utime(current_state, (future, future))
+
+            with (
+                patch("research_cockpit.ui.app.graph_to_json", wraps=ui_app.graph_to_json) as graph_builder,
+                patch("research_cockpit.ui.app.build_search_index", wraps=ui_app.build_search_index) as search_builder,
+            ):
+                loaded = _load_graph_data(root)
+
+        self.assertTrue(loaded[2]["nodes"])
+        self.assertIsInstance(loaded[8], list)
+        self.assertGreater(graph_builder.call_count, 0)
+        self.assertGreater(search_builder.call_count, 0)
+        self.assertTrue(loaded[11]["available"])
+        self.assertTrue(loaded[11]["stale"])
 
     def test_main_navigation_uses_sidebar_radio_instead_of_top_tabs(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")

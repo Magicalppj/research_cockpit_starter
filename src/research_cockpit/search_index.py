@@ -5,7 +5,7 @@ from typing import Any
 from urllib.parse import urlparse
 import re
 
-from research_cockpit.graph_core import focus_related_ids
+from research_cockpit.graph_core import GraphTopology, focus_related_ids
 from research_cockpit.storage import load_yaml, normalize_relative_path, relative_to_root
 from research_cockpit.types import (
     RESOURCE_SEARCH_ALLOWED_SUFFIXES,
@@ -175,19 +175,43 @@ def _resource_search_entries(
     nodes: dict[str, ResearchNode],
     current: dict[str, Any],
     note_paths: dict[str, str],
+    *,
+    link_rows: list[dict[str, Any]] | None = None,
+    focus_ids: set[str] | None = None,
+    topology: GraphTopology | None = None,
+    include_resource_text: bool = True,
 ) -> list[dict[str, Any]]:
-    focus_ids = focus_related_ids(nodes, current) if current else set()
+    focus_ids = focus_ids if focus_ids is not None else (
+        focus_related_ids(nodes, current, topology=topology) if current else set()
+    )
     normalized_note_paths = set(note_paths)
+    skip_cache: dict[tuple[str, str, object], tuple[str, Path | None, str]] = {}
+    text_cache: dict[str, tuple[str, bool, int]] = {}
     entries: list[dict[str, Any]] = []
-    for row in build_link_rows(root, nodes):
-        skip_reason, path, normalized = _resource_skip_reason(root, row, normalized_note_paths)
-        if skip_reason == "indexed_as_note":
+
+    def skip_reason(row: dict[str, Any]) -> tuple[str, Path | None, str]:
+        key = (str(row.get("kind") or ""), str(row.get("target") or ""), row.get("exists"))
+        if key not in skip_cache:
+            skip_cache[key] = _resource_skip_reason(root, row, normalized_note_paths)
+        return skip_cache[key]
+
+    def read_resource_text(path: Path, normalized: str) -> tuple[str, bool, int]:
+        key = normalized or path.as_posix()
+        if key not in text_cache:
+            text_cache[key] = _read_resource_text(path)
+        return text_cache[key]
+
+    for row in link_rows if link_rows is not None else build_link_rows(root, nodes):
+        reason, path, normalized = skip_reason(row)
+        if reason == "indexed_as_note":
             continue
-        if skip_reason:
-            entry = _resource_search_entry(row, path=normalized or str(row.get("target") or ""), skip_reason=skip_reason)
+        if reason:
+            entry = _resource_search_entry(row, path=normalized or str(row.get("target") or ""), skip_reason=reason)
+        elif not include_resource_text:
+            entry = _resource_search_entry(row, path=normalized, skip_reason="resource_search_disabled")
         else:
             assert path is not None
-            text, truncated, bytes_read = _read_resource_text(path)
+            text, truncated, bytes_read = read_resource_text(path, normalized)
             entry = _resource_search_entry(
                 row,
                 path=normalized,
@@ -204,9 +228,13 @@ def build_search_index(
     root: Path,
     nodes: dict[str, ResearchNode],
     current: dict[str, Any] | None = None,
+    *,
+    link_rows: list[dict[str, Any]] | None = None,
+    topology: GraphTopology | None = None,
+    include_resource_text: bool = True,
 ) -> list[dict[str, Any]]:
     current = current or {}
-    focus_ids = focus_related_ids(nodes, current) if current else set()
+    focus_ids = focus_related_ids(nodes, current, topology=topology) if current else set()
     node_paths = _node_file_paths(root)
     note_paths = _node_note_paths(nodes)
     entries: list[dict[str, Any]] = []
@@ -245,7 +273,16 @@ def build_search_index(
                 "updated_at": str(node.raw.get("updated_at") or "") if node else "",
                 "is_focus_related": bool(node and node.id in focus_ids),
             })
-    entries.extend(_resource_search_entries(root, nodes, current, note_paths))
+    entries.extend(_resource_search_entries(
+        root,
+        nodes,
+        current,
+        note_paths,
+        link_rows=link_rows,
+        focus_ids=focus_ids,
+        topology=topology,
+        include_resource_text=include_resource_text,
+    ))
     return entries
 
 
@@ -386,8 +423,12 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
     note_count = 0
     node_count = 0
     resource_count = 0
+    resource_unique_count = 0
     resource_truncated_count = 0
     resource_skipped_count = 0
+    resource_search_disabled_count = 0
+    resource_bytes_read = 0
+    resource_seen_paths: set[str] = set()
     focus_resource_count = 0
     unlinked_note_count = 0
     focus_entry_count = 0
@@ -404,8 +445,15 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
         if source == "resource":
             if entry.get("skip_reason"):
                 resource_skipped_count += 1
+                if entry.get("skip_reason") == "resource_search_disabled":
+                    resource_search_disabled_count += 1
             else:
                 resource_count += 1
+                resource_path = str(entry.get("path") or entry.get("target") or entry.get("entry_id") or "")
+                if resource_path not in resource_seen_paths:
+                    resource_seen_paths.add(resource_path)
+                    resource_unique_count += 1
+                    resource_bytes_read += int(entry.get("bytes_read") or 0)
                 if entry.get("truncated"):
                     resource_truncated_count += 1
                 if entry.get("is_focus_related"):
@@ -420,8 +468,11 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
         "note_count": note_count,
         "node_count": node_count,
         "resource_count": resource_count,
+        "resource_unique_count": resource_unique_count,
         "resource_truncated_count": resource_truncated_count,
         "resource_skipped_count": resource_skipped_count,
+        "resource_search_disabled_count": resource_search_disabled_count,
+        "resource_bytes_read": resource_bytes_read,
         "focus_resource_count": focus_resource_count,
         "unlinked_note_count": unlinked_note_count,
         "focus_entry_count": focus_entry_count,

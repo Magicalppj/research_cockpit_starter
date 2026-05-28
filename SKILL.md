@@ -121,6 +121,8 @@ research-cockpit agent-session-context --root <canonical_root> --agent <agent_id
 research-cockpit set-agent-focus --root <canonical_root> --agent <agent_id> --node <node_id> --no-build
 research-cockpit import-worktree-findings --root <canonical_root> --from-root <worktree>/research_cockpit --agent <agent_id> --option <option_id> --dry-run --json --show-diff
 research-cockpit build --root <canonical_root> --watch --interval 5 --json
+research-cockpit build --root <canonical_root> --json --profile --profile-output dashboards/build_profile.json
+research-cockpit build --root <canonical_root> --json --profile --skip-resource-search
 research-cockpit update-node-fields --root research_cockpit --id <node_id> --question "..." --tag <tag> --no-build
 research-cockpit update-workstream-fields --root research_cockpit --option <option_id> --status reported --objective "..." --no-build
 research-cockpit sync-focus-actions --root research_cockpit --from-node <node_id> --dry-run --json --show-diff

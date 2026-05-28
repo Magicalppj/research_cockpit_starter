@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 import networkx as nx
@@ -111,7 +112,134 @@ def focus_node_id_from_current(current: dict[str, Any], nodes: dict[str, Researc
     return None
 
 
-def derive_focus_path(nodes: dict[str, ResearchNode], focus_node_id: str) -> list[str]:
+@dataclass(frozen=True)
+class GraphTopology:
+    children_by_parent: dict[str, list[str]]
+    parent_by_node: dict[str, str | None]
+    path_by_node: dict[str, list[str]]
+    _path_errors: dict[str, str]
+
+    @classmethod
+    def from_nodes(cls, nodes: dict[str, ResearchNode]) -> "GraphTopology":
+        parent_by_node = {
+            node.id: str(node.parent) if node.parent else None
+            for node in nodes.values()
+        }
+        implicit_children: dict[str, list[str]] = {node_id: [] for node_id in nodes}
+        for node in nodes.values():
+            parent_id = parent_by_node[node.id]
+            if parent_id in nodes:
+                implicit_children.setdefault(str(parent_id), []).append(node.id)
+
+        children_by_parent: dict[str, list[str]] = {}
+        for node in nodes.values():
+            seen: set[str] = set()
+            children: list[str] = []
+            for child_id in node.children:
+                if child_id in nodes and child_id not in seen:
+                    seen.add(child_id)
+                    children.append(child_id)
+            for child_id in sorted(implicit_children.get(node.id, [])):
+                if child_id not in seen:
+                    seen.add(child_id)
+                    children.append(child_id)
+            children_by_parent[node.id] = children
+
+        path_by_node: dict[str, list[str]] = {}
+        path_errors: dict[str, str] = {}
+
+        def resolve_path(node_id: str) -> list[str]:
+            if node_id in path_by_node:
+                return path_by_node[node_id]
+            if node_id in path_errors:
+                raise ValueError(path_errors[node_id])
+            if node_id not in nodes:
+                raise ValueError(f"Focus node does not exist: {node_id}")
+
+            chain: list[str] = []
+            chain_positions: dict[str, int] = {}
+            current_id: str | None = node_id
+            while current_id:
+                if current_id in path_by_node:
+                    path = [*path_by_node[current_id], *reversed(chain)]
+                    break
+                if current_id in path_errors:
+                    raise ValueError(path_errors[current_id])
+                if current_id in chain_positions:
+                    error = f"Focus path has a parent cycle at {current_id!r}"
+                    for chain_id in chain:
+                        path_errors[chain_id] = error
+                    raise ValueError(error)
+                if current_id not in nodes:
+                    raise ValueError(f"Focus node does not exist: {current_id}")
+
+                chain_positions[current_id] = len(chain)
+                chain.append(current_id)
+                parent_id = parent_by_node.get(current_id)
+                if not parent_id:
+                    path = list(reversed(chain))
+                    break
+                if parent_id not in nodes:
+                    error = f"Focus path references missing parent {parent_id!r}"
+                    for chain_id in chain:
+                        path_errors[chain_id] = error
+                    raise ValueError(error)
+                current_id = parent_id
+
+            for index, path_node_id in enumerate(path):
+                if path_node_id not in path_errors:
+                    path_by_node[path_node_id] = path[:index + 1]
+            return list(path_by_node[node_id])
+
+        for node_id in nodes:
+            try:
+                resolve_path(node_id)
+            except ValueError as exc:
+                path_errors[node_id] = str(exc)
+
+        return cls(
+            children_by_parent=children_by_parent,
+            parent_by_node=parent_by_node,
+            path_by_node=path_by_node,
+            _path_errors=path_errors,
+        )
+
+    def child_ids(self, node_id: str) -> list[str]:
+        return list(self.children_by_parent.get(node_id, []))
+
+    def derive_path(self, node_id: str) -> list[str]:
+        if node_id in self._path_errors:
+            raise ValueError(self._path_errors[node_id])
+        if node_id not in self.path_by_node:
+            raise ValueError(f"Focus node does not exist: {node_id}")
+        return list(self.path_by_node[node_id])
+
+    def safe_path(self, node_id: str) -> list[str]:
+        try:
+            return self.derive_path(node_id)
+        except ValueError:
+            return [node_id] if node_id in self.parent_by_node else []
+
+    def descendant_ids(self, node_id: str) -> set[str]:
+        descendants: set[str] = set()
+        stack = list(self.child_ids(node_id))
+        while stack:
+            child_id = stack.pop()
+            if child_id in descendants or child_id not in self.parent_by_node:
+                continue
+            descendants.add(child_id)
+            stack.extend(self.child_ids(child_id))
+        return descendants
+
+
+def derive_focus_path(
+    nodes: dict[str, ResearchNode],
+    focus_node_id: str,
+    *,
+    topology: GraphTopology | None = None,
+) -> list[str]:
+    if topology is not None:
+        return topology.derive_path(focus_node_id)
     if focus_node_id not in nodes:
         raise ValueError(f"Focus node does not exist: {focus_node_id}")
 
@@ -162,7 +290,14 @@ def derive_focus_fields(
     }
 
 
-def child_ids(nodes: dict[str, ResearchNode], node: ResearchNode) -> list[str]:
+def child_ids(
+    nodes: dict[str, ResearchNode],
+    node: ResearchNode,
+    *,
+    topology: GraphTopology | None = None,
+) -> list[str]:
+    if topology is not None:
+        return topology.child_ids(node.id)
     ids = [child_id for child_id in node.children if child_id in nodes]
     for candidate in sorted(nodes.values(), key=lambda item: item.id):
         if candidate.parent == node.id and candidate.id not in ids:
@@ -170,11 +305,25 @@ def child_ids(nodes: dict[str, ResearchNode], node: ResearchNode) -> list[str]:
     return ids
 
 
-def graph_child_ids(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
+def graph_child_ids(
+    nodes: dict[str, ResearchNode],
+    node_id: str,
+    *,
+    topology: GraphTopology | None = None,
+) -> list[str]:
+    if topology is not None:
+        return topology.child_ids(node_id)
     return child_ids(nodes, nodes[node_id])
 
 
-def graph_descendant_ids(nodes: dict[str, ResearchNode], node_id: str) -> set[str]:
+def graph_descendant_ids(
+    nodes: dict[str, ResearchNode],
+    node_id: str,
+    *,
+    topology: GraphTopology | None = None,
+) -> set[str]:
+    if topology is not None:
+        return topology.descendant_ids(node_id)
     descendants: set[str] = set()
     stack = list(graph_child_ids(nodes, node_id)) if node_id in nodes else []
     while stack:
@@ -186,7 +335,14 @@ def graph_descendant_ids(nodes: dict[str, ResearchNode], node_id: str) -> set[st
     return descendants
 
 
-def safe_node_path(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
+def safe_node_path(
+    nodes: dict[str, ResearchNode],
+    node_id: str,
+    *,
+    topology: GraphTopology | None = None,
+) -> list[str]:
+    if topology is not None:
+        return topology.safe_path(node_id)
     try:
         return derive_focus_path(nodes, node_id)
     except ValueError:
@@ -342,7 +498,12 @@ def node_title(nodes: dict[str, ResearchNode], node_id: str | None) -> str | Non
     return None
 
 
-def focus_related_ids(nodes: dict[str, ResearchNode], current: dict[str, Any]) -> set[str]:
+def focus_related_ids(
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any],
+    *,
+    topology: GraphTopology | None = None,
+) -> set[str]:
     related = {
         str(node_id)
         for node_id in current.get("current_focus_path", []) or []
@@ -358,30 +519,32 @@ def focus_related_ids(nodes: dict[str, ResearchNode], current: dict[str, Any]) -
             continue
         if node.parent in nodes:
             related.add(str(node.parent))
-        related.update(child_id for child_id in child_ids(nodes, node) if child_id in nodes)
+        related.update(child_id for child_id in child_ids(nodes, node, topology=topology) if child_id in nodes)
     return related
 
 
 def _graph_interaction_metadata(
     nodes: dict[str, ResearchNode],
     current: dict[str, Any] | None,
+    *,
+    topology: GraphTopology,
 ) -> dict[str, dict[str, Any]]:
     current = current or {}
     focus_node_id = focus_node_id_from_current(current, nodes) if current else None
     current_branch_ids = set(str(node_id) for node_id in current.get("current_focus_path", []) or [])
     if focus_node_id and focus_node_id in nodes:
         current_branch_ids.add(focus_node_id)
-        current_branch_ids.update(graph_descendant_ids(nodes, focus_node_id))
+        current_branch_ids.update(graph_descendant_ids(nodes, focus_node_id, topology=topology))
 
     metadata: dict[str, dict[str, Any]] = {}
     for node in nodes.values():
-        path = safe_node_path(nodes, node.id)
+        path = safe_node_path(nodes, node.id, topology=topology)
         stage_id = node_id_by_type_in_path(nodes, path, "stage")
         problem_id = node_id_by_type_in_path(nodes, path, "problem", nearest=True)
         option_id = node_id_by_type_in_path(nodes, path, "option", nearest=True)
         upstream_problem_id = None
         if option_id and option_id in nodes:
-            option_path = safe_node_path(nodes, option_id)
+            option_path = safe_node_path(nodes, option_id, topology=topology)
             upstream_problem_id = node_id_by_type_in_path(nodes, option_path, "problem", nearest=True)
 
         metadata[node.id] = {
@@ -424,6 +587,8 @@ def _focus_graph_metadata(
     nodes: dict[str, ResearchNode],
     current_focus_path: list[str],
     current: dict[str, Any] | None,
+    *,
+    topology: GraphTopology,
 ) -> dict[str, dict[str, Any]]:
     current = current or {}
     focus_node_id = focus_node_id_from_current(current, nodes) if current else None
@@ -450,7 +615,7 @@ def _focus_graph_metadata(
         if focus_node.parent:
             include(str(focus_node.parent), 1, "parent")
             if focus_node.parent in nodes:
-                for sibling_id in graph_child_ids(nodes, str(focus_node.parent)):
+                for sibling_id in graph_child_ids(nodes, str(focus_node.parent), topology=topology):
                     if sibling_id != focus_node_id:
                         include(sibling_id, 1, "sibling")
 
@@ -461,7 +626,7 @@ def _focus_graph_metadata(
             role = "parent" if focus_index == -1 or index < focus_index else "child"
             include(node_id, 1, role)
 
-        child_ids_for_focus = graph_child_ids(nodes, focus_node_id)
+        child_ids_for_focus = graph_child_ids(nodes, focus_node_id, topology=topology)
         for child_id in child_ids_for_focus:
             include(child_id, 1, "child")
 
@@ -513,20 +678,24 @@ def graph_to_json(
     current_focus_path: list[str] | None = None,
     current: dict[str, Any] | None = None,
     explicit_edges: list[dict[str, Any]] | None = None,
+    *,
+    topology: GraphTopology | None = None,
+    include_raw: bool = True,
 ) -> dict[str, Any]:
     from research_cockpit.baselines import build_graph_baseline_metadata
 
     current_focus_path = current_focus_path or []
+    topology = topology or GraphTopology.from_nodes(nodes)
     focus_set = set(current_focus_path)
-    focus_metadata = _focus_graph_metadata(nodes, current_focus_path, current)
-    interaction_metadata = _graph_interaction_metadata(nodes, current)
+    focus_metadata = _focus_graph_metadata(nodes, current_focus_path, current, topology=topology)
+    interaction_metadata = _graph_interaction_metadata(nodes, current, topology=topology)
     baseline_metadata = build_graph_baseline_metadata(nodes, current)
     current_focus_node = focus_node_id_from_current(current or {}, nodes) if current else None
 
     out_nodes = []
     for node in nodes.values():
         color = STATUS_COLORS.get(node.status, "#EEEEEE")
-        out_nodes.append({
+        row = {
             "id": node.id,
             "label": node.title,
             "title": node.summary,
@@ -539,8 +708,10 @@ def graph_to_json(
             **focus_metadata.get(node.id, {}),
             **interaction_metadata.get(node.id, {}),
             **baseline_metadata.get(node.id, {}),
-            "raw": node.raw,
-        })
+        }
+        if include_raw:
+            row["raw"] = node.raw
+        out_nodes.append(row)
     out_edges = iter_graph_edges(nodes, explicit_edges)
     return {
         "nodes": out_nodes,

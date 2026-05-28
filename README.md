@@ -118,7 +118,7 @@ Research Cockpit 提供三层能力：
 - 在右侧对当前节点收拢/展开整棵分支，或临时显示被默认隐藏的直接子节点。
 - 保存常用 graph view，后续一键恢复筛选条件和分支可见性。
 
-图谱默认使用 React Flow 和 Dagre layout。PyVis 是 legacy fallback。后台 agent 或手动命令改了 YAML 后，先运行 `research-cockpit build --root research_cockpit`，再在 UI 中点击 `Refresh`。普通数据变化不需要重建 React bundle。
+图谱默认使用 React Flow 和 Dagre layout。PyVis 是 legacy fallback。后台 agent 或手动命令改了 YAML 后，推荐运行 `research-cockpit build --root research_cockpit`，再在 UI 中点击 `Refresh`。如果 dashboard 缺失、损坏或比 truth source 旧，UI 会临时从 YAML/notes/runs/gates 现场重建视图并显示 stale warning；大仓库或多 agent 场景下建议在 canonical root 跑 `research-cockpit build --root research_cockpit --watch --interval 5 --json`。普通数据变化不需要重建 React bundle。
 
 前端组件开发才需要 Node 依赖：
 
@@ -137,6 +137,7 @@ npm run build
 | 校验数据 | `research-cockpit validate --root research_cockpit --json` |
 | 检查语义陈旧状态 | `research-cockpit lint --root research_cockpit --semantic --json` |
 | 生成 dashboard/context | `research-cockpit build --root research_cockpit` |
+| 诊断大图 build 性能 | `research-cockpit build --root research_cockpit --json --profile` |
 | 启动 UI | `research-cockpit ui --root research_cockpit --server.port 8501` |
 | 查看可用命令 | `research-cockpit commands --json --compact` |
 | 全局启动上下文 | `research-cockpit bootstrap --root research_cockpit --json` |

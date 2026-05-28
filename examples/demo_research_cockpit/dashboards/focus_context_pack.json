@@ -1,8 +1,8 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-05-13T06:49:51.534053Z",
-    "source_git_commit": "7f486f0",
+    "generated_at": "2026-05-28T02:21:52.678782Z",
+    "source_git_commit": "169edeb",
     "worktree_dirty": true,
     "current_state_updated_at": "2026-04-29"
   },
@@ -544,6 +544,70 @@
     "Run the prompt refinement demo experiment.",
     "Record one finding before reviewing the demo decision."
   ],
+  "next_action_scopes": {
+    "focus_node_id": "experiment_demo_prompt_refinement",
+    "focus_path_ids": [
+      "stage_demo_research",
+      "problem_demo_quality_gap",
+      "option_demo_prompt_refinement",
+      "experiment_demo_prompt_refinement"
+    ],
+    "focus_next_actions": [],
+    "parent_option_next_actions": [],
+    "parent_problem_next_actions": [
+      {
+        "scope": "parent_problem_next_actions",
+        "source": "node",
+        "node_id": "problem_demo_quality_gap",
+        "node_title": "Demo answer quality is inconsistent",
+        "node_type": "problem",
+        "node_status": "active",
+        "action": "Run the prompt refinement demo experiment.",
+        "is_terminal": false,
+        "stale": false,
+        "migration_candidate": false,
+        "reason": "Stored on the nearest parent problem in the focus path."
+      }
+    ],
+    "global_coordinator_next_actions": [
+      {
+        "scope": "global_coordinator_next_actions",
+        "source": "current_state",
+        "node_id": "current_state",
+        "node_title": "current_state",
+        "node_type": "current_state",
+        "node_status": "",
+        "related_focus_node": "experiment_demo_prompt_refinement",
+        "action": "Run the prompt refinement demo experiment.",
+        "is_terminal": false,
+        "stale": false,
+        "migration_candidate": false,
+        "reason": "Stored in current_state.next_actions for coordinator-level handoff."
+      },
+      {
+        "scope": "global_coordinator_next_actions",
+        "source": "current_state",
+        "node_id": "current_state",
+        "node_title": "current_state",
+        "node_type": "current_state",
+        "node_status": "",
+        "related_focus_node": "experiment_demo_prompt_refinement",
+        "action": "Record one finding before reviewing the demo decision.",
+        "is_terminal": false,
+        "stale": false,
+        "migration_candidate": false,
+        "reason": "Stored in current_state.next_actions for coordinator-level handoff."
+      }
+    ],
+    "stale_terminal_node_next_actions": [],
+    "counts": {
+      "focus_next_actions": 0,
+      "parent_option_next_actions": 0,
+      "parent_problem_next_actions": 1,
+      "global_coordinator_next_actions": 2,
+      "stale_terminal_node_next_actions": 0
+    }
+  },
   "knowledge_index": [
     {
       "node_id": "artifact_demo_baseline",
@@ -1440,6 +1504,50 @@
         "blockers": []
       }
     ],
+    "run_summaries_by_experiment": {
+      "experiment_demo_eval_cases": {
+        "total_count": 0,
+        "active_count": 0,
+        "running_count": 0,
+        "queued_count": 0,
+        "completed_count": 0,
+        "failed_count": 0,
+        "cancelled_count": 0,
+        "possibly_stale_count": 0,
+        "active_run_ids": [],
+        "recent_run_ids": []
+      },
+      "experiment_demo_prompt_refinement": {
+        "total_count": 0,
+        "active_count": 0,
+        "running_count": 0,
+        "queued_count": 0,
+        "completed_count": 0,
+        "failed_count": 0,
+        "cancelled_count": 0,
+        "possibly_stale_count": 0,
+        "active_run_ids": [],
+        "recent_run_ids": []
+      }
+    },
+    "gate_summaries_by_experiment": {
+      "experiment_demo_eval_cases": {
+        "total_count": 0,
+        "blocking_count": 0,
+        "failed_count": 0,
+        "warning_count": 0,
+        "recent_gate_ids": [],
+        "blocking_gate_ids": []
+      },
+      "experiment_demo_prompt_refinement": {
+        "total_count": 0,
+        "blocking_count": 0,
+        "failed_count": 0,
+        "warning_count": 0,
+        "recent_gate_ids": [],
+        "blocking_gate_ids": []
+      }
+    },
     "decisions": [
       {
         "id": "decision_demo_prompt_refinement",
@@ -1500,10 +1608,33 @@
       "Draft three lightweight evaluation cases."
     ],
     "blockers": [],
+    "hierarchy_policy": {
+      "default_branch_shape": "option -> problem -> option -> experiment/decision",
+      "recommended_command": "research-cockpit create-workstream --root <root> --file workstream.yaml --dry-run --json --show-diff",
+      "use_nested_workstream_when": [
+        "A worktree result opens more than one follow-up question.",
+        "Later experiments should inherit a prior option, decision, or artifact bundle.",
+        "Several follow-up experiments would otherwise sit flat under the same option."
+      ],
+      "workstream_file_hint": {
+        "problem.parent": "option_demo_prompt_refinement",
+        "problem.derived_from": [
+          "<source_experiment_id>"
+        ]
+      },
+      "command_created_shape": {
+        "active_option.parent": "<created_problem_id>",
+        "experiments.parent": "<created_active_option_id>"
+      },
+      "single_gate_exception": "Use create-followup-experiment only for one small queued gate; it records derived_from but intentionally keeps the new experiment under the same option.",
+      "avoid": "Do not use experiment -> experiment as the primary hierarchy. Keep experiments under options and record derivation with derived_from.",
+      "source_experiment_id": null
+    },
     "suggested_commands": {
       "claim": "research-cockpit claim-option --option option_demo_prompt_refinement --agent <agent_id> --objective \"Describe objective\"",
       "context": "research-cockpit option-workstream-context --id option_demo_prompt_refinement --compact --json",
       "context_option_alias": "research-cockpit option-workstream-context --option option_demo_prompt_refinement --json",
+      "create_child_workstream": "research-cockpit create-workstream --file workstream.yaml --dry-run --json --show-diff",
       "finalize": "research-cockpit finalize-workstream --file finalize.yaml --json --compact",
       "report": "research-cockpit report-option-workstream --option option_demo_prompt_refinement --agent <agent_id> --recommend continue --summary \"Summarize evidence and recommendation\""
     },

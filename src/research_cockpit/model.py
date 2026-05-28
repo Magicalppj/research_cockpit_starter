@@ -24,7 +24,7 @@ from research_cockpit.decisions import (
     decision_acceptance_failure_message,
 )
 from research_cockpit.graph_views import graph_view_id_from_title, load_graph_views, upsert_graph_view
-from research_cockpit.graph_core import unique_strings
+from research_cockpit.graph_core import GraphTopology, unique_strings
 from research_cockpit.interaction_log import append_interaction_log, load_interaction_log, recent_interactions, validate_interaction_log
 from research_cockpit.option_workstreams import (
     build_branch_comparison,
@@ -479,7 +479,14 @@ def build_graph(nodes: dict[str, ResearchNode], explicit_edges: list[dict[str, A
     return g
 
 
-def _graph_child_ids(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
+def _graph_child_ids(
+    nodes: dict[str, ResearchNode],
+    node_id: str,
+    *,
+    topology: GraphTopology | None = None,
+) -> list[str]:
+    if topology is not None:
+        return topology.child_ids(node_id)
     node = nodes[node_id]
     child_ids = [child for child in node.children if child in nodes]
     implicit_children = sorted(
@@ -490,7 +497,14 @@ def _graph_child_ids(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
     return child_ids + implicit_children
 
 
-def _graph_descendant_ids(nodes: dict[str, ResearchNode], node_id: str) -> set[str]:
+def _graph_descendant_ids(
+    nodes: dict[str, ResearchNode],
+    node_id: str,
+    *,
+    topology: GraphTopology | None = None,
+) -> set[str]:
+    if topology is not None:
+        return topology.descendant_ids(node_id)
     descendants: set[str] = set()
     stack = list(_graph_child_ids(nodes, node_id)) if node_id in nodes else []
     while stack:
@@ -502,7 +516,14 @@ def _graph_descendant_ids(nodes: dict[str, ResearchNode], node_id: str) -> set[s
     return descendants
 
 
-def _safe_node_path(nodes: dict[str, ResearchNode], node_id: str) -> list[str]:
+def _safe_node_path(
+    nodes: dict[str, ResearchNode],
+    node_id: str,
+    *,
+    topology: GraphTopology | None = None,
+) -> list[str]:
+    if topology is not None:
+        return topology.safe_path(node_id)
     try:
         return derive_focus_path(nodes, node_id)
     except ValueError:
@@ -535,17 +556,19 @@ def _node_has_evidence(node: ResearchNode) -> bool:
 def _graph_interaction_metadata(
     nodes: dict[str, ResearchNode],
     current: dict[str, Any] | None,
+    *,
+    topology: GraphTopology,
 ) -> dict[str, dict[str, Any]]:
     current = current or {}
     focus_node_id = focus_node_id_from_current(current, nodes) if current else None
     current_branch_ids = set(str(node_id) for node_id in current.get("current_focus_path", []) or [])
     if focus_node_id and focus_node_id in nodes:
         current_branch_ids.add(focus_node_id)
-        current_branch_ids.update(_graph_descendant_ids(nodes, focus_node_id))
+        current_branch_ids.update(_graph_descendant_ids(nodes, focus_node_id, topology=topology))
 
     metadata: dict[str, dict[str, Any]] = {}
     for node in nodes.values():
-        path = _safe_node_path(nodes, node.id)
+        path = _safe_node_path(nodes, node.id, topology=topology)
         stage_id = _node_id_by_type_in_path(nodes, path, "stage")
         problem_id = _node_id_by_type_in_path(nodes, path, "problem", nearest=True)
         option_id = _node_id_by_type_in_path(nodes, path, "option", nearest=True)
@@ -553,7 +576,7 @@ def _graph_interaction_metadata(
         agent_owner = None
         agent_session_id = None
         if option_id and option_id in nodes:
-            option_path = _safe_node_path(nodes, option_id)
+            option_path = _safe_node_path(nodes, option_id, topology=topology)
             upstream_problem_id = _node_id_by_type_in_path(nodes, option_path, "problem", nearest=True)
             workstream = nodes[option_id].raw.get("agent_workstream")
             if isinstance(workstream, dict):
@@ -603,6 +626,8 @@ def _focus_graph_metadata(
     nodes: dict[str, ResearchNode],
     current_focus_path: list[str],
     current: dict[str, Any] | None,
+    *,
+    topology: GraphTopology,
 ) -> dict[str, dict[str, Any]]:
     current = current or {}
     focus_node_id = focus_node_id_from_current(current, nodes) if current else None
@@ -629,7 +654,7 @@ def _focus_graph_metadata(
         if focus_node.parent:
             include(str(focus_node.parent), 1, "parent")
             if focus_node.parent in nodes:
-                for sibling_id in _graph_child_ids(nodes, str(focus_node.parent)):
+                for sibling_id in _graph_child_ids(nodes, str(focus_node.parent), topology=topology):
                     if sibling_id != focus_node_id:
                         include(sibling_id, 1, "sibling")
 
@@ -640,7 +665,7 @@ def _focus_graph_metadata(
             role = "parent" if focus_index == -1 or index < focus_index else "child"
             include(node_id, 1, role)
 
-        child_ids = _graph_child_ids(nodes, focus_node_id)
+        child_ids = _graph_child_ids(nodes, focus_node_id, topology=topology)
         for child_id in child_ids:
             include(child_id, 1, "child")
 
@@ -692,13 +717,17 @@ def graph_to_json(
     current_focus_path: list[str] | None = None,
     current: dict[str, Any] | None = None,
     explicit_edges: list[dict[str, Any]] | None = None,
+    *,
+    topology: GraphTopology | None = None,
+    include_raw: bool = True,
 ) -> dict[str, Any]:
     from research_cockpit.baselines import build_graph_baseline_metadata
 
     current_focus_path = current_focus_path or []
+    topology = topology or GraphTopology.from_nodes(nodes)
     focus_set = set(current_focus_path)
-    focus_metadata = _focus_graph_metadata(nodes, current_focus_path, current)
-    interaction_metadata = _graph_interaction_metadata(nodes, current)
+    focus_metadata = _focus_graph_metadata(nodes, current_focus_path, current, topology=topology)
+    interaction_metadata = _graph_interaction_metadata(nodes, current, topology=topology)
     baseline_metadata = build_graph_baseline_metadata(nodes, current)
     current_focus_node = focus_node_id_from_current(current or {}, nodes) if current else None
 
@@ -706,7 +735,7 @@ def graph_to_json(
     out_edges = []
     for node in nodes.values():
         color = STATUS_COLORS.get(node.status, "#EEEEEE")
-        out_nodes.append({
+        row = {
             "id": node.id,
             "label": node.title,
             "title": node.summary,
@@ -719,8 +748,10 @@ def graph_to_json(
             **focus_metadata.get(node.id, {}),
             **interaction_metadata.get(node.id, {}),
             **baseline_metadata.get(node.id, {}),
-            "raw": node.raw,
-        })
+        }
+        if include_raw:
+            row["raw"] = node.raw
+        out_nodes.append(row)
     out_edges = iter_graph_edges(nodes, explicit_edges)
     return {
         "nodes": out_nodes,
@@ -1144,10 +1175,21 @@ def build_search_index(
     root: Path,
     nodes: dict[str, ResearchNode],
     current: dict[str, Any] | None = None,
+    *,
+    link_rows: list[dict[str, Any]] | None = None,
+    topology: GraphTopology | None = None,
+    include_resource_text: bool = True,
 ) -> list[dict[str, Any]]:
     from research_cockpit.search_index import build_search_index as _build_search_index
 
-    return _build_search_index(root, nodes, current)
+    return _build_search_index(
+        root,
+        nodes,
+        current,
+        link_rows=link_rows,
+        topology=topology,
+        include_resource_text=include_resource_text,
+    )
 
 
 def make_search_snippet(text: str, query: str, width: int = 180) -> str:

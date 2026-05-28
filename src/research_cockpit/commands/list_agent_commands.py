@@ -22,6 +22,7 @@ COMPACT_COMMAND_KEYS = {
     "supports_compact",
     "supports_build",
     "supports_watch",
+    "supports_profile",
     "supports_show_diff",
     "supports_root",
     "supported_flags",
@@ -279,6 +280,8 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": False,
         "supports_no_build": False,
         "supports_watch": True,
+        "supports_profile": True,
+        "extra_supported_flags": ["--skip-resource-search"],
         "recommended_when": "Refresh generated context after YAML changes.",
     },
     {
@@ -963,6 +966,8 @@ def _flag_support(row: dict[str, object]) -> tuple[list[str], list[str]]:
             unsupported.append(flag)
     if bool(row.get("supports_watch")):
         supported.extend(["--watch", "--interval", "--max-iterations"])
+    if bool(row.get("supports_profile")):
+        supported.extend(["--profile", "--profile-output"])
     return sorted(supported), sorted(unsupported)
 
 

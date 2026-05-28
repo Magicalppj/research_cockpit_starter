@@ -470,6 +470,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         }
 
         self.assertEqual({path.name for path in paths}, expected)
+        graph = json.loads((self.root / "dashboards" / "graph_view.json").read_text(encoding="utf-8"))
         context = json.loads((self.root / "dashboards" / "agent_context_pack.json").read_text(encoding="utf-8"))
         focus_context = json.loads((self.root / "dashboards" / "focus_context_pack.json").read_text(encoding="utf-8"))
         matrix = json.loads((self.root / "dashboards" / "experiment_matrix.json").read_text(encoding="utf-8"))
@@ -481,6 +482,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         assignment_view = json.loads((self.root / "dashboards" / "assignment_view.json").read_text(encoding="utf-8"))
         nodes = load_nodes(self.root)
 
+        self.assertTrue(graph["nodes"])
+        self.assertNotIn("raw", graph["nodes"][0])
+        self.assertIn("label", graph["nodes"][0])
         self.assertEqual(context["linked_nodes"][0]["id"], "stage_text")
         self.assertIn("suggested_next_actions", context)
         self.assertIn("search_index_summary", context)
@@ -505,6 +509,529 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("metadata", context)
         self.assertIn("metadata", focus_context)
         self.assertIsInstance(context["metadata"]["worktree_dirty"], bool)
+
+    def test_build_dashboard_reuses_read_models_in_context_packs(self) -> None:
+        import research_cockpit.commands.build_dashboard as build_dashboard_module
+
+        with (
+            patch(
+                "research_cockpit.commands.build_dashboard.build_link_rows",
+                wraps=build_dashboard_module.build_link_rows,
+            ) as dashboard_link_rows,
+            patch(
+                "research_cockpit.commands.build_dashboard.build_action_suggestions",
+                wraps=build_dashboard_module.build_action_suggestions,
+            ) as dashboard_action_suggestions,
+            patch(
+                "research_cockpit.commands.build_dashboard.build_search_index",
+                wraps=build_dashboard_module.build_search_index,
+            ) as dashboard_search_index,
+            patch(
+                "research_cockpit.commands.build_dashboard.build_option_workstream_rows",
+                wraps=build_dashboard_module.build_option_workstream_rows,
+            ) as dashboard_option_workstreams,
+            patch(
+                "research_cockpit.commands.build_dashboard.build_assignment_view",
+                wraps=build_dashboard_module.build_assignment_view,
+            ) as dashboard_assignment_view,
+            patch(
+                "research_cockpit.commands.build_dashboard.GraphTopology.from_nodes",
+                wraps=build_dashboard_module.GraphTopology.from_nodes,
+            ) as dashboard_topology,
+            patch("research_cockpit.context_packs.build_link_rows", side_effect=AssertionError("duplicate link rows")),
+            patch("research_cockpit.context_packs.build_search_index", side_effect=AssertionError("duplicate search index")),
+            patch(
+                "research_cockpit.context_packs.build_action_suggestions",
+                side_effect=AssertionError("duplicate suggestions"),
+            ),
+            patch(
+                "research_cockpit.context_packs.build_option_workstream_rows",
+                side_effect=AssertionError("duplicate option workstreams"),
+            ),
+            patch("research_cockpit.context_packs.build_assignment_view", side_effect=AssertionError("duplicate assignments")),
+            patch("research_cockpit.search_index.build_link_rows", side_effect=AssertionError("duplicate search links")),
+        ):
+            build_dashboard(self.root)
+
+        context = json.loads((self.root / "dashboards" / "agent_context_pack.json").read_text(encoding="utf-8"))
+        focus_context = json.loads((self.root / "dashboards" / "focus_context_pack.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(dashboard_link_rows.call_count, 1)
+        self.assertEqual(dashboard_action_suggestions.call_count, 1)
+        self.assertEqual(dashboard_search_index.call_count, 1)
+        self.assertEqual(dashboard_option_workstreams.call_count, 1)
+        self.assertEqual(dashboard_assignment_view.call_count, 1)
+        self.assertEqual(dashboard_topology.call_count, 1)
+        self.assertIn("search_index_summary", context)
+        self.assertIn("search_index_summary", focus_context)
+
+    def test_build_cli_profile_reports_stage_metrics_and_writes_profile_output(self) -> None:
+        profile_path = self.root / "dashboards" / "build_profile.json"
+        note_path = self.root / "notes" / "problems" / "problem_text.md"
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.write_text("# Problem Note\nSearch profile note.\n", encoding="utf-8")
+        resource_path = self.root / "resources" / "problem_context.txt"
+        resource_path.parent.mkdir(parents=True, exist_ok=True)
+        resource_path.write_text("Search profile resource.\n", encoding="utf-8")
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["links"] = {
+            "notes": "notes/problems/problem_text.md",
+            "context": "resources/problem_context.txt",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        out = subprocess.run(
+            [
+                *cli_command("build"),
+                "--root",
+                str(self.root),
+                "--json",
+                "--profile",
+                "--profile-output",
+                "dashboards/build_profile.json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertTrue(profile_path.exists())
+        self.assertIn("profile", payload)
+        self.assertEqual(payload["profile_output"], str(profile_path))
+        profile = payload["profile"]
+        written_profile = json.loads(profile_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(written_profile["schema_version"], "build_profile_v1")
+        self.assertEqual(profile["schema_version"], "build_profile_v1")
+        self.assertEqual(profile["counts"]["node_count"], payload["node_count"])
+        self.assertGreaterEqual(profile["counts"]["edge_count"], 0)
+        self.assertEqual(profile["counts"]["graph_view_raw_omitted_node_count"], payload["node_count"])
+        self.assertGreater(
+            profile["counts"]["graph_view_with_raw_estimated_bytes"],
+            profile["counts"]["graph_view_slim_estimated_bytes"],
+        )
+        self.assertEqual(profile["counts"]["search_note_count"], 1)
+        self.assertEqual(profile["counts"]["search_node_count"], payload["node_count"])
+        self.assertGreaterEqual(profile["counts"]["search_resource_indexed_count"], 1)
+        self.assertGreaterEqual(profile["counts"]["search_resource_unique_indexed_count"], 1)
+        self.assertGreaterEqual(
+            profile["counts"]["search_resource_total_count"],
+            profile["counts"]["search_resource_indexed_count"],
+        )
+        self.assertGreater(profile["counts"]["search_resource_bytes_read"], 0)
+        self.assertGreaterEqual(profile["total_duration_ms"], 0)
+        self.assertTrue(profile["stages"])
+        self.assertIn("load_nodes", {stage["name"] for stage in profile["stages"]})
+        self.assertIn("build_search_index", {stage["name"] for stage in profile["stages"]})
+        self.assertIn("write_outputs", {stage["name"] for stage in profile["stages"]})
+        self.assertTrue(all(stage["duration_ms"] >= 0 for stage in profile["stages"]))
+        output_files = {item["path"]: item["bytes"] for item in profile["output_files"]}
+        self.assertGreater(output_files["dashboards/graph_view.json"], 0)
+        self.assertGreater(output_files["dashboards/agent_context_pack.json"], 0)
+
+    def test_build_cli_profile_output_rejects_unsafe_paths(self) -> None:
+        unsafe_paths = {
+            "../profile.json": "inside <root>/dashboards",
+            "current_state.yaml": "inside <root>/dashboards",
+            "notes/profile.json": "inside <root>/dashboards",
+            "dashboards/profile.txt": ".json file",
+            "dashboards/graph_view.json": "must not overwrite standard dashboard outputs",
+        }
+
+        for profile_output, expected_error in unsafe_paths.items():
+            with self.subTest(profile_output=profile_output):
+                out = subprocess.run(
+                    [
+                        *cli_command("build"),
+                        "--root",
+                        str(self.root),
+                        "--json",
+                        "--profile-output",
+                        profile_output,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                self.assertNotEqual(out.returncode, 0, out.stdout + out.stderr)
+                self.assertIn(expected_error, out.stdout + out.stderr)
+
+        self.assertIsInstance(load_yaml(self.root / "current_state.yaml"), dict)
+        self.assertFalse((self.root / "dashboards").exists())
+
+    def test_build_cli_can_skip_resource_search_text_reads(self) -> None:
+        note_path = self.root / "notes" / "problems" / "problem_text.md"
+        note_path.parent.mkdir(parents=True, exist_ok=True)
+        note_path.write_text("# Problem Note\nNote search stays enabled.\n", encoding="utf-8")
+        resource_path = self.root / "resources" / "problem_context.txt"
+        resource_path.parent.mkdir(parents=True, exist_ok=True)
+        resource_path.write_text("Resource search should be skipped.\n", encoding="utf-8")
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["links"] = {
+            "notes": "notes/problems/problem_text.md",
+            "context": "resources/problem_context.txt",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        out = subprocess.run(
+            [
+                *cli_command("build"),
+                "--root",
+                str(self.root),
+                "--json",
+                "--profile",
+                "--skip-resource-search",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        profile = payload["profile"]
+        search_index = json.loads((self.root / "dashboards" / "search_index.json").read_text(encoding="utf-8"))
+        resource_entry = next(item for item in search_index if item.get("path") == "resources/problem_context.txt")
+        note_entry = next(item for item in search_index if item.get("entry_id") == "note:notes/problems/problem_text.md")
+
+        self.assertEqual(resource_entry["skip_reason"], "resource_search_disabled")
+        self.assertEqual(resource_entry["bytes_read"], 0)
+        self.assertIn("Note search stays enabled", note_entry["text"])
+        self.assertEqual(profile["counts"]["search_resource_text_enabled"], 0)
+        self.assertEqual(profile["counts"]["search_resource_indexed_count"], 0)
+        self.assertEqual(profile["counts"]["search_resource_unique_indexed_count"], 0)
+        self.assertEqual(profile["counts"]["search_resource_bytes_read"], 0)
+        self.assertGreaterEqual(profile["counts"]["search_resource_disabled_count"], 1)
+
+    def test_generate_large_cockpit_fixture_cli_creates_valid_profile_fixture(self) -> None:
+        fixture_root = self.tmp_root / "perf_fixture"
+        generator = DEV_SCRIPTS_DIR / "generate_large_cockpit_fixture.py"
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(generator),
+                "--root",
+                str(fixture_root),
+                "--nodes",
+                "24",
+                "--links-per-node",
+                "2",
+                "--note-count",
+                "3",
+                "--resource-count",
+                "4",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertEqual(payload["node_count"], 24)
+        self.assertEqual(payload["note_count"], 3)
+        self.assertEqual(payload["resource_count"], 4)
+
+        nodes = load_nodes(fixture_root)
+        self.assertEqual(len(nodes), 24)
+        self.assertIn("stage_perf_0000", nodes)
+        self.assertIn("artifact_perf_0000", nodes)
+        self.assertEqual(nodes["option_perf_0001"].parent, "problem_perf_0001")
+        self.assertEqual(nodes["problem_perf_0001"].parent, "option_perf_0000")
+        self.assertEqual(len(list((fixture_root / "notes").glob("*.md"))), 3)
+        self.assertEqual(len(list((fixture_root / "artifacts" / "search_resources").glob("*.md"))), 4)
+        self.assertTrue((fixture_root / ".synthetic_research_cockpit_fixture.json").exists())
+
+        for node in nodes.values():
+            for child_id in node.children:
+                self.assertEqual(nodes[child_id].parent, node.id)
+            if node.parent:
+                self.assertIn(node.id, nodes[node.parent].children)
+
+        note_links = sorted(
+            node.raw.get("links", {}).get("notes")
+            for node in nodes.values()
+            if node.raw.get("links", {}).get("notes")
+        )
+        self.assertEqual(note_links, [f"notes/note_{index:04d}.md" for index in range(3)])
+        linked_resource_targets = {
+            row["target"]
+            for row in build_link_rows(fixture_root, nodes)
+            if str(row["target"]).startswith("artifacts/search_resources/resource_")
+        }
+        self.assertEqual(
+            {_resource for _resource in linked_resource_targets},
+            {f"artifacts/search_resources/resource_{index:04d}.md" for index in range(4)},
+        )
+
+        validate = subprocess.run(
+            [*cli_command("validate"), "--root", str(fixture_root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(validate.returncode, 0, validate.stdout + validate.stderr)
+
+        build = subprocess.run(
+            [*cli_command("build"), "--root", str(fixture_root), "--json", "--profile"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        build_payload = json.loads(build.stdout)
+        self.assertEqual(build.returncode, 0, build.stderr or build.stdout)
+        self.assertEqual(build_payload["profile"]["counts"]["node_count"], 24)
+        self.assertEqual(build_payload["profile"]["counts"]["linked_resource_count"], payload["linked_resource_count"])
+        search_index = json.loads((fixture_root / "dashboards" / "search_index.json").read_text(encoding="utf-8"))
+        resource_entries = {
+            entry["path"]
+            for entry in search_index
+            if entry.get("source") == "resource"
+            and str(entry.get("path", "")).startswith("artifacts/search_resources/resource_")
+        }
+        self.assertEqual(
+            resource_entries,
+            {f"artifacts/search_resources/resource_{index:04d}.md" for index in range(4)},
+        )
+
+        smoke = subprocess.run(
+            [*cli_command("smoke"), "--root", str(fixture_root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        smoke_payload = json.loads(smoke.stdout)
+        self.assertEqual(smoke.returncode, 0, smoke.stdout + smoke.stderr)
+        self.assertTrue(smoke_payload["ok"])
+
+        second_root = self.tmp_root / "perf_fixture_second"
+        second = subprocess.run(
+            [
+                sys.executable,
+                str(generator),
+                "--root",
+                str(second_root),
+                "--nodes",
+                "24",
+                "--links-per-node",
+                "2",
+                "--note-count",
+                "3",
+                "--resource-count",
+                "4",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(second.returncode, 0, second.stderr or second.stdout)
+        for relative_path in (
+            "current_state.yaml",
+            "graph/nodes/experiment_perf_0000.yaml",
+            "graph/nodes/option_perf_0001.yaml",
+            "artifacts/search_resources/resource_0000.md",
+            "notes/note_0000.md",
+        ):
+            self.assertEqual(
+                (fixture_root / relative_path).read_text(encoding="utf-8"),
+                (second_root / relative_path).read_text(encoding="utf-8"),
+                relative_path,
+            )
+
+    def test_generate_large_cockpit_fixture_force_only_replaces_marked_fixture(self) -> None:
+        generator = DEV_SCRIPTS_DIR / "generate_large_cockpit_fixture.py"
+        unsafe_root = self.tmp_root / "not_a_fixture"
+        unsafe_root.mkdir()
+        keep_path = unsafe_root / "keep.txt"
+        keep_path.write_text("do not delete", encoding="utf-8")
+
+        unsafe = subprocess.run(
+            [
+                sys.executable,
+                str(generator),
+                "--root",
+                str(unsafe_root),
+                "--nodes",
+                "5",
+                "--note-count",
+                "1",
+                "--resource-count",
+                "1",
+                "--force",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        unsafe_payload = json.loads(unsafe.stdout)
+        self.assertNotEqual(unsafe.returncode, 0, unsafe.stdout + unsafe.stderr)
+        self.assertFalse(unsafe_payload["ok"])
+        self.assertIn("non-synthetic fixture root", unsafe_payload["error"])
+        self.assertTrue(keep_path.exists())
+
+        fixture_root = self.tmp_root / "replaceable_fixture"
+        first = subprocess.run(
+            [
+                sys.executable,
+                str(generator),
+                "--root",
+                str(fixture_root),
+                "--nodes",
+                "5",
+                "--note-count",
+                "1",
+                "--resource-count",
+                "1",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(first.returncode, 0, first.stderr or first.stdout)
+        stale_path = fixture_root / "stale.txt"
+        stale_path.write_text("replace me", encoding="utf-8")
+
+        second = subprocess.run(
+            [
+                sys.executable,
+                str(generator),
+                "--root",
+                str(fixture_root),
+                "--nodes",
+                "6",
+                "--note-count",
+                "1",
+                "--resource-count",
+                "1",
+                "--force",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        second_payload = json.loads(second.stdout)
+        self.assertEqual(second.returncode, 0, second.stderr or second.stdout)
+        self.assertEqual(second_payload["node_count"], 6)
+        self.assertFalse(stale_path.exists())
+        self.assertTrue((fixture_root / ".synthetic_research_cockpit_fixture.json").exists())
+
+    def test_benchmark_build_cli_reports_profile_statistics(self) -> None:
+        fixture_root = self.tmp_root / "benchmark_fixture"
+        generator = DEV_SCRIPTS_DIR / "generate_large_cockpit_fixture.py"
+        benchmark = DEV_SCRIPTS_DIR / "benchmark_build.py"
+
+        generated = subprocess.run(
+            [
+                sys.executable,
+                str(generator),
+                "--root",
+                str(fixture_root),
+                "--nodes",
+                "12",
+                "--links-per-node",
+                "1",
+                "--note-count",
+                "2",
+                "--resource-count",
+                "2",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(generated.returncode, 0, generated.stderr or generated.stdout)
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(benchmark),
+                "--root",
+                str(fixture_root),
+                "--runs",
+                "2",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["schema_version"], "benchmark_build_v1")
+        self.assertEqual(payload["run_count"], 2)
+        self.assertTrue(payload["include_resource_search"])
+        self.assertEqual(len(payload["runs"]), 2)
+        self.assertEqual(payload["summary"]["counts"]["node_count"], 12)
+        total = payload["summary"]["total_duration_ms"]
+        self.assertGreaterEqual(total["min"], 0)
+        self.assertGreaterEqual(total["median"], total["min"])
+        self.assertGreaterEqual(total["max"], total["median"])
+        self.assertIn("load_nodes", payload["summary"]["stages"])
+        self.assertIn("write_outputs", payload["summary"]["stages"])
+        for stats in payload["summary"]["stages"].values():
+            self.assertEqual(set(stats), {"min", "median", "max"})
+        for run in payload["runs"]:
+            self.assertIn("index", run)
+            self.assertIn("total_duration_ms", run)
+            self.assertIsInstance(run["stages"], list)
+        self.assertTrue((fixture_root / "dashboards" / "build_profile.json").exists())
+
+        light = subprocess.run(
+            [
+                sys.executable,
+                str(benchmark),
+                "--root",
+                str(fixture_root),
+                "--runs",
+                "1",
+                "--skip-resource-search",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        light_payload = json.loads(light.stdout)
+
+        self.assertEqual(light.returncode, 0, light.stderr or light.stdout)
+        self.assertFalse(light_payload["include_resource_search"])
+        self.assertEqual(light_payload["summary"]["counts"]["search_resource_text_enabled"], 0)
+        self.assertGreaterEqual(light_payload["summary"]["counts"]["search_resource_disabled_count"], 1)
+
+    def test_benchmark_build_cli_rejects_zero_runs(self) -> None:
+        benchmark = DEV_SCRIPTS_DIR / "benchmark_build.py"
+
+        out = subprocess.run(
+            [
+                sys.executable,
+                str(benchmark),
+                "--root",
+                str(self.root),
+                "--runs",
+                "0",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertNotEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertFalse(payload["ok"])
+        self.assertIn("--runs must be at least 1", payload["error"])
 
     def test_dashboard_splits_next_actions_by_scope(self) -> None:
         current = load_yaml(self.root / "current_state.yaml")
@@ -786,6 +1313,27 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(events[1]["truth_source_changed"])
         self.assertTrue(events[1]["time_sensitive_changed"])
         self.assertEqual(events[1]["last_build_status"], "success")
+
+    def test_dashboard_watch_can_write_profile_output(self) -> None:
+        profile_path = self.root / "dashboards" / "watch_profile.json"
+
+        with patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            watch_dashboard(
+                self.root,
+                interval=0,
+                max_iterations=1,
+                json_output=True,
+                profile=True,
+                profile_output=Path("dashboards/watch_profile.json"),
+            )
+
+        payload = json.loads(stdout.getvalue().splitlines()[0])
+        profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["build_attempted"])
+        self.assertEqual(payload["profile_output"], str(profile_path))
+        self.assertEqual(payload["profile"]["schema_version"], "build_profile_v1")
+        self.assertEqual(profile["schema_version"], "build_profile_v1")
 
     def test_dashboard_watch_json_reports_build_failure_without_crashing(self) -> None:
         with (
@@ -3586,6 +4134,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--watch", by_name["build"]["supported_flags"])
         self.assertIn("--interval", by_name["build"]["supported_flags"])
         self.assertIn("--max-iterations", by_name["build"]["supported_flags"])
+        self.assertIn("--profile", by_name["build"]["supported_flags"])
+        self.assertIn("--profile-output", by_name["build"]["supported_flags"])
+        self.assertIn("--skip-resource-search", by_name["build"]["supported_flags"])
         self.assertTrue(by_name["validate"]["safe_in_plan_mode"])
         self.assertEqual(by_name["validate"]["batch_policy"]["mode"], "read_only")
         self.assertFalse(by_name["update-node-fields"]["safe_in_plan_mode"])

@@ -25,6 +25,14 @@ A small structured demo can show how agents inspect, branch, test, and report op
 - Run the prompt refinement demo experiment.
 - Record one finding before reviewing the demo decision.
 
+## Next Actions By Scope
+
+### Parent Problem
+- `problem_demo_quality_gap`: Run the prompt refinement demo experiment.
+### Global Coordinator
+- `current_state`: Run the prompt refinement demo experiment.
+- `current_state`: Record one finding before reviewing the demo decision.
+
 ## Active Problems
 
 - **Demo answer quality is inconsistent** (`problem_demo_quality_gap`): Generic sample problem used to exercise option comparison, experiments, decisions, and agent workstreams.

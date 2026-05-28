@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,7 @@ import subprocess
 from research_cockpit.baselines import resolve_current_effective_baseline
 from research_cockpit.assignment_view import build_assignment_view
 from research_cockpit.graph_core import (
+    GraphTopology,
     child_ids,
     derive_focus_path,
     focus_mode_from_current,
@@ -40,6 +42,16 @@ TERMINAL_NEXT_ACTION_STATUSES = {
     "resolved",
     "superseded",
 }
+
+
+@dataclass(frozen=True)
+class DashboardReadModels:
+    linked_resources: list[dict[str, Any]]
+    action_suggestions: list[dict[str, Any]]
+    search_index: list[dict[str, Any]]
+    option_workstreams: list[dict[str, Any]]
+    assignment_view: dict[str, Any]
+    topology: GraphTopology | None = None
 
 
 def _git_output(repo_root: Path, *args: str) -> str | None:
@@ -197,6 +209,7 @@ def build_next_action_scopes(
     *,
     focus_node_id: str | None = None,
     focus_path_ids: list[str] | None = None,
+    topology: GraphTopology | None = None,
 ) -> dict[str, Any]:
     focus_node_id = focus_node_id or focus_node_id_from_current(current, nodes)
     path_ids = [
@@ -206,7 +219,7 @@ def build_next_action_scopes(
     ]
     if focus_node_id and focus_node_id in nodes and focus_node_id not in path_ids:
         try:
-            path_ids = derive_focus_path(nodes, focus_node_id)
+            path_ids = derive_focus_path(nodes, focus_node_id, topology=topology)
         except ValueError:
             path_ids = [focus_node_id]
 
@@ -269,8 +282,13 @@ def build_next_action_scopes(
     }
 
 
-def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str, Any]:
-    current = load_yaml(root / "current_state.yaml")
+def build_agent_context(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    current: dict[str, Any] | None = None,
+    read_models: DashboardReadModels | None = None,
+) -> dict[str, Any]:
+    current = current if current is not None else load_yaml(root / "current_state.yaml")
     path = current.get("current_focus_path", []) or []
     linked_nodes = [node_context(nodes[node_id]) for node_id in path if node_id in nodes]
     current_focus_node = focus_node_id_from_current(current, nodes)
@@ -280,6 +298,7 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         current,
         focus_node_id=current_focus_node,
         focus_path_ids=path,
+        topology=read_models.topology if read_models else None,
     )
 
     active_problems = [
@@ -294,9 +313,18 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         n for n in nodes.values()
         if n.type == "decision" and n.status == "proposed"
     ]
-    search_index = build_search_index(root, nodes, current)
-    option_workstreams = build_option_workstream_rows(nodes, current)
-    link_rows = build_link_rows(root, nodes)
+    if read_models is not None:
+        search_index = read_models.search_index
+        option_workstreams = read_models.option_workstreams
+        link_rows = read_models.linked_resources
+        action_suggestions = read_models.action_suggestions
+        assignment_view = read_models.assignment_view
+    else:
+        link_rows = build_link_rows(root, nodes)
+        search_index = build_search_index(root, nodes, current, link_rows=link_rows)
+        option_workstreams = build_option_workstream_rows(nodes, current)
+        action_suggestions = build_action_suggestions(root, nodes, current, link_rows)
+        assignment_view = build_assignment_view(nodes)
 
     return {
         "metadata": build_context_metadata(root, current),
@@ -354,13 +382,13 @@ def build_agent_context(root: Path, nodes: dict[str, ResearchNode]) -> dict[str,
         "active_option_workstreams": [
             row for row in option_workstreams if row.get("workstream_status") in ACTIVE_WORKSTREAM_STATUSES
         ],
-        "assignment_view": build_assignment_view(nodes),
+        "assignment_view": assignment_view,
         "run_overview": build_run_overview(root, nodes),
         "gate_overview": build_gate_overview(root),
         "saved_graph_views": load_graph_views(root),
         "recent_interactions": recent_interactions(root),
         "warnings": interaction_log_warnings(root),
-        "suggested_next_actions": build_action_suggestions(root, nodes, current, link_rows),
+        "suggested_next_actions": action_suggestions,
         "search_index_summary": build_search_index_summary(search_index),
     }
 
@@ -369,8 +397,10 @@ def build_focus_context(
     root: Path,
     nodes: dict[str, ResearchNode],
     current: dict[str, Any] | None = None,
+    read_models: DashboardReadModels | None = None,
 ) -> dict[str, Any]:
     current = current if current is not None else load_yaml(root / "current_state.yaml")
+    topology = read_models.topology if read_models else None
     focus_node_id = focus_node_id_from_current(current, nodes)
     focus_node = nodes.get(focus_node_id) if focus_node_id else None
     effective_baseline = resolve_current_effective_baseline(nodes, current)
@@ -394,9 +424,13 @@ def build_focus_context(
         if focus_node.parent and focus_node.parent in nodes:
             parent_ids.append(focus_node.parent)
             parent = nodes[focus_node.parent]
-            sibling_ids.extend(child for child in child_ids(nodes, parent) if child != focus_node.id)
+            sibling_ids.extend(
+                child
+                for child in child_ids(nodes, parent, topology=topology)
+                if child != focus_node.id
+            )
 
-        child_node_ids.extend(child_ids(nodes, focus_node))
+        child_node_ids.extend(child_ids(nodes, focus_node, topology=topology))
         focus_related_ids.extend(parent_ids)
         focus_related_ids.extend(child_node_ids)
         focus_related_ids.extend(sibling_ids)
@@ -442,6 +476,7 @@ def build_focus_context(
         current,
         focus_node_id=focus_node_id,
         focus_path_ids=path_ids,
+        topology=topology,
     )
     knowledge_node_ids = (
         [focus_node_id or ""]
@@ -453,19 +488,25 @@ def build_focus_context(
         + artifact_ids
     )
 
-    link_rows = build_link_rows(root, nodes)
+    if read_models is not None:
+        link_rows = read_models.linked_resources
+        action_suggestions = read_models.action_suggestions
+        search_index = read_models.search_index
+    else:
+        link_rows = build_link_rows(root, nodes)
+        action_suggestions = build_action_suggestions(root, nodes, current, link_rows)
+        search_index = build_search_index(root, nodes, current, link_rows=link_rows)
     suggested_next_actions = [
         suggestion
-        for suggestion in build_action_suggestions(root, nodes, current, link_rows)
+        for suggestion in action_suggestions
         if suggestion.get("is_focus_related")
     ]
-    search_index = build_search_index(root, nodes, current)
     option_context_id: str | None = None
     if focus_node:
         try:
             option_context_id = node_id_by_type_in_path(
                 nodes,
-                derive_focus_path(nodes, focus_node.id),
+                derive_focus_path(nodes, focus_node.id, topology=topology),
                 "option",
                 nearest=True,
             )
@@ -476,7 +517,7 @@ def build_focus_context(
         if candidate_option_id in nodes and nodes[candidate_option_id].type == "option":
             option_context_id = candidate_option_id
     option_workstream_context = (
-        build_option_workstream_context(root, nodes, current, option_context_id)
+        build_option_workstream_context(root, nodes, current, option_context_id, topology=topology)
         if option_context_id
         else None
     )

@@ -1,8 +1,8 @@
 {
   "metadata": {
     "schema_version": "agent_context_v1",
-    "generated_at": "2026-05-13T06:49:51.358983Z",
-    "source_git_commit": "7f486f0",
+    "generated_at": "2026-05-28T02:21:52.494099Z",
+    "source_git_commit": "169edeb",
     "worktree_dirty": true,
     "current_state_updated_at": "2026-04-29"
   },
@@ -68,6 +68,70 @@
     "Run the prompt refinement demo experiment.",
     "Record one finding before reviewing the demo decision."
   ],
+  "next_action_scopes": {
+    "focus_node_id": "experiment_demo_prompt_refinement",
+    "focus_path_ids": [
+      "stage_demo_research",
+      "problem_demo_quality_gap",
+      "option_demo_prompt_refinement",
+      "experiment_demo_prompt_refinement"
+    ],
+    "focus_next_actions": [],
+    "parent_option_next_actions": [],
+    "parent_problem_next_actions": [
+      {
+        "scope": "parent_problem_next_actions",
+        "source": "node",
+        "node_id": "problem_demo_quality_gap",
+        "node_title": "Demo answer quality is inconsistent",
+        "node_type": "problem",
+        "node_status": "active",
+        "action": "Run the prompt refinement demo experiment.",
+        "is_terminal": false,
+        "stale": false,
+        "migration_candidate": false,
+        "reason": "Stored on the nearest parent problem in the focus path."
+      }
+    ],
+    "global_coordinator_next_actions": [
+      {
+        "scope": "global_coordinator_next_actions",
+        "source": "current_state",
+        "node_id": "current_state",
+        "node_title": "current_state",
+        "node_type": "current_state",
+        "node_status": "",
+        "related_focus_node": "experiment_demo_prompt_refinement",
+        "action": "Run the prompt refinement demo experiment.",
+        "is_terminal": false,
+        "stale": false,
+        "migration_candidate": false,
+        "reason": "Stored in current_state.next_actions for coordinator-level handoff."
+      },
+      {
+        "scope": "global_coordinator_next_actions",
+        "source": "current_state",
+        "node_id": "current_state",
+        "node_title": "current_state",
+        "node_type": "current_state",
+        "node_status": "",
+        "related_focus_node": "experiment_demo_prompt_refinement",
+        "action": "Record one finding before reviewing the demo decision.",
+        "is_terminal": false,
+        "stale": false,
+        "migration_candidate": false,
+        "reason": "Stored in current_state.next_actions for coordinator-level handoff."
+      }
+    ],
+    "stale_terminal_node_next_actions": [],
+    "counts": {
+      "focus_next_actions": 0,
+      "parent_option_next_actions": 0,
+      "parent_problem_next_actions": 1,
+      "global_coordinator_next_actions": 2,
+      "stale_terminal_node_next_actions": 0
+    }
+  },
   "linked_nodes": [
     {
       "id": "stage_demo_research",
@@ -309,6 +373,34 @@
     },
     "count": 0,
     "assignments": []
+  },
+  "run_overview": {
+    "total_count": 0,
+    "active_count": 0,
+    "running_count": 0,
+    "queued_count": 0,
+    "completed_count": 0,
+    "failed_count": 0,
+    "cancelled_count": 0,
+    "possibly_stale_count": 0,
+    "active_run_ids": [],
+    "recent_run_ids": [],
+    "stale_after_hours": 24,
+    "queued": [],
+    "running": [],
+    "failed": [],
+    "recently_completed": [],
+    "cancelled": [],
+    "possibly_stale": [],
+    "warnings": []
+  },
+  "gate_overview": {
+    "total_count": 0,
+    "blocking_count": 0,
+    "failed_count": 0,
+    "warning_count": 0,
+    "recent_gate_ids": [],
+    "blocking_gate_ids": []
   },
   "saved_graph_views": [],
   "recent_interactions": [

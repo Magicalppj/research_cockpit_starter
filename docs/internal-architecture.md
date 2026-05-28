@@ -120,7 +120,7 @@ Generated output lives in `<data-root>/dashboards/` and can be rebuilt with:
 research-cockpit build --root <data-root>
 ```
 
-Generated dashboard files should not become the source of truth for commands or domain logic.
+Generated dashboard files should not become the source of truth for commands or domain logic. The Streamlit UI may use fresh generated dashboard files as a read-through cache for refresh speed, but it must fall back to truth-source builders and surface a stale warning when generated files are missing, malformed, or older than truth-source state.
 
 ## Adding A New Workflow
 
