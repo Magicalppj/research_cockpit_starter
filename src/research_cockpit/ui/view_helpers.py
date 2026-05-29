@@ -9,8 +9,9 @@ from research_cockpit.model import script_command, search_knowledge
 
 PRIMARY_GRAPH_NODE_TYPES = ("stage", "problem", "option", "experiment", "decision")
 BASELINE_LENS_DEFAULT_MODES = {"focus_depth_1", "focus_depth_2", "current_branch", "option_workstream", "global"}
-DEFAULT_HIDDEN_GRAPH_STATUSES = {"done"}
+DEFAULT_HIDDEN_GRAPH_STATUSES = {"cancelled", "done", "parked", "rejected"}
 DEFAULT_GRAPH_VIEW_MODE = "global"
+DEFAULT_HIDE_INACTIVE_OPTION_BRANCHES = True
 
 
 def ordered_tab_keys(text: dict[str, str]) -> list[str]:
@@ -369,6 +370,7 @@ def graph_filter_cache_key(
     only_blocking: bool = False,
     only_next_actions: bool = False,
     only_missing_evidence: bool = False,
+    hide_inactive_option_branches: bool = False,
     collapsed_branch_roots: set[str] | list[str] | tuple[str, ...] | None = None,
     revealed_child_roots: set[str] | list[str] | tuple[str, ...] | None = None,
 ) -> tuple[Any, ...]:
@@ -383,6 +385,7 @@ def graph_filter_cache_key(
         bool(only_blocking),
         bool(only_next_actions),
         bool(only_missing_evidence),
+        bool(hide_inactive_option_branches),
         _cache_key_values(collapsed_branch_roots),
         _cache_key_values(revealed_child_roots),
     )
@@ -957,6 +960,9 @@ def graph_view_state_from_saved_view(
         "graph_only_blocking": _saved_view_bool(filters.get("only_blocking", False)),
         "graph_only_next_actions": _saved_view_bool(filters.get("only_next_actions", False)),
         "graph_only_missing_evidence": _saved_view_bool(filters.get("only_missing_evidence", False)),
+        "graph_hide_inactive_option_branches": _saved_view_bool(
+            filters.get("hide_inactive_option_branches", DEFAULT_HIDE_INACTIVE_OPTION_BRANCHES)
+        ),
         "graph_show_baseline_lens": (
             _saved_view_bool(filters["show_baseline_lens"])
             if "show_baseline_lens" in filters
@@ -995,6 +1001,7 @@ def reset_global_graph_filter_state(
         session_state["graph_only_blocking"] = False
         session_state["graph_only_next_actions"] = False
         session_state["graph_only_missing_evidence"] = False
+        session_state["graph_hide_inactive_option_branches"] = DEFAULT_HIDE_INACTIVE_OPTION_BRANCHES
         changed = True
 
     return changed
@@ -1082,12 +1089,20 @@ def _collapsed_descendant_ids(
     collapsed_branch_roots: set[str],
     included: set[str],
 ) -> set[str]:
+    return _descendant_ids(
+        child_ids_by_parent,
+        {root_id for root_id in collapsed_branch_roots if root_id in included},
+    )
+
+
+def _descendant_ids(
+    child_ids_by_parent: dict[str, list[str]],
+    root_ids: set[str],
+) -> set[str]:
     hidden: set[str] = set()
     processed: set[str] = set()
     stack: list[tuple[str, str]] = []
-    for root_id in collapsed_branch_roots:
-        if root_id not in included:
-            continue
+    for root_id in root_ids:
         stack.extend((child_id, root_id) for child_id in child_ids_by_parent.get(root_id, []))
     while stack:
         node_id, root_id = stack.pop()
@@ -1111,6 +1126,7 @@ def _visible_graph_nodes(
     only_blocking: bool = False,
     only_next_actions: bool = False,
     only_missing_evidence: bool = False,
+    hide_inactive_option_branches: bool = False,
     collapsed_branch_roots: set[str] | None = None,
     revealed_child_roots: set[str] | None = None,
     child_ids_by_parent: dict[str, list[str]] | None = None,
@@ -1127,8 +1143,11 @@ def _visible_graph_nodes(
     upstream_problem_ids = _upstream_problem_ids(graph, selected_workstreams)
     visible_nodes = []
     included: set[str] = set()
-    for node in graph.get("nodes", []):
-        if not _node_matches_graph_filters(
+    status_hidden_branch_roots: set[str] = set()
+    inactive_option_branch_roots: set[str] = set()
+
+    def matches_graph_filters(node: dict, *, ignore_status: bool = False, ignore_focus_depth: bool = False) -> bool:
+        return _node_matches_graph_filters(
             node,
             view_mode,
             selected_types,
@@ -1141,12 +1160,53 @@ def _visible_graph_nodes(
             only_blocking=only_blocking,
             only_next_actions=only_next_actions,
             only_missing_evidence=only_missing_evidence,
-        ):
-            continue
-        visible_nodes.append(node)
-        included.add(str(node["id"]))
+            ignore_status=ignore_status,
+            ignore_focus_depth=ignore_focus_depth,
+        )
 
-    needs_branch_state = bool(collapsed_branch_roots or revealed_child_roots)
+    def is_inactive_option_branch_root(node: dict) -> bool:
+        return (
+            hide_inactive_option_branches
+            and node.get("type") == "option"
+            and node.get("status") != "active"
+            and _node_matches_graph_filters(
+                node,
+                view_mode,
+                set(),
+                selected_statuses,
+                selected_stages,
+                selected_focus_roles,
+                selected_workstreams,
+                upstream_problem_ids,
+                max_depth,
+                only_blocking=only_blocking,
+                only_next_actions=only_next_actions,
+                only_missing_evidence=only_missing_evidence,
+                ignore_status=True,
+            )
+        )
+
+    for node in graph.get("nodes", []):
+        if is_inactive_option_branch_root(node):
+            inactive_option_branch_roots.add(str(node["id"]))
+            continue
+        if matches_graph_filters(node):
+            visible_nodes.append(node)
+            included.add(str(node["id"]))
+            continue
+        if (
+            selected_statuses
+            and node["status"] not in selected_statuses
+            and matches_graph_filters(node, ignore_status=True)
+        ):
+            status_hidden_branch_roots.add(str(node["id"]))
+
+    needs_branch_state = bool(
+        collapsed_branch_roots
+        or revealed_child_roots
+        or status_hidden_branch_roots
+        or inactive_option_branch_roots
+    )
     if needs_branch_state and child_ids_by_parent is None:
         child_ids_by_parent = _graph_child_ids_by_parent(graph)
     child_ids_by_parent = child_ids_by_parent or {}
@@ -1185,6 +1245,14 @@ def _visible_graph_nodes(
                 visible_nodes.append(child)
                 included.add(child_id)
 
+    status_pruned_descendants = _descendant_ids(
+        child_ids_by_parent,
+        (status_hidden_branch_roots | inactive_option_branch_roots) - included,
+    )
+    if status_pruned_descendants:
+        visible_nodes = [node for node in visible_nodes if node.get("id") not in status_pruned_descendants]
+        included.difference_update(status_pruned_descendants)
+
     return visible_nodes, included, hidden_by_collapse
 
 
@@ -1201,6 +1269,7 @@ def revealable_child_ids_for_view(
     only_blocking: bool = False,
     only_next_actions: bool = False,
     only_missing_evidence: bool = False,
+    hide_inactive_option_branches: bool = False,
     collapsed_branch_roots: set[str] | None = None,
     included_node_ids: set[str] | None = None,
     hidden_by_collapse: set[str] | None = None,
@@ -1224,6 +1293,7 @@ def revealable_child_ids_for_view(
             only_blocking=only_blocking,
             only_next_actions=only_next_actions,
             only_missing_evidence=only_missing_evidence,
+            hide_inactive_option_branches=hide_inactive_option_branches,
             collapsed_branch_roots=collapsed_branch_roots,
             child_ids_by_parent=child_ids_by_parent,
         )
@@ -1282,6 +1352,7 @@ def filter_graph_for_view_with_visibility(
     only_blocking: bool = False,
     only_next_actions: bool = False,
     only_missing_evidence: bool = False,
+    hide_inactive_option_branches: bool = False,
     collapsed_branch_roots: set[str] | None = None,
     revealed_child_roots: set[str] | None = None,
 ) -> tuple[dict, dict[str, Any]]:
@@ -1297,6 +1368,7 @@ def filter_graph_for_view_with_visibility(
         only_blocking=only_blocking,
         only_next_actions=only_next_actions,
         only_missing_evidence=only_missing_evidence,
+        hide_inactive_option_branches=hide_inactive_option_branches,
         collapsed_branch_roots=collapsed_branch_roots,
         revealed_child_roots=revealed_child_roots,
         child_ids_by_parent=child_ids_by_parent,
@@ -1327,6 +1399,7 @@ def filter_graph_for_view(
     only_blocking: bool = False,
     only_next_actions: bool = False,
     only_missing_evidence: bool = False,
+    hide_inactive_option_branches: bool = False,
     collapsed_branch_roots: set[str] | None = None,
     revealed_child_roots: set[str] | None = None,
 ) -> dict:
@@ -1341,6 +1414,7 @@ def filter_graph_for_view(
         only_blocking=only_blocking,
         only_next_actions=only_next_actions,
         only_missing_evidence=only_missing_evidence,
+        hide_inactive_option_branches=hide_inactive_option_branches,
         collapsed_branch_roots=collapsed_branch_roots,
         revealed_child_roots=revealed_child_roots,
     )

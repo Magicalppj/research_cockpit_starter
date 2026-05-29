@@ -51,6 +51,7 @@ from research_cockpit.ui.pyvis_renderer import build_pyvis_html, render_pyvis_gr
 from research_cockpit.ui.text import get_text
 from research_cockpit.ui.view_helpers import (
     DEFAULT_GRAPH_VIEW_MODE,
+    DEFAULT_HIDE_INACTIVE_OPTION_BRANCHES,
     baseline_command_problem_ids,
     build_apply_suggestion_command,
     build_accept_decision_command,
@@ -279,6 +280,7 @@ def _filter_graph_for_view_cached(
     only_blocking: bool,
     only_next_actions: bool,
     only_missing_evidence: bool,
+    hide_inactive_option_branches: bool,
     collapsed_branch_roots: tuple[str, ...],
     revealed_child_roots: tuple[str, ...],
 ) -> tuple[dict, dict[str, object]]:
@@ -293,6 +295,7 @@ def _filter_graph_for_view_cached(
         only_blocking=only_blocking,
         only_next_actions=only_next_actions,
         only_missing_evidence=only_missing_evidence,
+        hide_inactive_option_branches=hide_inactive_option_branches,
         collapsed_branch_roots=set(collapsed_branch_roots),
         revealed_child_roots=set(revealed_child_roots),
     )
@@ -602,6 +605,7 @@ def render_branch_visibility_controls(
     only_blocking: bool,
     only_next_actions: bool,
     only_missing_evidence: bool,
+    hide_inactive_option_branches: bool,
     collapsed_branch_roots: set[str],
     revealed_child_roots: set[str],
     visibility_context: dict[str, object],
@@ -618,6 +622,7 @@ def render_branch_visibility_controls(
         only_blocking=only_blocking,
         only_next_actions=only_next_actions,
         only_missing_evidence=only_missing_evidence,
+        hide_inactive_option_branches=hide_inactive_option_branches,
         collapsed_branch_roots=collapsed_branch_roots,
         included_node_ids=visibility_context.get("included_node_ids"),
         hidden_by_collapse=visibility_context.get("hidden_by_collapse"),
@@ -871,6 +876,10 @@ def render_graph_tab(
             all_focus_roles=all_focus_roles,
         )
         st.session_state["graph_show_baseline_lens"] = default_show_baseline_lens(next_view_mode)
+        st.session_state.setdefault(
+            "graph_hide_inactive_option_branches",
+            DEFAULT_HIDE_INACTIVE_OPTION_BRANCHES,
+        )
 
     def selected_values(key: str, available: list[str], default: list[str]) -> list[str]:
         raw = st.session_state[key] if key in st.session_state else default
@@ -931,6 +940,12 @@ def render_graph_tab(
     only_blocking = bool(st.session_state.get("graph_only_blocking", False))
     only_next_actions = bool(st.session_state.get("graph_only_next_actions", False))
     only_missing_evidence = bool(st.session_state.get("graph_only_missing_evidence", False))
+    hide_inactive_option_branches = bool(
+        st.session_state.get(
+            "graph_hide_inactive_option_branches",
+            DEFAULT_HIDE_INACTIVE_OPTION_BRANCHES,
+        )
+    )
     show_baseline_lens = bool(
         st.session_state.get("graph_show_baseline_lens", default_show_baseline_lens(view_mode))
     )
@@ -963,6 +978,7 @@ def render_graph_tab(
         only_blocking=only_blocking,
         only_next_actions=only_next_actions,
         only_missing_evidence=only_missing_evidence,
+        hide_inactive_option_branches=hide_inactive_option_branches,
         collapsed_branch_roots=collapsed_branch_roots_key,
         revealed_child_roots=revealed_child_roots_key,
     )
@@ -978,6 +994,7 @@ def render_graph_tab(
         only_blocking,
         only_next_actions,
         only_missing_evidence,
+        hide_inactive_option_branches,
         collapsed_branch_roots_key,
         revealed_child_roots_key,
     )
@@ -1097,6 +1114,11 @@ def render_graph_tab(
                 value=only_missing_evidence,
                 key="graph_only_missing_evidence",
             )
+            hide_inactive_option_branches = st.checkbox(
+                text["hide_inactive_option_branches"],
+                value=hide_inactive_option_branches,
+                key="graph_hide_inactive_option_branches",
+            )
             show_baseline_lens = st.checkbox(
                 text["show_baseline_lens"],
                 value=show_baseline_lens,
@@ -1142,6 +1164,7 @@ def render_graph_tab(
                             "only_blocking": only_blocking,
                             "only_next_actions": only_next_actions,
                             "only_missing_evidence": only_missing_evidence,
+                            "hide_inactive_option_branches": hide_inactive_option_branches,
                             "show_baseline_lens": show_baseline_lens,
                         },
                         "saved_focus_node_id": graph.get("current_focus_node"),
@@ -1196,6 +1219,7 @@ def render_graph_tab(
             only_blocking=only_blocking,
             only_next_actions=only_next_actions,
             only_missing_evidence=only_missing_evidence,
+            hide_inactive_option_branches=hide_inactive_option_branches,
             collapsed_branch_roots=collapsed_branch_roots,
             revealed_child_roots=revealed_child_roots,
             visibility_context=graph_visibility_context,

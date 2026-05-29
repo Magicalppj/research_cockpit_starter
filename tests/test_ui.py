@@ -553,6 +553,9 @@ class UiRenderingTests(unittest.TestCase):
         self.assertIn("default_show_baseline_lens(view_mode)", source)
         self.assertIn("show_baseline_lens=show_baseline_lens", source)
         self.assertIn('"show_baseline_lens": show_baseline_lens', source)
+        self.assertIn('key="graph_hide_inactive_option_branches"', source)
+        self.assertIn("hide_inactive_option_branches=hide_inactive_option_branches", source)
+        self.assertIn('"hide_inactive_option_branches": hide_inactive_option_branches', source)
 
     def test_set_focus_resets_stale_graph_filters(self) -> None:
         source = (ROOT_DIR / "src" / "research_cockpit" / "ui" / "app.py").read_text(encoding="utf-8")
@@ -625,7 +628,7 @@ class UiRenderingTests(unittest.TestCase):
             state,
             "global",
             all_types=["artifact", "decision", "experiment", "option", "problem", "stage"],
-            all_statuses=["active", "done", "open", "parked", "planned", "proposed"],
+            all_statuses=["active", "cancelled", "done", "open", "parked", "planned", "proposed", "rejected"],
             all_stages=["stage_demo"],
             all_focus_roles=["child", "current", "parent", "sibling", "unrelated"],
         )
@@ -633,7 +636,7 @@ class UiRenderingTests(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(state["graph_previous_view_mode"], "global")
         self.assertEqual(state["graph_node_types"], ["decision", "experiment", "option", "problem", "stage"])
-        self.assertEqual(state["graph_statuses"], ["active", "open", "parked", "planned", "proposed"])
+        self.assertEqual(state["graph_statuses"], ["active", "open", "planned", "proposed"])
         self.assertEqual(state["graph_focus_roles"], ["child", "current", "parent", "sibling", "unrelated"])
         self.assertEqual(state["graph_workstreams"], [])
         self.assertFalse(state["graph_only_blocking"])
@@ -1073,6 +1076,142 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual({node["id"] for node in filtered["nodes"]}, {"problem_text"})
         self.assertEqual(filtered["edges"], [])
 
+    def test_graph_status_filter_prunes_descendants_of_hidden_structural_parent(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_text",
+                    "type": "problem",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 0,
+                },
+                {
+                    "id": "option_parked",
+                    "type": "option",
+                    "status": "parked",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                },
+                {
+                    "id": "exp_child",
+                    "type": "experiment",
+                    "status": "running",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                },
+                {
+                    "id": "option_active",
+                    "type": "option",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                },
+            ],
+            "edges": [
+                {"from": "problem_text", "to": "option_parked", "relation": "child"},
+                {"from": "option_parked", "to": "exp_child", "relation": "child"},
+                {"from": "problem_text", "to": "option_active", "relation": "child"},
+            ],
+        }
+
+        filtered = filter_graph_for_view(
+            graph,
+            "global",
+            {"problem", "option", "experiment"},
+            {"active", "running"},
+        )
+
+        self.assertEqual({node["id"] for node in filtered["nodes"]}, {"problem_text", "option_active"})
+        self.assertEqual(filtered["edges"], [{"from": "problem_text", "to": "option_active", "relation": "child"}])
+
+    def test_graph_filter_can_hide_inactive_option_branches_without_hiding_open_problems(self) -> None:
+        graph = {
+            "nodes": [
+                {
+                    "id": "problem_open",
+                    "type": "problem",
+                    "status": "open",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 0,
+                },
+                {
+                    "id": "option_open",
+                    "type": "option",
+                    "status": "open",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                },
+                {
+                    "id": "exp_open_child",
+                    "type": "experiment",
+                    "status": "planned",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                },
+                {
+                    "id": "option_active",
+                    "type": "option",
+                    "status": "active",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 1,
+                },
+                {
+                    "id": "exp_active_child",
+                    "type": "experiment",
+                    "status": "running",
+                    "stage_id": "stage_text",
+                    "is_focus_visible": True,
+                    "focus_visible_depth": 2,
+                },
+            ],
+            "edges": [
+                {"from": "problem_open", "to": "option_open", "relation": "child"},
+                {"from": "option_open", "to": "exp_open_child", "relation": "child"},
+                {"from": "problem_open", "to": "option_active", "relation": "child"},
+                {"from": "option_active", "to": "exp_active_child", "relation": "child"},
+            ],
+        }
+
+        compact = filter_graph_for_view(
+            graph,
+            "global",
+            {"problem", "option", "experiment"},
+            {"active", "open", "planned", "running"},
+            hide_inactive_option_branches=True,
+        )
+        expanded = filter_graph_for_view(
+            graph,
+            "global",
+            {"problem", "option", "experiment"},
+            {"active", "open", "planned", "running"},
+            hide_inactive_option_branches=False,
+        )
+
+        self.assertEqual(
+            {node["id"] for node in compact["nodes"]},
+            {"problem_open", "option_active", "exp_active_child"},
+        )
+        self.assertEqual(
+            compact["edges"],
+            [
+                {"from": "problem_open", "to": "option_active", "relation": "child"},
+                {"from": "option_active", "to": "exp_active_child", "relation": "child"},
+            ],
+        )
+        self.assertEqual(
+            {node["id"] for node in expanded["nodes"]},
+            {"problem_open", "option_open", "exp_open_child", "option_active", "exp_active_child"},
+        )
+
     def test_collapsed_descendant_walk_does_not_rescan_nested_roots(self) -> None:
         class CountingChildren(dict):
             def __init__(self, values: dict[str, list[str]]) -> None:
@@ -1265,6 +1404,7 @@ class UiRenderingTests(unittest.TestCase):
                     "only_blocking": "true",
                     "only_next_actions": False,
                     "only_missing_evidence": True,
+                    "hide_inactive_option_branches": False,
                 },
             },
             {
@@ -1293,6 +1433,7 @@ class UiRenderingTests(unittest.TestCase):
         self.assertFalse(state["graph_only_next_actions"])
         self.assertTrue(state["graph_only_missing_evidence"])
         self.assertTrue(state["graph_show_baseline_lens"])
+        self.assertFalse(state["graph_hide_inactive_option_branches"])
 
         global_state = graph_view_state_from_saved_view(
             {"scope": "global", "filters": {}},
@@ -1306,6 +1447,7 @@ class UiRenderingTests(unittest.TestCase):
         )
         self.assertTrue(global_state["graph_show_baseline_lens"])
         self.assertTrue(explicit_state["graph_show_baseline_lens"])
+        self.assertTrue(global_state["graph_hide_inactive_option_branches"])
 
         no_scope_state = graph_view_state_from_saved_view(
             {"filters": {}},
@@ -1314,6 +1456,7 @@ class UiRenderingTests(unittest.TestCase):
         )
         self.assertEqual(no_scope_state["graph_view_mode"], "Global")
         self.assertTrue(no_scope_state["graph_show_baseline_lens"])
+        self.assertTrue(no_scope_state["graph_hide_inactive_option_branches"])
 
     def test_pyvis_html_focuses_current_node(self) -> None:
         graph = {
@@ -1475,6 +1618,15 @@ class UiRenderingTests(unittest.TestCase):
             graph_component_payload_cache_key(default_filter_key, show_baseline_lens=False),
             graph_component_payload_cache_key(default_filter_key, show_baseline_lens=True),
         )
+        inactive_options_filter_key = graph_filter_cache_key(
+            graph,
+            "global",
+            {"problem", "option"},
+            {"active", "open"},
+            selected_stages={"stage_text"},
+            hide_inactive_option_branches=True,
+        )
+        self.assertNotEqual(default_filter_key, inactive_options_filter_key)
 
         changed_graph = {
             **graph,
@@ -1663,6 +1815,14 @@ class UiRenderingTests(unittest.TestCase):
         defaults = default_selected_statuses(graph, ["active", "archived", "done", "parked", "rejected"])
 
         self.assertEqual(defaults, ["active"])
+
+    def test_default_status_filter_hides_terminal_and_rejected_statuses_without_focus_mode(self) -> None:
+        defaults = default_selected_statuses(
+            {},
+            ["active", "cancelled", "done", "parked", "planned", "rejected", "running"],
+        )
+
+        self.assertEqual(defaults, ["active", "planned", "running"])
 
     def test_default_node_type_filter_treats_artifact_as_supporting_material(self) -> None:
         defaults = default_selected_node_types(["artifact", "decision", "experiment", "option", "problem", "stage"])
