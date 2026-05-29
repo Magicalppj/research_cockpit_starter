@@ -12,6 +12,7 @@ ROOT = default_data_root()
 from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.file_schemas import CREATE_WORKSTREAM_EXAMPLE
 from research_cockpit.commands._runtime import compact_mutation_result, emit_json, safe_print
+from research_cockpit.lifecycle_guards import LifecycleGuardError
 from research_cockpit.model import ValidationError, load_yaml
 
 
@@ -203,6 +204,12 @@ def main() -> None:
             dry_run=args.dry_run,
             show_diff=args.show_diff,
         )
+    except LifecycleGuardError as exc:
+        if args.json:
+            emit_json(exc.payload)
+        else:
+            safe_print(str(exc))
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileExistsError, FileNotFoundError) as exc:
         safe_print(str(exc))
         raise SystemExit(1) from exc

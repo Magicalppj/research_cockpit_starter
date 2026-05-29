@@ -24,6 +24,7 @@ from research_cockpit.commands._runtime import (
 from research_cockpit.commands.file_schemas import FINALIZE_WORKSTREAM_EXAMPLE
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.graph_core import derive_focus_path, node_id_by_type_in_path
+from research_cockpit.lifecycle_guards import LifecycleGuardError, raise_for_terminal_parent_transitions
 from research_cockpit.model import (
     ResearchNode,
     VALID_WORKSTREAM_RECOMMENDATIONS,
@@ -307,6 +308,12 @@ def finalize_workstream(
         if current_data != current_before:
             changes.append((current_path, current_before, current_data))
 
+    guard_node_ids = [option_id]
+    if problem_status and problem_id:
+        guard_node_ids.append(problem_id)
+    if stage_status and stage_id:
+        guard_node_ids.append(stage_id)
+    raise_for_terminal_parent_transitions(root, nodes, candidate, guard_node_ids)
     validate_cockpit(root, candidate, current_data, state.explicit_edges, raise_on_error=True)
     changed = bool(changes)
     result: dict[str, Any] = {
@@ -442,6 +449,12 @@ def main() -> None:
             dry_run=args.dry_run,
             show_diff=args.show_diff,
         )
+    except LifecycleGuardError as exc:
+        if args.json:
+            emit_json(exc.payload)
+        else:
+            safe_print(str(exc))
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         safe_print(str(exc))
         raise SystemExit(1) from exc

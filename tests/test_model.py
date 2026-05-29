@@ -53,6 +53,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.graph_core import GraphTopology
+from research_cockpit.lifecycle_guards import active_descendant_blockers
 from research_cockpit.types import ResearchNode
 
 
@@ -473,6 +474,106 @@ class ModelValidationTests(unittest.TestCase):
         self.assertIn("missing_option", str(ctx.exception))
         self.assertEqual(topology.safe_path("exp_orphan"), ["exp_orphan"])
 
+    def test_lifecycle_guard_blocks_terminal_problem_with_active_child_option(self) -> None:
+        nodes = load_nodes(self.root)
+
+        blockers = active_descendant_blockers(nodes, "problem_text", "resolved")
+
+        self.assertEqual(
+            blockers,
+            [
+                {
+                    "id": "option_t5",
+                    "type": "option",
+                    "status": "active",
+                    "path": ["stage_text", "problem_text", "option_t5"],
+                },
+                {
+                    "id": "exp_t5",
+                    "type": "experiment",
+                    "status": "planned",
+                    "path": ["stage_text", "problem_text", "option_t5", "exp_t5"],
+                },
+            ],
+        )
+
+    def test_lifecycle_guard_blocks_nested_active_descendant_option(self) -> None:
+        save_yaml(
+            self.root / "graph" / "nodes" / "option_t5.yaml",
+            {
+                "id": "option_t5",
+                "type": "option",
+                "title": "T5",
+                "status": "paused",
+                "parent": "problem_text",
+                "children": ["problem_child"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "problem_child",
+                "type": "problem",
+                "title": "Nested question",
+                "status": "active",
+                "parent": "option_t5",
+                "children": ["option_child"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_child",
+                "type": "option",
+                "title": "Nested option",
+                "status": "promising",
+                "parent": "problem_child",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+
+        blockers = active_descendant_blockers(nodes, "problem_text", "parked")
+
+        self.assertEqual(
+            blockers,
+            [
+                {
+                    "id": "problem_child",
+                    "type": "problem",
+                    "status": "active",
+                    "path": ["stage_text", "problem_text", "option_t5", "problem_child"],
+                },
+                {
+                    "id": "option_child",
+                    "type": "option",
+                    "status": "promising",
+                    "path": ["stage_text", "problem_text", "option_t5", "problem_child", "option_child"],
+                },
+            ],
+        )
+
+    def test_lifecycle_guard_allows_terminal_parent_without_active_downstream(self) -> None:
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["status"] = "accepted"
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        nodes = load_nodes(self.root)
+
+        blockers = active_descendant_blockers(nodes, "problem_text", "resolved")
+
+        self.assertEqual(blockers, [])
+
+    def test_lifecycle_guard_ignores_non_terminal_parent_transition(self) -> None:
+        nodes = load_nodes(self.root)
+
+        blockers = active_descendant_blockers(nodes, "problem_text", "active")
+
+        self.assertEqual(blockers, [])
 
     def test_explicit_edges_are_loaded_validated_and_deduplicated(self) -> None:
         save_yaml(

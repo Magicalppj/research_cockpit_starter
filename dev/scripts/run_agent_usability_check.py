@@ -118,6 +118,27 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _write_yaml(path: Path, data: dict[str, Any]) -> None:
+    import yaml
+
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def _prepare_demo_decision_acceptance_state(root: Path) -> None:
+    status_by_node = {
+        "experiment_demo_prompt_refinement": "done",
+        "problem_demo_subtask_scope": "parked",
+        "option_demo_eval_cases": "parked",
+        "experiment_demo_eval_cases": "cancelled",
+    }
+    for node_id, status in status_by_node.items():
+        path = root / "graph" / "nodes" / f"{node_id}.yaml"
+        data = _read_yaml(path)
+        if data:
+            data["status"] = status
+            _write_yaml(path, data)
+
+
 def _surface_doc_paths(skill_path: Path) -> list[Path]:
     paths = [skill_path / relative for relative in SURFACE_DOCS]
     paths.extend((skill_path / "capabilities" / name) for name in CAPABILITY_FILES)
@@ -375,6 +396,7 @@ def agent_c_safe_option_workstream(skill_path: Path, python: str, parent: Path) 
 def agent_d_decision_suggestion_dry_run(skill_path: Path, python: str, parent: Path) -> dict[str, Any]:
     research_repo, plugin_path = _new_research_repo(skill_path, parent, "d")
     root = _copy_demo_state(plugin_path, research_repo)
+    _prepare_demo_decision_acceptance_state(root)
     repo_before = _file_manifest(research_repo)
     env = _package_env(plugin_path)
     checks = [

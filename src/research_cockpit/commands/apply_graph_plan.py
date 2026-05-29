@@ -22,6 +22,7 @@ from research_cockpit.commands._runtime import (
 from research_cockpit.commands.file_schemas import APPLY_GRAPH_PLAN_EXAMPLE
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.commands.update_node_fields import apply_node_field_updates, field_updates_from_mapping
+from research_cockpit.lifecycle_guards import LifecycleGuardError, raise_for_terminal_parent_transitions
 from research_cockpit.model import (
     ResearchNode,
     ValidationError,
@@ -74,6 +75,7 @@ class GraphPlanBuilder:
         self.path_by_id: dict[str, Path] = {}
         self.created_ids: list[str] = []
         self.updated_ids: set[str] = set()
+        self.status_changed_ids: set[str] = set()
         self.status_aliases: list[dict[str, str]] = []
         self.normalized_statuses: list[dict[str, str]] = []
 
@@ -138,6 +140,7 @@ class GraphPlanBuilder:
         self.path_by_id[node_id] = _node_path(self.root, node_id)
         self.candidate[node_id] = ResearchNode.from_dict(data)
         self.created_ids.append(node_id)
+        self.status_changed_ids.add(node_id)
 
     def apply_fields(self, node_id: str, fields: dict[str, Any], *, owner: str) -> None:
         updates = field_updates_from_mapping(fields)
@@ -195,6 +198,8 @@ class GraphPlanBuilder:
         data["status"] = status
         data["updated_at"] = str(date.today())
         self.candidate[node_id] = ResearchNode.from_dict(data)
+        if node.status != status:
+            self.status_changed_ids.add(node_id)
         if node_id not in self.created_ids:
             self.updated_ids.add(node_id)
 
@@ -287,6 +292,7 @@ def apply_graph_plan(
             builder.apply_fields(node_id, fields, owner=f"updates[{index}]")
 
     builder.sync_parent_children()
+    raise_for_terminal_parent_transitions(root, builder.state.nodes, builder.candidate, builder.status_changed_ids)
     validate_cockpit(root, builder.candidate, builder.state.current, builder.state.explicit_edges, raise_on_error=True)
 
     changes = builder.changes()
@@ -366,6 +372,12 @@ def main() -> None:
             dry_run=args.dry_run,
             show_diff=args.show_diff,
         )
+    except LifecycleGuardError as exc:
+        if args.json:
+            emit_json(exc.payload)
+        else:
+            safe_print(str(exc))
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileExistsError, FileNotFoundError) as exc:
         safe_print(str(exc))
         raise SystemExit(1) from exc

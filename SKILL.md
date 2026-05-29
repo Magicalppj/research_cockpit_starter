@@ -60,6 +60,8 @@ Status semantics:
 
 Use `promising` only for an `option` that has positive signal but is not yet accepted. Do not set decisions to `accepted` directly; use `research-cockpit accept-decision`.
 
+Terminal parent lifecycle guard: do not mark a `problem` as `resolved`/`parked` or an `option` as `accepted`/`rejected`/`paused`/`parked` while its descendant `problem`, `option`, or `experiment` nodes still contain active work. Active downstream work means `problem` in `open|active|blocked`, `option` in `open|active|promising`, or `experiment` in `planned|queued|running`. If a terminal transition reports `terminal_parent_has_active_descendants`, run `close-branch --dry-run --json --show-diff`, inspect the `updates`, `skipped`, and `remaining_active_descendants`, then explicitly close or cancel downstream work before retrying the parent status change.
+
 ## Capability Routing
 
 - Graph state, data files, saved graph views, and interaction log: `capabilities/graph-state.md`
@@ -79,6 +81,7 @@ Read only the capability files needed for the current task.
 
 ```sh
 research-cockpit validate --root research_cockpit
+research-cockpit validate --root research_cockpit --strict-lifecycle --json
 research-cockpit add-node --root research_cockpit --id <node_id> --type <type> --title "..." --parent <parent_id> --dry-run --json --show-diff
 research-cockpit apply-graph-plan --print-schema
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
@@ -116,6 +119,8 @@ research-cockpit finalize-workstream --print-schema
 research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --dry-run --json --show-diff
 research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --json --compact
 research-cockpit finalize-workstream --root research_cockpit --option <option_id> --status accepted --problem-status resolved --report --dry-run --json --show-diff
+research-cockpit close-branch --root research_cockpit --id <problem_or_option_id> --downstream-status parked --dry-run --json --show-diff
+research-cockpit close-branch --root research_cockpit --id <problem_or_option_id> --downstream-status parked --include-experiments --no-build
 research-cockpit option-workstream-context --root research_cockpit --id <option_id> --compact --json
 research-cockpit start-agent-session --root <canonical_root> --option <option_id> --agent <agent_id> --objective "..." --branch agent/<option_id> --worktree ../worktrees/<agent_id> --dry-run --json --show-diff
 research-cockpit agent-session-context --root <canonical_root> --agent <agent_id> --compact --json
@@ -175,9 +180,11 @@ When closing the current experiment and advancing focus in the same turn, prefer
 Generated dashboard context includes `next_action_scopes`; read it before choosing work so focus-node, parent option/problem, global coordinator, and stale terminal-node actions are not conflated.
 Done nodes should keep conclusions, not live work. If a done experiment still has real follow-up work in `next_actions`, create a small derived queued experiment with `create-followup-experiment` or clean up an older stale action with `migrate-terminal-next-actions`. Use `create-workstream` when the follow-up is a branch, not one gate.
 
+Before marking a branch terminal, make active descendants explicit. If `update-status`, `finalize-workstream`, `apply-graph-plan`, `create-workstream`, `accept-decision`, or `promote-decision --status accepted` returns `terminal_parent_has_active_descendants`, do not force the parent status. Run `close-branch --id <problem_or_option_id> --downstream-status parked --dry-run --json --show-diff`. By default it does not cancel `planned`, `queued`, or `running` experiments; those appear in `skipped` and `remaining_active_descendants`. After confirming external runs are stopped or intentionally abandoned, rerun with `--include-experiments --no-build`; active experiments become `cancelled`. Then retry the parent terminal status command with the intended terminal status, such as `resolved` for a closed problem or `accepted` for the chosen option.
+
 Known-node tasks should use `effective_baseline` from `context` or `node-context` as the default option/decision/artifact bundle for follow-up work. When an accepted branch should become the default for later agents, use `research-cockpit set-baseline`; do not expand every accepted decision into normal handoffs unless the task is explicitly auditing accepted history.
 
-Use `finalize-workstream --file finalize.yaml` when the close-out needs several flags. `--file` supports `option`, `status`, `problem_status`, `stage_status`, `summary_file`, `summary_target`, `artifacts`, `sync_focus`, `report`, `agent`, and `locale`; explicit CLI flags override file values. A relative `summary_file` in `finalize.yaml` resolves against the finalize file directory, then the data root, then the current working directory. Use `finalize-workstream` only for explicit close-out. It updates the named option/problem/stage statuses and optional report/artifact/focus fields that you pass; it does not accept decisions, pause old options, delete branches, or invent next actions.
+Use `finalize-workstream --file finalize.yaml` when the close-out needs several flags. `--file` supports `option`, `status`, `problem_status`, `stage_status`, `summary_file`, `summary_target`, `artifacts`, `sync_focus`, `report`, `agent`, and `locale`; explicit CLI flags override file values. A relative `summary_file` in `finalize.yaml` resolves against the finalize file directory, then the data root, then the current working directory. Use `finalize-workstream` only for explicit close-out. It updates the named option/problem/stage statuses and optional report/artifact/focus fields that you pass; it does not accept decisions, pause old options, delete branches, or invent next actions. If the option or parent problem still has active descendants, close or cancel those descendants with `close-branch` first.
 
 ## Parallel Agents With Git Worktrees
 
@@ -216,7 +223,7 @@ research-cockpit smoke --root D:/main_repo/research_cockpit --json
 
 Do not use worktree-local paths as long-lived `--evidence-path` values. Keep run directories free of symlinks before `ingest-artifact`; v1 rejects symlinked files or directories instead of copying through them. Deletion is safe only after artifact files, finding/decision/baseline updates, and any useful commit/patch have been preserved outside the worktree.
 
-For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `create-run`, `update-run`, `complete-run`, `create-artifact`, `ingest-artifact`, `record-gate-result`, `ingest-gate-result`, `complete-experiment`, `complete-experiments`, `close-current-experiment`, `create-followup-experiment`, `migrate-terminal-next-actions`, `update-finding`, `update-workstream-fields`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `--show-diff` still includes the full diff; use it only when reviewing write content.
+For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `close-branch`, `create-run`, `update-run`, `complete-run`, `create-artifact`, `ingest-artifact`, `record-gate-result`, `ingest-gate-result`, `complete-experiment`, `complete-experiments`, `close-current-experiment`, `create-followup-experiment`, `migrate-terminal-next-actions`, `update-finding`, `update-workstream-fields`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `close-branch --compact` additionally keeps `parent_ready_for_terminal_status`, `skipped`, and `remaining_active_descendants`; read those before retrying a parent terminal transition. `--show-diff` still includes the full diff; use it only when reviewing write content.
 For legacy mutation commands without `--compact`, use `--dry-run --json --show-diff` to preview writes and keep the JSON payload focused on `changed/would_change`, affected path, before/after summary, and optional diff. Dry-run also performs mutation preflight; if `interaction_log.yaml` is malformed, it fails before showing a misleading successful preview.
 Use `commands --json --compact --workflow <graph|evidence|decision|focus|maintenance|read>` or `--name <command>` to read the short discovery manifest. It omits long examples and Python/cwd metadata; use full `commands --json` only when you need the complete command contract. If `validate` or a mutating dry-run reports malformed interaction log schema, use `repair-interaction-log --dry-run --json --show-diff`; it can drop non-mapping event items with a backup, but it refuses YAML scanner errors.
 

@@ -21,6 +21,7 @@ from research_cockpit.model import (
 from research_cockpit.decisions import build_decision_acceptance_checklist, decision_acceptance_failure_message
 from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state
 from research_cockpit.commands.record_finding import find_node_file
+from research_cockpit.lifecycle_guards import LifecycleGuardError, raise_for_terminal_parent_transitions
 
 
 class DecisionNotReadyError(ValueError):
@@ -91,6 +92,7 @@ def accept_decision(
     candidate[decision_id] = ResearchNode.from_dict(decision_data)
     candidate[str(option_id)] = ResearchNode.from_dict(option_data)
     candidate[str(problem_id)] = ResearchNode.from_dict(problem_data)
+    raise_for_terminal_parent_transitions(root, nodes, candidate, [str(option_id), str(problem_id)])
     validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
 
     after = {
@@ -175,6 +177,12 @@ def main() -> None:
                 "blocking_failures": exc.checklist.get("blocking_failures", []),
             }
             print(json.dumps(payload, ensure_ascii=False, indent=2))
+        else:
+            print(str(exc))
+        raise SystemExit(1) from exc
+    except LifecycleGuardError as exc:
+        if args.json:
+            print(json.dumps(exc.payload, ensure_ascii=False, indent=2))
         else:
             print(str(exc))
         raise SystemExit(1) from exc

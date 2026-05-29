@@ -63,6 +63,7 @@ WORKFLOW_TAGS_BY_COMMAND = {
     "add-node": ["graph"],
     "apply-graph-plan": ["graph"],
     "create-workstream": ["graph"],
+    "close-branch": ["graph", "maintenance"],
     "update-status": ["graph"],
     "set-focus": ["focus"],
     "set-agent-focus": ["focus"],
@@ -106,6 +107,7 @@ WORKFLOW_TAGS_BY_COMMAND = {
 SHOW_DIFF_COMMANDS = {
     "add-node",
     "apply-graph-plan",
+    "close-branch",
     "cleanup-suggestion-lifecycle",
     "complete-experiment",
     "complete-experiments",
@@ -162,6 +164,7 @@ CAPABILITY_BY_COMMAND = {
     "add_node.py": "capabilities/node-management.md",
     "apply_graph_plan.py": "capabilities/node-management.md",
     "create_workstream.py": "capabilities/node-management.md",
+    "close_branch.py": "capabilities/node-management.md",
     "update_status.py": "capabilities/node-management.md",
     "set_focus.py": "capabilities/focus-context.md",
     "set_agent_focus.py": "capabilities/focus-context.md",
@@ -242,6 +245,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
+        "extra_supported_flags": ["--strict-lifecycle"],
         "recommended_when": "Run before and after mutating cockpit data.",
     },
     {
@@ -439,6 +443,19 @@ COMMANDS: list[dict[str, object]] = [
             "For derived worktree follow-up, set problem.parent to the inherited option id."
         ),
         "recommended_when": "Start a new research branch from a structured workstream plan.",
+    },
+    {
+        "name": "close_branch.py",
+        "purpose": "Safely close active downstream work before marking a problem or option terminal.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "supports_compact": True,
+        "can_batch": True,
+        "fields_supported": ["downstream_status=parked", "include_experiments"],
+        "extra_supported_flags": ["--include-experiments", "--downstream-status"],
+        "recommended_when": "Clear active descendants reported by terminal_parent_has_active_descendants before closing a branch.",
     },
     {
         "name": "update_status.py",

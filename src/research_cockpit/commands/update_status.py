@@ -19,6 +19,7 @@ from research_cockpit.model import (
     validate_cockpit,
     validate_status,
 )
+from research_cockpit.lifecycle_guards import LifecycleGuardError, raise_for_terminal_parent_transitions
 from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 
 
@@ -91,6 +92,7 @@ def update_status_result(
 
     candidate = dict(nodes)
     candidate[node_id] = ResearchNode.from_dict(data)
+    raise_for_terminal_parent_transitions(root, nodes, candidate, [node_id])
     current = load_yaml(root / "current_state.yaml")
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
@@ -162,6 +164,12 @@ def main() -> None:
             dry_run=args.dry_run,
             show_diff=args.show_diff,
         )
+    except LifecycleGuardError as exc:
+        if args.json:
+            print(json.dumps(exc.payload, ensure_ascii=False, indent=2))
+        else:
+            print(str(exc))
+        raise SystemExit(1) from exc
     except (ValueError, FileNotFoundError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc

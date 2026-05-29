@@ -24,6 +24,7 @@ Run:
 
 ```sh
 research-cockpit validate --root research_cockpit --json
+research-cockpit validate --root research_cockpit --strict-lifecycle --json
 ```
 
 Common causes:
@@ -33,6 +34,7 @@ Common causes:
 - A node status is not valid for its type.
 - Decision checklist fields are missing or reference invalid option IDs.
 - `graph/interaction_log.yaml` has invalid `events` shape or malformed YAML.
+- In strict lifecycle mode, a terminal `problem` or `option` still has active downstream work.
 
 For interaction log schema damage reported by `validate` or by a mutating dry-run, preview the repair before writing:
 
@@ -52,7 +54,20 @@ Run semantic lint when generated context looks stale even though `validate` pass
 research-cockpit lint --root research_cockpit --semantic --json
 ```
 
-Semantic lint checks for terminal global or per-agent focus nodes, `next_actions` that still mention closed nodes, open experiments that already contain results, and option workstream state that no longer matches child experiment state. Warning output exits with status 1; a zero exit means no semantic warnings were found.
+Semantic lint checks for terminal global or per-agent focus nodes, `next_actions` that still mention closed nodes, open experiments that already contain results, terminal parent nodes that still contain active descendants, and option workstream state that no longer matches child experiment state. Warning output exits with status 1; a zero exit means no semantic warnings were found.
+
+If the warning id is `terminal_parent_has_active_descendants`, the parent branch is marked terminal while active work remains below it. Preview the cleanup first and read `updates`, `skipped`, `remaining_active_descendants`, and `parent_ready_for_terminal_status` before applying any mutation:
+
+```sh
+research-cockpit close-branch --root research_cockpit --id <problem_or_option_id> --downstream-status parked --dry-run --json --show-diff
+```
+
+If the dry-run still reports planned, queued, or running experiments in `skipped` or `remaining_active_descendants`, only use `--include-experiments` after checking that those external jobs are intentionally stopped or abandoned. With `--include-experiments`, active experiments move to `cancelled`, not `parked`.
+
+```sh
+research-cockpit close-branch --root research_cockpit --id <problem_or_option_id> --downstream-status parked --include-experiments --no-build
+research-cockpit validate --root research_cockpit --strict-lifecycle --json
+```
 
 ## Release Checks
 

@@ -20,6 +20,7 @@ COMMAND_MODULES: dict[str, str] = {
     "add-node": "add_node",
     "apply-graph-plan": "apply_graph_plan",
     "create-workstream": "create_workstream",
+    "close-branch": "close_branch",
     "update-status": "update_status",
     "set-focus": "set_focus",
     "set-agent-focus": "set_agent_focus",

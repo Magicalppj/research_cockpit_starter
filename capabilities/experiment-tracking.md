@@ -113,6 +113,16 @@ research-cockpit finalize-workstream --root research_cockpit --option option_x -
 
 Use `--file` to avoid long close-out commands. The file supports `option`, `status`, `problem_status`, `stage_status`, `summary_file`, `summary_target`, `artifacts`, `sync_focus`, `report`, `agent`, and `locale`; CLI flags override file values. A relative `summary_file` in the file resolves against the finalize file directory, then the data root, then cwd, and JSON output reports the resolved path. `finalize-workstream` does not create artifacts, accept decisions, pause old branches, delete nodes, or invent next actions. `--summary-file` writes only to the workstream report by default; use `--summary-target option|problem|all` when you explicitly want node summaries replaced.
 
+If `finalize-workstream` would mark an option `accepted`/`rejected`/`paused`/`parked` or mark a problem `resolved`/`parked`, active descendants must already be closed. When the command reports `terminal_parent_has_active_descendants`, preview the cleanup, then explicitly close descendants before retrying the finalization:
+
+```sh
+research-cockpit close-branch --root research_cockpit --id option_x --downstream-status parked --dry-run --json --show-diff
+research-cockpit close-branch --root research_cockpit --id option_x --downstream-status parked --include-experiments --no-build
+research-cockpit finalize-workstream --root research_cockpit --file finalize.yaml --no-build
+```
+
+With `--include-experiments`, active experiments move to `cancelled`, not `parked`. Do not use it until planned, queued, or running jobs under that branch are intentionally stopped or abandoned.
+
 ## Baseline Selection
 
 Treat findings as raw evidence, promising/accepted options as evaluated branches, and `baseline` as the default branch a downstream agent should inherit. Do not put every accepted option or decision into a known-node handoff. Set the default explicitly:

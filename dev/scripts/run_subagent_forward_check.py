@@ -50,6 +50,37 @@ def _copy_track_source(skill_path: Path, destination: Path) -> Path:
     return copy_path
 
 
+def _read_yaml(path: Path) -> dict[str, Any]:
+    import yaml
+
+    if not path.exists():
+        return {}
+    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_yaml(path: Path, data: dict[str, Any]) -> None:
+    import yaml
+
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+
+
+def _prepare_demo_decision_acceptance_state(root: Path | str) -> None:
+    root_path = Path(root)
+    status_by_node = {
+        "experiment_demo_prompt_refinement": "done",
+        "problem_demo_subtask_scope": "parked",
+        "option_demo_eval_cases": "parked",
+        "experiment_demo_eval_cases": "cancelled",
+    }
+    for node_id, status in status_by_node.items():
+        path = root_path / "graph" / "nodes" / f"{node_id}.yaml"
+        data = _read_yaml(path)
+        if data:
+            data["status"] = status
+            _write_yaml(path, data)
+
+
 def _run_all(
     commands: list[list[str]],
     cwd: Path,
@@ -97,8 +128,8 @@ def prompt_refinement_workstream_track(skill_path: Path, python: str, destinatio
 
     source_before = _file_manifest(skill_path)
     copy_path = _copy_track_source(skill_path, destination)
-    copy_before = _file_manifest(copy_path)
     root = _data_root(copy_path)
+    copy_before = _file_manifest(copy_path)
     env = _package_env(copy_path)
     commands = [
         _cli(
@@ -187,8 +218,9 @@ def retrieval_branch_track(skill_path: Path, python: str, destination: Path) -> 
 
     source_before = _file_manifest(skill_path)
     copy_path = _copy_track_source(skill_path, destination)
-    copy_before = _file_manifest(copy_path)
     root = _data_root(copy_path)
+    _prepare_demo_decision_acceptance_state(root)
+    copy_before = _file_manifest(copy_path)
     env = _package_env(copy_path)
     new_problem = "problem_demo_retrieval_scope"
     new_option = "option_demo_retrieval_minimal_index"
@@ -328,8 +360,9 @@ def decision_gate_workflow_track(skill_path: Path, python: str, destination: Pat
 
     source_before = _file_manifest(skill_path)
     copy_path = _copy_track_source(skill_path, destination)
-    copy_before = _file_manifest(copy_path)
     root = _data_root(copy_path)
+    _prepare_demo_decision_acceptance_state(root)
+    copy_before = _file_manifest(copy_path)
     env = _package_env(copy_path)
     commands = [
         _cli(python, "check-decision-acceptance", "--root", root, "--id", DECISION_ID, "--json"),

@@ -27,6 +27,7 @@ from research_cockpit.decisions import (
 )
 from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation
 from research_cockpit.commands.record_finding import find_node_file
+from research_cockpit.lifecycle_guards import LifecycleGuardError, raise_for_terminal_parent_transitions
 
 
 VALID_DECISION_STATUSES = {"proposed", "accepted"}
@@ -163,6 +164,10 @@ def promote_decision(
             problem_data["updated_at"] = today
             candidate[str(problem_id)] = ResearchNode.from_dict(problem_data)
 
+    guard_node_ids = [option_id]
+    if problem_data is not None and problem_id:
+        guard_node_ids.append(str(problem_id))
+    raise_for_terminal_parent_transitions(root, nodes, candidate, guard_node_ids)
     validate_cockpit(root, candidate, load_yaml(root / "current_state.yaml"), raise_on_error=True)
 
     out = root / "graph" / "nodes" / f"{decision_id}.yaml"
@@ -258,6 +263,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
         )
+    except LifecycleGuardError as exc:
+        if args.json:
+            print(json.dumps(exc.payload, ensure_ascii=False, indent=2))
+        else:
+            print(str(exc))
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileExistsError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc

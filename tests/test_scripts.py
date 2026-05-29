@@ -42,6 +42,7 @@ from research_cockpit.commands.build_dashboard import build_dashboard, dashboard
 from research_cockpit.commands.check_decision_acceptance import decision_acceptance_payload
 from research_cockpit.commands.claim_option import claim_option
 from research_cockpit.commands.cleanup_suggestion_lifecycle import cleanup_suggestion_lifecycle
+from research_cockpit.commands.close_branch import close_branch
 from research_cockpit.commands.close_current_experiment import close_current_experiment
 from research_cockpit.commands.complete_experiment import complete_experiment
 from research_cockpit.commands.complete_experiments import complete_experiments
@@ -405,6 +406,216 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["would_change"])
         self.assertIn("diff", payload)
         self.assertEqual(before, after)
+
+    def test_update_status_rejects_terminal_parent_with_active_descendants(self) -> None:
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        before = problem_path.read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                *cli_command("update-status"),
+                "--root",
+                str(self.root),
+                "--id",
+                "problem_text",
+                "--status",
+                "resolved",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertEqual(payload["error"], "terminal_parent_has_active_descendants")
+        self.assertEqual(payload["node_id"], "problem_text")
+        self.assertEqual(payload["target_status"], "resolved")
+        self.assertEqual([item["id"] for item in payload["blocking_descendants"]], ["option_t5", "exp_t5"])
+        self.assertIn("close-branch", payload["suggested_commands"][0])
+        self.assertEqual(before, problem_path.read_text(encoding="utf-8"))
+
+    def test_close_branch_dry_run_lists_safe_updates_and_experiment_warning(self) -> None:
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["children"] = ["exp_t5", "problem_child"]
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        write_node(
+            self.root,
+            {
+                "id": "problem_child",
+                "type": "problem",
+                "title": "Child problem",
+                "status": "open",
+                "parent": "option_t5",
+            },
+        )
+        before_problem_child = (self.root / "graph" / "nodes" / "problem_child.yaml").read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                *cli_command("close-branch"),
+                "--root",
+                str(self.root),
+                "--id",
+                "problem_text",
+                "--downstream-status",
+                "parked",
+                "--dry-run",
+                "--show-diff",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertTrue(payload["dry_run"])
+        self.assertTrue(payload["would_change"])
+        self.assertFalse(payload["changed"])
+        self.assertEqual([item["id"] for item in payload["updates"]], ["problem_child"])
+        self.assertIn("problem_child.yaml", payload["diff"])
+        self.assertEqual(before_problem_child, (self.root / "graph" / "nodes" / "problem_child.yaml").read_text(encoding="utf-8"))
+        skipped = {item["id"]: item["reason"] for item in payload["skipped"]}
+        self.assertEqual(skipped["exp_t5"], "requires_include_experiments")
+        self.assertEqual(skipped["option_t5"], "blocked_by_active_descendants")
+        self.assertFalse(payload["parent_ready_for_terminal_status"])
+        self.assertIn("--include-experiments", payload["recommended_commands"][0])
+
+    def test_close_branch_compact_json_keeps_safety_preview_fields(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("close-branch"),
+                "--root",
+                str(self.root),
+                "--id",
+                "problem_text",
+                "--dry-run",
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertFalse(payload["parent_ready_for_terminal_status"])
+        self.assertGreater(payload["skipped_count"], 0)
+        self.assertGreater(payload["remaining_active_count"], 0)
+        self.assertIn("skipped", payload)
+        self.assertIn("remaining_active_descendants", payload)
+        self.assertEqual(payload["remaining_active_descendants"][0]["id"], "option_t5")
+
+    def test_close_branch_include_experiments_closes_descendants_before_parent_status(self) -> None:
+        result = close_branch(
+            self.root,
+            node_id="problem_text",
+            include_experiments=True,
+            rebuild_dashboard=False,
+        )
+
+        self.assertTrue(result["changed"])
+        self.assertTrue(result["parent_ready_for_terminal_status"])
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")["status"], "parked")
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")["status"], "cancelled")
+        self.assertIn("--status <terminal_status>", result["recommended_commands"][0])
+
+        out = subprocess.run(
+            [
+                *cli_command("update-status"),
+                "--root",
+                str(self.root),
+                "--id",
+                "problem_text",
+                "--status",
+                "resolved",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertFalse((self.root / "dashboards" / "graph_view.json").exists())
+
+    def test_close_branch_cli_include_experiments_no_build_writes_only_descendants(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("close-branch"),
+                "--root",
+                str(self.root),
+                "--id",
+                "problem_text",
+                "--include-experiments",
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertTrue(payload["changed"])
+        self.assertTrue(payload["parent_ready_for_terminal_status"])
+        self.assertEqual(
+            {item["id"]: item["after_status"] for item in payload["updates"]},
+            {"exp_t5": "cancelled", "option_t5": "parked"},
+        )
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")["status"], "active")
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")["status"], "parked")
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")["status"], "cancelled")
+        self.assertIn("--status <terminal_status>", payload["recommended_commands"][0])
+        self.assertFalse((self.root / "dashboards" / "graph_view.json").exists())
+
+    def test_close_branch_json_error_for_invalid_root_type(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("close-branch"),
+                "--root",
+                str(self.root),
+                "--id",
+                "stage_text",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["changed"])
+        self.assertEqual(payload["id"], "stage_text")
+        self.assertIn("must be problem or option", payload["error"])
+
+    def test_close_branch_json_error_when_id_missing(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("close-branch"),
+                "--root",
+                str(self.root),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["changed"])
+        self.assertIsNone(payload["id"])
+        self.assertIn("--id is required", payload["error"])
 
     def test_set_focus_updates_current_state(self) -> None:
         set_focus(
@@ -2195,6 +2406,9 @@ class ScriptBehaviorTests(unittest.TestCase):
             outcome="positive",
             rebuild_dashboard=False,
         )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
         problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
         problem["next_actions"] = ["Open follow-up branch."]
         save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
@@ -2279,6 +2493,9 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "status": "done",
             },
         )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
         summary_file = self.tmp_root / "report.md"
         summary_file.write_text("Report summary from file.", encoding="utf-8")
         finalize_file = self.tmp_root / "finalize.yaml"
@@ -2350,6 +2567,43 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(option["workstream_report"]["summary"], "Report summary from file.")
         self.assertEqual(option["workstream_report"]["linked_artifacts"], ["artifact_bundle"])
         self.assertFalse((self.root / "dashboards").exists())
+
+    def test_finalize_workstream_rejects_terminal_option_with_active_descendants(self) -> None:
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        before = option_path.read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                *cli_command("finalize-workstream"),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--status",
+                "accepted",
+                "--problem-status",
+                "resolved",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertEqual(payload["error"], "terminal_parent_has_active_descendants")
+        errors_by_node = {error["node_id"]: error for error in payload["lifecycle_errors"]}
+        self.assertIn("option_t5", errors_by_node)
+        self.assertIn("problem_text", errors_by_node)
+        self.assertEqual(errors_by_node["option_t5"]["target_status"], "accepted")
+        self.assertEqual(
+            [item["id"] for item in errors_by_node["option_t5"]["blocking_descendants"]],
+            ["exp_t5"],
+        )
+        self.assertIn("close-branch", payload["suggested_commands"][0])
+        self.assertEqual(before, option_path.read_text(encoding="utf-8"))
 
     def test_finalize_workstream_file_summary_relative_to_finalize_file(self) -> None:
         plan_dir = self.tmp_root / "plans"
@@ -4964,6 +5218,49 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(out.returncode, 1)
         self.assertEqual(cli_payload["warning_count"], len(payload["warnings"]))
 
+    def test_semantic_lint_reports_terminal_parent_with_active_descendants(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["status"] = "resolved"
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        payload = semantic_lint(self.root)
+        out = subprocess.run(
+            [*cli_command("lint"), "--root", str(self.root), "--semantic", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        cli_payload = json.loads(out.stdout)
+
+        warning = next(
+            warning
+            for warning in payload["warnings"]
+            if warning["id"] == "terminal_parent_has_active_descendants"
+        )
+        self.assertFalse(payload["ok"])
+        self.assertEqual(warning["node_id"], "problem_text")
+        self.assertEqual(warning["parent_status"], "resolved")
+        self.assertEqual(
+            warning["blocking_descendants"],
+            [
+                {
+                    "id": "option_t5",
+                    "type": "option",
+                    "status": "active",
+                    "path": ["stage_text", "problem_text", "option_t5"],
+                },
+                {
+                    "id": "exp_t5",
+                    "type": "experiment",
+                    "status": "planned",
+                    "path": ["stage_text", "problem_text", "option_t5", "exp_t5"],
+                },
+            ],
+        )
+        self.assertIn("close-branch", warning["command"])
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("terminal_parent_has_active_descendants", {item["id"] for item in cli_payload["warnings"]})
+
     def test_semantic_lint_does_not_suggest_invalid_followup_for_failed_experiment(self) -> None:
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
         experiment["status"] = "failed"
@@ -7357,6 +7654,43 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(payload["valid"])
         self.assertTrue(any("baseline.artifacts must be a list" in error for error in payload["errors"]))
 
+    def test_validate_strict_lifecycle_rejects_terminal_parent_with_active_descendants(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["status"] = "resolved"
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        compatible = subprocess.run(
+            [*cli_command("validate"), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        strict = subprocess.run(
+            [*cli_command("validate"), "--root", str(self.root), "--strict-lifecycle", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        compatible_payload = json.loads(compatible.stdout)
+        strict_payload = json.loads(strict.stdout)
+
+        self.assertEqual(compatible.returncode, 0, compatible.stdout + compatible.stderr)
+        self.assertTrue(compatible_payload["valid"])
+        self.assertNotIn("lifecycle_errors", compatible_payload)
+        self.assertEqual(strict.returncode, 1, strict.stdout + strict.stderr)
+        self.assertFalse(strict_payload["valid"])
+        self.assertEqual(strict_payload["strict_lifecycle"], True)
+        self.assertEqual(strict_payload["lifecycle_errors"][0]["error"], "terminal_parent_has_active_descendants")
+        self.assertEqual(strict_payload["lifecycle_errors"][0]["node_id"], "problem_text")
+        self.assertEqual(strict_payload["lifecycle_errors"][0]["target_status"], "resolved")
+        self.assertEqual(
+            [item["id"] for item in strict_payload["lifecycle_errors"][0]["blocking_descendants"]],
+            ["option_t5", "exp_t5"],
+        )
+        self.assertTrue(
+            any("terminal_parent_has_active_descendants" in error for error in strict_payload["errors"])
+        )
+
     def test_effective_baseline_prefers_explicit_then_inherited_then_problem_fallback(self) -> None:
         write_node(
             self.root,
@@ -7981,6 +8315,46 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(load_yaml(self.root / "current_state.yaml"), before_current)
         self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml"), before_old_option)
 
+    def test_create_workstream_json_preserves_lifecycle_guard_error(self) -> None:
+        plan_path = self.tmp_root / "terminal_workstream.yaml"
+        save_yaml(
+            plan_path,
+            {
+                "problem": {
+                    "id": "problem_terminal_workstream",
+                    "title": "Terminal workstream",
+                    "parent": "stage_text",
+                    "status": "resolved",
+                },
+                "active_option": {
+                    "id": "option_terminal_workstream",
+                    "title": "Active child option",
+                },
+            },
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("create-workstream"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(plan_path),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertEqual(payload["error"], "terminal_parent_has_active_descendants")
+        self.assertEqual(payload["node_id"], "problem_terminal_workstream")
+        self.assertEqual(payload["blocking_descendants"][0]["id"], "option_terminal_workstream")
+        self.assertFalse((self.root / "graph" / "nodes" / "problem_terminal_workstream.yaml").exists())
+        self.assertFalse((self.root / "graph" / "nodes" / "option_terminal_workstream.yaml").exists())
+
     def test_create_workstream_can_create_nested_branch_under_option(self) -> None:
         result = create_workstream(
             self.root,
@@ -8446,6 +8820,46 @@ class ScriptBehaviorTests(unittest.TestCase):
                 plan={"updates": [{"id": "decision_t5", "status": "accepted"}]},
                 dry_run=True,
             )
+
+    def test_apply_graph_plan_rejects_terminal_parent_with_active_descendants(self) -> None:
+        plan_file = self.tmp_root / "resolve_problem.yaml"
+        save_yaml(
+            plan_file,
+            {
+                "updates": [
+                    {
+                        "id": "problem_text",
+                        "status": "resolved",
+                    }
+                ]
+            },
+        )
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        before = problem_path.read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                *cli_command("apply-graph-plan"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(plan_file),
+                "--dry-run",
+                "--json",
+                "--show-diff",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertEqual(payload["error"], "terminal_parent_has_active_descendants")
+        self.assertEqual(payload["node_id"], "problem_text")
+        self.assertEqual(payload["target_status"], "resolved")
+        self.assertEqual([item["id"] for item in payload["blocking_descendants"]], ["option_t5", "exp_t5"])
+        self.assertEqual(before, problem_path.read_text(encoding="utf-8"))
 
     def test_assignment_view_lists_high_priority_agent_tasks(self) -> None:
         write_node(
@@ -8999,7 +9413,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "id": "option_alt",
                 "type": "option",
                 "title": "Alternative",
-                "status": "open",
+                "status": "rejected",
                 "parent": "problem_text",
             },
         )
@@ -9107,7 +9521,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "id": "option_alt",
                 "type": "option",
                 "title": "Alternative",
-                "status": "open",
+                "status": "rejected",
                 "parent": "problem_text",
             },
         )
@@ -9161,7 +9575,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "id": "option_alt",
                 "type": "option",
                 "title": "Alternative",
-                "status": "open",
+                "status": "rejected",
                 "parent": "problem_text",
             },
         )
@@ -9288,12 +9702,74 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("not ready", str(not_ready.exception))
         self.assertEqual(interaction_events(self.root), [])
 
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
         accept_decision(self.root, decision_id="decision_t5", force_accept=True, rebuild_dashboard=False)
         decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
         self.assertEqual(decision["status"], "accepted")
         event = interaction_events(self.root)[-1]
         self.assertEqual(event["kind"], "accept_decision")
         self.assertTrue(event["forced"])
+
+    def test_accept_decision_rejects_terminal_parent_with_active_descendants(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["result_summary"] = "Improves edit following."
+        experiment["outcome"] = "positive"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+                "supporting_experiments": ["exp_t5"],
+                "evidence_strength": "medium",
+                "evidence_summary": "1 experiment; outcome positive",
+                "alternatives_considered": ["option_alt"],
+                "consequences": ["Update focus."],
+                "next_required_actions": ["Run CLAP ablation."],
+            },
+        )
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        before = problem_path.read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                *cli_command("accept-decision"),
+                "--root",
+                str(self.root),
+                "--id",
+                "decision_t5",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertEqual(payload["error"], "terminal_parent_has_active_descendants")
+        self.assertEqual(payload["node_id"], "problem_text")
+        self.assertEqual(payload["target_status"], "resolved")
+        self.assertEqual([item["id"] for item in payload["blocking_descendants"]], ["option_alt"])
+        self.assertEqual(before, problem_path.read_text(encoding="utf-8"))
 
     def test_promote_accepted_decision_updates_option_and_problem(self) -> None:
         write_node(
@@ -9302,7 +9778,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "id": "option_alt",
                 "type": "option",
                 "title": "Alternative",
-                "status": "open",
+                "status": "rejected",
                 "parent": "problem_text",
             },
         )
@@ -9346,6 +9822,66 @@ class ScriptBehaviorTests(unittest.TestCase):
                 status="accepted",
             )
         self.assertIn("not ready", str(not_ready.exception))
+
+    def test_promote_accepted_decision_rejects_terminal_parent_with_active_descendants(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "open",
+                "parent": "problem_text",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["result_summary"] = "Improves edit following."
+        experiment["outcome"] = "positive"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        before = problem_path.read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                *cli_command("promote-decision"),
+                "--root",
+                str(self.root),
+                "--id",
+                "decision_accept_t5",
+                "--option",
+                "option_t5",
+                "--title",
+                "Accept T5",
+                "--summary",
+                "Accept T5 as current branch.",
+                "--status",
+                "accepted",
+                "--supporting-experiment",
+                "exp_t5",
+                "--alternative",
+                "option_alt",
+                "--consequence",
+                "Update focus.",
+                "--next-required-action",
+                "Run CLAP ablation.",
+                "--auto-evidence",
+                "--dry-run",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertEqual(payload["error"], "terminal_parent_has_active_descendants")
+        self.assertEqual(payload["node_id"], "problem_text")
+        self.assertEqual(payload["target_status"], "resolved")
+        self.assertEqual([item["id"] for item in payload["blocking_descendants"]], ["option_alt"])
+        self.assertEqual(before, problem_path.read_text(encoding="utf-8"))
+        self.assertFalse((self.root / "graph" / "nodes" / "decision_accept_t5.yaml").exists())
 
     def test_update_status_rejects_direct_decision_acceptance(self) -> None:
         write_node(

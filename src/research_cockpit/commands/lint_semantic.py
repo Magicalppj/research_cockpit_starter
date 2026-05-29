@@ -6,6 +6,12 @@ from pathlib import Path
 import re
 from typing import Any
 
+from research_cockpit.graph_core import GraphTopology
+from research_cockpit.lifecycle_guards import (
+    PARENT_TERMINAL_STATUSES,
+    TERMINAL_PARENT_ACTIVE_DESCENDANTS_ERROR,
+    active_descendant_blockers,
+)
 from research_cockpit.model import load_nodes, load_yaml, validate_cockpit
 from research_cockpit.paths import default_data_root
 
@@ -35,6 +41,7 @@ def _warning(
     node_id: str | None = None,
     agent_id: str | None = None,
     command: str | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     out: dict[str, Any] = {
         "id": warning_id,
@@ -47,6 +54,8 @@ def _warning(
         out["agent_id"] = agent_id
     if command:
         out["command"] = command
+    if extra:
+        out.update(extra)
     return out
 
 
@@ -78,6 +87,7 @@ def semantic_lint(root: Path = ROOT) -> dict[str, Any]:
     nodes = load_nodes(root)
     current = load_yaml(root / "current_state.yaml")
     validation_errors = validate_cockpit(root, nodes, current)
+    topology = GraphTopology.from_nodes(nodes)
     warnings: list[dict[str, Any]] = []
 
     current_focus_node = current.get("current_focus_node")
@@ -156,6 +166,26 @@ def semantic_lint(root: Path = ROOT) -> dict[str, Any]:
             break
 
     for node in nodes.values():
+        if node.status in PARENT_TERMINAL_STATUSES.get(node.type, set()):
+            blockers = active_descendant_blockers(nodes, node.id, node.status, topology=topology)
+            if blockers:
+                warnings.append(_warning(
+                    TERMINAL_PARENT_ACTIVE_DESCENDANTS_ERROR,
+                    (
+                        f"{node.type} {node.id!r} is {node.status!r} but still has "
+                        f"{len(blockers)} active downstream descendant(s)."
+                    ),
+                    node_id=node.id,
+                    command=(
+                        f"research-cockpit close-branch --root {root} --id {node.id} "
+                        "--downstream-status parked --dry-run --json --show-diff"
+                    ),
+                    extra={
+                        "parent_type": node.type,
+                        "parent_status": node.status,
+                        "blocking_descendants": blockers,
+                    },
+                ))
         if node.status in TERMINAL_STATUSES and _next_actions(node.raw.get("next_actions")):
             command = ""
             if node.type == "experiment" and node.status == "done":

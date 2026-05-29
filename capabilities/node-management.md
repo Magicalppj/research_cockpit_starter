@@ -152,11 +152,52 @@ Status meanings:
 
 Use `promising` only for `option` nodes that have evidence or strong rationale but still need comparison, experiment results, or a decision gate before acceptance. Do not use `promising` for `experiment` or `decision` nodes.
 
+## Terminal Parent Lifecycle Guard
+
+A `problem` or `option` with active descendants cannot be marked terminal. This keeps the graph from claiming a branch is closed while work under that branch is still live.
+
+Terminal parent statuses:
+
+- `problem`: `resolved`, `parked`
+- `option`: `accepted`, `rejected`, `paused`, `parked`
+
+Active downstream statuses:
+
+- `problem`: `open`, `active`, `blocked`
+- `option`: `open`, `active`, `promising`
+- `experiment`: `planned`, `queued`, `running`
+
+If `update-status`, `finalize-workstream`, `apply-graph-plan`, `accept-decision`, `promote-decision --status accepted`, or `create-workstream` reports `terminal_parent_has_active_descendants`, do not force the parent status. Preview the explicit cleanup first:
+
+```sh
+research-cockpit close-branch --root research_cockpit --id <problem_or_option_id> --downstream-status parked --dry-run --json --show-diff
+```
+
+The result lists:
+
+- `updates`: descendants that can be safely moved, usually active `problem`/`option` nodes to `parked`.
+- `skipped`: descendants that were not changed, including experiments that require explicit confirmation.
+- `remaining_active_descendants`: blockers that must be handled before the parent can become terminal.
+- `parent_ready_for_terminal_status`: whether the parent status command can be retried.
+
+By default `close-branch` does not cancel `planned`, `queued`, or `running` experiments because those may correspond to external jobs. After confirming the run or job is stopped or intentionally abandoned, rerun with:
+
+```sh
+research-cockpit close-branch --root research_cockpit --id <problem_or_option_id> --downstream-status parked --include-experiments --no-build
+research-cockpit update-status --root research_cockpit --id <problem_or_option_id> --status <terminal_status> --dry-run --json --show-diff
+research-cockpit update-status --root research_cockpit --id <problem_or_option_id> --status <terminal_status> --no-build
+```
+
+With `--include-experiments`, active experiments move to `cancelled`, not `parked`. Choose `<terminal_status>` from `resolved|parked` for a `problem`, or `accepted|rejected|paused|parked` for an `option`.
+
+Use `validate --strict-lifecycle --json` as an opt-in audit for older repositories. Plain `validate` remains compatible with historical data.
+
 ## Safe Archive Instead of Delete
 
 There is no public `delete-node` command. If a user asks to delete, close, or archive a node, use a safe status transition such as `parked`, `rejected`, `resolved`, or `archived` when that status is valid for the node type:
 
 ```sh
+research-cockpit close-branch --root research_cockpit --id option_x --downstream-status parked --dry-run --json --show-diff
 research-cockpit update-status --root research_cockpit --id option_x --status parked
 ```
 
