@@ -24,6 +24,7 @@ COMMAND_MODULES: dict[str, str] = {
     "update-status": "update_status",
     "set-focus": "set_focus",
     "set-agent-focus": "set_agent_focus",
+    "set-cursor": "set_cursor",
     "sync-focus-actions": "sync_focus_actions",
     "claim-option": "claim_option",
     "claim-workstream": "claim_workstream",

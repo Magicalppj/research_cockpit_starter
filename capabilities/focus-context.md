@@ -6,19 +6,28 @@ Use this capability at the start of an agent session and before making local res
 
 Choose one startup path. Do not run both bootstrap and `context --with-bootstrap` for normal known-node work.
 
-1. Known node id:
+1. Assigned downstream agent with an `assignment_id`:
+
+```sh
+research-cockpit bootstrap --root research_cockpit --assignment <assignment_id> --json
+research-cockpit agent-session-context --root research_cockpit --assignment <assignment_id> --compact --json
+```
+
+Use `assignment_scope` / `agent_scope` and `assignment_cursor` as the primary task context. Global `current_state`, `coordinator_state`, and `focus.current_focus_node` are coordinator metadata and may point to another agent's branch. Use `--agent` only when it resolves to exactly one active assignment.
+
+2. Known node id:
 
 ```sh
 research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
 ```
 
-2. Unknown target or global triage:
+3. Unknown target or global triage:
 
 ```sh
 research-cockpit bootstrap --root research_cockpit --json
 ```
 
-3. Older minimal known-node handoff:
+4. Older minimal known-node handoff:
 
 ```sh
 research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
@@ -26,7 +35,7 @@ research-cockpit node-context --root research_cockpit --id <node_id> --compact -
 
 For known-node continuation, compact `context` is the preferred one-command handoff when artifact and validation context matter. Bootstrap plus compact `node-context` remains fine for the older minimal flow. Do not also read both context packs unless you need global state or generated dashboard context.
 
-4. If dashboard files are missing or stale and generated-file writes are allowed:
+5. If dashboard files are missing or stale and generated-file writes are allowed:
 
 ```sh
 research-cockpit build --root research_cockpit
@@ -34,7 +43,7 @@ research-cockpit build --root research_cockpit
 
 For a brand-new data root, use `research-cockpit init --root research_cockpit --build --json` if the next step will read generated context packs. Do not run `bootstrap --build` or `build` during read-only onboarding.
 
-5. Read generated context only for global scans:
+6. Read generated context only for global scans:
    - `research_cockpit/dashboards/agent_context_pack.json`
    - `research_cockpit/dashboards/focus_context_pack.json`
    - `research_cockpit/dashboards/search_index.json` when searching.
@@ -46,13 +55,14 @@ research-cockpit commands --json --compact --workflow focus
 research-cockpit commands --json --compact --name context
 ```
 
-For a downstream agent launched in a git worktree, start from the canonical root session context instead of global bootstrap:
+For a downstream agent launched in a git worktree, start from the canonical root scoped context instead of unscoped global bootstrap:
 
 ```sh
-research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
+research-cockpit bootstrap --root D:/main_repo/research_cockpit --assignment <assignment_id> --json
+research-cockpit agent-session-context --root D:/main_repo/research_cockpit --assignment <assignment_id> --compact --json
 ```
 
-The payload includes `required_root`, `do_not_mutate_worktree_root: true`, the agent session, per-agent focus, compact option context, and handoff commands. Use the included `ingest-artifact` command template for worktree run outputs before recording findings or deleting the worktree.
+The payload includes `required_root`, `do_not_mutate_worktree_root: true`, the assignment record, assignment cursor, compact option context, and handoff commands. Use the included `ingest-artifact` command template for worktree run outputs before recording findings or deleting the worktree.
 
 ## Node Handoff
 
@@ -81,10 +91,10 @@ research-cockpit set-baseline --root research_cockpit --node problem_x --clear -
 Use `node-context --compact --json` only when you need the narrow node onboarding payload without bootstrap/artifact aggregation. Use full `node-context --json` without `--compact` when you need complete relations, resources, recent interactions, or type-specific traces.
 Avoid the old chain `bootstrap` + generated context packs + `node-context` for known-node work unless you are explicitly auditing global dashboard state.
 
-The combined `context` payload names the work target and global focus separately:
+The combined `context` payload names the work target and coordinator/global focus separately:
 
 - `target_context`: the node this command was asked to inspect.
-- `current_global_focus`: the current `current_state.yaml` focus.
+- `current_global_focus`: coordinator/global focus from coordinator state and legacy compatibility fields.
 - `context_boundary.warning`: non-empty when those two differ.
 
 If the console script is unavailable, use:
@@ -101,39 +111,39 @@ research-cockpit search --root research_cockpit --query "retrieval branch" --jso
 
 Search covers YAML nodes, Markdown notes, and safe local linked resources under `research_cockpit/`.
 
-## Focus Updates
+## Coordinator Focus Updates
 
-Use `research-cockpit set-focus` for focus changes:
+Use `research-cockpit set-focus` for coordinator/UI selection:
 
 ```sh
 research-cockpit set-focus --root research_cockpit --focus-node problem_id
 ```
 
-Focus changes write `current_state.yaml`, append `interaction_log.yaml`, and rebuild dashboard/context unless `--no-build` is passed.
+Coordinator focus changes write `coordinator_state.yaml`, mirror legacy `current_state.yaml` focus fields for compatibility, append `interaction_log.yaml`, and rebuild dashboard/context unless `--no-build` is passed.
 
-Passing `--next-action` replaces the current_state `next_actions` list with the repeated values supplied in this command. It does not append.
+Passing `--next-action` replaces coordinator/global `next_actions` with the repeated values supplied in this command and mirrors them to legacy `current_state.next_actions`. It does not append.
 
-Dashboard "Current Next Actions" remains sourced from `current_state.yaml` for compatibility. Generated and computed context also include `next_action_scopes` so agents can distinguish `focus_next_actions`, `parent_option_next_actions`, `parent_problem_next_actions`, `global_coordinator_next_actions`, and `stale_terminal_node_next_actions`. Updating a node's `next_actions` is useful for local planning, but it will not become a global coordinator action until you run `set-focus --next-action ...` or `sync-focus-actions`.
+Dashboard "Current Next Actions" is coordinator/global state and remains mirrored to `current_state.yaml` for compatibility. Generated and computed context also include `next_action_scopes` so agents can distinguish `focus_next_actions`, `parent_option_next_actions`, `parent_problem_next_actions`, `global_coordinator_next_actions`, and `stale_terminal_node_next_actions`. Updating a node's `next_actions` is useful for local planning, but it will not become a global coordinator action until a coordinator runs `set-focus --next-action ...` or `sync-focus-actions`.
 
-In multi-agent worktree runs, downstream agents should not use global `set-focus`. Use per-agent focus instead:
+In multi-agent worktree runs, downstream agents should not use coordinator `set-focus`. Move the assignment-local cursor instead:
 
 ```sh
-research-cockpit set-agent-focus --root D:/main_repo/research_cockpit --agent agent_x --node experiment_x --next-action "Run follow-up" --dry-run --json --show-diff
-research-cockpit set-agent-focus --root D:/main_repo/research_cockpit --agent agent_x --node experiment_x --no-build
+research-cockpit set-cursor --root D:/main_repo/research_cockpit --assignment <assignment_id> --node experiment_x --next-action "Run follow-up" --dry-run --json --show-diff
+research-cockpit set-cursor --root D:/main_repo/research_cockpit --assignment <assignment_id> --node experiment_x --no-build
 ```
 
-`set-agent-focus` writes `current_state.agent_focuses[agent_id]` and leaves global `current_focus_node`, `current_focus_path`, and `next_actions` unchanged. Passing one or more `--next-action` values replaces that agent's existing `next_actions`; omitting `--next-action` preserves them. A coordinator or human should own global focus when several agents are active.
+`set-cursor` writes `assignments/<assignment_id>.yaml` and leaves coordinator focus unchanged. Passing one or more `--next-action` values replaces the assignment's existing `next_actions`; omitting `--next-action` preserves them. `set-agent-focus` is a legacy compatibility command that writes `current_state.agent_focuses[agent_id]`; do not use it for new assignment-scoped sessions.
 
 ## Sync Focus Actions
 
-When the current focus node already has the canonical `next_actions`, sync them into `current_state.yaml` instead of hand-copying action text:
+When the coordinator-selected focus node already has the canonical `next_actions`, sync them into coordinator/global state instead of hand-copying action text:
 
 ```sh
 research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --dry-run --json --show-diff
 research-cockpit sync-focus-actions --root research_cockpit --from-node problem_x --no-build
 ```
 
-Default mode is `replace`: current_state `next_actions` becomes the node `next_actions`. Use `--mode append` to append de-duplicated node actions after existing current_state actions.
+Default mode is `replace`: coordinator/global `next_actions` becomes the node `next_actions`. Use `--mode append` to append de-duplicated node actions after existing coordinator actions.
 
 `suggest-next-actions` deterministically de-duplicates focus actions after trimming, lowercasing, collapsing whitespace, and stripping trailing punctuation. This avoids duplicate suggestions when current_state and the focus node differ only in formatting.
 

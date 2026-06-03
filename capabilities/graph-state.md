@@ -1,10 +1,15 @@
 # Graph State
 
+`current_state.yaml` is legacy/coordinator compatibility state, not the default worker cursor in multi-agent sessions. For assigned workers, `assignments/*.yaml` is the source of truth for the assignment-local cursor and next actions; `coordinator_state.yaml` is the source of truth for coordinator/UI selection. Treat `agents/*.yaml`, `assignments/*.yaml`, and `coordinator_state.yaml` as structured truth-source files alongside graph nodes, runs, gate results, and artifacts.
+
 Use this capability when reading or changing the research graph shape, saved graph views, or interaction log.
 
 ## Data Files
 
-- `research_cockpit/current_state.yaml`: active stage/problem/option/focus path.
+- `research_cockpit/agents/*.yaml`: generated agent identities, display names, and active assignment ids.
+- `research_cockpit/assignments/*.yaml`: worker-local assignment roots, cursors, next actions, and status.
+- `research_cockpit/coordinator_state.yaml`: coordinator/UI selected node, selected assignment, global next actions, and dashboard filters.
+- `research_cockpit/current_state.yaml`: legacy/coordinator compatibility focus, baseline, and global next-action state; not the default worker cursor.
 - `research_cockpit/graph/nodes/*.yaml`: graph nodes and their parent/children links.
 - `research_cockpit/graph/edges.yaml`: optional semantic edges beyond parent/children.
 - `research_cockpit/graph/graph_views.yaml`: saved dynamic view presets, not frozen snapshots.

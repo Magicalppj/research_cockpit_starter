@@ -1,5 +1,7 @@
 # Internal Architecture
 
+Current multi-agent state is split across three truth-source layers: `assignments/*.yaml` stores worker-local cursors and next actions, `agents/*.yaml` stores generated agent identities and active assignment ids, and `coordinator_state.yaml` stores coordinator/UI selection. `current_state.yaml` remains supported for legacy/global compatibility and coordinator mirroring, but ordinary worker agents should not treat it as their own cursor.
+
 This document is for maintainers and coding agents changing the Research Cockpit plugin internals. It describes the current source organization and the boundaries that should stay stable as the project grows.
 
 ## Goals
@@ -20,6 +22,8 @@ Public entrypoints
   ui/*
 
 Workflow/domain layer
+  agent_sessions.py
+  assignment_scope.py
   node_onboarding.py
   context_packs.py
   search_index.py
@@ -32,6 +36,7 @@ Workflow/domain layer
   suggestions.py
 
 Graph and sidecar state
+  agent_state.py
   graph_core.py
   resources.py
   graph_views.py
@@ -53,12 +58,15 @@ Dependency direction should generally flow downward. For example, `commands/*` m
 - `command_registry.py`: owns command metadata and legacy script-name to CLI-name mapping used in suggested commands.
 - `commands/*.py`: command-specific argument parsing and workflow orchestration.
 - `commands/_runtime.py`: shared command helpers for `load_validated_state(...)` and `finish_mutation(...)`.
+- `commands/_assignment_scope_cli.py`: shared `--assignment` / `--coordinator` CLI flags and structured assignment-scope error output.
 - `ui/`: researcher-facing Streamlit app, graph rendering wrappers, text labels, and view formatting helpers.
 
 Commands are the public write boundary. A mutating command should validate, prepare candidate data, write YAML, append `interaction_log.yaml`, and optionally rebuild dashboard/context output. Dry-run paths must not write YAML, logs, or generated dashboards.
 
 ### Workflow And Domain Layer
 
+- `agent_sessions.py`: assignment-scoped handoff payloads, canonical root boundaries, and worker startup command templates.
+- `assignment_scope.py`: assignment mutation boundaries, out-of-scope write checks, and coordinator override handling.
 - `node_onboarding.py`: builds read-only node handoff payloads for `node-context`.
 - `context_packs.py`: builds agent context, focus context, current-state payloads, context metadata, and dashboard Markdown.
 - `search_index.py`: indexes nodes, notes, and linked local resources.
@@ -74,6 +82,7 @@ Domain modules should work with loaded `ResearchNode` objects and plain dictiona
 
 ### Graph And Sidecar State
 
+- `agent_state.py`: `AgentRecord`, `AssignmentRecord`, `CoordinatorState`, and loaders for `agents/*.yaml`, `assignments/*.yaml`, and `coordinator_state.yaml`.
 - `graph_core.py`: node/edge loading, focus path derivation, graph traversal, node context serialization, and graph JSON.
 - `resources.py`: extracts link rows from node `links`, `linked_artifacts`, `config_path`, `path`, and `run_id` fields.
 - `graph_views.py`: saved graph view normalization, ID generation, load, and upsert.
@@ -94,6 +103,8 @@ These modules should remain free of command, UI, and dashboard dependencies.
 `model.py` remains as a compatibility facade for older imports and tests. It should re-export focused helpers where needed, but new code should prefer direct imports from the owning module:
 
 - Use `graph_core.py` for graph traversal and node context.
+- Use `agent_state.py` for agent, assignment, and coordinator state records/loaders.
+- Use `assignment_scope.py` for assignment-scoped mutation boundaries.
 - Use `resources.py` for link/resource rows.
 - Use `context_packs.py` for context payloads.
 - Use `decisions.py`, `option_workstreams.py`, `run_summaries.py`, `progress.py`, `gate_results.py`, `gate_result_records.py`, and `suggestions.py` for domain logic.
@@ -105,7 +116,10 @@ Do not add new large domain logic to `model.py`. If a new behavior is hard to pl
 
 Truth-source data lives in:
 
-- `<data-root>/current_state.yaml`
+- `<data-root>/agents/*.yaml` for generated agent identities, display names, and active assignment ids
+- `<data-root>/assignments/*.yaml` for worker-local assignment roots, cursors, next actions, and assignment status
+- `<data-root>/coordinator_state.yaml` for coordinator/UI selected node, selected assignment, global next actions, and dashboard filters
+- `<data-root>/current_state.yaml` for legacy/coordinator compatibility focus, baseline, and global next-action state
 - `<data-root>/graph/nodes/*.yaml`
 - `<data-root>/graph/edges.yaml` when present
 - sidecar files such as `<data-root>/graph/graph_views.yaml` and `<data-root>/graph/interaction_log.yaml`

@@ -5,7 +5,7 @@ description: Use this skill to read, validate, update, and summarize project-loc
 
 # Research Cockpit
 
-Research Cockpit stores project-local research state in a repository `research_cockpit/` directory. Use it to read context, validate graph health, record findings, update focus/status, and generate dashboard/context files without hand-editing YAML.
+Research Cockpit stores project-local research state in a repository `research_cockpit/` directory. Use it to read context, validate graph health, record findings, update assignment/coordinator state, and generate dashboard/context files without hand-editing YAML.
 
 ## Startup Contract
 
@@ -17,9 +17,19 @@ Research Cockpit stores project-local research state in a repository `research_c
    - If the caller repository has no data root yet, initialize one with `research-cockpit init --root research_cockpit` from the caller repository root. Use `research-cockpit init --root research_cockpit --build --json` when the next step will read generated context packs.
 
 2. Choose one read path:
+   - Assigned downstream agent with an `assignment_id`: run scoped bootstrap or `agent-session-context`; treat global `current_state` focus and `coordinator_state` as coordinator metadata only. Use `--agent` only as a lookup convenience when that agent has exactly one active assignment.
    - Known node id: use compact `context` directly; do not run a separate bootstrap first.
    - Unknown target or global triage: run read-only bootstrap.
    - Minimal older handoff: use compact `node-context` only when artifact/bootstrap aggregation is unnecessary.
+
+Assigned agent handoff:
+
+```sh
+research-cockpit bootstrap --root research_cockpit --assignment <assignment_id> --json
+research-cockpit agent-session-context --root research_cockpit --assignment <assignment_id> --compact --json
+```
+
+In scoped bootstrap output, use `assignment_scope` / `agent_scope` and `assignment_cursor` as the primary task context. Do not switch to `focus.current_focus_node`, global `current_state.current_*`, or `coordinator_state.selected_node` unless the user explicitly assigns that other branch.
 
 Known node handoff:
 
@@ -41,7 +51,7 @@ research-cockpit node-context --root research_cockpit --id <node_id> --compact -
 
 If the current working directory is already the plugin root, use `research-cockpit bootstrap --root <path> --json` instead. If the `research-cockpit` console script is unavailable but the package is installed, use `python -m research_cockpit.cli <command>` with the same Python environment. For `node-context`, add `--command-style python` so returned command drafts use the module entrypoint too.
 
-Read `agent_context_pack.json` or `focus_context_pack.json` only when you need global state, generated dashboard context, or a broader focus scan.
+Read `agent_context_pack.json` or `focus_context_pack.json` only when you need global state, generated dashboard context, or a broader focus scan. For assigned downstream agents, those files can contain coordinator/global focus from another branch; prefer the scoped bootstrap or agent session context.
 
 3. If generated dashboards are missing or stale and the task allows generated-file writes, run `research-cockpit build --root research_cockpit`. Do not run `bootstrap --build` or `build` for read-only onboarding tasks.
 
@@ -82,6 +92,7 @@ Read only the capability files needed for the current task.
 ```sh
 research-cockpit validate --root research_cockpit
 research-cockpit validate --root research_cockpit --strict-lifecycle --json
+research-cockpit bootstrap --root research_cockpit --assignment <assignment_id> --json
 research-cockpit add-node --root research_cockpit --id <node_id> --type <type> --title "..." --parent <parent_id> --dry-run --json --show-diff
 research-cockpit apply-graph-plan --print-schema
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
@@ -111,8 +122,10 @@ research-cockpit complete-experiments --print-schema
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --json --compact
 research-cockpit close-current-experiment --root research_cockpit --id <experiment_id> --finding "..." --confidence medium --next-focus <next_node> --sync-agent all --json --compact
-research-cockpit create-followup-experiment --root research_cockpit --from <done_or_running_experiment_id> --id <followup_id> --title "..." --priority high --next-action "Run follow-up gate" --set-focus --json --compact
-research-cockpit migrate-terminal-next-actions --root research_cockpit --id <experiment_id> --followup-id <followup_id> --title "Follow-up gate" --dry-run --json --show-diff
+research-cockpit create-followup-experiment --root research_cockpit --assignment <assignment_id> --from <done_or_running_experiment_id> --id <followup_id> --title "..." --priority high --next-action "Run follow-up gate" --json --compact
+research-cockpit set-cursor --root research_cockpit --assignment <assignment_id> --node <followup_id> --no-build
+research-cockpit migrate-terminal-next-actions --root research_cockpit --assignment <assignment_id> --id <experiment_id> --followup-id <followup_id> --title "Follow-up gate" --dry-run --json --show-diff
+research-cockpit set-cursor --root research_cockpit --assignment <assignment_id> --node <followup_id> --no-build
 research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --dry-run --json --show-diff
 research-cockpit update-finding --root research_cockpit --experiment <experiment_id> --finding-id <finding_id> --statement "..." --json --compact
 research-cockpit finalize-workstream --print-schema
@@ -122,9 +135,9 @@ research-cockpit finalize-workstream --root research_cockpit --option <option_id
 research-cockpit close-branch --root research_cockpit --id <problem_or_option_id> --downstream-status parked --dry-run --json --show-diff
 research-cockpit close-branch --root research_cockpit --id <problem_or_option_id> --downstream-status parked --include-experiments --no-build
 research-cockpit option-workstream-context --root research_cockpit --id <option_id> --compact --json
-research-cockpit start-agent-session --root <canonical_root> --option <option_id> --agent <agent_id> --objective "..." --branch agent/<option_id> --worktree ../worktrees/<agent_id> --dry-run --json --show-diff
-research-cockpit agent-session-context --root <canonical_root> --agent <agent_id> --compact --json
-research-cockpit set-agent-focus --root <canonical_root> --agent <agent_id> --node <node_id> --no-build
+research-cockpit start-agent-session --root <canonical_root> --option <option_id> --label <short_label> --objective "..." --branch agent/<option_id>-<short_label> --worktree ../worktrees/<short_label> --dry-run --json --show-diff
+research-cockpit agent-session-context --root <canonical_root> --assignment <assignment_id> --compact --json
+research-cockpit set-cursor --root <canonical_root> --assignment <assignment_id> --node <node_id> --no-build
 research-cockpit import-worktree-findings --root <canonical_root> --from-root <worktree>/research_cockpit --agent <agent_id> --option <option_id> --dry-run --json --show-diff
 research-cockpit build --root <canonical_root> --watch --interval 5 --json
 research-cockpit build --root <canonical_root> --json --profile --profile-output dashboards/build_profile.json
@@ -176,7 +189,7 @@ Use `complete-experiment --evidence-path ... --evidence-link key=value` or per-e
 
 Use run records for concrete executions and findings for conclusions. A long experiment should usually create or update a run with `create-run` / `update-run`, point it at `progress.json`, attach `gate_result.json` with `record-gate-result` or `ingest-gate-result`, and only then record conclusions with `complete-experiment` or `record-finding`. `run-context` is the narrow read path for monitor and stop details.
 
-When closing the current experiment and advancing focus in the same turn, prefer `close-current-experiment` over manually chaining `complete-experiment`, `set-focus`, and `set-agent-focus`. Use `create-followup-experiment --set-focus` for a derived queued next gate from a `done` or `running` experiment; by default it reuses the source experiment's option parent. When `--next-action` is passed with `--set-focus`, the same action is written to both the new experiment and `current_state.next_actions`.
+When an assignment-scoped agent completes an experiment, `complete-experiment` records the conclusion but does not move the assignment cursor. If JSON output warns that the assignment cursor is terminal, move it explicitly with `set-cursor --assignment <assignment_id> --node <next_node> --no-build`. `close-current-experiment`, `set-focus`, `sync-focus-actions`, and `create-followup-experiment --set-focus` are coordinator/legacy focus helpers; `--set-focus` updates coordinator selection and compatibility `current_state` fields, not the assignment cursor.
 Generated dashboard context includes `next_action_scopes`; read it before choosing work so focus-node, parent option/problem, global coordinator, and stale terminal-node actions are not conflated.
 Done nodes should keep conclusions, not live work. If a done experiment still has real follow-up work in `next_actions`, create a small derived queued experiment with `create-followup-experiment` or clean up an older stale action with `migrate-terminal-next-actions`. Use `create-workstream` when the follow-up is a branch, not one gate.
 
@@ -191,19 +204,20 @@ Use `finalize-workstream --file finalize.yaml` when the close-out needs several 
 Use git worktrees for code and experiment isolation, not for separate Research Cockpit truth sources. The canonical data root stays in the main repository and every downstream agent writes only that root:
 
 ```sh
-research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run downstream experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --dry-run --json --show-diff
-research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run downstream experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --no-build
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label cache_probe --objective "Run downstream experiments" --branch agent/option_x-cache_probe --worktree ../worktrees/cache_probe --base main --create-worktree --dry-run --json --show-diff
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label cache_probe --objective "Run downstream experiments" --branch agent/option_x-cache_probe --worktree ../worktrees/cache_probe --base main --create-worktree --no-build
 ```
 
-Send the JSON `handoff` to the downstream agent. Relative `--worktree` values resolve against the canonical repo root (`--root` parent). In the worktree, set `RESEARCH_COCKPIT_ROOT` to the canonical root or pass the same absolute `--root` on every command. The downstream agent starts with:
+Send the JSON `handoff` to the downstream agent. It contains the generated `agent_id`, `assignment_id`, `launch_env`, and `startup_command`; the downstream agent should not invent its own id. Relative `--worktree` values resolve against the canonical repo root (`--root` parent). In the worktree, set `RESEARCH_COCKPIT_ROOT` and `RESEARCH_COCKPIT_ASSIGNMENT_ID` from `launch_env`, or pass the same absolute `--root` and `--assignment` on every command. The downstream agent starts with:
 
 ```sh
-research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
+research-cockpit bootstrap --root D:/main_repo/research_cockpit --assignment <assignment_id> --json
+research-cockpit agent-session-context --root D:/main_repo/research_cockpit --assignment <assignment_id> --compact --json
 ```
 
 For coordinator-side task dispatch, use `assignment-view --json` to list high-priority queued/running experiments with `owner`, `depends_on`, `blocked_by`, key artifacts, and first `next_action`. Prefer one small queued experiment per downstream agent handoff.
 
-Do not run `init`, `set-focus`, or any mutation against a worktree-local `research_cockpit/`. Use `set-agent-focus` for per-agent progress; reserve global `set-focus` for a coordinator or human. Keep all canonical root mutations sequential and usually `--no-build`; run one main-root dashboard watcher when you want the panel to refresh:
+Do not run `init`, `set-focus`, or any mutation against a worktree-local `research_cockpit/`. Use `set-cursor --assignment <assignment_id>` for worker progress; reserve `set-focus` for coordinator/UI selection. `set-agent-focus` remains a legacy compatibility command for older roots and should not be used for new assignment-scoped sessions. Keep all canonical root mutations sequential and usually `--no-build`; run one main-root dashboard watcher when you want the panel to refresh:
 
 ```sh
 research-cockpit build --root D:/main_repo/research_cockpit --watch --interval 5 --json
@@ -234,6 +248,9 @@ Run `suggest-next-actions` once before choosing work. Re-run it only after you c
 Allowed project-state writes are under:
 
 - `research_cockpit/current_state.yaml`
+- `research_cockpit/coordinator_state.yaml`
+- `research_cockpit/agents/*.yaml`
+- `research_cockpit/assignments/*.yaml`
 - `research_cockpit/graph/nodes/*.yaml`
 - `research_cockpit/graph/edges.yaml`
 - `research_cockpit/graph/graph_views.yaml`
@@ -246,7 +263,7 @@ Allowed project-state writes are under:
 
 Agents should normally write structured state files through `research-cockpit` CLI commands. Direct YAML repair is a last-resort structural fix and must be followed by validation and dashboard rebuild.
 
-Markdown notes under `research_cockpit/notes/**/*.md` may be edited directly for human-readable detail. Artifact payloads under `research_cockpit/artifacts/**` may be copied or preserved by launcher handoff and `ingest-artifact`, but structured metadata should still be written through CLI commands. Keep structured findings, status, focus, decision state, run records, gate results, `baseline`, `current_best_option`, and `next_actions` in YAML via CLI where a command exists.
+Markdown notes under `research_cockpit/notes/**/*.md` may be edited directly for human-readable detail. Artifact payloads under `research_cockpit/artifacts/**` may be copied or preserved by launcher handoff and `ingest-artifact`, but structured metadata should still be written through CLI commands. Keep structured findings, status, coordinator focus, assignment cursor, decision state, run records, gate results, `baseline`, `current_best_option`, and `next_actions` in YAML via CLI where a command exists.
 
 Generated files under `research_cockpit/dashboards/` must be rebuilt, not hand-authored.
 

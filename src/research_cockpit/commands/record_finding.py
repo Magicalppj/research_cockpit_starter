@@ -19,6 +19,8 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
+from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands._evidence import (
     append_unique,
@@ -60,6 +62,8 @@ def record_finding(
     evidence_path: str | None = None,
     evidence_links: dict[str, str] | None = None,
     rebuild_dashboard: bool = True,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> Path:
     result = record_finding_result(
         root,
@@ -75,6 +79,8 @@ def record_finding(
         rebuild_dashboard=rebuild_dashboard,
         dry_run=False,
         show_diff=False,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
     )
     return Path(str(result["path"]))
 
@@ -94,6 +100,8 @@ def record_finding_result(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
     nodes = state.nodes
@@ -108,10 +116,16 @@ def record_finding_result(
     if outcome is not None and outcome not in VALID_FINDING_OUTCOMES:
         allowed = ", ".join(sorted(VALID_FINDING_OUTCOMES))
         raise ValueError(f"Invalid outcome {outcome!r}; allowed: {allowed}")
-
     artifacts = artifacts or []
     evidence_links = evidence_links or {}
     validate_artifact_ids(nodes, artifacts)
+    ensure_assignment_scope(
+        root,
+        nodes,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[experiment_id, *artifacts],
+    )
 
     path = find_node_file(root, experiment_id)
     data = load_yaml(path)
@@ -227,6 +241,7 @@ def main() -> None:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -244,7 +259,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except (ValueError, FileNotFoundError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc

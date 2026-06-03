@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone, date
 from pathlib import Path
 import sys
+from typing import Any
 from unittest.mock import patch
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -23,7 +24,8 @@ sys.path.insert(0, str(DEV_SCRIPTS_DIR))
 existing_pythonpath = os.environ.get("PYTHONPATH", "")
 os.environ["PYTHONPATH"] = str(SRC_DIR) if not existing_pythonpath else str(SRC_DIR) + os.pathsep + existing_pythonpath
 
-from research_cockpit.model import ValidationError, load_nodes, load_yaml, save_yaml
+from research_cockpit.model import ValidationError, load_nodes, load_yaml, save_yaml, validate_cockpit
+from research_cockpit.assignment_scope import AssignmentScopeError
 from research_cockpit.baselines import (
     build_accepted_decision_rows,
     build_accepted_option_rows,
@@ -32,8 +34,13 @@ from research_cockpit.baselines import (
     resolve_effective_baseline,
 )
 from research_cockpit.commands.accept_decision import accept_decision
-from research_cockpit.commands.add_node import add_node
-from research_cockpit.commands.agent_bootstrap import agent_bootstrap_payload, format_dependency_error, missing_runtime_dependencies
+from research_cockpit.commands.add_node import add_node, add_node_result
+from research_cockpit.commands.agent_bootstrap import (
+    BootstrapIdentityError,
+    agent_bootstrap_payload,
+    format_dependency_error,
+    missing_runtime_dependencies,
+)
 from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.apply_suggestion import apply_suggestion
 from research_cockpit.commands.agent_session_context import agent_session_context_payload
@@ -72,6 +79,7 @@ from research_cockpit.commands.report_option_workstream import report_option_wor
 from research_cockpit.commands.run_context import run_context_payload
 from research_cockpit.commands.set_agent_focus import set_agent_focus
 from research_cockpit.commands.set_baseline import set_baseline
+from research_cockpit.commands.set_cursor import set_cursor
 from research_cockpit.commands.set_focus import set_focus
 from research_cockpit.commands.skill_smoke_test import missing_modules_for_python, skill_smoke_test_payload
 from research_cockpit.commands.start_agent_session import start_agent_session
@@ -179,6 +187,48 @@ class ScriptBehaviorTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp_root, ignore_errors=True)
+
+    def start_t5_assignment(self, *, label: str = "t5") -> dict[str, Any]:
+        return start_agent_session(
+            self.root,
+            option_id="option_t5",
+            label=label,
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
+
+    def write_other_scope_branch(
+        self,
+        *,
+        option_id: str,
+        experiment_id: str,
+        option_title: str = "Other scope option",
+        experiment_title: str = "Other scope experiment",
+        experiment_status: str = "running",
+        experiment_next_actions: list[str] | None = None,
+    ) -> None:
+        write_node(
+            self.root,
+            {
+                "id": option_id,
+                "type": "option",
+                "title": option_title,
+                "status": "active",
+                "parent": "problem_text",
+            },
+        )
+        experiment: dict[str, Any] = {
+            "id": experiment_id,
+            "type": "experiment",
+            "title": experiment_title,
+            "status": experiment_status,
+            "parent": option_id,
+        }
+        if experiment_next_actions is not None:
+            experiment["next_actions"] = experiment_next_actions
+        write_node(self.root, experiment)
 
     def run_dev_script(self, script_name: str, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -650,6 +700,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         focus_context = json.loads((self.root / "dashboards" / "focus_context_pack.json").read_text(encoding="utf-8"))
 
         self.assertEqual(current["current_focus_node"], "option_t5")
+        coordinator = load_yaml(self.root / "coordinator_state.yaml")
+        self.assertEqual(coordinator["selected_node"], "option_t5")
         self.assertEqual(graph["current_focus_node"], "option_t5")
         self.assertEqual(focus_context["focus_node"]["id"], "option_t5")
         interaction_log = load_yaml(self.root / "graph" / "interaction_log.yaml")
@@ -1783,6 +1835,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("git", payload["git_command"][0])
         self.assertIn("diff", payload)
         self.assertEqual(before, option_path.read_text(encoding="utf-8"))
+        self.assertFalse((self.root / "agents").exists())
+        self.assertFalse((self.root / "assignments").exists())
         self.assertFalse((self.root / "graph" / "interaction_log.yaml").exists())
 
     def test_start_agent_session_resolves_relative_worktree_from_repo_root(self) -> None:
@@ -1860,6 +1914,278 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(workstream["git_branch"], "agent/option_t5")
         self.assertEqual(workstream["worktree_label"], "agent_t5")
         self.assertNotIn(str(worktree), json.dumps(workstream))
+
+    def test_start_agent_session_generates_agent_and_assignment_identity(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "cache_probe"
+        worktree.mkdir(parents=True)
+
+        with (
+            patch("research_cockpit.commands.start_agent_session.secrets.token_hex", return_value="8f4c2a"),
+            patch("research_cockpit.commands.start_agent_session.today", return_value="2026-06-03"),
+        ):
+            payload = start_agent_session(
+                self.root,
+                option_id="option_t5",
+                label="Cache Probe",
+                objective="Run cache probe",
+                branch="agent/option_t5",
+                worktree=worktree,
+                rebuild_dashboard=False,
+            )
+
+        agent_id = "agent_20260603_8f4c2a_cache_probe"
+        assignment_id = "assign_20260603_8f4c2a"
+        agent = load_yaml(self.root / "agents" / f"{agent_id}.yaml")
+        assignment = load_yaml(self.root / "assignments" / f"{assignment_id}.yaml")
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+
+        self.assertEqual(payload["agent_id"], agent_id)
+        self.assertEqual(payload["assignment_id"], assignment_id)
+        self.assertEqual(payload["launch_env"]["RESEARCH_COCKPIT_AGENT_ID"], agent_id)
+        self.assertEqual(payload["launch_env"]["RESEARCH_COCKPIT_ASSIGNMENT_ID"], assignment_id)
+        self.assertEqual(payload["handoff"]["launch_env"]["RESEARCH_COCKPIT_AGENT_ID"], agent_id)
+        self.assertEqual(payload["handoff"]["launch_env"]["RESEARCH_COCKPIT_ASSIGNMENT_ID"], assignment_id)
+        self.assertIn("--assignment", payload["startup_command"])
+        self.assertEqual(
+            payload["startup_command_args"],
+            [
+                "research-cockpit",
+                "bootstrap",
+                "--root",
+                str(self.root.resolve()),
+                "--assignment",
+                assignment_id,
+                "--json",
+            ],
+        )
+        self.assertEqual(agent["active_assignment_ids"], [assignment_id])
+        self.assertEqual(assignment["agent_id"], agent_id)
+        self.assertEqual(assignment["root_node"], "option_t5")
+        self.assertEqual(assignment["current_node"], "option_t5")
+        self.assertEqual(assignment["allowed_subtree"], {"root": "option_t5", "policy": "descendants_only"})
+        self.assertEqual(assignment["worktree"]["branch"], "agent/option_t5")
+        self.assertEqual(assignment["worktree"]["label"], "cache_probe")
+        self.assertEqual(option["agent_workstream"]["owner"], agent_id)
+        self.assertEqual(validate_cockpit(self.root, load_nodes(self.root)), [])
+        out = subprocess.run(
+            [
+                *cli_command("bootstrap"),
+                "--root",
+                str(self.root),
+                "--assignment",
+                assignment_id,
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        bootstrap_payload = json.loads(out.stdout)
+        self.assertEqual(bootstrap_payload["scope"]["mode"], "assignment")
+        self.assertEqual(bootstrap_payload["scope"]["primary_context"], "assignment_scope")
+        self.assertEqual(bootstrap_payload["scope"]["assignment_id"], assignment_id)
+        self.assertEqual(bootstrap_payload["scope"]["agent_id"], agent_id)
+        self.assertEqual(bootstrap_payload["assignment_scope"], bootstrap_payload["agent_scope"])
+        self.assertEqual(
+            bootstrap_payload["agent_scope"]["handoff"]["launch_env"]["RESEARCH_COCKPIT_ASSIGNMENT_ID"],
+            assignment_id,
+        )
+        guidance_text = json.dumps(bootstrap_payload["mutation_guidance"])
+        self.assertIn(f"--assignment {assignment_id}", guidance_text)
+        self.assertIn(f"create-followup-experiment --root <root> --assignment {assignment_id}", guidance_text)
+        self.assertIn(f"migrate-terminal-next-actions --root <root> --assignment {assignment_id}", guidance_text)
+        self.assertIn("set-cursor", guidance_text)
+        self.assertNotIn("research-cockpit init", guidance_text)
+        self.assertNotIn("set-baseline", guidance_text)
+        self.assertNotIn("sync-focus-actions", guidance_text)
+        self.assertNotIn("update-suggestion-state", guidance_text)
+        self.assertNotIn("finalize-workstream", guidance_text)
+
+    def test_start_agent_session_quotes_shell_sensitive_root_in_startup_command(self) -> None:
+        repo_root = self.tmp_root / "repo & spaces"
+        data_root = repo_root / "research_cockpit"
+        shutil.copytree(self.root, data_root)
+        worktree = repo_root / "worktrees" / "cache probe"
+        worktree.mkdir(parents=True)
+
+        payload = start_agent_session(
+            data_root,
+            option_id="option_t5",
+            label="cache probe",
+            objective="Run cache probe",
+            branch="agent/option_t5",
+            worktree=worktree,
+            rebuild_dashboard=False,
+        )
+
+        self.assertIn(f"'{data_root.resolve()}'", payload["startup_command"])
+        out = subprocess.run(
+            [
+                *cli_command("bootstrap"),
+                *payload["startup_command_args"][2:],
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        bootstrap_payload = json.loads(out.stdout)
+        self.assertEqual(bootstrap_payload["scope"]["assignment_id"], payload["assignment_id"])
+
+    def test_start_agent_session_cli_generates_identity_without_agent_arg(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "cache_probe"
+        worktree.mkdir(parents=True)
+
+        out = subprocess.run(
+            [
+                *cli_command("start-agent-session"),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--label",
+                "cache probe",
+                "--objective",
+                "Run cache probe",
+                "--branch",
+                "agent/option_t5",
+                "--worktree",
+                str(worktree),
+                "--json",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertRegex(payload["agent_id"], r"^agent_\d{8}_[0-9a-f]{6}_cache_probe$")
+        self.assertRegex(payload["assignment_id"], r"^assign_\d{8}_[0-9a-f]{6}$")
+        self.assertTrue((self.root / "agents" / f"{payload['agent_id']}.yaml").exists())
+        self.assertTrue((self.root / "assignments" / f"{payload['assignment_id']}.yaml").exists())
+        self.assertEqual(payload["launch_env"]["RESEARCH_COCKPIT_ASSIGNMENT_ID"], payload["assignment_id"])
+
+    def test_start_agent_session_rejects_unsafe_identity_ids(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+        worktree.mkdir(parents=True)
+        current_before = (self.root / "current_state.yaml").read_text(encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            start_agent_session(
+                self.root,
+                option_id="option_t5",
+                agent_id="../current_state",
+                objective="Run T5 branch",
+                branch="agent/option_t5",
+                worktree=worktree,
+                rebuild_dashboard=False,
+            )
+
+        self.assertIn("agent_id must contain only letters", str(ctx.exception))
+        self.assertEqual(current_before, (self.root / "current_state.yaml").read_text(encoding="utf-8"))
+
+    def test_start_agent_session_rejects_unsafe_assignment_id(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+        worktree.mkdir(parents=True)
+        current_before = (self.root / "current_state.yaml").read_text(encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            start_agent_session(
+                self.root,
+                option_id="option_t5",
+                agent_id="agent_t5",
+                assignment_id="../current_state",
+                objective="Run T5 branch",
+                branch="agent/option_t5",
+                worktree=worktree,
+                rebuild_dashboard=False,
+            )
+
+        self.assertIn("assignment_id must contain only letters", str(ctx.exception))
+        self.assertEqual(current_before, (self.root / "current_state.yaml").read_text(encoding="utf-8"))
+
+    def test_start_agent_session_force_reuses_existing_assignment_for_new_agent(self) -> None:
+        worktree_a = self.tmp_root / "worktrees" / "agent_a"
+        worktree_b = self.tmp_root / "worktrees" / "agent_b"
+        worktree_a.mkdir(parents=True)
+        worktree_b.mkdir(parents=True)
+        first = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_a",
+            objective="Run T5 branch",
+            branch="agent/option_t5_a",
+            worktree=worktree_a,
+            rebuild_dashboard=False,
+        )
+
+        second = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_b",
+            objective="Take over T5 branch",
+            branch="agent/option_t5_b",
+            worktree=worktree_b,
+            force=True,
+            rebuild_dashboard=False,
+        )
+
+        assignment_id = first["assignment_id"]
+        self.assertEqual(second["assignment_id"], assignment_id)
+        assignment = load_yaml(self.root / "assignments" / f"{assignment_id}.yaml")
+        old_agent = load_yaml(self.root / "agents" / "agent_a.yaml")
+        new_agent = load_yaml(self.root / "agents" / "agent_b.yaml")
+        self.assertEqual(assignment["agent_id"], "agent_b")
+        self.assertNotIn(assignment_id, old_agent.get("active_assignment_ids", []))
+        self.assertIn(assignment_id, new_agent.get("active_assignment_ids", []))
+        self.assertEqual(validate_cockpit(self.root, load_nodes(self.root)), [])
+
+    def test_start_agent_session_preserves_existing_agent_label_and_smoke_uses_coordinator_bootstrap(self) -> None:
+        worktree_a = self.tmp_root / "worktrees" / "agent_multi_a"
+        worktree_b = self.tmp_root / "worktrees" / "agent_multi_b"
+        worktree_a.mkdir(parents=True)
+        worktree_b.mkdir(parents=True)
+        write_node(
+            self.root,
+            {
+                "id": "option_multi_assignment",
+                "type": "option",
+                "title": "Multi assignment option",
+                "status": "active",
+                "parent": "problem_text",
+            },
+        )
+        first = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_multi",
+            label="First Display",
+            objective="Run first assignment",
+            branch="agent/multi_a",
+            worktree=worktree_a,
+            rebuild_dashboard=False,
+        )
+        second = start_agent_session(
+            self.root,
+            option_id="option_multi_assignment",
+            agent_id="agent_multi",
+            label="Second Display",
+            objective="Run second assignment",
+            branch="agent/multi_b",
+            worktree=worktree_b,
+            rebuild_dashboard=False,
+        )
+
+        agent = load_yaml(self.root / "agents" / "agent_multi.yaml")
+        smoke = skill_smoke_test_payload(self.root)
+
+        self.assertEqual(agent["label"], "first_display")
+        self.assertEqual(agent["display_name"], "First Display")
+        self.assertEqual(agent["active_assignment_ids"], [first["assignment_id"], second["assignment_id"]])
+        self.assertTrue(smoke["ok"])
 
     def test_start_agent_session_can_create_git_worktree(self) -> None:
         if shutil.which("git") is None:
@@ -1946,9 +2272,100 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["do_not_mutate_worktree_root"])
         self.assertEqual(payload["stable_artifact_root"], str((self.root / "artifacts").resolve()))
         self.assertIn("ingest-artifact", payload["handoff"]["commands"]["ingest_artifact"])
-        self.assertEqual(payload["agent_focus"]["current_focus_node"], "exp_t5")
+        self.assertEqual(payload["assignment"]["current_node"], "option_t5")
+        self.assertEqual(payload["agent_focus"]["source"], "assignment")
+        self.assertEqual(payload["agent_focus"]["current_focus_node"], "option_t5")
         self.assertEqual(payload["option_context"]["hierarchy_policy"]["workstream_file_hint"]["problem.parent"], "option_t5")
         self.assertIn("create_child_workstream", payload["option_context"]["suggested_commands"])
+
+    def test_set_cursor_updates_assignment_record_and_assignment_context_reads_it(self) -> None:
+        session = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
+
+        result = set_cursor(
+            self.root,
+            assignment_id=session["assignment_id"],
+            node_id="exp_t5",
+            next_actions=["Run downstream test"],
+            rebuild_dashboard=False,
+        )
+        assignment = load_yaml(self.root / "assignments" / f"{session['assignment_id']}.yaml")
+        current = load_yaml(self.root / "current_state.yaml")
+        payload = agent_session_context_payload(
+            self.root,
+            assignment_id=session["assignment_id"],
+            compact=True,
+        )
+        payload_by_agent = agent_session_context_payload(
+            self.root,
+            agent_id="agent_t5",
+            compact=True,
+        )
+
+        self.assertEqual(result["after"]["assignment"]["current_node"], "exp_t5")
+        self.assertEqual(assignment["current_node"], "exp_t5")
+        self.assertEqual(assignment["next_actions"], ["Run downstream test"])
+        self.assertNotIn("agent_focuses", current)
+        self.assertEqual(payload["assignment"]["assignment_id"], session["assignment_id"])
+        self.assertEqual(payload["assignment"]["current_node"], "exp_t5")
+        self.assertEqual(payload["assignment"]["next_actions"], ["Run downstream test"])
+        self.assertEqual(payload["assignment_cursor"]["current_node"], "exp_t5")
+        self.assertEqual(payload["agent_focus"]["source"], "assignment")
+        self.assertEqual(payload["agent_focus"]["current_focus_node"], "exp_t5")
+        self.assertIn("--assignment", payload["handoff"]["commands"]["read_context"])
+        self.assertIn("set-cursor", payload["handoff"]["commands"]["set_cursor"])
+        self.assertEqual(payload_by_agent["assignment"]["assignment_id"], session["assignment_id"])
+        self.assertEqual(payload_by_agent["assignment"]["current_node"], "exp_t5")
+        self.assertEqual(payload_by_agent["agent_focus"]["source"], "assignment")
+        self.assertIn("--assignment", payload_by_agent["handoff"]["commands"]["read_context"])
+        self.assertIn("set-cursor", payload_by_agent["handoff"]["commands"]["set_cursor"])
+        self.assertNotIn("set_agent_focus", payload_by_agent["handoff"]["commands"])
+
+    def test_set_cursor_cli_compact_json_uses_assignment_target(self) -> None:
+        session = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("set-cursor"),
+                "--root",
+                str(self.root),
+                "--assignment",
+                session["assignment_id"],
+                "--node",
+                "exp_t5",
+                "--next-action",
+                "Review run output",
+                "--json",
+                "--compact",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        assignment = load_yaml(self.root / "assignments" / f"{session['assignment_id']}.yaml")
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["command"], "research-cockpit set-cursor")
+        self.assertEqual(payload["target"]["assignment_id"], session["assignment_id"])
+        self.assertEqual(assignment["current_node"], "exp_t5")
+        self.assertEqual(assignment["next_actions"], ["Review run output"])
 
     def test_set_agent_focus_actual_json_omits_would_change_and_compact_is_supported(self) -> None:
         out = subprocess.run(
@@ -2018,7 +2435,7 @@ class ScriptBehaviorTests(unittest.TestCase):
     def test_build_dashboard_rows_include_agent_session_fields(self) -> None:
         worktree = self.tmp_root / "worktrees" / "agent_t5"
         worktree.mkdir(parents=True)
-        start_agent_session(
+        session = start_agent_session(
             self.root,
             option_id="option_t5",
             agent_id="agent_t5",
@@ -2027,15 +2444,46 @@ class ScriptBehaviorTests(unittest.TestCase):
             worktree=worktree,
             rebuild_dashboard=False,
         )
-        set_agent_focus(self.root, agent_id="agent_t5", node_id="exp_t5", rebuild_dashboard=False)
+        set_cursor(
+            self.root,
+            assignment_id=session["assignment_id"],
+            node_id="exp_t5",
+            next_actions=["Review assignment output"],
+            rebuild_dashboard=False,
+        )
+        set_focus(
+            self.root,
+            focus_node="problem_text",
+            next_actions=["Coordinator review"],
+            rebuild_dashboard=False,
+        )
 
         build_dashboard(self.root)
         rows = json.loads((self.root / "dashboards" / "option_workstreams.json").read_text(encoding="utf-8"))
+        agent_context = json.loads((self.root / "dashboards" / "agent_context_pack.json").read_text(encoding="utf-8"))
 
         self.assertEqual(rows[0]["session_id"], "session_agent_t5_option_t5")
         self.assertEqual(rows[0]["git_branch"], "agent/option_t5")
         self.assertEqual(rows[0]["worktree_label"], "agent_t5")
         self.assertEqual(rows[0]["agent_focus_node"], "exp_t5")
+        self.assertEqual(rows[0]["agent_focus_source"], "assignment")
+        self.assertEqual(rows[0]["assignment_id"], session["assignment_id"])
+        self.assertEqual(rows[0]["assignment_current_node"], "exp_t5")
+        self.assertEqual(rows[0]["assignment_next_actions"], ["Review assignment output"])
+        self.assertEqual(agent_context["primary_context"], "assignment_overview")
+        self.assertTrue(agent_context["legacy_global_fields_are_coordinator_only"])
+        self.assertTrue(agent_context["current_focus_is_coordinator_only"])
+        self.assertTrue(agent_context["current_global_focus"]["coordinator_only"])
+        self.assertEqual(
+            agent_context["current_global_focus"]["next_action_scopes"]["global_coordinator_next_actions"][0]["source"],
+            "coordinator_state",
+        )
+        self.assertEqual(agent_context["assignment_overview"]["assignments"][0]["assignment_id"], session["assignment_id"])
+        self.assertEqual(agent_context["assignment_overview"]["assignments"][0]["current_node"], "exp_t5")
+        self.assertEqual(
+            agent_context["assignment_overview"]["assignments"][0]["next_actions"],
+            ["Review assignment output"],
+        )
 
     def test_option_workstream_context_cli_outputs_json(self) -> None:
         command = "option-workstream-context"
@@ -2977,6 +3425,230 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["run_overview"]["running"][0]["progress"]["warnings"], ["warmup slow"])
         self.assertNotIn("schema_version", payload["run_overview"]["running"][0]["progress"])
         self.assertNotIn("path", payload["run_overview"]["running"][0]["progress"])
+
+    def test_agent_bootstrap_agent_scope_does_not_treat_global_focus_as_agent_focus(self) -> None:
+        stage_path = self.root / "graph" / "nodes" / "stage_text.yaml"
+        stage_data = load_yaml(stage_path)
+        stage_data["children"] = ["problem_text", "problem_other"]
+        save_yaml(stage_path, stage_data)
+        write_node(
+            self.root,
+            {
+                "id": "problem_other",
+                "type": "problem",
+                "title": "Other problem",
+                "status": "active",
+                "parent": "stage_text",
+                "children": ["option_other"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_other",
+                "type": "option",
+                "title": "Other option",
+                "status": "active",
+                "parent": "problem_other",
+                "children": ["exp_other"],
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_other",
+                "type": "experiment",
+                "title": "Other experiment",
+                "status": "running",
+                "parent": "option_other",
+            },
+        )
+        current_path = self.root / "current_state.yaml"
+        current = load_yaml(current_path)
+        current["current_problem"] = "problem_other"
+        current["current_option"] = "option_other"
+        current["current_focus_node"] = "exp_other"
+        current["current_focus_path"] = ["stage_text", "problem_other", "option_other", "exp_other"]
+        save_yaml(current_path, current)
+        start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
+        session = load_yaml(self.root / "agents" / "agent_t5.yaml")["active_assignment_ids"][0]
+        set_cursor(
+            self.root,
+            assignment_id=session,
+            node_id="exp_t5",
+            next_actions=["Review T5 output"],
+            rebuild_dashboard=False,
+        )
+
+        payload = agent_bootstrap_payload(self.root, build=False, agent_id="agent_t5")
+
+        self.assertEqual(payload["scope"]["mode"], "assignment")
+        self.assertEqual(payload["scope"]["primary_context"], "assignment_scope")
+        self.assertEqual(payload["scope"]["identity_source"], "explicit_agent")
+        self.assertTrue(payload["scope"]["assignment_id"].startswith("assign_"))
+        self.assertEqual(payload["assignment_scope"], payload["agent_scope"])
+        self.assertEqual(payload["agent_scope"]["agent_id"], "agent_t5")
+        self.assertEqual(payload["agent_scope"]["option_id"], "option_t5")
+        self.assertEqual(payload["agent_scope"]["assignment_id"], payload["scope"]["assignment_id"])
+        self.assertEqual(payload["agent_scope"]["current_node"], "exp_t5")
+        self.assertEqual(payload["agent_scope"]["next_actions"], ["Review T5 output"])
+        self.assertEqual(payload["agent_scope"]["agent_focus"]["current_focus_node"], "exp_t5")
+        self.assertEqual(payload["agent_scope"]["agent_focus"]["source"], "assignment")
+        self.assertFalse(payload["agent_scope"]["uses_global_current_state"])
+        self.assertEqual(payload["agent_scope"]["option_context"]["option"]["id"], "option_t5")
+        self.assertEqual(payload["focus"]["current_focus_node"], "exp_other")
+        self.assertTrue(payload["focus"]["coordinator_only"])
+        self.assertIn("agent-session-context", payload["agent_scope"]["handoff"]["commands"]["read_context"])
+        self.assertEqual(
+            payload["mutation_guidance"]["hierarchy_policy"]["workstream_file_hint"]["problem.parent"],
+            "option_t5",
+        )
+
+    def test_agent_bootstrap_cli_accepts_agent_scope(self) -> None:
+        start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
+        out = subprocess.run(
+            [
+                *cli_command("bootstrap"),
+                "--root",
+                str(self.root),
+                "--agent",
+                "agent_t5",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["scope"]["mode"], "assignment")
+        self.assertEqual(payload["scope"]["primary_context"], "assignment_scope")
+        self.assertEqual(payload["scope"]["identity_source"], "explicit_agent")
+        self.assertTrue(payload["scope"]["assignment_id"].startswith("assign_"))
+        self.assertEqual(payload["assignment_scope"], payload["agent_scope"])
+        self.assertEqual(payload["agent_scope"]["agent_id"], "agent_t5")
+        self.assertTrue(payload["focus"]["coordinator_only"])
+
+    def test_agent_bootstrap_resolves_assignment_from_environment(self) -> None:
+        session = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "RESEARCH_COCKPIT_ASSIGNMENT_ID": session["assignment_id"],
+                "RESEARCH_COCKPIT_AGENT_ID": "agent_t5",
+            },
+        ):
+            payload = agent_bootstrap_payload(self.root, build=False)
+
+        self.assertEqual(payload["scope"]["mode"], "assignment")
+        self.assertEqual(payload["scope"]["primary_context"], "assignment_scope")
+        self.assertEqual(payload["scope"]["identity_source"], "env_assignment")
+        self.assertEqual(payload["scope"]["assignment_id"], session["assignment_id"])
+        self.assertEqual(payload["assignment_scope"], payload["agent_scope"])
+        self.assertEqual(payload["assignment_scope"]["current_node"], "option_t5")
+        self.assertEqual(payload["agent_scope"]["handoff"]["launch_env"]["RESEARCH_COCKPIT_ASSIGNMENT_ID"], session["assignment_id"])
+
+    def test_agent_bootstrap_rejects_conflicting_env_assignment_and_agent(self) -> None:
+        session = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "RESEARCH_COCKPIT_ASSIGNMENT_ID": session["assignment_id"],
+                "RESEARCH_COCKPIT_AGENT_ID": "agent_other",
+            },
+        ):
+            with self.assertRaises(BootstrapIdentityError) as ctx:
+                agent_bootstrap_payload(self.root, build=False)
+
+        self.assertEqual(ctx.exception.payload["error"], "assignment_identity_mismatch")
+        self.assertEqual(ctx.exception.payload["assignment_id"], session["assignment_id"])
+        self.assertEqual(ctx.exception.payload["assignment_agent_id"], "agent_t5")
+        self.assertEqual(ctx.exception.payload["agent_id"], "agent_other")
+
+    def test_agent_bootstrap_cli_rejects_ambiguous_active_assignments_without_identity(self) -> None:
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        problem = load_yaml(problem_path)
+        problem["children"] = [*problem.get("children", []), "option_other"]
+        save_yaml(problem_path, problem)
+        write_node(
+            self.root,
+            {
+                "id": "option_other",
+                "type": "option",
+                "title": "Other option",
+                "status": "active",
+                "parent": "problem_text",
+            },
+        )
+        start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_a",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_a",
+            rebuild_dashboard=False,
+        )
+        start_agent_session(
+            self.root,
+            option_id="option_other",
+            agent_id="agent_b",
+            objective="Run other branch",
+            branch="agent/option_other",
+            worktree=self.tmp_root / "worktrees" / "agent_b",
+            rebuild_dashboard=False,
+        )
+        env = os.environ.copy()
+        env.pop("RESEARCH_COCKPIT_ASSIGNMENT_ID", None)
+        env.pop("RESEARCH_COCKPIT_AGENT_ID", None)
+
+        out = subprocess.run(
+            [*cli_command("bootstrap"), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+
+        self.assertEqual(out.returncode, 1)
+        payload = json.loads(out.stdout)
+        self.assertEqual(payload["error"], "assignment_identity_required")
+        self.assertIn("assignment_ids", payload)
 
     def test_agent_bootstrap_surfaces_missing_progress_warning_without_crashing(self) -> None:
         save_yaml(
@@ -4160,6 +4832,22 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["context"]["supports_json"])
         self.assertTrue(by_name["context"]["supports_compact"])
         self.assertIn("focus", by_name["context"]["workflow_tags"])
+        self.assertIn("--assignment", by_name["bootstrap"]["supported_flags"])
+        for command_name in (
+            "apply-graph-plan",
+            "create-workstream",
+            "update-status",
+            "create-run",
+            "update-run",
+            "complete-run",
+            "record-gate-result",
+            "ingest-artifact",
+            "record-finding",
+            "complete-experiment",
+        ):
+            with self.subTest(command_name=command_name):
+                self.assertIn("--assignment", by_name[command_name]["supported_flags"])
+                self.assertIn("--coordinator", by_name[command_name]["supported_flags"])
         self.assertTrue(by_name["node-context"]["supports_compact"])
         self.assertIn("read", by_name["node-context"]["workflow_tags"])
         self.assertTrue(by_name["add-node"]["supports_json"])
@@ -4179,6 +4867,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["set-agent-focus"]["supports_dry_run"])
         self.assertTrue(by_name["set-agent-focus"]["supports_compact"])
         self.assertIn("agent_focuses", by_name["set-agent-focus"]["fields_supported"])
+        self.assertTrue(by_name["set-cursor"]["supports_dry_run"])
+        self.assertTrue(by_name["set-cursor"]["supports_compact"])
+        self.assertIn("--assignment", by_name["set-cursor"]["supported_flags"])
+        self.assertIn("assignment.current_node", by_name["set-cursor"]["fields_supported"])
         self.assertTrue(by_name["apply-graph-plan"]["supports_json"])
         self.assertTrue(by_name["apply-graph-plan"]["supports_dry_run"])
         self.assertTrue(by_name["apply-graph-plan"]["supports_no_build"])
@@ -4234,7 +4926,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_name["option-workstream-context"]["primary_target"], "--id")
         self.assertTrue(by_name["option-workstream-context"]["supports_compact"])
         self.assertTrue(by_name["agent-session-context"]["supports_compact"])
-        self.assertEqual(by_name["agent-session-context"]["primary_target"], "--agent")
+        self.assertEqual(by_name["agent-session-context"]["primary_target"], "--assignment")
+        self.assertIn("--agent", by_name["agent-session-context"]["target_aliases"])
         self.assertIn("finalize file directory", by_name["finalize-workstream"]["path_resolution"])
         self.assertTrue(by_name["update-node-fields"]["mutating"])
         self.assertTrue(by_name["update-node-fields"]["supports_json"])
@@ -4263,7 +4956,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--show-diff", by_name["close-current-experiment"]["unsupported_flags"])
         self.assertIn("create-followup-experiment", by_name)
         self.assertIn("derived_from", by_name["create-followup-experiment"]["fields_supported"])
+        self.assertIn("coordinator_set_focus", by_name["create-followup-experiment"]["fields_supported"])
+        self.assertNotIn("set_focus", by_name["create-followup-experiment"]["fields_supported"])
         self.assertTrue(by_name["create-followup-experiment"]["supports_show_diff"])
+        self.assertIn("--assignment", by_name["create-followup-experiment"]["supported_flags"])
+        self.assertIn("--coordinator", by_name["create-followup-experiment"]["supported_flags"])
         self.assertIn("--show-diff", by_name["create-followup-experiment"]["supported_flags"])
         self.assertIn("single queued gate", by_name["create-followup-experiment"]["hierarchy_guidance"])
         self.assertIn("update-workstream-fields", by_name)
@@ -5954,6 +6651,88 @@ class ScriptBehaviorTests(unittest.TestCase):
         ))
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "ingest_artifact")
 
+    def test_assignment_scope_guard_applies_to_run_gate_and_artifact_links(self) -> None:
+        session = self.start_t5_assignment()
+        self.write_other_scope_branch(
+            option_id="option_other_link_scope",
+            experiment_id="exp_other_link_scope",
+            option_title="Other link scope option",
+            experiment_title="Other link scope experiment",
+        )
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_scope"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.5}', encoding="utf-8")
+
+        in_scope_run = create_run(
+            self.root,
+            run_id="run_scope_in",
+            experiment_id="exp_t5",
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+        completed = complete_run(
+            self.root,
+            run_id="run_scope_in",
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+        with self.assertRaises(AssignmentScopeError) as run_ctx:
+            create_run(
+                self.root,
+                run_id="run_scope_out",
+                experiment_id="exp_other_link_scope",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        create_run(
+            self.root,
+            run_id="run_scope_rebind",
+            experiment_id="exp_other_link_scope",
+            rebuild_dashboard=False,
+        )
+        before_rebind = (self.root / "runs" / "run_scope_rebind.yaml").read_text(encoding="utf-8")
+        with self.assertRaises(AssignmentScopeError) as rebind_ctx:
+            update_run(
+                self.root,
+                run_id="run_scope_rebind",
+                experiment_id="exp_t5",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        after_rebind = (self.root / "runs" / "run_scope_rebind.yaml").read_text(encoding="utf-8")
+        with self.assertRaises(AssignmentScopeError) as gate_ctx:
+            record_gate_result(
+                self.root,
+                gate_id="gate_scope_out",
+                experiment_id="exp_other_link_scope",
+                gate_type="smoke_check",
+                passed=False,
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as artifact_ctx:
+            ingest_artifact(
+                self.root,
+                node_id="exp_other_link_scope",
+                source_dir=source,
+                run_id="run_scope",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+
+        self.assertEqual(in_scope_run["experiment_id"], "exp_t5")
+        self.assertEqual(completed["status"], "completed")
+        self.assertEqual(run_ctx.exception.payload["error"], "node_out_of_assignment_scope")
+        self.assertEqual(rebind_ctx.exception.payload["error"], "node_out_of_assignment_scope")
+        self.assertEqual(rebind_ctx.exception.payload["node_id"], "exp_other_link_scope")
+        self.assertEqual(before_rebind, after_rebind)
+        self.assertEqual(gate_ctx.exception.payload["error"], "node_out_of_assignment_scope")
+        self.assertEqual(artifact_ctx.exception.payload["error"], "node_out_of_assignment_scope")
+        self.assertFalse((self.root / "runs" / "run_scope_out.yaml").exists())
+        self.assertFalse((self.root / "gate_results" / "gate_scope_out.yaml").exists())
+        self.assertFalse((self.root / "graph" / "nodes" / "artifact_exp_other_link_scope_run_scope.yaml").exists())
+        self.assertFalse((self.root / "artifacts" / "exp_other_link_scope" / "run_scope").exists())
+
     def test_ingest_artifact_cli_dry_run_compact_does_not_copy(self) -> None:
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_002"
         source.mkdir(parents=True)
@@ -6676,6 +7455,418 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("current_best_option", problem)
         self.assertTrue((self.root / "dashboards" / "focus_context_pack.json").exists())
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "complete_experiment")
+
+    def test_complete_experiment_warns_when_assignment_cursor_becomes_terminal(self) -> None:
+        session = self.start_t5_assignment()
+        set_cursor(
+            self.root,
+            assignment_id=session["assignment_id"],
+            node_id="exp_t5",
+            rebuild_dashboard=False,
+        )
+
+        result = complete_experiment(
+            self.root,
+            experiment_id="exp_t5",
+            finding="Completed assignment cursor target.",
+            confidence="medium",
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+
+        self.assertIn(f"assignment_cursor_is_terminal:{session['assignment_id']}", result["warnings"])
+        self.assertIn("set-cursor", " ".join(result["recommended_commands"]))
+        self.assertIn(session["assignment_id"], " ".join(result["recommended_commands"]))
+
+    def test_assignment_scope_guard_allows_in_scope_and_rejects_out_of_scope_completion(self) -> None:
+        session = self.start_t5_assignment()
+        self.write_other_scope_branch(
+            option_id="option_other_scope",
+            experiment_id="exp_other_scope",
+        )
+        before_other = (self.root / "graph" / "nodes" / "exp_other_scope.yaml").read_text(encoding="utf-8")
+
+        in_scope = complete_experiment(
+            self.root,
+            experiment_id="exp_t5",
+            finding="In scope finding.",
+            confidence="medium",
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+        with self.assertRaises(AssignmentScopeError) as ctx:
+            complete_experiment(
+                self.root,
+                experiment_id="exp_other_scope",
+                finding="Out of scope finding.",
+                confidence="medium",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        after_other = (self.root / "graph" / "nodes" / "exp_other_scope.yaml").read_text(encoding="utf-8")
+        coordinator = complete_experiment(
+            self.root,
+            experiment_id="exp_other_scope",
+            finding="Coordinator override finding.",
+            confidence="medium",
+            assignment_id=session["assignment_id"],
+            coordinator=True,
+            rebuild_dashboard=False,
+        )
+
+        self.assertTrue(in_scope["changed"])
+        self.assertEqual(ctx.exception.payload["error"], "node_out_of_assignment_scope")
+        self.assertEqual(ctx.exception.payload["assignment_id"], session["assignment_id"])
+        self.assertEqual(ctx.exception.payload["node_id"], "exp_other_scope")
+        self.assertEqual(ctx.exception.payload["allowed_root"], "option_t5")
+        self.assertEqual(before_other, after_other)
+        self.assertTrue(coordinator["changed"])
+
+    def test_assignment_scope_guard_rejects_out_of_scope_artifact_links(self) -> None:
+        session = self.start_t5_assignment()
+        write_node(
+            self.root,
+            {
+                "id": "option_other_artifact_scope",
+                "type": "option",
+                "title": "Other artifact scope option",
+                "status": "active",
+                "parent": "problem_text",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_other_scope",
+                "type": "artifact",
+                "title": "Other branch artifact",
+                "status": "done",
+                "parent": "option_other_artifact_scope",
+            },
+        )
+        before = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
+
+        with self.assertRaises(AssignmentScopeError) as finding_ctx:
+            record_finding(
+                self.root,
+                experiment_id="exp_t5",
+                statement="Out of scope artifact should fail.",
+                confidence="medium",
+                artifacts=["artifact_other_scope"],
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as complete_ctx:
+            complete_experiment(
+                self.root,
+                experiment_id="exp_t5",
+                finding="Out of scope artifact should fail.",
+                confidence="medium",
+                artifact_ids=["artifact_other_scope"],
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        after = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
+
+        self.assertEqual(finding_ctx.exception.payload["error"], "node_out_of_assignment_scope")
+        self.assertEqual(finding_ctx.exception.payload["node_id"], "artifact_other_scope")
+        self.assertEqual(complete_ctx.exception.payload["error"], "node_out_of_assignment_scope")
+        self.assertEqual(complete_ctx.exception.payload["node_id"], "artifact_other_scope")
+        self.assertEqual(before, after)
+
+    def test_assignment_scope_guard_applies_to_artifact_and_finding_mutations(self) -> None:
+        session = self.start_t5_assignment()
+        self.write_other_scope_branch(
+            option_id="option_other_artifact_cmd_scope",
+            experiment_id="exp_other_artifact_cmd_scope",
+            option_title="Other artifact command scope option",
+            experiment_title="Other artifact command scope experiment",
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_other_cmd_scope",
+                "type": "artifact",
+                "title": "Other command scope artifact",
+                "status": "done",
+                "parent": "option_other_artifact_cmd_scope",
+            },
+        )
+        record_finding(
+            self.root,
+            experiment_id="exp_t5",
+            statement="Seed finding.",
+            confidence="medium",
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+        created = create_artifact(
+            self.root,
+            artifact_id="artifact_in_scope_cmd",
+            title="In-scope command artifact",
+            status="done",
+            link_to=["exp_t5"],
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+        before_exp = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
+        with self.assertRaises(AssignmentScopeError) as create_ctx:
+            create_artifact(
+                self.root,
+                artifact_id="artifact_out_scope_cmd",
+                title="Out-scope command artifact",
+                status="done",
+                link_to=["exp_other_artifact_cmd_scope"],
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as link_artifact_ctx:
+            link_artifact(
+                self.root,
+                artifact_id="artifact_other_cmd_scope",
+                to_nodes=["exp_t5"],
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as link_node_ctx:
+            link_artifact(
+                self.root,
+                artifact_id="artifact_in_scope_cmd",
+                to_nodes=["exp_other_artifact_cmd_scope"],
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as finding_ctx:
+            update_finding(
+                self.root,
+                experiment_id="exp_t5",
+                finding_id="finding_exp_t5_001",
+                artifact_ids=["artifact_other_cmd_scope"],
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        after_exp = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
+
+        self.assertTrue(created["changed"])
+        self.assertEqual(create_ctx.exception.payload["node_id"], "exp_other_artifact_cmd_scope")
+        self.assertEqual(link_artifact_ctx.exception.payload["node_id"], "artifact_other_cmd_scope")
+        self.assertEqual(link_node_ctx.exception.payload["node_id"], "exp_other_artifact_cmd_scope")
+        self.assertEqual(finding_ctx.exception.payload["node_id"], "artifact_other_cmd_scope")
+        self.assertFalse((self.root / "graph" / "nodes" / "artifact_out_scope_cmd.yaml").exists())
+        self.assertEqual(before_exp, after_exp)
+
+    def test_assignment_scope_guard_applies_to_graph_plan_and_node_field_refs(self) -> None:
+        session = self.start_t5_assignment()
+        self.write_other_scope_branch(
+            option_id="option_other_ref_scope",
+            experiment_id="exp_other_ref_scope",
+            option_title="Other ref scope option",
+            experiment_title="Other ref scope experiment",
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_other_ref_scope",
+                "type": "artifact",
+                "title": "Other ref scope artifact",
+                "status": "done",
+                "parent": "option_other_ref_scope",
+            },
+        )
+        before = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
+
+        created = add_node_result(
+            self.root,
+            node_id="exp_t5_child_scope",
+            node_type="experiment",
+            title="In-scope child experiment",
+            parent="option_t5",
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+        with self.assertRaises(AssignmentScopeError) as add_ctx:
+            add_node_result(
+                self.root,
+                node_id="exp_other_child_scope",
+                node_type="experiment",
+                title="Out-scope child experiment",
+                parent="option_other_ref_scope",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as fields_ctx:
+            update_node_fields(
+                self.root,
+                node_id="exp_t5",
+                list_appends={"linked_artifacts": ["artifact_other_ref_scope"]},
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as plan_ctx:
+            apply_graph_plan(
+                self.root,
+                plan={"updates": [{"id": "exp_t5", "fields": {"linked_artifacts": ["artifact_other_ref_scope"]}}]},
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as artifact_add_ctx:
+            add_node_result(
+                self.root,
+                node_id="artifact_orphan_scope",
+                node_type="artifact",
+                title="Orphan scope artifact",
+                parent="option_t5",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as artifact_plan_ctx:
+            apply_graph_plan(
+                self.root,
+                plan={
+                    "nodes": [
+                        {
+                            "id": "artifact_plan_orphan_scope",
+                            "type": "artifact",
+                            "title": "Orphan plan artifact",
+                            "parent": "option_t5",
+                        }
+                    ]
+                },
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        after = (self.root / "graph" / "nodes" / "exp_t5.yaml").read_text(encoding="utf-8")
+        linked_plan = apply_graph_plan(
+            self.root,
+            plan={
+                "nodes": [
+                    {
+                        "id": "artifact_plan_linked_scope",
+                        "type": "artifact",
+                        "title": "Linked plan artifact",
+                    }
+                ],
+                "updates": [
+                    {
+                        "id": "exp_t5",
+                        "fields": {"linked_artifacts": ["artifact_plan_linked_scope"]},
+                    }
+                ],
+            },
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+
+        self.assertTrue(created["changed"])
+        self.assertEqual(add_ctx.exception.payload["node_id"], "exp_other_child_scope")
+        self.assertEqual(fields_ctx.exception.payload["node_id"], "artifact_other_ref_scope")
+        self.assertEqual(plan_ctx.exception.payload["node_id"], "artifact_other_ref_scope")
+        self.assertEqual(artifact_add_ctx.exception.payload["error"], "artifact_not_linked_in_assignment_scope")
+        self.assertEqual(artifact_plan_ctx.exception.payload["error"], "artifact_not_linked_in_assignment_scope")
+        self.assertFalse((self.root / "graph" / "nodes" / "exp_other_child_scope.yaml").exists())
+        self.assertFalse((self.root / "graph" / "nodes" / "artifact_orphan_scope.yaml").exists())
+        self.assertFalse((self.root / "graph" / "nodes" / "artifact_plan_orphan_scope.yaml").exists())
+        self.assertEqual(before, after)
+        self.assertTrue(linked_plan["changed"])
+        self.assertIn("artifact_plan_linked_scope", load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")["linked_artifacts"])
+
+    def test_assignment_scope_guard_applies_to_batch_completion_and_gate_ingest(self) -> None:
+        session = self.start_t5_assignment()
+        self.write_other_scope_branch(
+            option_id="option_other_batch_scope",
+            experiment_id="exp_other_batch_scope",
+            option_title="Other batch scope option",
+            experiment_title="Other batch scope experiment",
+        )
+        gate_path = self.root / "artifacts" / "exp_other_batch_scope" / "run_gate" / "gate_result.json"
+        gate_path.parent.mkdir(parents=True)
+        gate_path.write_text(json.dumps({"gate_type": "smoke_check", "passed": True}), encoding="utf-8")
+        before_other = (self.root / "graph" / "nodes" / "exp_other_batch_scope.yaml").read_text(encoding="utf-8")
+
+        in_scope = complete_experiments(
+            self.root,
+            plan={
+                "experiments": [
+                    {
+                        "id": "exp_t5",
+                        "finding": "Batch in scope finding.",
+                        "confidence": "medium",
+                    }
+                ]
+            },
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+        with self.assertRaises(AssignmentScopeError) as complete_ctx:
+            complete_experiments(
+                self.root,
+                plan={
+                    "experiments": [
+                        {
+                            "id": "exp_other_batch_scope",
+                            "finding": "Batch out of scope finding.",
+                            "confidence": "medium",
+                        }
+                    ]
+                },
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as gate_ctx:
+            ingest_gate_result(
+                self.root,
+                gate_id="gate_other_batch_scope",
+                gate_result_file="artifacts/exp_other_batch_scope/run_gate/gate_result.json",
+                experiment_id="exp_other_batch_scope",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        after_other = (self.root / "graph" / "nodes" / "exp_other_batch_scope.yaml").read_text(encoding="utf-8")
+
+        self.assertEqual(in_scope["experiment_ids"], ["exp_t5"])
+        self.assertEqual(complete_ctx.exception.payload["node_id"], "exp_other_batch_scope")
+        self.assertEqual(gate_ctx.exception.payload["node_id"], "exp_other_batch_scope")
+        self.assertEqual(before_other, after_other)
+        self.assertFalse((self.root / "gate_results" / "gate_other_batch_scope.yaml").exists())
+
+    def test_assignment_scope_guard_cli_returns_structured_error_before_write(self) -> None:
+        session = self.start_t5_assignment()
+        self.write_other_scope_branch(
+            option_id="option_other_cli_scope",
+            experiment_id="exp_other_cli_scope",
+            option_title="Other CLI scope option",
+            experiment_title="Other CLI scope experiment",
+        )
+        before = (self.root / "graph" / "nodes" / "exp_other_cli_scope.yaml").read_text(encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                *cli_command("complete-experiment"),
+                "--root",
+                str(self.root),
+                "--assignment",
+                session["assignment_id"],
+                "--id",
+                "exp_other_cli_scope",
+                "--finding",
+                "Out of scope CLI finding.",
+                "--confidence",
+                "medium",
+                "--json",
+                "--no-build",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        after = (self.root / "graph" / "nodes" / "exp_other_cli_scope.yaml").read_text(encoding="utf-8")
+
+        self.assertEqual(out.returncode, 1)
+        self.assertEqual(payload["error"], "node_out_of_assignment_scope")
+        self.assertEqual(payload["assignment_id"], session["assignment_id"])
+        self.assertEqual(payload["node_id"], "exp_other_cli_scope")
+        self.assertEqual(before, after)
 
     def test_complete_experiment_rejects_next_actions_on_done_node(self) -> None:
         with self.assertRaisesRegex(ValueError, "create-followup-experiment"):
@@ -8356,6 +9547,15 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse((self.root / "graph" / "nodes" / "option_terminal_workstream.yaml").exists())
 
     def test_create_workstream_can_create_nested_branch_under_option(self) -> None:
+        session = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            label="t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=self.tmp_root / "worktrees" / "agent_t5",
+            rebuild_dashboard=False,
+        )
         result = create_workstream(
             self.root,
             workstream={
@@ -8374,6 +9574,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                     {"id": "exp_nested_gate", "title": "Run nested gate"},
                 ],
             },
+            assignment_id=session["assignment_id"],
             rebuild_dashboard=False,
         )
 
@@ -8390,6 +9591,35 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(option["supporting_experiments"], ["exp_nested_gate"])
         self.assertEqual(experiment["parent"], "option_nested_route")
         self.assertIn("problem_nested_worktree", parent["children"])
+
+    def test_create_workstream_rejects_out_of_scope_branch_without_writing(self) -> None:
+        session = self.start_t5_assignment()
+
+        with self.assertRaises(AssignmentScopeError) as ctx:
+            create_workstream(
+                self.root,
+                workstream={
+                    "problem": {
+                        "id": "problem_out_of_scope_workstream",
+                        "title": "Out of scope workstream",
+                        "parent": "stage_text",
+                    },
+                    "active_option": {
+                        "id": "option_out_of_scope_workstream",
+                        "title": "Out of scope option",
+                    },
+                    "experiments": [
+                        {"id": "exp_out_of_scope_workstream", "title": "Out of scope experiment"},
+                    ],
+                },
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+
+        self.assertEqual(ctx.exception.payload["error"], "node_out_of_assignment_scope")
+        self.assertEqual(ctx.exception.payload["node_id"], "problem_out_of_scope_workstream")
+        self.assertFalse((self.root / "graph" / "nodes" / "problem_out_of_scope_workstream.yaml").exists())
+        self.assertFalse((self.root / "graph" / "nodes" / "option_out_of_scope_workstream.yaml").exists())
 
     def test_create_workstream_normalizes_planned_followup_option_to_open(self) -> None:
         result = create_workstream(
@@ -8500,6 +9730,233 @@ class ScriptBehaviorTests(unittest.TestCase):
                 rebuild_dashboard=False,
             )
 
+    def test_create_followup_experiment_respects_assignment_scope(self) -> None:
+        session = self.start_t5_assignment()
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+        self.write_other_scope_branch(
+            option_id="option_other_followup_scope",
+            experiment_id="exp_other_followup_scope",
+            option_title="Other follow-up scope option",
+            experiment_title="Other follow-up scope experiment",
+            experiment_status="queued",
+        )
+
+        ok = create_followup_experiment(
+            self.root,
+            from_experiment="exp_t5",
+            node_id="exp_t5_scoped_followup",
+            title="Scoped follow-up",
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+        with self.assertRaises(AssignmentScopeError) as out_of_scope_source:
+            create_followup_experiment(
+                self.root,
+                from_experiment="exp_other_followup_scope",
+                node_id="exp_other_scoped_followup",
+                title="Out-of-scope follow-up",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        with self.assertRaises(AssignmentScopeError) as out_of_scope_parent:
+            create_followup_experiment(
+                self.root,
+                from_experiment="exp_t5",
+                parent="option_other_followup_scope",
+                node_id="exp_t5_bad_parent_followup",
+                title="Bad parent follow-up",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        source["status"] = "queued"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+        with self.assertRaises(AssignmentScopeError) as out_of_scope_parent_before_status:
+            create_followup_experiment(
+                self.root,
+                from_experiment="exp_t5",
+                parent="option_other_followup_scope",
+                node_id="exp_t5_bad_parent_status_followup",
+                title="Bad parent beats bad status",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+
+        self.assertTrue(ok["changed"])
+        self.assertEqual(out_of_scope_source.exception.payload["node_id"], "exp_other_followup_scope")
+        self.assertEqual(out_of_scope_parent.exception.payload["node_id"], "option_other_followup_scope")
+        self.assertEqual(out_of_scope_parent_before_status.exception.payload["node_id"], "option_other_followup_scope")
+        self.assertFalse((self.root / "graph" / "nodes" / "exp_other_scoped_followup.yaml").exists())
+        self.assertFalse((self.root / "graph" / "nodes" / "exp_t5_bad_parent_followup.yaml").exists())
+        self.assertFalse((self.root / "graph" / "nodes" / "exp_t5_bad_parent_status_followup.yaml").exists())
+
+    def test_followup_and_migrate_assignment_scope_cli_errors_are_structured(self) -> None:
+        session = self.start_t5_assignment()
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        source["next_actions"] = ["Run cache validation gate."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+        self.write_other_scope_branch(
+            option_id="option_other_cli_followup_scope",
+            experiment_id="exp_other_cli_followup_scope",
+            option_title="Other CLI follow-up scope option",
+            experiment_title="Other CLI follow-up scope experiment",
+            experiment_status="queued",
+            experiment_next_actions=["Run other gate."],
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_t5_cli_queued_scope",
+                "type": "experiment",
+                "title": "Queued in-scope CLI scope experiment",
+                "status": "queued",
+                "parent": "option_t5",
+                "next_actions": ["Run queued gate."],
+            },
+        )
+
+        cases = [
+            (
+                [
+                    *cli_command("create-followup-experiment"),
+                    "--root",
+                    str(self.root),
+                    "--assignment",
+                    session["assignment_id"],
+                    "--from",
+                    "exp_other_cli_followup_scope",
+                    "--id",
+                    "exp_other_cli_followup",
+                    "--title",
+                    "Out of scope follow-up",
+                    "--json",
+                    "--no-build",
+                ],
+                "node_out_of_assignment_scope",
+                "exp_other_cli_followup_scope",
+                self.root / "graph" / "nodes" / "exp_other_cli_followup.yaml",
+            ),
+            (
+                [
+                    *cli_command("create-followup-experiment"),
+                    "--root",
+                    str(self.root),
+                    "--assignment",
+                    session["assignment_id"],
+                    "--from",
+                    "exp_t5_cli_queued_scope",
+                    "--parent",
+                    "option_other_cli_followup_scope",
+                    "--id",
+                    "exp_t5_cli_queued_bad_parent_followup",
+                    "--title",
+                    "Bad parent beats bad status",
+                    "--json",
+                    "--no-build",
+                ],
+                "node_out_of_assignment_scope",
+                "option_other_cli_followup_scope",
+                self.root / "graph" / "nodes" / "exp_t5_cli_queued_bad_parent_followup.yaml",
+            ),
+            (
+                [
+                    *cli_command("create-followup-experiment"),
+                    "--root",
+                    str(self.root),
+                    "--assignment",
+                    session["assignment_id"],
+                    "--from",
+                    "exp_t5",
+                    "--id",
+                    "exp_t5_forbidden_focus_followup",
+                    "--title",
+                    "Forbidden focus follow-up",
+                    "--set-focus",
+                    "--json",
+                    "--no-build",
+                ],
+                "assignment_set_focus_forbidden",
+                "exp_t5",
+                self.root / "graph" / "nodes" / "exp_t5_forbidden_focus_followup.yaml",
+            ),
+            (
+                [
+                    *cli_command("migrate-terminal-next-actions"),
+                    "--root",
+                    str(self.root),
+                    "--assignment",
+                    session["assignment_id"],
+                    "--id",
+                    "exp_other_cli_followup_scope",
+                    "--followup-id",
+                    "exp_other_cli_migrate_followup",
+                    "--title",
+                    "Out of scope migrate follow-up",
+                    "--json",
+                    "--no-build",
+                ],
+                "node_out_of_assignment_scope",
+                "exp_other_cli_followup_scope",
+                self.root / "graph" / "nodes" / "exp_other_cli_migrate_followup.yaml",
+            ),
+            (
+                [
+                    *cli_command("migrate-terminal-next-actions"),
+                    "--root",
+                    str(self.root),
+                    "--assignment",
+                    session["assignment_id"],
+                    "--id",
+                    "exp_t5_cli_queued_scope",
+                    "--parent",
+                    "option_other_cli_followup_scope",
+                    "--followup-id",
+                    "exp_t5_cli_queued_bad_parent_migrate",
+                    "--title",
+                    "Bad parent beats bad status",
+                    "--json",
+                    "--no-build",
+                ],
+                "node_out_of_assignment_scope",
+                "option_other_cli_followup_scope",
+                self.root / "graph" / "nodes" / "exp_t5_cli_queued_bad_parent_migrate.yaml",
+            ),
+            (
+                [
+                    *cli_command("migrate-terminal-next-actions"),
+                    "--root",
+                    str(self.root),
+                    "--assignment",
+                    session["assignment_id"],
+                    "--id",
+                    "exp_t5",
+                    "--followup-id",
+                    "exp_t5_forbidden_focus_migrate",
+                    "--title",
+                    "Forbidden focus migrate",
+                    "--set-focus",
+                    "--json",
+                    "--no-build",
+                ],
+                "assignment_set_focus_forbidden",
+                "exp_t5",
+                self.root / "graph" / "nodes" / "exp_t5_forbidden_focus_migrate.yaml",
+            ),
+        ]
+
+        for command, expected_error, expected_node, forbidden_path in cases:
+            with self.subTest(expected_error=expected_error, expected_node=expected_node):
+                out = subprocess.run(command, capture_output=True, text=True, check=False)
+                payload = json.loads(out.stdout)
+
+                self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+                self.assertEqual(payload["error"], expected_error)
+                self.assertEqual(payload["assignment_id"], session["assignment_id"])
+                self.assertEqual(payload["node_id"], expected_node)
+                self.assertFalse(forbidden_path.exists())
+
     def test_migrate_terminal_next_actions_dry_run_shows_followup_and_cleanup(self) -> None:
         source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
         source["status"] = "done"
@@ -8552,6 +10009,68 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(followup["derived_from"], ["exp_t5"])
         self.assertEqual(followup["next_actions"], ["Run cache validation gate."])
         self.assertIn("Validate follow-up against exp_t5.", followup["success_criteria"])
+
+    def test_migrate_terminal_next_actions_respects_assignment_scope(self) -> None:
+        session = self.start_t5_assignment()
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        source["next_actions"] = ["Run cache validation gate."]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+        self.write_other_scope_branch(
+            option_id="option_other_migrate_scope",
+            experiment_id="exp_other_migrate_scope",
+            option_title="Other migrate scope option",
+            experiment_title="Other migrate scope experiment",
+            experiment_status="queued",
+            experiment_next_actions=["Run other gate."],
+        )
+
+        ok = migrate_terminal_next_actions(
+            self.root,
+            node_id="exp_t5",
+            followup_id="exp_t5_cache_gate_scoped",
+            title="T5 cache validation gate",
+            assignment_id=session["assignment_id"],
+            rebuild_dashboard=False,
+        )
+        with self.assertRaises(AssignmentScopeError) as out_of_scope:
+            migrate_terminal_next_actions(
+                self.root,
+                node_id="exp_other_migrate_scope",
+                followup_id="exp_other_cache_gate_scoped",
+                title="Other cache validation gate",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+        write_node(
+            self.root,
+            {
+                "id": "exp_t5_invalid_migrate_scope",
+                "type": "experiment",
+                "title": "Invalid migrate scope experiment",
+                "status": "queued",
+                "parent": "option_t5",
+                "next_actions": ["Run invalid gate."],
+            },
+        )
+        with self.assertRaises(AssignmentScopeError) as out_of_scope_parent_before_status:
+            migrate_terminal_next_actions(
+                self.root,
+                node_id="exp_t5_invalid_migrate_scope",
+                parent="option_other_migrate_scope",
+                followup_id="exp_t5_invalid_migrate_followup",
+                title="Bad parent beats bad status",
+                assignment_id=session["assignment_id"],
+                rebuild_dashboard=False,
+            )
+
+        self.assertTrue(ok["changed"])
+        self.assertIn("set-cursor", ok["recommended_commands"]["set_cursor"])
+        self.assertIn("exp_t5_cache_gate_scoped", ok["recommended_commands"]["set_cursor"])
+        self.assertEqual(out_of_scope.exception.payload["node_id"], "exp_other_migrate_scope")
+        self.assertEqual(out_of_scope_parent_before_status.exception.payload["node_id"], "option_other_migrate_scope")
+        self.assertFalse((self.root / "graph" / "nodes" / "exp_other_cache_gate_scoped.yaml").exists())
+        self.assertFalse((self.root / "graph" / "nodes" / "exp_t5_invalid_migrate_followup.yaml").exists())
 
     def test_migrate_terminal_next_actions_guides_larger_work_to_workstream(self) -> None:
         source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
@@ -8657,6 +10176,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("migrate-terminal-next-actions", by_name)
         self.assertTrue(by_name["migrate-terminal-next-actions"]["supports_dry_run"])
         self.assertTrue(by_name["migrate-terminal-next-actions"]["supports_no_build"])
+        self.assertIn("--assignment", by_name["migrate-terminal-next-actions"]["supported_flags"])
+        self.assertIn("--coordinator", by_name["migrate-terminal-next-actions"]["supported_flags"])
         self.assertIn("create-workstream", by_name["migrate-terminal-next-actions"]["hierarchy_guidance"])
 
     def test_close_current_experiment_completes_and_moves_global_and_agent_focus(self) -> None:

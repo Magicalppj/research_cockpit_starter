@@ -18,7 +18,9 @@ from research_cockpit.commands._runtime import (
     safe_print,
     yaml_change_diff,
 )
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runs import update_fields, run_path
+from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.model import (
     RunRecord,
     VALID_RUN_STATUSES,
@@ -53,6 +55,8 @@ def update_run(
     show_diff: bool = False,
     interaction_kind: str = "update_run",
     interaction_command: str | None = None,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
     runs = load_runs(root)
@@ -84,6 +88,13 @@ def update_run(
     after_data = copy.deepcopy(before_data)
     after_data.update(updates)
     after_data["run_id"] = normalized_id
+    ensure_assignment_scope(
+        root,
+        state.nodes,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[before_data.get("experiment_id"), after_data.get("experiment_id")],
+    )
 
     candidate = dict(runs)
     candidate[normalized_id] = RunRecord.from_dict(after_data)
@@ -149,6 +160,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -172,7 +184,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         safe_print(str(exc))
         raise SystemExit(1) from exc

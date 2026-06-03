@@ -10,7 +10,9 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
+from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.commands._evidence import append_unique, validate_artifact_ids
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runtime import (
     compact_mutation_result,
     dry_run_preflight_result,
@@ -54,6 +56,8 @@ def update_finding(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     if (
         statement is None
@@ -81,6 +85,13 @@ def update_finding(
 
     artifact_ids = artifact_ids or []
     validate_artifact_ids(nodes, artifact_ids)
+    ensure_assignment_scope(
+        root,
+        nodes,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[experiment_id, *artifact_ids],
+    )
 
     path = find_node_file(root, experiment_id)
     data = load_yaml(path)
@@ -123,6 +134,13 @@ def update_finding(
 
     candidate = dict(nodes)
     candidate[experiment_id] = ResearchNode.from_dict(data)
+    ensure_assignment_scope(
+        root,
+        candidate,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[experiment_id],
+    )
     validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
 
     changed = before_data != data
@@ -186,6 +204,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -203,7 +222,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         safe_print(str(exc))
         raise SystemExit(1) from exc

@@ -19,10 +19,19 @@ from research_cockpit.commands._runtime import (
     safe_print,
     yaml_change_diff,
 )
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands.file_schemas import APPLY_GRAPH_PLAN_EXAMPLE
 from research_cockpit.commands.record_finding import find_node_file
-from research_cockpit.commands.update_node_fields import apply_node_field_updates, field_updates_from_mapping
+from research_cockpit.commands.update_node_fields import (
+    apply_node_field_updates,
+    field_updates_from_mapping,
+    referenced_node_ids_from_field_updates,
+)
 from research_cockpit.lifecycle_guards import LifecycleGuardError, raise_for_terminal_parent_transitions
+from research_cockpit.assignment_scope import (
+    AssignmentScopeError,
+    resolve_assignment_scope,
+)
 from research_cockpit.model import (
     ResearchNode,
     ValidationError,
@@ -75,6 +84,7 @@ class GraphPlanBuilder:
         self.path_by_id: dict[str, Path] = {}
         self.created_ids: list[str] = []
         self.updated_ids: set[str] = set()
+        self.referenced_ids: set[str] = set()
         self.status_changed_ids: set[str] = set()
         self.status_aliases: list[dict[str, str]] = []
         self.normalized_statuses: list[dict[str, str]] = []
@@ -144,6 +154,12 @@ class GraphPlanBuilder:
 
     def apply_fields(self, node_id: str, fields: dict[str, Any], *, owner: str) -> None:
         updates = field_updates_from_mapping(fields)
+        self.referenced_ids.update(
+            referenced_node_ids_from_field_updates(
+                current_best_option=updates["current_best_option"],
+                list_appends=updates["list_appends"],
+            )
+        )
         if not any(
             [
                 updates["current_best_option"],
@@ -239,6 +255,8 @@ def apply_graph_plan(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("Graph plan must be a mapping")
@@ -292,6 +310,18 @@ def apply_graph_plan(
             builder.apply_fields(node_id, fields, owner=f"updates[{index}]")
 
     builder.sync_parent_children()
+    created_id_set = set(builder.created_ids)
+    existing_reference_ids = sorted(node_id for node_id in builder.referenced_ids if node_id not in created_id_set)
+    created_reference_ids = sorted(node_id for node_id in builder.referenced_ids if node_id in created_id_set)
+    created_artifact_ids = [
+        node_id
+        for node_id in builder.created_ids
+        if builder.candidate[node_id].type == "artifact"
+    ]
+    scope = resolve_assignment_scope(root, builder.state.nodes, assignment_id=assignment_id, coordinator=coordinator)
+    scope.check_nodes(builder.candidate, [*builder.created_ids, *sorted(builder.updated_ids), *created_reference_ids])
+    scope.check_created_artifacts_linked(builder.candidate, created_artifact_ids)
+    scope.check_nodes(builder.state.nodes, [*sorted(builder.updated_ids), *existing_reference_ids])
     raise_for_terminal_parent_transitions(root, builder.state.nodes, builder.candidate, builder.status_changed_ids)
     validate_cockpit(root, builder.candidate, builder.state.current, builder.state.explicit_edges, raise_on_error=True)
 
@@ -357,6 +387,7 @@ def main() -> None:
     parser.add_argument("--validate", action="store_true", help="Accepted for readability; validation always runs.")
     parser.add_argument("--build", action="store_true", help="Accepted for readability; build is the default.")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
     if args.print_schema:
         safe_print(APPLY_GRAPH_PLAN_EXAMPLE)
@@ -371,7 +402,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except LifecycleGuardError as exc:
         if args.json:
             emit_json(exc.payload)

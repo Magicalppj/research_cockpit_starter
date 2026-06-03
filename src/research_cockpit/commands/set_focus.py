@@ -11,6 +11,7 @@ from research_cockpit.paths import default_data_root
 ROOT = default_data_root()
 
 from research_cockpit.model import (
+    CoordinatorState,
     derive_focus_fields,
     load_nodes,
     load_yaml,
@@ -71,8 +72,12 @@ def set_focus_result(
 ) -> dict[str, object]:
     nodes = load_nodes(root)
     current_path = root / "current_state.yaml"
+    coordinator_path = root / "coordinator_state.yaml"
     current = load_yaml(current_path)
+    coordinator = load_yaml(coordinator_path)
     before_data = copy.deepcopy(current)
+    before_coordinator = copy.deepcopy(coordinator) if coordinator_path.exists() else None
+    before_coordinator_payload = before_coordinator or {}
     before = {
         "current_stage": current.get("current_stage"),
         "current_problem": current.get("current_problem"),
@@ -115,7 +120,17 @@ def set_focus_result(
         current["next_actions"] = next_actions
     current["updated_at"] = str(date.today())
 
-    validate_cockpit(root, nodes, current, raise_on_error=True)
+    coordinator["selected_node"] = focus_node
+    if next_actions is not None:
+        coordinator["global_next_actions"] = next_actions
+
+    validate_cockpit(
+        root,
+        nodes,
+        current,
+        coordinator_state=CoordinatorState.from_dict(coordinator),
+        raise_on_error=True,
+    )
     after = {
         "current_stage": current.get("current_stage"),
         "current_problem": current.get("current_problem"),
@@ -124,7 +139,11 @@ def set_focus_result(
         "current_focus_path": current.get("current_focus_path", []) or [],
         "next_actions": current.get("next_actions", []) or [],
     }
-    changed = before_data != current
+    coordinator_after = {
+        "selected_node": coordinator.get("selected_node"),
+        "global_next_actions": coordinator.get("global_next_actions", []) or [],
+    }
+    changed = before_data != current or before_coordinator != coordinator
     result: dict[str, object] = {
         "focus_node": focus_node,
         "dry_run": dry_run,
@@ -133,9 +152,20 @@ def set_focus_result(
         "path": str(current_path),
         "before": before,
         "after": after,
+        "coordinator_state": {
+            "path": str(coordinator_path),
+            "before": {
+                "selected_node": before_coordinator_payload.get("selected_node"),
+                "global_next_actions": before_coordinator_payload.get("global_next_actions", []) or [],
+            },
+            "after": coordinator_after,
+        },
     }
     if show_diff:
-        result["diff"] = yaml_change_diff([(current_path, before_data, current)]) if changed else ""
+        result["diff"] = yaml_change_diff([
+            (current_path, before_data, current),
+            (coordinator_path, before_coordinator, coordinator),
+        ]) if changed else ""
     if dry_run:
         return dry_run_preflight_result(root, result)
     if not changed:
@@ -143,14 +173,14 @@ def set_focus_result(
 
     finish_mutation(
         root,
-        [(current_path, before_data, current)],
+        [(current_path, before_data, current), (coordinator_path, before_coordinator, coordinator)],
         interaction={
             "kind": "set_focus",
             "actor": "researcher",
             "node_id": focus_node,
             "command": f"{script_command('set_focus.py')} --focus-node {focus_node}",
             "before": before,
-            "after": after,
+            "after": {**after, "coordinator_state": coordinator_after},
         },
         rebuild_dashboard=rebuild_dashboard,
     )
@@ -172,7 +202,11 @@ def main() -> None:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
-    parser.add_argument("--no-build", action="store_true", help="Only update current_state.yaml; do not rebuild dashboards")
+    parser.add_argument(
+        "--no-build",
+        action="store_true",
+        help="Update coordinator focus state without rebuilding dashboards",
+    )
     args = parser.parse_args()
 
     try:

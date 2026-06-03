@@ -19,6 +19,8 @@ from research_cockpit.commands._runtime import (
     text_change_diff,
     yaml_change_diff,
 )
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
+from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.gate_result_records import (
     build_gate_record_data,
     default_gate_result_file,
@@ -91,6 +93,8 @@ def record_gate_result(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
     linked_experiment_id, linked_run_id = _resolve_attachment(root, experiment_id=experiment_id, run_id=run_id)
@@ -107,6 +111,13 @@ def record_gate_result(
             artifact_id=artifact_id,
             gate_result_file=gate_result_file,
         )
+    ensure_assignment_scope(
+        root,
+        state.nodes,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[linked_experiment_id, artifact_id],
+    )
     if gate_path.exists():
         raise FileExistsError(gate_path)
 
@@ -219,6 +230,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -241,7 +253,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except MutationError as exc:
         if args.json and exc.payload:
             emit_json(exc.payload)

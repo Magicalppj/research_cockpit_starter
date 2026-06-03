@@ -26,6 +26,7 @@ from research_cockpit.model import (
     build_search_index,
     build_search_index_summary,
     graph_to_json,
+    load_assignments,
     load_explicit_edges,
     load_nodes,
     load_yaml,
@@ -46,6 +47,15 @@ def _truth_source_files(root: Path) -> list[Path]:
     current = root / "current_state.yaml"
     if current.exists():
         files.append(current)
+    coordinator = root / "coordinator_state.yaml"
+    if coordinator.exists():
+        files.append(coordinator)
+    agents = root / "agents"
+    if agents.exists():
+        files.extend(path for path in agents.rglob("*.yaml") if path.is_file())
+    assignments = root / "assignments"
+    if assignments.exists():
+        files.extend(path for path in assignments.rglob("*.yaml") if path.is_file())
     graph = root / "graph"
     if graph.exists():
         files.extend(path for path in graph.rglob("*.yaml") if path.is_file())
@@ -264,6 +274,7 @@ def _build_dashboard_payload(
     current = _profiled(profiler, "load_current_state", lambda: load_yaml(root / "current_state.yaml"))
     explicit_edges = _profiled(profiler, "load_explicit_edges", lambda: load_explicit_edges(root))
     _profiled(profiler, "validate", lambda: validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True))
+    assignments = _profiled(profiler, "load_assignments", lambda: load_assignments(root))
     topology = _profiled(profiler, "build_graph_topology", lambda: GraphTopology.from_nodes(nodes))
     graph_json = _profiled(
         profiler,
@@ -298,7 +309,7 @@ def _build_dashboard_payload(
     option_workstreams = _profiled(
         profiler,
         "build_option_workstreams",
-        lambda: build_option_workstream_rows(nodes, current, topology=topology),
+        lambda: build_option_workstream_rows(nodes, current, assignments=assignments, topology=topology),
     )
     assignment_view = _profiled(profiler, "build_assignment_view", lambda: build_assignment_view(nodes))
     read_models = DashboardReadModels(

@@ -7,7 +7,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.assignment_scope import AssignmentScopeError, resolve_assignment_scope
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
+from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, emit_json, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.model import ResearchNode, ValidationError, derive_focus_fields, load_yaml, script_command, validate_cockpit
 from research_cockpit.paths import default_data_root
 
@@ -29,16 +31,25 @@ def create_followup_experiment(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
+    scope = resolve_assignment_scope(root, state.nodes, assignment_id=assignment_id, coordinator=coordinator)
+    scope.check_nodes(state.nodes, [from_experiment])
     if from_experiment not in state.nodes:
         raise ValueError(f"Source experiment does not exist: {from_experiment}")
+    if set_focus_to_created:
+        scope.forbid_set_focus(from_experiment)
+    if parent is not None:
+        scope.check_nodes(state.nodes, [parent])
     source = state.nodes[from_experiment]
     if source.type != "experiment":
         raise ValueError(f"Source node {from_experiment} must be experiment")
     if source.status not in {"done", "running"}:
         raise ValueError(f"Source experiment {from_experiment} must be done or running")
     resolved_parent = parent or source.raw.get("parent")
+    scope.check_nodes(state.nodes, [resolved_parent])
     if not resolved_parent or resolved_parent not in state.nodes:
         raise ValueError(f"Parent option does not exist: {resolved_parent}")
     if state.nodes[str(resolved_parent)].type != "option":
@@ -70,6 +81,7 @@ def create_followup_experiment(
 
     candidate = dict(state.nodes)
     candidate[node_id] = ResearchNode.from_dict(data)
+    scope.check_nodes(candidate, [node_id])
     changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any] | None]] = [
         (root / "graph" / "nodes" / f"{node_id}.yaml", None, data)
     ]
@@ -141,6 +153,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -158,7 +171,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileExistsError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc

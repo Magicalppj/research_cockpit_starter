@@ -297,10 +297,10 @@ research-cockpit build --root research_cockpit
 Parallel agents with git worktrees:
 
 ```sh
-research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run branch experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --dry-run --json --show-diff
-research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run branch experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --no-build
-research-cockpit set-agent-focus --root D:/main_repo/research_cockpit --agent agent_x --node experiment_x --no-build
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label branch_probe --objective "Run branch experiments" --branch agent/option_x-branch_probe --worktree ../worktrees/branch_probe --base main --create-worktree --dry-run --json --show-diff
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label branch_probe --objective "Run branch experiments" --branch agent/option_x-branch_probe --worktree ../worktrees/branch_probe --base main --create-worktree --no-build
+research-cockpit set-cursor --root D:/main_repo/research_cockpit --assignment <assignment_id> --node experiment_x --no-build
 research-cockpit validate --root D:/main_repo/research_cockpit --json
 ```
 
-The worktree is only for code/experiment isolation. Research graph mutations still go to the canonical root in the main repository. Relative `--worktree` values resolve against the canonical repository root (`--root` parent). Use `set-agent-focus` for downstream progress and reserve global `set-focus` for coordinator-level focus changes. Preserve useful run outputs with `ingest-artifact` before deleting the worktree; see `experiment-tracking.md` and `integrations.md`.
+The worktree is only for code/experiment isolation. Research graph mutations still go to the canonical root in the main repository. Relative `--worktree` values resolve against the canonical repository root (`--root` parent). Use `set-cursor --assignment <assignment_id>` for downstream progress and reserve `set-focus` for coordinator/UI selection. `set-agent-focus` is legacy compatibility only. Preserve useful run outputs with `ingest-artifact` before deleting the worktree; see `experiment-tracking.md` and `integrations.md`.

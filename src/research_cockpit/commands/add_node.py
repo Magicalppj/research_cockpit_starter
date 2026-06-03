@@ -10,6 +10,12 @@ from typing import Any
 
 ROOT = default_data_root()
 
+from research_cockpit.assignment_scope import (
+    AssignmentScopeError,
+    ensure_assignment_scope,
+    ensure_created_artifacts_linked_in_scope,
+)
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 from research_cockpit.model import (
     VALID_NODE_TYPES,
@@ -62,6 +68,8 @@ def add_node_result(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     nodes = load_nodes(root)
     if node_id in nodes:
@@ -87,6 +95,20 @@ def add_node_result(
 
     candidate = dict(nodes)
     candidate[node_id] = ResearchNode.from_dict(data)
+    ensure_assignment_scope(
+        root,
+        candidate,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[node_id],
+    )
+    ensure_created_artifacts_linked_in_scope(
+        root,
+        candidate,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        artifact_ids=[node_id] if node_type == "artifact" else [],
+    )
     validate_cockpit(root, candidate, load_yaml(root / "current_state.yaml"), raise_on_error=True)
 
     out = root / "graph" / "nodes" / f"{node_id}.yaml"
@@ -137,6 +159,7 @@ def main() -> None:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -151,7 +174,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileExistsError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc

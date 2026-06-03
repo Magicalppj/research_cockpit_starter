@@ -7,7 +7,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.assignment_scope import AssignmentScopeError, resolve_assignment_scope
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
+from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, emit_json, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import ResearchNode, ValidationError, derive_focus_fields, load_yaml, script_command, validate_cockpit
 from research_cockpit.paths import default_data_root
@@ -34,10 +36,15 @@ def _actions(value: Any) -> list[str]:
     return [str(item) for item in value if str(item).strip()]
 
 
-def _workstream_guidance(root: Path, node_id: str) -> dict[str, str]:
+def _assignment_flag(assignment_id: str | None) -> str:
+    return f" --assignment {assignment_id}" if assignment_id else ""
+
+
+def _workstream_guidance(root: Path, node_id: str, *, assignment_id: str | None = None) -> dict[str, str]:
+    assignment_flag = _assignment_flag(assignment_id)
     return {
         "create_workstream": (
-            f"research-cockpit create-workstream --root {root} "
+            f"research-cockpit create-workstream --root {root}{assignment_flag} "
             "--file workstream.yaml --dry-run --json --show-diff"
         ),
         "inspect_node": f"research-cockpit node-context --root {root} --id {node_id} --json",
@@ -50,6 +57,7 @@ def _base_result(
     node: ResearchNode,
     actions: list[str],
     dry_run: bool,
+    assignment_id: str | None = None,
 ) -> dict[str, Any]:
     return {
         "node_id": node.id,
@@ -63,7 +71,7 @@ def _base_result(
         "created_nodes": [],
         "updated_nodes": [],
         "changed_files": [],
-        "recommended_commands": _workstream_guidance(root, node.id),
+        "recommended_commands": _workstream_guidance(root, node.id, assignment_id=assignment_id),
     }
 
 
@@ -75,8 +83,9 @@ def _guidance_result(
     dry_run: bool,
     strategy: str,
     guidance: str,
+    assignment_id: str | None = None,
 ) -> dict[str, Any]:
-    result = _base_result(root, node=node, actions=actions, dry_run=dry_run)
+    result = _base_result(root, node=node, actions=actions, dry_run=dry_run, assignment_id=assignment_id)
     result.update({
         "strategy": strategy,
         "guidance": guidance,
@@ -98,10 +107,18 @@ def migrate_terminal_next_actions(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
+    scope = resolve_assignment_scope(root, state.nodes, assignment_id=assignment_id, coordinator=coordinator)
+    scope.check_nodes(state.nodes, [node_id])
     if node_id not in state.nodes:
         raise ValueError(f"Node does not exist: {node_id}")
+    if scope.active and set_focus_to_created:
+        scope.forbid_set_focus(node_id)
+    if parent is not None:
+        scope.check_nodes(state.nodes, [parent])
     node = state.nodes[node_id]
     if node.status not in TERMINAL_STATUSES:
         raise ValueError(f"Node {node_id} is not terminal: {node.status}")
@@ -115,6 +132,7 @@ def migrate_terminal_next_actions(
             dry_run=dry_run,
             strategy="no_terminal_next_actions",
             guidance="No node-local next_actions to migrate.",
+            assignment_id=scope.assignment_id,
         )
 
     if len(actions) != 1 or node.type != "experiment" or node.status != "done":
@@ -128,6 +146,7 @@ def migrate_terminal_next_actions(
                 "Use create-workstream for multi-step work, non-experiment nodes, "
                 "or terminal experiments that are not done."
             ),
+            assignment_id=scope.assignment_id,
         )
 
     if bool(followup_id) != bool(title):
@@ -140,9 +159,10 @@ def migrate_terminal_next_actions(
             dry_run=dry_run,
             strategy="single_followup_experiment",
             guidance="Provide --followup-id and --title to create a queued follow-up experiment.",
+            assignment_id=scope.assignment_id,
         )
         result["recommended_commands"]["migrate_single_followup"] = (
-            f"research-cockpit migrate-terminal-next-actions --root {root} --id {node.id} "
+            f"research-cockpit migrate-terminal-next-actions --root {root}{_assignment_flag(scope.assignment_id)} --id {node.id} "
             "--followup-id <followup_experiment_id> --title \"<follow-up title>\" "
             "--dry-run --json --show-diff"
         )
@@ -151,6 +171,7 @@ def migrate_terminal_next_actions(
     if followup_id in state.nodes:
         raise FileExistsError(root / "graph" / "nodes" / f"{followup_id}.yaml")
     resolved_parent = parent or node.raw.get("parent")
+    scope.check_nodes(state.nodes, [resolved_parent])
     if not resolved_parent or resolved_parent not in state.nodes:
         raise ValueError(f"Parent option does not exist: {resolved_parent}")
     if state.nodes[str(resolved_parent)].type != "option":
@@ -182,6 +203,7 @@ def migrate_terminal_next_actions(
     candidate = dict(state.nodes)
     candidate[node.id] = ResearchNode.from_dict(source_data)
     candidate[followup_id] = ResearchNode.from_dict(followup_data)
+    scope.check_nodes(candidate, [node.id, resolved_parent, followup_id])
     current = copy.deepcopy(state.current)
     changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any] | None]] = [
         (source_path, before_source, source_data),
@@ -215,8 +237,13 @@ def migrate_terminal_next_actions(
             "source": {"id": node.id, "next_actions": []},
             "followup": followup_data,
         },
-        "recommended_commands": _workstream_guidance(root, node.id),
+        "recommended_commands": _workstream_guidance(root, node.id, assignment_id=scope.assignment_id),
     }
+    if scope.assignment_id:
+        result["recommended_commands"]["set_cursor"] = (
+            f"research-cockpit set-cursor --root {root} --assignment {scope.assignment_id} "
+            f"--node {followup_id} --no-build"
+        )
     if show_diff:
         result["diff"] = yaml_change_diff(changes)
     if dry_run:
@@ -253,6 +280,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -267,7 +295,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileExistsError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc

@@ -78,6 +78,8 @@ def build_dashboard_read_models(
     topology: GraphTopology | None = None,
     include_resource_text: bool = True,
 ) -> DashboardReadModels:
+    from research_cockpit.model import load_assignments
+
     topology = topology or GraphTopology.from_nodes(nodes)
     linked_resources = build_link_rows(root, nodes)
     action_suggestions = build_action_suggestions(root, nodes, current, linked_resources)
@@ -93,7 +95,12 @@ def build_dashboard_read_models(
         linked_resources=linked_resources,
         action_suggestions=action_suggestions,
         search_index=search_index,
-        option_workstreams=build_option_workstream_rows(nodes, current, topology=topology),
+        option_workstreams=build_option_workstream_rows(
+            nodes,
+            current,
+            assignments=load_assignments(root),
+            topology=topology,
+        ),
         assignment_view=build_assignment_view(nodes),
         topology=topology,
     )
@@ -217,20 +224,77 @@ def _current_state_action_entries(current: dict[str, Any], focus_node_id: str | 
     return [
         {
             "scope": "global_coordinator_next_actions",
-            "source": "current_state",
-            "node_id": "current_state",
-            "node_title": "current_state",
-            "node_type": "current_state",
+            "source": "coordinator_state",
+            "node_id": "coordinator_state",
+            "node_title": "coordinator_state",
+            "node_type": "coordinator_state",
             "node_status": "",
             "related_focus_node": focus_node_id,
             "action": action,
             "is_terminal": False,
             "stale": False,
             "migration_candidate": False,
-            "reason": "Stored in current_state.next_actions for coordinator-level handoff.",
+            "reason": "Stored as coordinator-level handoff state.",
         }
         for action in _action_list(current.get("next_actions"))
     ]
+
+
+def _coordinator_state_payload(root: Path) -> dict[str, Any]:
+    from research_cockpit.model import load_coordinator_state
+
+    coordinator = load_coordinator_state(root)
+    return {
+        "coordinator_only": True,
+        "selected_node": coordinator.selected_node,
+        "selected_assignment": coordinator.selected_assignment,
+        "global_next_actions": list(coordinator.global_next_actions),
+        "dashboard_filters": dict(coordinator.dashboard_filters),
+    }
+
+
+def _assignment_record_overview(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    *,
+    topology: GraphTopology | None = None,
+) -> dict[str, Any]:
+    from research_cockpit.model import ACTIVE_ASSIGNMENT_STATUSES, load_assignments
+
+    topology = topology or GraphTopology.from_nodes(nodes)
+    rows: list[dict[str, Any]] = []
+    for assignment in sorted(load_assignments(root).values(), key=lambda item: item.assignment_id):
+        current_path: list[str] = []
+        current_option = None
+        if assignment.current_node in nodes:
+            try:
+                current_path = derive_focus_path(nodes, assignment.current_node, topology=topology)
+                current_option = node_id_by_type_in_path(nodes, current_path, "option", nearest=True)
+            except ValueError:
+                current_path = [assignment.current_node]
+        rows.append({
+            "assignment_id": assignment.assignment_id,
+            "agent_id": assignment.agent_id,
+            "status": assignment.status,
+            "root_node": assignment.root_node,
+            "root_node_title": node_title(nodes, assignment.root_node),
+            "current_node": assignment.current_node,
+            "current_node_title": node_title(nodes, assignment.current_node),
+            "current_path": current_path,
+            "current_option": current_option,
+            "next_actions": list(assignment.next_actions),
+            "objective": assignment.objective,
+            "updated_at": assignment.updated_at,
+        })
+    active_rows = [row for row in rows if row["status"] in ACTIVE_ASSIGNMENT_STATUSES]
+    return {
+        "schema_version": "assignment_overview_v1",
+        "primary_context": "assignment_scope",
+        "count": len(rows),
+        "active_count": len(active_rows),
+        "assignments": rows,
+        "active_assignments": active_rows,
+    }
 
 
 def _nearest_parent_id(
@@ -345,6 +409,19 @@ def build_agent_context(
         focus_path_ids=path,
         topology=read_models.topology if read_models else None,
     )
+    topology = read_models.topology if read_models else None
+    assignment_overview = _assignment_record_overview(root, nodes, topology=topology)
+    coordinator_state = _coordinator_state_payload(root)
+    current_global_focus = {
+        "coordinator_only": True,
+        "current_stage": current.get("current_stage"),
+        "current_problem": current.get("current_problem"),
+        "current_option": current.get("current_option"),
+        "current_focus_node": current_focus_node,
+        "current_focus_path": path,
+        "next_actions": current.get("next_actions", []),
+        "next_action_scopes": next_action_scopes,
+    }
 
     active_problems = [
         n for n in nodes.values()
@@ -369,11 +446,19 @@ def build_agent_context(
         option_workstreams = read_models.option_workstreams
         assignment_view = read_models.assignment_view
     else:
-        option_workstreams = build_option_workstream_rows(nodes, current)
+        from research_cockpit.model import load_assignments
+
+        option_workstreams = build_option_workstream_rows(nodes, current, assignments=load_assignments(root))
         assignment_view = build_assignment_view(nodes)
 
     return {
         "metadata": build_context_metadata(root, current),
+        "primary_context": "assignment_overview" if assignment_overview["active_count"] else "coordinator_global",
+        "legacy_global_fields_are_coordinator_only": True,
+        "current_focus_is_coordinator_only": True,
+        "assignment_overview": assignment_overview,
+        "coordinator_state": coordinator_state,
+        "current_global_focus": current_global_focus,
         "project_name": "Research Cockpit Demo",
         "current_stage": current.get("current_stage"),
         "current_stage_title": node_title(nodes, current.get("current_stage")),

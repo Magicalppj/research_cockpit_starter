@@ -19,6 +19,7 @@ from research_cockpit.commands._runtime import (
     load_validated_state,
     yaml_change_diff,
 )
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._evidence import (
     append_unique,
     evidence_warnings,
@@ -26,6 +27,7 @@ from research_cockpit.commands._evidence import (
     parse_link_values,
     validate_artifact_ids,
 )
+from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.commands.record_finding import _next_finding_id, find_node_file
 from research_cockpit.model import (
     ResearchNode,
@@ -63,6 +65,28 @@ def _focus_completion_guidance(state_current: dict[str, Any], experiment: Resear
     return warnings, commands
 
 
+def _assignment_cursor_completion_guidance(
+    root: Path,
+    *,
+    assignment_id: str | None,
+    experiment: ResearchNode,
+) -> tuple[list[str], list[str]]:
+    if not assignment_id:
+        return [], []
+    from research_cockpit.model import load_assignments
+
+    assignment = load_assignments(root).get(assignment_id)
+    if assignment is None or assignment.current_node != experiment.id:
+        return [], []
+    next_focus = experiment.parent
+    commands = []
+    if next_focus:
+        commands.append(
+            f"research-cockpit set-cursor --root {root} --assignment {assignment_id} --node {next_focus}"
+        )
+    return [f"assignment_cursor_is_terminal:{assignment_id}"], commands
+
+
 def complete_experiment(
     root: Path,
     *,
@@ -79,6 +103,8 @@ def complete_experiment(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
     nodes = state.nodes
@@ -95,7 +121,6 @@ def complete_experiment(
     if outcome is not None and outcome not in VALID_FINDING_OUTCOMES:
         allowed = ", ".join(sorted(VALID_FINDING_OUTCOMES))
         raise ValueError(f"Invalid outcome {outcome!r}; allowed: {allowed}")
-
     metrics = metrics or []
     artifact_ids = artifact_ids or []
     evidence_links = evidence_links or {}
@@ -106,6 +131,13 @@ def complete_experiment(
             "use create-followup-experiment for follow-up work"
         )
     validate_artifact_ids(nodes, artifact_ids)
+    resolved_assignment_id = ensure_assignment_scope(
+        root,
+        nodes,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[experiment_id, *artifact_ids],
+    )
 
     path = find_node_file(root, experiment_id)
     data = load_yaml(path)
@@ -190,6 +222,13 @@ def complete_experiment(
     focus_warnings, focus_commands = _focus_completion_guidance(state.current, experiment, root)
     result["warnings"].extend(focus_warnings)
     result["recommended_commands"].extend(focus_commands)
+    assignment_warnings, assignment_commands = _assignment_cursor_completion_guidance(
+        root,
+        assignment_id=resolved_assignment_id,
+        experiment=experiment,
+    )
+    result["warnings"].extend(assignment_warnings)
+    result["recommended_commands"].extend(assignment_commands)
     if show_diff:
         result["diff"] = yaml_change_diff(changes)
     if dry_run:
@@ -240,6 +279,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -258,7 +298,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except MutationError as exc:
         if args.json:
             emit_json(exc.payload)

@@ -196,6 +196,7 @@ def build_option_workstream_rows(
     nodes: dict[str, ResearchNode],
     current: dict[str, Any] | None = None,
     *,
+    assignments: dict[str, Any] | None = None,
     topology: GraphTopology | None = None,
 ) -> list[dict[str, Any]]:
     from research_cockpit.decisions import build_decision_evidence_bundle
@@ -203,6 +204,9 @@ def build_option_workstream_rows(
     current = current or {}
     topology = topology or GraphTopology.from_nodes(nodes)
     agent_focuses = current.get("agent_focuses") if isinstance(current.get("agent_focuses"), dict) else {}
+    assignments_by_root: dict[str, Any] = {}
+    for assignment in sorted((assignments or {}).values(), key=lambda item: str(item.assignment_id)):
+        assignments_by_root.setdefault(str(assignment.root_node), assignment)
     rows: list[dict[str, Any]] = []
 
     def option_sort_key(node: ResearchNode) -> tuple[int, str]:
@@ -219,6 +223,11 @@ def build_option_workstream_rows(
         report = option.raw.get("workstream_report") if isinstance(option.raw.get("workstream_report"), dict) else {}
         owner = workstream.get("owner")
         focus = agent_focuses.get(str(owner)) if owner and isinstance(agent_focuses.get(str(owner)), dict) else {}
+        assignment = assignments_by_root.get(option.id)
+        assignment_current_node = str(assignment.current_node) if assignment else None
+        assignment_next_actions = list(assignment.next_actions) if assignment else []
+        agent_focus_node = assignment_current_node or focus.get("current_focus_node")
+        agent_focus_source = "assignment" if assignment_current_node else ("current_state" if focus else None)
         last_update = workstream.get("updated_at") or report.get("reported_at")
         rows.append({
             "option_id": option.id,
@@ -230,7 +239,12 @@ def build_option_workstream_rows(
             "session_id": workstream.get("session_id"),
             "git_branch": workstream.get("git_branch"),
             "worktree_label": workstream.get("worktree_label"),
-            "agent_focus_node": focus.get("current_focus_node"),
+            "agent_focus_node": agent_focus_node,
+            "agent_focus_source": agent_focus_source,
+            "assignment_id": str(assignment.assignment_id) if assignment else None,
+            "assignment_status": str(assignment.status) if assignment else None,
+            "assignment_current_node": assignment_current_node,
+            "assignment_next_actions": assignment_next_actions,
             "workstream_status": workstream.get("status"),
             "objective": workstream.get("objective"),
             "report_to_problem": workstream.get("report_to_problem") or problem_id,

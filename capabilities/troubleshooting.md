@@ -54,7 +54,7 @@ Run semantic lint when generated context looks stale even though `validate` pass
 research-cockpit lint --root research_cockpit --semantic --json
 ```
 
-Semantic lint checks for terminal global or per-agent focus nodes, `next_actions` that still mention closed nodes, open experiments that already contain results, terminal parent nodes that still contain active descendants, and option workstream state that no longer matches child experiment state. Warning output exits with status 1; a zero exit means no semantic warnings were found.
+Semantic lint checks for terminal coordinator/global focus nodes, legacy per-agent focus nodes, assignment cursors that point at terminal work, `next_actions` that still mention closed nodes, open experiments that already contain results, terminal parent nodes that still contain active descendants, and option workstream state that no longer matches child experiment state. Warning output exits with status 1; a zero exit means no semantic warnings were found.
 
 If the warning id is `terminal_parent_has_active_descendants`, the parent branch is marked terminal while active work remains below it. Preview the cleanup first and read `updates`, `skipped`, `remaining_active_descendants`, and `parent_ready_for_terminal_status` before applying any mutation:
 

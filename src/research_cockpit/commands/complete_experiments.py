@@ -10,7 +10,9 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
+from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.commands._evidence import append_unique, evidence_warnings, inline_evidence_artifact, validate_artifact_ids
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runtime import (
     compact_mutation_result,
     dry_run_preflight_result,
@@ -95,6 +97,8 @@ def complete_experiments(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("Completion plan must be a mapping")
@@ -115,6 +119,8 @@ def complete_experiments(
     path_by_id: dict[str, Path] = {}
     completed: list[dict[str, Any]] = []
     experiment_order: list[str] = []
+    explicit_scope_artifact_ids: set[str] = set()
+    created_scope_artifact_ids: set[str] = set()
     artifact_changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any]]] = []
     known_node_ids = set(nodes)
 
@@ -176,6 +182,7 @@ def complete_experiments(
                 "use create-followup-experiment for follow-up work"
             )
         validate_artifact_ids(nodes, artifact_ids)
+        explicit_scope_artifact_ids.update(artifact_ids)
 
         path = find_node_file(root, experiment_id)
         data = load_yaml(path)
@@ -196,6 +203,7 @@ def complete_experiments(
             candidate[str(evidence_artifact["id"])] = ResearchNode.from_dict(evidence_artifact)
             artifact_changes.append((artifact_path, None, evidence_artifact))
             known_node_ids.add(str(evidence_artifact["id"]))
+            created_scope_artifact_ids.add(str(evidence_artifact["id"]))
         all_artifact_ids = [*artifact_ids, *([created_artifact_id] if created_artifact_id else [])]
         finding_record = {
             "id": finding_id,
@@ -247,6 +255,20 @@ def complete_experiments(
             "warnings": evidence_warnings(all_artifact_ids),
         })
 
+    ensure_assignment_scope(
+        root,
+        state.nodes,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[*experiment_order, *sorted(explicit_scope_artifact_ids)],
+    )
+    ensure_assignment_scope(
+        root,
+        candidate,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[*experiment_order, *sorted(created_scope_artifact_ids)],
+    )
     validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
     experiment_changes = [
         (path_by_id[experiment_id], before_by_id[experiment_id], data_by_id[experiment_id])
@@ -303,6 +325,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
     if args.print_schema:
         safe_print(COMPLETE_EXPERIMENTS_EXAMPLE)
@@ -317,7 +340,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         safe_print(str(exc))
         raise SystemExit(1) from exc

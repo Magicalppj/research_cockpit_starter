@@ -19,7 +19,9 @@ from research_cockpit.model import (
     validate_cockpit,
     validate_status,
 )
+from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.lifecycle_guards import LifecycleGuardError, raise_for_terminal_parent_transitions
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
 
 
@@ -39,6 +41,8 @@ def update_status(
     summary: str | None = None,
     result_summary: str | None = None,
     rebuild_dashboard: bool = True,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> Path:
     result = update_status_result(
         root,
@@ -49,6 +53,8 @@ def update_status(
         rebuild_dashboard=rebuild_dashboard,
         dry_run=False,
         show_diff=False,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
     )
     return Path(str(result["path"]))
 
@@ -63,6 +69,8 @@ def update_status_result(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, object]:
     nodes = load_nodes(root)
     if node_id not in nodes:
@@ -74,6 +82,13 @@ def update_status_result(
         raise ValueError("Use `research-cockpit accept-decision` to accept a decision so option/problem state stays synchronized.")
     if result_summary is not None and node.type != "experiment":
         raise ValueError("--result-summary can only be used with experiment nodes")
+    ensure_assignment_scope(
+        root,
+        nodes,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[node_id],
+    )
 
     path = find_node_file(root, node_id)
     data = load_yaml(path)
@@ -151,6 +166,7 @@ def main() -> None:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true", help="Only update YAML; do not rebuild dashboards")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -163,7 +179,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except LifecycleGuardError as exc:
         if args.json:
             print(json.dumps(exc.payload, ensure_ascii=False, indent=2))

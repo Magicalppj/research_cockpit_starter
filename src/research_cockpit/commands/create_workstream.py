@@ -12,6 +12,8 @@ ROOT = default_data_root()
 from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.file_schemas import CREATE_WORKSTREAM_EXAMPLE
 from research_cockpit.commands._runtime import compact_mutation_result, emit_json, safe_print
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
+from research_cockpit.assignment_scope import AssignmentScopeError
 from research_cockpit.lifecycle_guards import LifecycleGuardError
 from research_cockpit.model import ValidationError, load_yaml
 
@@ -150,6 +152,8 @@ def create_workstream(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     plan = graph_plan_from_workstream(workstream)
     result = apply_graph_plan(
@@ -158,6 +162,8 @@ def create_workstream(
         rebuild_dashboard=rebuild_dashboard,
         dry_run=dry_run,
         show_diff=show_diff,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
     )
     result["workstream"] = {
         "problem_id": plan["nodes"][0]["id"],
@@ -189,6 +195,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
     if args.print_schema:
         safe_print(CREATE_WORKSTREAM_EXAMPLE)
@@ -203,7 +210,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except LifecycleGuardError as exc:
         if args.json:
             emit_json(exc.payload)

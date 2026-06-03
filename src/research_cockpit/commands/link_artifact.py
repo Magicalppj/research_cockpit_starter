@@ -11,6 +11,7 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
+from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.commands._evidence import (
     append_unique,
     linked_resource_rows,
@@ -18,6 +19,7 @@ from research_cockpit.commands._evidence import (
     validate_artifact_ids,
     validate_node_refs,
 )
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import ResearchNode, ValidationError, load_yaml, script_command, validate_cockpit
@@ -33,6 +35,8 @@ def link_artifact(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
     nodes = state.nodes
@@ -42,6 +46,13 @@ def link_artifact(
     validate_node_refs(nodes, to_nodes, "--to")
     if not to_nodes and path is None and not links:
         raise ValueError("At least one of --to, --path, or --link is required")
+    ensure_assignment_scope(
+        root,
+        nodes,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=[artifact_id],
+    )
 
     candidate = dict(nodes)
     today = str(date.today())
@@ -76,6 +87,13 @@ def link_artifact(
         if before != data:
             changes.append((node_path, before, data))
 
+    ensure_assignment_scope(
+        root,
+        candidate,
+        assignment_id=assignment_id,
+        coordinator=coordinator,
+        target_node_ids=to_nodes,
+    )
     validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
     changed = bool(changes)
     result: dict[str, Any] = {
@@ -128,6 +146,7 @@ def main() -> None:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -140,7 +159,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))
         raise SystemExit(1) from exc

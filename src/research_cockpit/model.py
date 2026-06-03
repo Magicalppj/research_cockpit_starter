@@ -6,6 +6,14 @@ from typing import Any
 import networkx as nx
 import yaml
 
+from research_cockpit.agent_state import (
+    AgentRecord,
+    AssignmentRecord,
+    CoordinatorState,
+    load_agents,
+    load_assignments,
+    load_coordinator_state,
+)
 from research_cockpit.command_registry import cli_command_for_script
 from research_cockpit.context_packs import (
     build_agent_context,
@@ -34,6 +42,7 @@ from research_cockpit.option_workstreams import (
 )
 from research_cockpit.resources import build_link_rows, node_link_entries as _node_link_entries
 from research_cockpit.storage import load_yaml, save_yaml
+from research_cockpit.types import ValidationError
 from research_cockpit.suggestions import (
     build_action_suggestions,
     build_suggestion_lifecycle_rows,
@@ -71,6 +80,9 @@ VALID_WORKSTREAM_STATUSES = {"claimed", "in_progress", "blocked", "reported", "r
 ACTIVE_WORKSTREAM_STATUSES = {"claimed", "in_progress", "blocked"}
 VALID_WORKSTREAM_RECOMMENDATIONS = {"accept", "reject", "continue"}
 VALID_RUN_STATUSES = {"queued", "running", "completed", "failed", "cancelled"}
+VALID_AGENT_STATUSES = {"active", "idle", "completed", "retired"}
+VALID_ASSIGNMENT_STATUSES = {"queued", "active", "blocked", "completed", "cancelled", "retired"}
+ACTIVE_ASSIGNMENT_STATUSES = {"queued", "active", "blocked"}
 CONTEXT_SCHEMA_VERSION = "agent_context_v1"
 
 SEARCH_NODE_TEXT_FIELDS = (
@@ -163,12 +175,6 @@ TYPE_SHAPES = {
     "decision": "hexagon",
     "artifact": "database",
 }
-
-
-class ValidationError(ValueError):
-    def __init__(self, errors: list[str]) -> None:
-        self.errors = errors
-        super().__init__("\n".join(errors))
 
 
 @dataclass
@@ -717,6 +723,171 @@ def validate_runs(runs: dict[str, RunRecord], nodes: dict[str, ResearchNode]) ->
     return errors
 
 
+def validate_agents(agents: dict[str, AgentRecord], assignments: dict[str, AssignmentRecord]) -> list[str]:
+    errors: list[str] = []
+    for agent in agents.values():
+        if not agent.agent_id:
+            errors.append("agent has empty agent_id")
+        if agent.status not in VALID_AGENT_STATUSES:
+            allowed = ", ".join(sorted(VALID_AGENT_STATUSES))
+            errors.append(f"{agent.agent_id}: invalid agent status {agent.status!r}; allowed: {allowed}")
+        if not isinstance(agent.raw.get("active_assignment_ids", []), list):
+            errors.append(f"{agent.agent_id}: active_assignment_ids must be a list")
+        for assignment_id in agent.active_assignment_ids:
+            if assignment_id not in assignments:
+                errors.append(
+                    f"{agent.agent_id}: active_assignment_ids references missing assignment {assignment_id!r}"
+                )
+            elif assignments[assignment_id].agent_id != agent.agent_id:
+                errors.append(
+                    f"{agent.agent_id}: active_assignment_ids contains assignment {assignment_id!r} "
+                    f"owned by {assignments[assignment_id].agent_id!r}"
+                )
+    return errors
+
+
+def _assignment_allowed_root(assignment: AssignmentRecord) -> str:
+    value = assignment.allowed_subtree.get("root")
+    return str(value) if value not in (None, "") else assignment.root_node
+
+
+def _assignment_policy(assignment: AssignmentRecord) -> str:
+    value = assignment.allowed_subtree.get("policy")
+    return str(value) if value not in (None, "") else "descendants_only"
+
+
+def _node_inside_assignment_scope(
+    nodes: dict[str, ResearchNode],
+    assignment: AssignmentRecord,
+    node_id: str,
+    *,
+    topology: GraphTopology,
+) -> bool:
+    root_node = _assignment_allowed_root(assignment)
+    if root_node not in nodes or node_id not in nodes:
+        return False
+    if node_id == root_node:
+        return True
+    return node_id in topology.descendant_ids(root_node)
+
+
+def validate_assignments(
+    assignments: dict[str, AssignmentRecord],
+    agents: dict[str, AgentRecord],
+    nodes: dict[str, ResearchNode],
+) -> list[str]:
+    errors: list[str] = []
+    if not assignments:
+        return errors
+    topology = GraphTopology.from_nodes(nodes)
+    active_by_root: dict[str, list[str]] = {}
+
+    for assignment in assignments.values():
+        if not assignment.assignment_id:
+            errors.append("assignment has empty assignment_id")
+        if assignment.status not in VALID_ASSIGNMENT_STATUSES:
+            allowed = ", ".join(sorted(VALID_ASSIGNMENT_STATUSES))
+            errors.append(
+                f"{assignment.assignment_id}: invalid assignment status {assignment.status!r}; allowed: {allowed}"
+            )
+        if not assignment.agent_id:
+            errors.append(f"{assignment.assignment_id}: agent_id is required")
+        elif assignment.agent_id not in agents:
+            errors.append(
+                f"{assignment.assignment_id}: agent_id references missing agent {assignment.agent_id!r}"
+            )
+        if not assignment.root_node:
+            errors.append(f"{assignment.assignment_id}: root_node is required")
+        elif assignment.root_node not in nodes:
+            errors.append(
+                f"{assignment.assignment_id}: root_node references missing node {assignment.root_node!r}"
+            )
+        if not assignment.current_node:
+            errors.append(f"{assignment.assignment_id}: current_node is required")
+        elif assignment.current_node not in nodes:
+            errors.append(
+                f"{assignment.assignment_id}: current_node references missing node {assignment.current_node!r}"
+            )
+
+        raw_allowed_subtree = assignment.raw.get("allowed_subtree")
+        if not isinstance(raw_allowed_subtree, dict):
+            errors.append(f"{assignment.assignment_id}: allowed_subtree must be a mapping")
+        allowed_root = _assignment_allowed_root(assignment)
+        if not isinstance(raw_allowed_subtree, dict) or raw_allowed_subtree.get("root") in (None, ""):
+            errors.append(f"{assignment.assignment_id}: allowed_subtree.root is required")
+        if allowed_root != assignment.root_node:
+            errors.append(
+                f"{assignment.assignment_id}: allowed_subtree.root {allowed_root!r} "
+                f"must match root_node {assignment.root_node!r}"
+            )
+        if allowed_root not in nodes:
+            errors.append(
+                f"{assignment.assignment_id}: allowed_subtree.root references missing node {allowed_root!r}"
+            )
+        policy = _assignment_policy(assignment)
+        if policy != "descendants_only":
+            errors.append(f"{assignment.assignment_id}: unsupported allowed_subtree.policy {policy!r}")
+        if (
+            assignment.current_node
+            and assignment.current_node in nodes
+            and allowed_root in nodes
+            and not _node_inside_assignment_scope(nodes, assignment, assignment.current_node, topology=topology)
+        ):
+            errors.append(
+                f"{assignment.assignment_id}: current_node {assignment.current_node!r} "
+                f"is outside allowed_subtree root {allowed_root!r}"
+            )
+        if assignment.next_actions is not None and not isinstance(assignment.raw.get("next_actions", []), list):
+            errors.append(f"{assignment.assignment_id}: next_actions must be a list")
+        if assignment.raw.get("worktree") is not None and not isinstance(assignment.raw.get("worktree"), dict):
+            errors.append(f"{assignment.assignment_id}: worktree must be a mapping")
+
+        if assignment.status in ACTIVE_ASSIGNMENT_STATUSES and assignment.root_node in nodes:
+            root = nodes[assignment.root_node]
+            if root.status not in {"planned", "queued", "running", "open", "active", "promising", "blocked"}:
+                if assignment.raw.get("allow_terminal_root") is not True:
+                    errors.append(
+                        f"{assignment.assignment_id}: active assignment root_node {assignment.root_node!r} "
+                        f"has terminal status {root.status!r}"
+                    )
+            active_by_root.setdefault(assignment.root_node, []).append(assignment.assignment_id)
+
+    for root_node, assignment_ids in sorted(active_by_root.items()):
+        if len(assignment_ids) <= 1:
+            continue
+        if all(assignments[assignment_id].raw.get("allow_parallel_assignments") is True for assignment_id in assignment_ids):
+            continue
+        errors.append(
+            f"multiple active assignments claim root_node {root_node!r}: {', '.join(sorted(assignment_ids))}"
+        )
+    return errors
+
+
+def validate_coordinator_state(
+    coordinator_state: CoordinatorState,
+    nodes: dict[str, ResearchNode],
+    assignments: dict[str, AssignmentRecord],
+) -> list[str]:
+    errors: list[str] = []
+    if coordinator_state.selected_node and coordinator_state.selected_node not in nodes:
+        errors.append(
+            f"coordinator_state.selected_node references missing node {coordinator_state.selected_node!r}"
+        )
+    if coordinator_state.selected_assignment and coordinator_state.selected_assignment not in assignments:
+        errors.append(
+            "coordinator_state.selected_assignment references missing assignment "
+            f"{coordinator_state.selected_assignment!r}"
+        )
+    if not isinstance(coordinator_state.raw.get("global_next_actions", []), list):
+        errors.append("coordinator_state.global_next_actions must be a list")
+    if coordinator_state.raw.get("dashboard_filters") is not None and not isinstance(
+        coordinator_state.raw.get("dashboard_filters"),
+        dict,
+    ):
+        errors.append("coordinator_state.dashboard_filters must be a mapping")
+    return errors
+
+
 def validate_current_state(
     current: dict[str, Any],
     nodes: dict[str, ResearchNode],
@@ -861,6 +1032,9 @@ def validate_cockpit(
     explicit_edges: list[dict[str, Any]] | None = None,
     *,
     runs: dict[str, RunRecord] | None = None,
+    agents: dict[str, AgentRecord] | None = None,
+    assignments: dict[str, AssignmentRecord] | None = None,
+    coordinator_state: CoordinatorState | None = None,
     include_interaction_log: bool = False,
     raise_on_error: bool = False,
 ) -> list[str]:
@@ -874,11 +1048,38 @@ def validate_cockpit(
         except ValidationError as exc:
             runs = {}
             run_load_errors = exc.errors
+    agent_load_errors: list[str] = []
+    if agents is None:
+        try:
+            agents = load_agents(root)
+        except ValidationError as exc:
+            agents = {}
+            agent_load_errors = exc.errors
+    assignment_load_errors: list[str] = []
+    if assignments is None:
+        try:
+            assignments = load_assignments(root)
+        except ValidationError as exc:
+            assignments = {}
+            assignment_load_errors = exc.errors
+    coordinator_load_errors: list[str] = []
+    if coordinator_state is None:
+        try:
+            coordinator_state = load_coordinator_state(root)
+        except ValidationError as exc:
+            coordinator_state = CoordinatorState()
+            coordinator_load_errors = exc.errors
     errors = validate_nodes(nodes)
     errors.extend(validate_explicit_edges(nodes, explicit_edges))
     errors.extend(validate_current_state(current, nodes, explicit_edges))
     errors.extend(run_load_errors)
     errors.extend(validate_runs(runs, nodes))
+    errors.extend(agent_load_errors)
+    errors.extend(assignment_load_errors)
+    errors.extend(coordinator_load_errors)
+    errors.extend(validate_agents(agents, assignments))
+    errors.extend(validate_assignments(assignments, agents, nodes))
+    errors.extend(validate_coordinator_state(coordinator_state, nodes, assignments))
     if include_interaction_log:
         errors.extend(validate_interaction_log(root))
     if errors and raise_on_error:

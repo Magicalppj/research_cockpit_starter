@@ -39,6 +39,9 @@ from research_cockpit.model import (
     graph_to_json,
     append_interaction_log,
     graph_view_id_from_title,
+    load_agents,
+    load_assignments,
+    load_coordinator_state,
     load_graph_views,
     load_interaction_log,
     load_explicit_edges,
@@ -235,6 +238,390 @@ class ModelValidationTests(unittest.TestCase):
                 errors = validate_cockpit(self.root, load_nodes(self.root))
 
                 self.assertEqual(errors, [])
+
+    def test_agent_assignment_and_coordinator_records_are_loaded_and_validated(self) -> None:
+        save_yaml(
+            self.root / "agents" / "agent_20260603_ab12cd_cache_probe.yaml",
+            {
+                "agent_id": "agent_20260603_ab12cd_cache_probe",
+                "label": "cache_probe",
+                "display_name": "Cache probe",
+                "status": "active",
+                "created_at": "2026-06-03T10:00:00Z",
+                "last_seen_at": "2026-06-03T10:30:00Z",
+                "active_assignment_ids": ["assign_20260603_ab12cd"],
+            },
+        )
+        save_yaml(
+            self.root / "assignments" / "assign_20260603_ab12cd.yaml",
+            {
+                "assignment_id": "assign_20260603_ab12cd",
+                "agent_id": "agent_20260603_ab12cd_cache_probe",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+                "objective": "Run T5 cache probe.",
+                "next_actions": ["Review smoke metrics."],
+                "worktree": {"branch": "agent/option_t5", "label": "agent_option_t5"},
+                "created_at": "2026-06-03T10:00:00Z",
+                "updated_at": "2026-06-03T10:30:00Z",
+            },
+        )
+        save_yaml(
+            self.root / "coordinator_state.yaml",
+            {
+                "selected_node": "problem_text",
+                "selected_assignment": "assign_20260603_ab12cd",
+                "global_next_actions": ["Compare assignment results."],
+                "dashboard_filters": {"hide_statuses": ["parked"]},
+            },
+        )
+
+        agents = load_agents(self.root)
+        assignments = load_assignments(self.root)
+        coordinator_state = load_coordinator_state(self.root)
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertEqual(errors, [])
+        self.assertEqual(agents["agent_20260603_ab12cd_cache_probe"].label, "cache_probe")
+        self.assertEqual(assignments["assign_20260603_ab12cd"].root_node, "option_t5")
+        self.assertEqual(coordinator_state.selected_assignment, "assign_20260603_ab12cd")
+
+    def test_validate_rejects_assignment_missing_agent(self) -> None:
+        save_yaml(
+            self.root / "assignments" / "assign_missing_agent.yaml",
+            {
+                "assignment_id": "assign_missing_agent",
+                "agent_id": "missing_agent",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(
+            any("assign_missing_agent: agent_id references missing agent 'missing_agent'" in error for error in errors)
+        )
+
+    def test_validate_rejects_invalid_agent_and_assignment_statuses(self) -> None:
+        save_yaml(
+            self.root / "agents" / "agent_scope.yaml",
+            {"agent_id": "agent_scope", "status": "unknown"},
+        )
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "unknown",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("agent_scope: invalid agent status 'unknown'" in error for error in errors))
+        self.assertTrue(any("assign_scope: invalid assignment status 'unknown'" in error for error in errors))
+
+    def test_validate_rejects_assignment_missing_root_and_current_nodes(self) -> None:
+        save_yaml(self.root / "agents" / "agent_scope.yaml", {"agent_id": "agent_scope", "status": "active"})
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "active",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("assign_scope: root_node is required" in error for error in errors))
+        self.assertTrue(any("assign_scope: current_node is required" in error for error in errors))
+
+    def test_validate_rejects_assignment_missing_node_references(self) -> None:
+        save_yaml(self.root / "agents" / "agent_scope.yaml", {"agent_id": "agent_scope", "status": "active"})
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "active",
+                "root_node": "missing_root",
+                "current_node": "missing_current",
+                "allowed_subtree": {"root": "missing_root", "policy": "descendants_only"},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("assign_scope: root_node references missing node 'missing_root'" in error for error in errors))
+        self.assertTrue(any("assign_scope: current_node references missing node 'missing_current'" in error for error in errors))
+
+    def test_validate_rejects_assignment_current_node_outside_allowed_subtree(self) -> None:
+        save_yaml(
+            self.root / "agents" / "agent_scope.yaml",
+            {"agent_id": "agent_scope", "status": "active"},
+        )
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "problem_text",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("assign_scope: current_node 'problem_text' is outside allowed_subtree root 'option_t5'" in error for error in errors))
+
+    def test_validate_rejects_assignment_allowed_subtree_root_mismatch(self) -> None:
+        save_yaml(self.root / "agents" / "agent_scope.yaml", {"agent_id": "agent_scope", "status": "active"})
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "problem_text", "policy": "descendants_only"},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(
+            any(
+                "assign_scope: allowed_subtree.root 'problem_text' must match root_node 'option_t5'" in error
+                for error in errors
+            )
+        )
+
+    def test_validate_rejects_agent_active_assignment_ids_that_are_not_a_list(self) -> None:
+        save_yaml(
+            self.root / "agents" / "agent_scope.yaml",
+            {
+                "agent_id": "agent_scope",
+                "status": "active",
+                "active_assignment_ids": {"assign_scope": True},
+            },
+        )
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("agent_scope: active_assignment_ids must be a list" in error for error in errors))
+
+    def test_validate_rejects_agent_active_assignment_owned_by_another_agent(self) -> None:
+        save_yaml(
+            self.root / "agents" / "agent_owner.yaml",
+            {"agent_id": "agent_owner", "status": "active"},
+        )
+        save_yaml(
+            self.root / "agents" / "agent_scope.yaml",
+            {
+                "agent_id": "agent_scope",
+                "status": "active",
+                "active_assignment_ids": ["assign_scope"],
+            },
+        )
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_owner",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(
+            any(
+                "agent_scope: active_assignment_ids contains assignment 'assign_scope' owned by 'agent_owner'"
+                in error
+                for error in errors
+            )
+        )
+
+    def test_validate_rejects_scalar_agent_assignment_and_coordinator_lists(self) -> None:
+        save_yaml(
+            self.root / "agents" / "agent_scope.yaml",
+            {
+                "agent_id": "agent_scope",
+                "status": "active",
+                "active_assignment_ids": 123,
+            },
+        )
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+                "next_actions": 123,
+            },
+        )
+        save_yaml(self.root / "coordinator_state.yaml", {"global_next_actions": 123})
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("agent_scope: active_assignment_ids must be a list" in error for error in errors))
+        self.assertTrue(any("assign_scope: next_actions must be a list" in error for error in errors))
+        self.assertTrue(any("coordinator_state.global_next_actions must be a list" in error for error in errors))
+
+    def test_validate_rejects_assignment_allowed_subtree_without_root(self) -> None:
+        save_yaml(self.root / "agents" / "agent_scope.yaml", {"agent_id": "agent_scope", "status": "active"})
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("assign_scope: allowed_subtree.root is required" in error for error in errors))
+
+    def test_validate_rejects_scalar_assignment_allowed_subtree_without_crashing(self) -> None:
+        save_yaml(self.root / "agents" / "agent_scope.yaml", {"agent_id": "agent_scope", "status": "active"})
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": 123,
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("assign_scope: allowed_subtree must be a mapping" in error for error in errors))
+
+    def test_validate_rejects_active_assignment_with_terminal_root(self) -> None:
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["status"] = "accepted"
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        save_yaml(self.root / "agents" / "agent_scope.yaml", {"agent_id": "agent_scope", "status": "active"})
+        save_yaml(
+            self.root / "assignments" / "assign_scope.yaml",
+            {
+                "assignment_id": "assign_scope",
+                "agent_id": "agent_scope",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+            },
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(
+            any("assign_scope: active assignment root_node 'option_t5' has terminal status 'accepted'" in error for error in errors)
+        )
+
+    def test_validate_rejects_coordinator_missing_references(self) -> None:
+        save_yaml(
+            self.root / "coordinator_state.yaml",
+            {"selected_node": "missing_node", "selected_assignment": "missing_assignment"},
+        )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(
+            any("coordinator_state.selected_node references missing node 'missing_node'" in error for error in errors)
+        )
+        self.assertTrue(
+            any(
+                "coordinator_state.selected_assignment references missing assignment 'missing_assignment'" in error
+                for error in errors
+            )
+        )
+
+    def test_validate_rejects_multiple_active_assignments_for_same_root(self) -> None:
+        for agent_id, assignment_id in (("agent_a", "assign_a"), ("agent_b", "assign_b")):
+            save_yaml(self.root / "agents" / f"{agent_id}.yaml", {"agent_id": agent_id, "status": "active"})
+            save_yaml(
+                self.root / "assignments" / f"{assignment_id}.yaml",
+                {
+                    "assignment_id": assignment_id,
+                    "agent_id": agent_id,
+                    "status": "active",
+                    "root_node": "option_t5",
+                    "current_node": "exp_t5",
+                    "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+                },
+            )
+
+        errors = validate_cockpit(self.root, load_nodes(self.root))
+
+        self.assertTrue(any("multiple active assignments claim root_node 'option_t5'" in error for error in errors))
+
+    def test_validate_rejects_duplicate_assignment_id(self) -> None:
+        save_yaml(self.root / "agents" / "agent_scope.yaml", {"agent_id": "agent_scope", "status": "active"})
+        for filename in ("assign_first.yaml", "assign_second.yaml"):
+            save_yaml(
+                self.root / "assignments" / filename,
+                {
+                    "assignment_id": "assign_duplicate",
+                    "agent_id": "agent_scope",
+                    "status": "active",
+                    "root_node": "option_t5",
+                    "current_node": "exp_t5",
+                    "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+                },
+            )
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, load_nodes(self.root), raise_on_error=True)
+
+        self.assertIn("duplicate assignment id 'assign_duplicate'", str(ctx.exception))
+
+    def test_validate_rejects_duplicate_agent_id(self) -> None:
+        save_yaml(self.root / "agents" / "agent_first.yaml", {"agent_id": "agent_duplicate", "status": "active"})
+        save_yaml(self.root / "agents" / "agent_second.yaml", {"agent_id": "agent_duplicate", "status": "active"})
+
+        with self.assertRaises(ValidationError) as ctx:
+            validate_cockpit(self.root, load_nodes(self.root), raise_on_error=True)
+
+        self.assertIn("duplicate agent id 'agent_duplicate'", str(ctx.exception))
 
     def test_validate_rejects_run_missing_run_id(self) -> None:
         save_yaml(

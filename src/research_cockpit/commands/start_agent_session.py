@@ -4,6 +4,8 @@ import argparse
 import copy
 import json
 from pathlib import Path
+import re
+import secrets
 import subprocess
 from typing import Any
 
@@ -11,6 +13,7 @@ from research_cockpit.agent_sessions import (
     ensure_worktree_boundary,
     nearest_problem_id,
     session_handoff,
+    shell_join,
     stable_session_id,
     today,
     worktree_boundary,
@@ -26,9 +29,14 @@ from research_cockpit.commands._runtime import (
     yaml_change_diff,
 )
 from research_cockpit.model import (
+    ACTIVE_ASSIGNMENT_STATUSES,
     ACTIVE_WORKSTREAM_STATUSES,
+    AgentRecord,
+    AssignmentRecord,
     ResearchNode,
     ValidationError,
+    load_agents,
+    load_assignments,
     load_yaml,
     script_command,
     validate_cockpit,
@@ -38,6 +46,7 @@ from research_cockpit.paths import default_data_root
 from research_cockpit.storage import find_node_file
 
 ROOT = default_data_root()
+IDENTITY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
 def _git_worktree_command(repo_root: Path, branch: str, worktree: Path, base: str | None) -> list[str]:
@@ -58,14 +67,271 @@ def _run_git_worktree_add(command: list[str]) -> None:
         raise RuntimeError(message)
 
 
+def _identity_date() -> str:
+    return today().replace("-", "")
+
+
+def _label_slug(label: str | None, *, fallback: str = "agent") -> str:
+    raw = str(label or fallback).strip().lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", raw).strip("_")
+    return slug[:48].strip("_") or fallback
+
+
+def _safe_identity_id(value: str, field_name: str) -> str:
+    if not IDENTITY_ID_RE.fullmatch(value):
+        raise ValueError(
+            f"{field_name} must contain only letters, numbers, underscores, or hyphens, "
+            "and must not contain path separators"
+        )
+    return value
+
+
+def _agent_path(root: Path, agent_id: str) -> Path:
+    return root / "agents" / f"{_safe_identity_id(agent_id, 'agent_id')}.yaml"
+
+
+def _assignment_path(root: Path, assignment_id: str) -> Path:
+    return root / "assignments" / f"{_safe_identity_id(assignment_id, 'assignment_id')}.yaml"
+
+
+def _existing_assignment_id(
+    assignments: dict[str, AssignmentRecord],
+    *,
+    agent_id: str,
+    option_id: str,
+) -> str | None:
+    for assignment in assignments.values():
+        if (
+            assignment.agent_id == agent_id
+            and assignment.root_node == option_id
+            and assignment.status in ACTIVE_ASSIGNMENT_STATUSES
+        ):
+            return assignment.assignment_id
+    return None
+
+
+def _active_assignment_id_for_root(assignments: dict[str, AssignmentRecord], option_id: str) -> str | None:
+    for assignment in assignments.values():
+        if assignment.root_node == option_id and assignment.status in ACTIVE_ASSIGNMENT_STATUSES:
+            return assignment.assignment_id
+    return None
+
+
+def _resolve_identity(
+    root: Path,
+    *,
+    agents: dict[str, AgentRecord],
+    assignments: dict[str, AssignmentRecord],
+    label: str | None,
+    agent_id: str | None,
+    assignment_id: str | None,
+) -> tuple[str, str]:
+    date_text = _identity_date()
+    if agent_id:
+        agent_id = _safe_identity_id(agent_id, "agent_id")
+    if assignment_id:
+        assignment_id = _safe_identity_id(assignment_id, "assignment_id")
+    slug = _label_slug(label or agent_id)
+    for _ in range(100):
+        token = secrets.token_hex(3)
+        candidate_agent_id = agent_id or f"agent_{date_text}_{token}_{slug}"
+        candidate_assignment_id = assignment_id or f"assign_{date_text}_{token}"
+        agent_collision = (
+            agent_id is None
+            and (candidate_agent_id in agents or _agent_path(root, candidate_agent_id).exists())
+        )
+        assignment_collision = (
+            assignment_id is None
+            and (
+                candidate_assignment_id in assignments
+                or _assignment_path(root, candidate_assignment_id).exists()
+            )
+        )
+        if not agent_collision and not assignment_collision:
+            return candidate_agent_id, candidate_assignment_id
+    raise ValueError("Could not generate unique agent and assignment ids")
+
+
+def _load_existing_record(path: Path) -> dict[str, Any] | None:
+    return load_yaml(path) if path.exists() else None
+
+
+def _startup_command_args(root: Path, assignment_id: str) -> list[str]:
+    return [
+        "research-cockpit",
+        "bootstrap",
+        "--root",
+        str(root.resolve()),
+        "--assignment",
+        assignment_id,
+        "--json",
+    ]
+
+
+def _build_agent_data(
+    before_agent: dict[str, Any] | None,
+    *,
+    agent_id: str,
+    assignment_id: str,
+    label: str | None,
+    today_text: str,
+) -> dict[str, Any]:
+    agent_data = dict(before_agent or {})
+    active_assignment_ids = (
+        agent_data.get("active_assignment_ids")
+        if isinstance(agent_data.get("active_assignment_ids"), list)
+        else []
+    )
+    if assignment_id not in active_assignment_ids:
+        active_assignment_ids = [*active_assignment_ids, assignment_id]
+    agent_data.update({
+        "agent_id": agent_id,
+        "status": "active",
+        "created_at": agent_data.get("created_at") or today_text,
+        "last_seen_at": today_text,
+        "active_assignment_ids": active_assignment_ids,
+    })
+    if label:
+        agent_data.setdefault("label", _label_slug(label))
+        agent_data.setdefault("display_name", label)
+    return agent_data
+
+
+def _previous_agent_assignment_update(
+    root: Path,
+    *,
+    before_assignment: dict[str, Any] | None,
+    assignment_id: str,
+    agent_id: str,
+    agent_path: Path,
+) -> tuple[str, Path | None, dict[str, Any] | None, dict[str, Any] | None]:
+    previous_assignment_agent_id = str((before_assignment or {}).get("agent_id") or "")
+    if not previous_assignment_agent_id or previous_assignment_agent_id == agent_id:
+        return previous_assignment_agent_id, None, None, None
+    previous_agent_path = _agent_path(root, previous_assignment_agent_id)
+    if previous_agent_path == agent_path:
+        return previous_assignment_agent_id, None, None, None
+    before_previous_agent = _load_existing_record(previous_agent_path)
+    if not before_previous_agent:
+        return previous_assignment_agent_id, previous_agent_path, before_previous_agent, None
+    previous_agent_data = dict(before_previous_agent)
+    previous_ids = previous_agent_data.get("active_assignment_ids")
+    if isinstance(previous_ids, list):
+        previous_agent_data["active_assignment_ids"] = [
+            item for item in previous_ids if str(item) != assignment_id
+        ]
+    return previous_assignment_agent_id, previous_agent_path, before_previous_agent, previous_agent_data
+
+
+def _build_assignment_data(
+    before_assignment: dict[str, Any] | None,
+    *,
+    assignment_id: str,
+    agent_id: str,
+    option_id: str,
+    objective: str,
+    branch: str,
+    resolved_worktree: Path,
+    session_id: str,
+    today_text: str,
+) -> dict[str, Any]:
+    assignment_data = dict(before_assignment or {})
+    assignment_data.update({
+        "assignment_id": assignment_id,
+        "agent_id": agent_id,
+        "status": "active",
+        "root_node": option_id,
+        "current_node": assignment_data.get("current_node") or option_id,
+        "allowed_subtree": {"root": option_id, "policy": "descendants_only"},
+        "objective": objective,
+        "worktree": {
+            "branch": branch,
+            "label": worktree_label(resolved_worktree),
+            "session_id": session_id,
+        },
+        "created_at": assignment_data.get("created_at") or today_text,
+        "updated_at": today_text,
+    })
+    if not isinstance(assignment_data.get("next_actions"), list):
+        assignment_data["next_actions"] = []
+    return assignment_data
+
+
+def _build_start_session_result(
+    *,
+    root: Path,
+    dry_run: bool,
+    option_id: str,
+    agent_id: str,
+    assignment_id: str,
+    session_id: str,
+    branch: str,
+    resolved_worktree: Path,
+    option_path: Path,
+    agent_path: Path,
+    assignment_path: Path,
+    before_workstream: dict[str, Any] | None,
+    before_agent: dict[str, Any] | None,
+    before_assignment: dict[str, Any] | None,
+    workstream_data: dict[str, Any],
+    agent_data: dict[str, Any],
+    assignment_data: dict[str, Any],
+    boundary: dict[str, Any],
+    git_command: list[str],
+    show_diff: bool,
+    changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any]]],
+) -> dict[str, Any]:
+    launch_env = {
+        "RESEARCH_COCKPIT_ROOT": str(root.resolve()),
+        "RESEARCH_COCKPIT_AGENT_ID": agent_id,
+        "RESEARCH_COCKPIT_ASSIGNMENT_ID": assignment_id,
+    }
+    startup_command_args = _startup_command_args(root, assignment_id)
+    result: dict[str, Any] = {
+        "ok": True,
+        "dry_run": dry_run,
+        "changed": not dry_run,
+        "would_change": dry_run,
+        "option_id": option_id,
+        "agent_id": agent_id,
+        "assignment_id": assignment_id,
+        "session_id": session_id,
+        "git_branch": branch,
+        "worktree_label": worktree_label(resolved_worktree),
+        "path": str(option_path),
+        "agent_path": str(agent_path),
+        "assignment_path": str(assignment_path),
+        "before": {"agent_workstream": before_workstream, "agent": before_agent, "assignment": before_assignment},
+        "after": {"agent_workstream": workstream_data, "agent": agent_data, "assignment": assignment_data},
+        "root_boundary": boundary,
+        "git_command": git_command,
+        "launch_env": launch_env,
+        "startup_command": shell_join(startup_command_args),
+        "startup_command_args": startup_command_args,
+        "handoff": session_handoff(
+            root=root,
+            agent_id=agent_id,
+            assignment_id=assignment_id,
+            option_id=option_id,
+            worktree=resolved_worktree,
+        ),
+        "created_worktree": False,
+    }
+    if show_diff:
+        result["diff"] = yaml_change_diff(changes)
+    return result
+
+
 def start_agent_session(
     root: Path,
     *,
     option_id: str,
-    agent_id: str,
     objective: str,
     branch: str,
     worktree: Path,
+    agent_id: str | None = None,
+    assignment_id: str | None = None,
+    label: str | None = None,
     base: str | None = None,
     create_worktree: bool = False,
     force: bool = False,
@@ -94,6 +360,20 @@ def start_agent_session(
     before_workstream = dict(existing) if existing else None
     existing_owner = str(existing.get("owner") or "")
     existing_status = str(existing.get("status") or "")
+    agents = load_agents(root)
+    assignments = load_assignments(root)
+    if agent_id:
+        assignment_id = assignment_id or _existing_assignment_id(assignments, agent_id=agent_id, option_id=option_id)
+    if force:
+        assignment_id = assignment_id or _active_assignment_id_for_root(assignments, option_id)
+    agent_id, assignment_id = _resolve_identity(
+        root,
+        agents=agents,
+        assignments=assignments,
+        label=label,
+        agent_id=agent_id,
+        assignment_id=assignment_id,
+    )
     if existing_owner and existing_owner != agent_id and existing_status in ACTIVE_WORKSTREAM_STATUSES and not force:
         raise ValueError(
             f"{option_id} is already claimed by {existing_owner} with status {existing_status}; use --force to override"
@@ -119,33 +399,92 @@ def start_agent_session(
     }
     data["updated_at"] = today_text
 
+    agent_path = _agent_path(root, agent_id)
+    before_agent = _load_existing_record(agent_path)
+    agent_data = _build_agent_data(
+        before_agent,
+        agent_id=agent_id,
+        assignment_id=assignment_id,
+        label=label,
+        today_text=today_text,
+    )
+
+    assignment_path = _assignment_path(root, assignment_id)
+    before_assignment = _load_existing_record(assignment_path)
+    (
+        previous_assignment_agent_id,
+        previous_agent_path,
+        before_previous_agent,
+        previous_agent_data,
+    ) = _previous_agent_assignment_update(
+        root,
+        before_assignment=before_assignment,
+        assignment_id=assignment_id,
+        agent_id=agent_id,
+        agent_path=agent_path,
+    )
+    session_id = data["agent_workstream"]["session_id"]
+    assignment_data = _build_assignment_data(
+        before_assignment,
+        assignment_id=assignment_id,
+        agent_id=agent_id,
+        option_id=option_id,
+        objective=objective,
+        branch=branch,
+        resolved_worktree=resolved_worktree,
+        session_id=session_id,
+        today_text=today_text,
+    )
+
     candidate = dict(nodes)
     candidate[option_id] = ResearchNode.from_dict(data)
-    validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
+    candidate_agents = dict(agents)
+    candidate_agents[agent_id] = AgentRecord.from_dict(agent_data)
+    if previous_agent_data and previous_assignment_agent_id:
+        candidate_agents[previous_assignment_agent_id] = AgentRecord.from_dict(previous_agent_data)
+    candidate_assignments = dict(assignments)
+    candidate_assignments[assignment_id] = AssignmentRecord.from_dict(assignment_data)
+    validate_cockpit(
+        root,
+        candidate,
+        state.current,
+        state.explicit_edges,
+        agents=candidate_agents,
+        assignments=candidate_assignments,
+        raise_on_error=True,
+    )
 
     git_command = _git_worktree_command(repo_root, branch, resolved_worktree, base)
-    changes = [(option_path, before_data, data)]
-    result: dict[str, Any] = {
-        "ok": True,
-        "dry_run": dry_run,
-        "changed": not dry_run,
-        "would_change": dry_run,
-        "option_id": option_id,
-        "agent_id": agent_id,
-        "session_id": data["agent_workstream"]["session_id"],
-        "git_branch": branch,
-        "worktree_label": worktree_label(resolved_worktree),
-        "path": str(option_path),
-        "before": {"agent_workstream": before_workstream},
-        "after": {"agent_workstream": data["agent_workstream"]},
-        "root_boundary": boundary,
-        "git_command": git_command,
-        "launch_env": {"RESEARCH_COCKPIT_ROOT": str(root.resolve())},
-        "handoff": session_handoff(root=root, agent_id=agent_id, option_id=option_id, worktree=resolved_worktree),
-        "created_worktree": False,
-    }
-    if show_diff:
-        result["diff"] = yaml_change_diff(changes)
+    changes = [
+        (option_path, before_data, data),
+        (agent_path, before_agent, agent_data),
+        (assignment_path, before_assignment, assignment_data),
+    ]
+    if previous_agent_path and previous_agent_data and before_previous_agent is not None:
+        changes.append((previous_agent_path, before_previous_agent, previous_agent_data))
+    result = _build_start_session_result(
+        root=root,
+        dry_run=dry_run,
+        option_id=option_id,
+        agent_id=agent_id,
+        assignment_id=assignment_id,
+        session_id=session_id,
+        branch=branch,
+        resolved_worktree=resolved_worktree,
+        option_path=option_path,
+        agent_path=agent_path,
+        assignment_path=assignment_path,
+        before_workstream=before_workstream,
+        before_agent=before_agent,
+        before_assignment=before_assignment,
+        workstream_data=data["agent_workstream"],
+        agent_data=agent_data,
+        assignment_data=assignment_data,
+        boundary=boundary,
+        git_command=git_command,
+        show_diff=show_diff,
+        changes=changes,
+    )
     if dry_run:
         result["changed"] = False
         return dry_run_preflight_result(root, result)
@@ -169,6 +508,8 @@ def start_agent_session(
                     option_id,
                     "--agent",
                     agent_id,
+                    "--assignment",
+                    assignment_id,
                     "--branch",
                     branch,
                 ),
@@ -177,6 +518,7 @@ def start_agent_session(
                 "extra": {
                     "option_id": option_id,
                     "agent_id": agent_id,
+                    "assignment_id": assignment_id,
                     "session_id": data["agent_workstream"]["session_id"],
                     "git_branch": branch,
                     "worktree_label": worktree_label(resolved_worktree),
@@ -202,6 +544,8 @@ def start_agent_session(
                     option_id,
                     "--agent",
                     agent_id,
+                    "--assignment",
+                    assignment_id,
                     "--objective",
                     objective,
                     "--branch",
@@ -221,7 +565,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="research-cockpit start-agent-session")
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--option", required=True, dest="option_id")
-    parser.add_argument("--agent", required=True, dest="agent_id")
+    parser.add_argument("--agent", dest="agent_id")
+    parser.add_argument("--assignment", dest="assignment_id", help=argparse.SUPPRESS)
+    parser.add_argument("--label")
     parser.add_argument("--objective", required=True)
     parser.add_argument("--branch", required=True)
     parser.add_argument("--worktree", required=True, type=Path)
@@ -239,6 +585,8 @@ def main() -> None:
             args.root,
             option_id=args.option_id,
             agent_id=args.agent_id,
+            assignment_id=args.assignment_id,
+            label=args.label,
             objective=args.objective,
             branch=args.branch,
             worktree=args.worktree,
@@ -275,9 +623,9 @@ def main() -> None:
         emit_json(payload)
         return
     if args.dry_run:
-        safe_print(f"Would start session for {args.agent_id} on {args.option_id}.")
+        safe_print(f"Would start session for {payload['agent_id']} on {args.option_id}.")
     else:
-        safe_print(f"Started session for {args.agent_id} on {args.option_id}.")
+        safe_print(f"Started session for {payload['agent_id']} on {args.option_id}.")
 
 
 if __name__ == "__main__":

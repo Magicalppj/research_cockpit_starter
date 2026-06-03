@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,60 @@ BATCH_FINISH_COMMANDS = [
     "research-cockpit build --root <root>",
     "research-cockpit smoke --root <root> --json",
 ]
+ASSIGNMENT_CURSOR_EXAMPLE_TEMPLATES = [
+    'research-cockpit set-cursor --root <root>{scope} --node <node_id> --next-action "..." --no-build',
+]
+NEXT_ACTION_EXAMPLE_TEMPLATES = [
+    'research-cockpit migrate-terminal-next-actions --root <root>{scope} --id <done_experiment_id> --followup-id <followup_id> --title "..." --dry-run --json --show-diff',
+    'research-cockpit update-node-fields --root <root>{scope} --id <node_id> --clear-next-actions --next-action "..." --no-build',
+]
+GLOBAL_NEXT_ACTION_EXAMPLE_TEMPLATES = [
+    "research-cockpit sync-focus-actions --root <root> --from-node <node_id> --no-build",
+    'research-cockpit update-suggestion-state --root <root> --id <suggestion_id> --state completed --reason "..." --no-build',
+]
+MUTATION_COMMAND_SKELETON_TEMPLATES = [
+    "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",
+    "research-cockpit assignment-view --root <root> --json",
+    'research-cockpit add-node --root <root>{scope} --id <node_id> --type <type> --title "..." --parent <parent_id> --no-build',
+    'research-cockpit update-node-fields --root <root>{scope} --id <node_id> --question "..." --tag <tag> --no-build',
+    "research-cockpit apply-graph-plan --root <root>{scope} --file graph_update.yaml --dry-run --json --show-diff",
+    "research-cockpit create-workstream --root <root>{scope} --file workstream.yaml --dry-run --json --show-diff",
+    'research-cockpit create-artifact --root <root>{scope} --id <artifact_id> --title "..." --path artifacts/<node_id>/<run_id> --link-to <node_id> --no-build',
+    "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --dry-run --json --show-diff",
+    'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type smoke_check --passed false --fatal-json "{{}}" --no-build',
+    'research-cockpit record-gate-result --root <root>{scope} --id <preflight_gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --no-build',
+    "research-cockpit ingest-gate-result --root <root>{scope} --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --artifact <artifact_id> --no-build",
+    'research-cockpit complete-experiment --root <root>{scope} --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --no-build',
+    "research-cockpit complete-experiments --root <root>{scope} --file findings.yaml --no-build",
+    'research-cockpit create-followup-experiment --root <root>{scope} --from <done_or_running_experiment_id> --id <followup_id> --title "..." --priority high --next-action "..." --no-build',
+    'research-cockpit migrate-terminal-next-actions --root <root>{scope} --id <done_experiment_id> --followup-id <followup_id> --title "..." --dry-run --json --show-diff',
+]
+GLOBAL_COMMAND_SKELETON_PREFIX = [
+    "research-cockpit init --root <root> --build --json",
+]
+GLOBAL_COMMAND_SKELETON_SUFFIX = [
+    "research-cockpit set-baseline --root <root> --node <node_id> --option <option_id> --decision <decision_id> --no-build",
+    "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
+    "research-cockpit finalize-workstream --root <root> --option <option_id> --status accepted --problem-status resolved --report --no-build",
+]
+BATCH_EXAMPLE_TEMPLATES = {
+    "findings": [
+        'research-cockpit record-finding --root <root>{scope} --experiment <experiment_id> --statement "..." --confidence medium --artifact-id <artifact_id> --no-build',
+        'research-cockpit complete-experiment --root <root>{scope} --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --no-build',
+    ],
+    "artifacts": [
+        "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --no-build",
+        "research-cockpit link-artifact --root <root>{scope} --artifact <artifact_id> --to <node_id> --no-build",
+    ],
+    "runs": [
+        "research-cockpit create-run --root <root>{scope} --id <run_id> --experiment <experiment_id> --status running --no-build",
+        "research-cockpit update-run --root <root>{scope} --id <run_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build",
+        "research-cockpit complete-run --root <root>{scope} --id <run_id> --status completed --no-build",
+    ],
+    "gates": [
+        'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --no-build',
+    ],
+}
 
 
 def missing_runtime_dependencies(required: dict[str, str] = REQUIRED_MODULES) -> list[str]:
@@ -39,14 +94,20 @@ def format_dependency_error(missing: list[str]) -> str:
 _MISSING_DEPENDENCIES = missing_runtime_dependencies()
 
 if not _MISSING_DEPENDENCIES:
+    from research_cockpit.agent_sessions import build_agent_session_context
     from research_cockpit.baselines import resolve_current_effective_baseline
     from research_cockpit.context_packs import build_context_metadata
     from research_cockpit.gate_result_records import build_gate_overview
     from research_cockpit.hierarchy_policy import hierarchy_policy
+    from research_cockpit.commands.option_workstream_context import compact_option_workstream_context
     from research_cockpit.model import (
+        ACTIVE_ASSIGNMENT_STATUSES,
+        ValidationError,
         build_search_index,
         build_search_index_summary,
         focus_node_id_from_current,
+        load_assignments,
+        load_coordinator_state,
         load_nodes,
         load_yaml,
         validate_cockpit,
@@ -81,16 +142,142 @@ def _context_paths(root: Path) -> dict[str, dict[str, Any]]:
     }
 
 
-def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+class BootstrapIdentityError(ValueError):
+    def __init__(self, error: str, message: str, **extra: Any) -> None:
+        super().__init__(message)
+        self.payload: dict[str, Any] = {
+            "ok": False,
+            "error": error,
+            "message": message,
+            "validation": {"ok": False, "errors": [message]},
+        }
+        self.payload.update(extra)
+
+
+def _active_assignment_ids(assignments: dict[str, Any]) -> list[str]:
+    return sorted(
+        assignment.assignment_id
+        for assignment in assignments.values()
+        if assignment.status in ACTIVE_ASSIGNMENT_STATUSES
+    )
+
+
+def _active_assignment_for_agent(assignments: dict[str, Any], agent_id: str) -> str | None:
+    assignment_ids = sorted(
+        assignment.assignment_id
+        for assignment in assignments.values()
+        if assignment.agent_id == agent_id and assignment.status in ACTIVE_ASSIGNMENT_STATUSES
+    )
+    if len(assignment_ids) > 1:
+        raise BootstrapIdentityError(
+            "assignment_identity_required",
+            (
+                f"Multiple active assignments exist for agent {agent_id!r}. "
+                "Pass --assignment or set RESEARCH_COCKPIT_ASSIGNMENT_ID."
+            ),
+            agent_id=agent_id,
+            assignment_ids=assignment_ids,
+        )
+    return assignment_ids[0] if assignment_ids else None
+
+
+def _session_file_identity(root: Path) -> dict[str, str]:
+    candidates = []
+    cwd_file = Path.cwd() / ".research_cockpit_session.yaml"
+    candidates.append(cwd_file)
+    repo_file = root.resolve().parent / ".research_cockpit_session.yaml"
+    if repo_file not in candidates:
+        candidates.append(repo_file)
+    for path in candidates:
+        if not path.exists():
+            continue
+        data = load_yaml(path)
+        if not isinstance(data, dict):
+            continue
+        result: dict[str, str] = {}
+        if data.get("assignment_id"):
+            result["assignment_id"] = str(data["assignment_id"])
+        if data.get("agent_id"):
+            result["agent_id"] = str(data["agent_id"])
+        return result
+    return {}
+
+
+def _resolve_bootstrap_identity(
+    root: Path,
+    assignments: dict[str, Any],
+    *,
+    agent_id: str | None,
+    assignment_id: str | None,
+) -> tuple[str | None, str | None, str]:
+    if assignment_id:
+        return assignment_id, agent_id, "explicit_assignment"
+    if agent_id:
+        resolved = _active_assignment_for_agent(assignments, agent_id)
+        return resolved, agent_id, "explicit_agent" if resolved else "explicit_agent_legacy"
+
+    env_assignment_id = os.environ.get("RESEARCH_COCKPIT_ASSIGNMENT_ID")
+    env_agent_id = os.environ.get("RESEARCH_COCKPIT_AGENT_ID")
+    if env_assignment_id:
+        return env_assignment_id, env_agent_id or agent_id, "env_assignment"
+    if env_agent_id:
+        resolved = _active_assignment_for_agent(assignments, env_agent_id)
+        return resolved, env_agent_id, "env_agent" if resolved else "env_agent_legacy"
+
+    session = _session_file_identity(root)
+    if session.get("assignment_id"):
+        return session["assignment_id"], session.get("agent_id"), "session_file_assignment"
+    if session.get("agent_id"):
+        session_agent_id = session["agent_id"]
+        resolved = _active_assignment_for_agent(assignments, session_agent_id)
+        return resolved, session_agent_id, "session_file_agent" if resolved else "session_file_agent_legacy"
+
+    active_ids = _active_assignment_ids(assignments)
+    if len(active_ids) == 1:
+        return active_ids[0], agent_id, "single_active_assignment"
+    if len(active_ids) > 1:
+        raise BootstrapIdentityError(
+            "assignment_identity_required",
+            "Multiple active assignments exist. Pass --assignment or set RESEARCH_COCKPIT_ASSIGNMENT_ID.",
+            assignment_ids=active_ids,
+        )
+    return None, agent_id, "global"
+
+
+def _render_scoped_templates(templates: list[str], assignment_flag: str) -> list[str]:
+    return [template.format(scope=assignment_flag) for template in templates]
+
+
+def _mutation_guidance(
+    nodes: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    scope_option_id: str | None = None,
+    assignment_id: str | None = None,
+) -> dict[str, Any]:
     focus_node_id = focus_node_id_from_current(current, nodes)
     focus_node = nodes.get(focus_node_id) if focus_node_id else None
     problem_id = current.get("current_problem")
     problem = nodes.get(str(problem_id)) if problem_id else None
-    current_best_option = None
-    if problem:
+    current_best_option = scope_option_id
+    if current_best_option is None and problem:
         current_best_option = problem.raw.get("current_best_option") or current.get("current_option")
-    elif focus_node:
+    elif current_best_option is None and focus_node:
         current_best_option = focus_node.raw.get("current_best_option") or current.get("current_option")
+    assignment_flag = f" --assignment {assignment_id}" if assignment_id else ""
+    next_action_examples = _render_scoped_templates(NEXT_ACTION_EXAMPLE_TEMPLATES, assignment_flag)
+    if assignment_id:
+        next_action_examples.extend(_render_scoped_templates(ASSIGNMENT_CURSOR_EXAMPLE_TEMPLATES, assignment_flag))
+    else:
+        next_action_examples.extend(GLOBAL_NEXT_ACTION_EXAMPLE_TEMPLATES)
+    command_skeletons = _render_scoped_templates(MUTATION_COMMAND_SKELETON_TEMPLATES, assignment_flag)
+    if not assignment_id:
+        command_skeletons = [*GLOBAL_COMMAND_SKELETON_PREFIX, *command_skeletons, *GLOBAL_COMMAND_SKELETON_SUFFIX]
+    batch_examples = {
+        name: _render_scoped_templates(templates, assignment_flag)
+        for name, templates in BATCH_EXAMPLE_TEMPLATES.items()
+    }
+    batch_examples["next_actions"] = next_action_examples
 
     pause_candidates: list[str] = []
     if problem:
@@ -113,57 +300,69 @@ def _mutation_guidance(nodes: dict[str, Any], current: dict[str, Any]) -> dict[s
                 "On mutation conflict, reread compact context and retry the stale command.",
             ],
             "finish_commands": BATCH_FINISH_COMMANDS,
-            "examples": {
-                "findings": [
-                    "research-cockpit record-finding --root <root> --experiment <experiment_id> --statement \"...\" --confidence medium --artifact-id <artifact_id> --no-build",
-                    "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --artifact-id <artifact_id> --no-build",
-                ],
-                "artifacts": [
-                    "research-cockpit ingest-artifact --root <root> --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --no-build",
-                    "research-cockpit link-artifact --root <root> --artifact <artifact_id> --to <node_id> --no-build",
-                ],
-                "runs": [
-                    "research-cockpit create-run --root <root> --id <run_id> --experiment <experiment_id> --status running --no-build",
-                    "research-cockpit update-run --root <root> --id <run_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build",
-                    "research-cockpit complete-run --root <root> --id <run_id> --status completed --no-build",
-                ],
-                "gates": [
-                    "research-cockpit record-gate-result --root <root> --id <gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json \"{}\" --fatal-json \"{}\" --next-allowed-action full_run --no-build",
-                ],
-                "next_actions": [
-                    "research-cockpit migrate-terminal-next-actions --root <root> --id <done_experiment_id> --followup-id <followup_id> --title \"...\" --dry-run --json --show-diff",
-                    "research-cockpit update-node-fields --root <root> --id <node_id> --clear-next-actions --next-action \"...\" --no-build",
-                    "research-cockpit sync-focus-actions --root <root> --from-node <node_id> --no-build",
-                    "research-cockpit update-suggestion-state --root <root> --id <suggestion_id> --state completed --reason \"...\" --no-build",
-                ],
-            },
+            "examples": batch_examples,
         },
-        "hierarchy_policy": hierarchy_policy(parent_option_id=current.get("current_option") or current_best_option),
-        "command_skeletons": [
-            "research-cockpit init --root <root> --build --json",
-            "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",
-            "research-cockpit assignment-view --root <root> --json",
-            "research-cockpit add-node --root <root> --id <node_id> --type <type> --title \"...\" --parent <parent_id> --no-build",
-            "research-cockpit update-node-fields --root <root> --id <node_id> --question \"...\" --tag <tag> --no-build",
-            "research-cockpit apply-graph-plan --root <root> --file graph_update.yaml --dry-run --json --show-diff",
-            "research-cockpit create-workstream --root <root> --file workstream.yaml --dry-run --json --show-diff",
-            "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path artifacts/<node_id>/<run_id> --link-to <node_id> --no-build",
-            "research-cockpit ingest-artifact --root <root> --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --dry-run --json --show-diff",
-            "research-cockpit record-gate-result --root <root> --id <gate_id> --experiment <experiment_id> --run <run_id> --type smoke_check --passed false --fatal-json \"{}\" --no-build",
-            "research-cockpit record-gate-result --root <root> --id <preflight_gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json \"{}\" --fatal-json \"{}\" --next-allowed-action full_run --no-build",
-            "research-cockpit ingest-gate-result --root <root> --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --artifact <artifact_id> --no-build",
-            "research-cockpit set-baseline --root <root> --node <node_id> --option <option_id> --decision <decision_id> --no-build",
-            "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --artifact-id <artifact_id> --no-build",
-            "research-cockpit complete-experiments --root <root> --file findings.yaml --no-build",
-            "research-cockpit create-followup-experiment --root <root> --from <done_or_running_experiment_id> --id <followup_id> --title \"...\" --priority high --next-action \"...\" --no-build",
-            "research-cockpit migrate-terminal-next-actions --root <root> --id <done_experiment_id> --followup-id <followup_id> --title \"...\" --dry-run --json --show-diff",
-            "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
-            "research-cockpit finalize-workstream --root <root> --option <option_id> --status accepted --problem-status resolved --report --no-build",
-        ],
+        "hierarchy_policy": hierarchy_policy(parent_option_id=scope_option_id or current.get("current_option") or current_best_option),
+        "command_skeletons": command_skeletons,
     }
 
 
-def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[str, Any]:
+def _agent_scope_payload(
+    root: Path,
+    nodes: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    agent_id: str | None,
+    option_id: str | None,
+    assignment_id: str | None = None,
+) -> dict[str, Any] | None:
+    if not agent_id and not option_id:
+        return None
+    payload = build_agent_session_context(
+        root,
+        nodes,
+        current,
+        agent_id=agent_id,
+        assignment_id=assignment_id,
+        option_id=option_id,
+    )
+    return {
+        "assignment_id": assignment_id,
+        "agent_id": payload.get("agent_id"),
+        "option_id": payload.get("option_id"),
+        "assignment": payload.get("assignment"),
+        "assignment_cursor": payload.get("assignment_cursor"),
+        "root_node": (payload.get("assignment") or {}).get("root_node") if payload.get("assignment") else payload.get("option_id"),
+        "current_node": (payload.get("assignment") or {}).get("current_node") if payload.get("assignment") else None,
+        "current_path": (payload.get("assignment_cursor") or {}).get("current_path", []),
+        "next_actions": (payload.get("assignment") or {}).get("next_actions", []) if payload.get("assignment") else [],
+        "matching_options": payload.get("matching_options", []),
+        "session": payload.get("session", {}),
+        "canonical_root": payload.get("canonical_root"),
+        "required_root": payload.get("required_root"),
+        "do_not_mutate_worktree_root": True,
+        "stable_artifact_root": payload.get("stable_artifact_root"),
+        "worktree_boundary": payload.get("worktree_boundary", {}),
+        "agent_focus": payload.get("agent_focus"),
+        "option_context": compact_option_workstream_context(payload["option_context"], nodes),
+        "handoff": payload.get("handoff", {}),
+        "uses_global_current_state": False,
+        "current_state_policy": (
+            "Treat current_state global focus as coordinator metadata only. "
+            "Use this agent_scope and its option_context unless the user explicitly assigns another branch."
+        ),
+    }
+
+
+def agent_bootstrap_payload(
+    root: Path = ROOT,
+    *,
+    build: bool = False,
+    agent_id: str | None = None,
+    assignment_id: str | None = None,
+    option_id: str | None = None,
+    coordinator: bool = False,
+) -> dict[str, Any]:
     if _MISSING_DEPENDENCIES:
         raise RuntimeError(format_dependency_error(_MISSING_DEPENDENCIES))
 
@@ -180,9 +379,85 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
     effective_baseline = resolve_current_effective_baseline(nodes, current)
     metadata = build_context_metadata(root, current)
     semantic = semantic_lint(root)
+    try:
+        coordinator_state = load_coordinator_state(root)
+    except ValidationError:
+        coordinator_state = None
+    try:
+        assignments = load_assignments(root)
+    except ValidationError:
+        assignments = {}
+    if coordinator:
+        assignment_id, agent_id, identity_source = None, None, "explicit_coordinator"
+    else:
+        assignment_id, agent_id, identity_source = _resolve_bootstrap_identity(
+            root,
+            assignments,
+            agent_id=agent_id,
+            assignment_id=assignment_id,
+        )
+    if assignment_id:
+        assignment = assignments.get(assignment_id)
+        if assignment is None:
+            raise BootstrapIdentityError(
+                "assignment_not_found",
+                f"Assignment does not exist: {assignment_id}",
+                assignment_id=assignment_id,
+            )
+        if agent_id and agent_id != assignment.agent_id:
+            raise BootstrapIdentityError(
+                "assignment_identity_mismatch",
+                f"Assignment {assignment_id} is owned by {assignment.agent_id!r}, not {agent_id!r}",
+                assignment_id=assignment_id,
+                assignment_agent_id=assignment.agent_id,
+                agent_id=agent_id,
+            )
+        if option_id and option_id != assignment.root_node:
+            raise BootstrapIdentityError(
+                "assignment_identity_mismatch",
+                f"Assignment {assignment_id} root_node is {assignment.root_node!r}, not {option_id!r}",
+                assignment_id=assignment_id,
+                assignment_root_node=assignment.root_node,
+                option_id=option_id,
+            )
+        agent_id = assignment.agent_id
+        option_id = assignment.root_node
+    agent_scope = _agent_scope_payload(
+        root,
+        nodes,
+        current,
+        agent_id=agent_id,
+        option_id=option_id,
+        assignment_id=assignment_id,
+    )
+    scope_option_id = str(agent_scope["option_id"]) if agent_scope and agent_scope.get("option_id") else None
+    if agent_scope and assignment_id:
+        scope_mode = "assignment"
+        primary_context = "assignment_scope"
+    elif agent_scope:
+        scope_mode = "agent"
+        primary_context = "agent_session"
+    else:
+        scope_mode = "global"
+        primary_context = "global_current_state"
+    scope = {
+        "mode": scope_mode,
+        "primary_context": primary_context,
+    }
+    if agent_scope:
+        scope.update({
+            "assignment_id": agent_scope.get("assignment_id"),
+            "agent_id": agent_scope.get("agent_id"),
+            "option_id": agent_scope.get("option_id"),
+            "identity_source": identity_source,
+            "global_focus_is_coordinator_only": True,
+        })
+    else:
+        scope["identity_source"] = identity_source
 
-    return {
+    payload: dict[str, Any] = {
         "root": _display_path(root),
+        "scope": scope,
         "validation": {
             "ok": not errors,
             "errors": errors,
@@ -195,6 +470,14 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
             "current_focus_node": focus_node_id,
             "current_focus_path": current.get("current_focus_path", []) or [],
             "effective_baseline": effective_baseline,
+            "coordinator_only": bool(agent_scope),
+        },
+        "coordinator_state": {
+            "coordinator_only": True,
+            "selected_node": coordinator_state.selected_node if coordinator_state else None,
+            "selected_assignment": coordinator_state.selected_assignment if coordinator_state else None,
+            "global_next_actions": list(coordinator_state.global_next_actions) if coordinator_state else [],
+            "dashboard_filters": dict(coordinator_state.dashboard_filters) if coordinator_state else {},
         },
         "context_paths": _context_paths(root),
         "skill": {
@@ -207,7 +490,12 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
         },
         "top_suggestions": suggestions[:3],
         "semantic_warnings": semantic["warnings"],
-        "mutation_guidance": _mutation_guidance(nodes, current),
+        "mutation_guidance": _mutation_guidance(
+            nodes,
+            current,
+            scope_option_id=scope_option_id,
+            assignment_id=assignment_id,
+        ),
         "run_overview": build_run_overview(root, nodes),
         "gate_overview": build_gate_overview(root),
         "search_summary": build_search_index_summary(search_index),
@@ -217,6 +505,11 @@ def agent_bootstrap_payload(root: Path = ROOT, *, build: bool = False) -> dict[s
         },
         "metadata": metadata,
     }
+    if agent_scope:
+        if assignment_id:
+            payload["assignment_scope"] = agent_scope
+        payload["agent_scope"] = agent_scope
+    return payload
 
 
 def _print_text(payload: dict[str, Any]) -> None:
@@ -226,6 +519,9 @@ def _print_text(payload: dict[str, Any]) -> None:
     for error in validation.get("errors", []):
         print(f"- {error}")
     focus = payload["focus"]
+    scope = payload.get("scope", {})
+    if scope.get("mode") in {"agent", "assignment"}:
+        print(f"Scope: {scope.get('mode')} {scope.get('agent_id')} / option {scope.get('option_id')}")
     print(f"Focus: {focus.get('current_focus_node')}")
     print("Context paths:")
     for name, item in payload["context_paths"].items():
@@ -240,12 +536,30 @@ def _print_text(payload: dict[str, Any]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--agent", dest="agent_id", help="Return an agent-scoped bootstrap payload for this active session")
+    parser.add_argument("--assignment", dest="assignment_id", help="Return an assignment-scoped bootstrap payload")
+    parser.add_argument("--option", dest="option_id", help="Return an option-scoped bootstrap payload for this active session")
+    parser.add_argument("--coordinator", action="store_true", help="Return coordinator/global bootstrap even when active assignments exist")
     parser.add_argument("--json", action="store_true", help="Print machine-readable bootstrap payload")
     parser.add_argument("--build", action="store_true", help="Refresh dashboard/context files before reporting")
     args = parser.parse_args()
 
     try:
-        payload = agent_bootstrap_payload(args.root, build=args.build)
+        payload = agent_bootstrap_payload(
+            args.root,
+            build=args.build,
+            agent_id=args.agent_id,
+            assignment_id=args.assignment_id,
+            option_id=args.option_id,
+            coordinator=args.coordinator,
+        )
+    except BootstrapIdentityError as exc:
+        error_payload = exc.payload
+        if args.json:
+            print(json.dumps(error_payload, indent=2, ensure_ascii=False))
+        else:
+            print(f"FAILED: {exc}")
+        raise SystemExit(1)
     except (OSError, RuntimeError, ValueError) as exc:
         error_payload = {
             "validation": {"ok": False, "errors": [str(exc)]},

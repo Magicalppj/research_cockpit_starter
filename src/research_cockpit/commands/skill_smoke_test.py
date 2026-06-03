@@ -135,7 +135,7 @@ def skill_smoke_test_payload(
     option_id = _current_option_for_root(root)
     checks = [
         _run_check("validate_cockpit", _cli_args(python, "validate", "--root", root_arg)),
-        _run_check("agent_bootstrap", _cli_args(python, "bootstrap", "--root", root_arg, "--json")),
+        _run_check("agent_bootstrap", _cli_args(python, "bootstrap", "--root", root_arg, "--coordinator", "--json")),
         _run_check("list_agent_commands", _cli_args(python, "commands", "--json")),
         _run_check(
             "search_knowledge",

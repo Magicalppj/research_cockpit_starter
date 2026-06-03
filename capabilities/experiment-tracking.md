@@ -25,12 +25,15 @@ research-cockpit claim-workstream --root research_cockpit --option option_x --ag
 For parallel agents that run code in git worktrees, prefer `start-agent-session` over plain claim. It can create the worktree and records portable session metadata on the option while keeping the canonical Research Cockpit root in the main repo:
 
 ```sh
-research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --dry-run --json --show-diff
-research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --agent agent_x --objective "Run experiments" --branch agent/option_x --worktree ../worktrees/agent_option_x --base main --create-worktree --no-build
-research-cockpit agent-session-context --root D:/main_repo/research_cockpit --agent agent_x --compact --json
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label cache_probe --objective "Run experiments" --branch agent/option_x-cache_probe --worktree ../worktrees/cache_probe --base main --create-worktree --dry-run --json --show-diff
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label cache_probe --objective "Run experiments" --branch agent/option_x-cache_probe --worktree ../worktrees/cache_probe --base main --create-worktree --no-build
+research-cockpit bootstrap --root D:/main_repo/research_cockpit --assignment <assignment_id> --json
+research-cockpit agent-session-context --root D:/main_repo/research_cockpit --assignment <assignment_id> --compact --json
 ```
 
 Relative `--worktree` values resolve against the canonical repository root (`--root` parent), matching `git -C <repo> worktree add`. Do not store local absolute worktree paths in YAML. `start-agent-session` writes `session_id`, `owner`, `status`, `objective`, `git_branch`, `worktree_label`, `report_to_problem`, `started_at`, and `updated_at`; absolute paths appear only in JSON `handoff`/`launch_env`. `--create-worktree` expects a new branch/worktree path; for an already-created worktree, rerun without `--create-worktree`.
+
+For assigned downstream agents, `assignment_scope` / `agent_scope` and `assignment_cursor` are the primary task context. Treat global `current_state`, `coordinator_state`, and `focus.current_focus_node` as coordinator metadata that may point to another agent's branch. Do not leave the assigned option subtree unless the user explicitly assigns a different node or branch.
 
 Read workstream context:
 
@@ -87,9 +90,11 @@ Next action updates:
 
 ```sh
 research-cockpit update-node-fields --root research_cockpit --id experiment_x --clear-next-actions --next-action "Review metrics" --next-action "Draft decision" --no-build
-research-cockpit sync-focus-actions --root research_cockpit --from-node experiment_x --no-build
+research-cockpit set-cursor --root research_cockpit --assignment <assignment_id> --node experiment_x --next-action "Review metrics" --no-build
 research-cockpit update-suggestion-state --root research_cockpit --id sg_x --state completed --reason "Recorded in experiment_x" --no-build
 ```
+
+Use `set-cursor` for assignment-local worker progress. `sync-focus-actions` is a coordinator helper for global dashboard actions; do not use it to steer a worker session.
 
 Do not parallelize mutating commands against the same root. If a mutation conflict is reported, reread compact context and retry the stale command.
 
@@ -289,30 +294,33 @@ research-cockpit complete-experiment --root research_cockpit --id experiment_x -
 
 `complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, creates inline evidence artifacts when evidence fields are present, and clears experiment-local `next_actions` so completed nodes do not carry live work. It does not change focus, option status, problem status, or `current_best_option`. Use `create-followup-experiment` only for a single small follow-up gate; when a conclusion opens a multi-step branch, use `create-workstream` with `problem.parent` and `problem.derived_from` so the node graph stays hierarchical.
 
-If the completed experiment is still the global `current_focus_node` or a per-agent focus node, JSON output includes focus-stale warnings plus recommended `set-focus` / `set-agent-focus` commands. Use explicit focus movement when closing a branch:
+If the completed experiment is still the coordinator/global focus, JSON output includes focus-stale warnings plus recommended coordinator focus commands. If the current assignment cursor points at the completed experiment, JSON output includes `assignment_cursor_is_terminal:<assignment_id>` and recommends `set-cursor`. Move assignment cursors explicitly when closing a branch:
 
 ```sh
-research-cockpit close-current-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --next-focus option_x --sync-agent agent_x --json --compact
+research-cockpit complete-experiment --root research_cockpit --assignment <assignment_id> --id experiment_x --finding "..." --confidence medium --artifact-id artifact_experiment_x_run_x --no-build
+research-cockpit set-cursor --root research_cockpit --assignment <assignment_id> --node option_x --no-build
 ```
 
-`--next-focus` must point to a non-terminal node and cannot be the experiment being closed.
-When `--next-focus` is present, the command copies that node's node-local `next_actions` into global `current_state.next_actions`. `--sync-agent <agent_id>` moves one agent focus to the same node; `--sync-agent all` moves only agents currently focused on the experiment being closed.
+`close-current-experiment --next-focus` is a coordinator/legacy shortcut. `--next-focus` must point to a non-terminal node and cannot be the experiment being closed. When `--next-focus` is present, the command copies that node's node-local `next_actions` into coordinator/global next actions and compatibility `current_state.next_actions`. `--sync-agent` updates legacy per-agent focus only; assignment-scoped workers should use `set-cursor`.
 
 For mixed or incomplete findings that need a follow-up gate, derive the next experiment instead of hand-editing YAML:
 
 ```sh
-research-cockpit create-followup-experiment --root research_cockpit --from experiment_x --id experiment_x_followup --title "Follow-up gate" --priority high --next-action "Run follow-up gate" --set-focus --json --compact
+research-cockpit create-followup-experiment --root research_cockpit --assignment <assignment_id> --from experiment_x --id experiment_x_followup --title "Follow-up gate" --priority high --next-action "Run follow-up gate" --json --compact
+research-cockpit set-cursor --root research_cockpit --assignment <assignment_id> --node experiment_x_followup --no-build
 ```
 
-The source experiment must be `done` or `running`. The new experiment is queued, records `derived_from`, reuses the source experiment's option parent unless `--parent` is supplied, and gets a default success criterion that references the source. `--next-action` writes the initial follow-up experiment `next_actions`. When combined with `--set-focus`, the same action is also written to `current_state.next_actions`, so dashboard "Current Next Actions" immediately points at the new gate.
+The source experiment must be `done` or `running`. The new experiment is queued, records `derived_from`, reuses the source experiment's option parent unless `--parent` is supplied, and gets a default success criterion that references the source. `--next-action` writes the initial follow-up experiment `next_actions`. It does not move any assignment cursor; run `set-cursor --assignment <assignment_id> --node <followup_id>` when the worker should continue on that gate.
+The `--set-focus` flag is coordinator/global only. Coordinator runs may use `--coordinator --set-focus` to also write coordinator/global next actions and compatibility `current_state.next_actions`; assignment-scoped workers should pass `--assignment <assignment_id>` and move their worker cursor with `set-cursor`. Combining `--assignment` with `--set-focus` is rejected.
 If a `done` experiment still has real follow-up work, move that work into a derived queued experiment instead of leaving live `next_actions` on the completed node.
 Use this command only for a single follow-up gate. If the result creates a new worktree branch, several follow-up experiments, or a new question, create a child workstream instead: use `create-workstream` with `problem.parent` set to the inherited option id and `derived_from` pointing back to the source experiment. That keeps the graph as `option -> problem -> option -> experiment` instead of flattening all later experiments under one option.
 
 Use `migrate-terminal-next-actions` when an older terminal node already carries live `next_actions`:
 
 ```sh
-research-cockpit migrate-terminal-next-actions --root research_cockpit --id experiment_x --followup-id experiment_x_followup --title "Follow-up gate" --dry-run --json --show-diff
-research-cockpit migrate-terminal-next-actions --root research_cockpit --id experiment_x --followup-id experiment_x_followup --title "Follow-up gate" --no-build
+research-cockpit migrate-terminal-next-actions --root research_cockpit --assignment <assignment_id> --id experiment_x --followup-id experiment_x_followup --title "Follow-up gate" --dry-run --json --show-diff
+research-cockpit migrate-terminal-next-actions --root research_cockpit --assignment <assignment_id> --id experiment_x --followup-id experiment_x_followup --title "Follow-up gate" --no-build
+research-cockpit set-cursor --root research_cockpit --assignment <assignment_id> --node experiment_x_followup --no-build
 ```
 
 The command creates one queued follow-up experiment only for a `done` experiment with exactly one node-local next action, then clears the source node's `next_actions`. For multiple actions, non-experiment terminal nodes, or larger branches, the JSON output points to `create-workstream` instead of mutating.

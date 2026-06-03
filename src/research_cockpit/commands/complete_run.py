@@ -9,7 +9,9 @@ from research_cockpit.paths import default_data_root
 ROOT = default_data_root()
 
 from research_cockpit.commands._runtime import compact_mutation_result, emit_json, safe_print
+from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands.update_run import update_run
+from research_cockpit.assignment_scope import AssignmentScopeError
 from research_cockpit.model import ValidationError, script_command
 
 
@@ -30,6 +32,8 @@ def complete_run(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    assignment_id: str | None = None,
+    coordinator: bool = False,
 ) -> dict[str, Any]:
     if status not in TERMINAL_RUN_STATUSES:
         allowed = ", ".join(TERMINAL_RUN_STATUSES)
@@ -49,6 +53,8 @@ def complete_run(
         show_diff=show_diff,
         interaction_kind="complete_run",
         interaction_command=f"{script_command('complete_run.py')} --id {run_id} --status {status}",
+        assignment_id=assignment_id,
+        coordinator=coordinator,
     )
 
 
@@ -68,6 +74,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    add_assignment_scope_args(parser)
     args = parser.parse_args()
 
     try:
@@ -84,7 +91,12 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            assignment_id=args.assignment,
+            coordinator=args.coordinator,
         )
+    except AssignmentScopeError as exc:
+        emit_assignment_scope_error(args, exc)
+        raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         safe_print(str(exc))
         raise SystemExit(1) from exc
