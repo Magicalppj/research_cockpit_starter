@@ -81,6 +81,7 @@ Terminal parent lifecycle guard: do not mark a `problem` as `resolved`/`parked` 
 - Decisions, ADR-style acceptance, checklist repair, promote/accept flows: `capabilities/decision-adr.md`
 - Streamlit UI, React Flow graph, refresh behavior, and frontend build rules: `capabilities/ui-dashboard.md`
 - Installation shape, CLI, wrappers, environment variables, and agent integration: `capabilities/integrations.md`
+- Cleanup, artifact retention, worktree closeout, branch lifecycle, active resources, and large-repo hygiene: `capabilities/maintenance.md`
 - Validation failures, release checks, dependency issues, and recovery: `capabilities/troubleshooting.md`
 - Launcher output files and starter templates for shell, Python, scheduler, and manual experiment runs: `docs/launcher-output-conventions.md`, `templates/launcher/`
 - Dashboard build profiling, large-graph refresh behavior, and deferred incremental-build plan: `docs/plans/2026-05-28-dashboard-build-performance.md`
@@ -236,6 +237,7 @@ research-cockpit smoke --root D:/main_repo/research_cockpit --json
 ```
 
 Do not use worktree-local paths as long-lived `--evidence-path` values. Keep run directories free of symlinks before `ingest-artifact`; v1 rejects symlinked files or directories instead of copying through them. Deletion is safe only after artifact files, finding/decision/baseline updates, and any useful commit/patch have been preserved outside the worktree.
+For large experiment repositories, prefer sparse or minimal worktrees and keep generated outputs, caches, logs, and bulky artifacts outside temporary worktree checkouts. Before deleting or moving any worktree, branch, output, cache, checkpoint, or large artifact payload, follow the maintenance closeout checklist in `capabilities/maintenance.md`.
 
 For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `close-branch`, `create-run`, `update-run`, `complete-run`, `create-artifact`, `ingest-artifact`, `record-gate-result`, `ingest-gate-result`, `complete-experiment`, `complete-experiments`, `close-current-experiment`, `create-followup-experiment`, `migrate-terminal-next-actions`, `update-finding`, `update-workstream-fields`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `close-branch --compact` additionally keeps `parent_ready_for_terminal_status`, `skipped`, and `remaining_active_descendants`; read those before retrying a parent terminal transition. `--show-diff` still includes the full diff; use it only when reviewing write content.
 For legacy mutation commands without `--compact`, use `--dry-run --json --show-diff` to preview writes and keep the JSON payload focused on `changed/would_change`, affected path, before/after summary, and optional diff. Dry-run also performs mutation preflight; if `interaction_log.yaml` is malformed, it fails before showing a misleading successful preview.

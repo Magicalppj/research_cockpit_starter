@@ -27,6 +27,23 @@ Agents should use `start-agent-session` to receive a handoff with `RESEARCH_COCK
 
 `import-worktree-findings` is a recovery tool for accidental worktree-local cockpit writes. It is not the normal path for preserving outputs.
 
+For large experiment repositories, prefer sparse or minimal temporary worktrees. A temporary worktree usually needs source code, configs, scripts, tests, and minimal docs; it usually does not need a full checkout of `research_cockpit/`, `outputs/`, `logs/`, large `data/` trees, generated dataset artifacts, or virtual environments. The canonical `--root` should still point to the main checkout's `research_cockpit/` directory.
+
+Recommended watcher excludes for IDEs and repo watchers:
+
+```text
+.worktrees/
+outputs/
+logs/
+data/
+datasets/**/artifacts/
+research_cockpit/artifacts/**
+.venv/
+.venvs/
+```
+
+When a repository has large generated payloads, keep bulk artifacts in git-ignored or external stable storage and link only small summaries, manifests, metrics, or portable review bundles from Research Cockpit. See `capabilities/maintenance.md` and `docs/large-repo-hygiene.md`.
+
 ## Data Root Resolution
 
 Commands resolve data root in this order:

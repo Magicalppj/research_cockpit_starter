@@ -252,6 +252,48 @@ research-cockpit ingest-gate-result --root research_cockpit --id gate_x --file a
 
 Both commands create a `gate_results/<gate_id>.yaml` metadata record. `record-gate-result` also writes the JSON payload, while `ingest-gate-result` only links an existing file. `run-context --json` and experiment `node-context --json` expose compact gate details including latest gate state, blocking gates, warnings, and linked artifact id when present. Option workstream summaries, bootstrap, and dashboard context expose aggregate gate counts and gate ids so agents can decide when to read the narrower run or node context.
 
+## Run Retention And Active Resources
+
+For long-running or disk-heavy experiments, record enough run metadata to support later cleanup decisions. Existing run fields such as `pid`, `tmux_session`, `log_root`, `output_root`, `progress_file`, and `config_file` are operational hints; they do not by themselves prove a path is safe to remove.
+
+When a run consumes resources that cleanup must respect, record an active resource declaration in the run record when the current CLI supports it, or preserve the same details in the launcher output until it can be written through a command:
+
+```yaml
+resources:
+  gpus:
+    - 0
+  ports:
+    - 8000
+  process_ids:
+    - 123456
+  worktree: /repo/.worktrees/example
+  output_roots:
+    - /repo/outputs/example_run
+  cache_roots:
+    - /repo/data/example/.precomputed
+  dataset_roots:
+    - /repo/data/example
+  model_paths:
+    - /repo/outputs/example_run/checkpoint-final
+```
+
+At run closeout, capture retention intent for large outputs:
+
+```yaml
+output_retention:
+  keep_checkpoints:
+    - final
+  keep_optimizer_state: false
+  resume_planned: false
+  raw_outputs_disposable: true
+  portable_bundle_path: outputs/example/listening_bundle.tar.gz
+  cleanup_after_completion: true
+  cleanup_notes: "Metrics and bundle preserved; intermediate generations are reproducible."
+```
+
+Retention metadata is advisory unless a project has explicitly opted into stricter lint rules. Missing retention information should be handled as a maintenance warning, not as a reason to bypass normal finding or run completion workflows. For the full cleanup and branch/worktree policy, read `capabilities/maintenance.md`.
+P0 note: this section documents the intended metadata shape. Until nested metadata write support is implemented, do not assume `create-run`, `update-run`, or `complete-run` will persist `resources` or `output_retention`; keep those details in launcher output, artifact manifests, or review bundles.
+
 ## Artifacts
 
 Use artifact commands for result folders, review bundles, metrics directories, and other evidence objects that need their own status or links:
