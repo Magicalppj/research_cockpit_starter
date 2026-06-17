@@ -45,6 +45,7 @@ from research_cockpit.commands.agent_bootstrap import (
 from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.apply_suggestion import apply_suggestion
 from research_cockpit.commands.agent_session_context import agent_session_context_payload
+from research_cockpit.commands.artifact_retention_audit import artifact_retention_audit_payload
 from research_cockpit.commands.assignment_view import assignment_view_payload
 from research_cockpit.commands.branch_audit import branch_audit_payload
 from research_cockpit.commands.build_dashboard import build_dashboard, dashboard_watch_signature, watch_dashboard
@@ -70,6 +71,7 @@ from research_cockpit.commands.link_artifact import link_artifact
 from research_cockpit.commands.list_runs import list_runs_payload
 from research_cockpit.commands.lint_semantic import semantic_lint
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
+from research_cockpit.commands.maintenance_audit import maintenance_audit_payload
 from research_cockpit.commands.migrate_terminal_next_actions import migrate_terminal_next_actions
 from research_cockpit.commands.node_context import node_context_payload
 from research_cockpit.commands.option_workstream_context import compact_option_workstream_context, option_workstream_context_payload
@@ -5174,6 +5176,241 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--base", manifest["branch-audit"]["supported_flags"])
         self.assertIn("name", manifest["branch-audit"]["fields_supported"])
         self.assertNotIn("branch", manifest["branch-audit"]["fields_supported"])
+
+    def test_artifact_retention_audit_flags_large_missing_and_active_blockers(self) -> None:
+        repo = self.tmp_root
+        for rel_path in (
+            "artifacts/large_missing/payload.bin",
+            "artifacts/active_output/cache.bin",
+            "artifacts/clear_cache/cache.bin",
+        ):
+            path = repo / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x" * 8)
+        write_node(
+            self.root,
+            {
+                "id": "artifact_large_missing",
+                "type": "artifact",
+                "title": "Large missing retention",
+                "status": "done",
+                "path": "artifacts/large_missing",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_active_output",
+                "type": "artifact",
+                "title": "Active output cache",
+                "status": "done",
+                "path": "artifacts/active_output",
+                "retention": {"class": "disposable_cache"},
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_clear_cache",
+                "type": "artifact",
+                "title": "Clear cache",
+                "status": "done",
+                "path": "artifacts/clear_cache",
+                "retention": {"class": "disposable_cache"},
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_linked_cache",
+                "type": "artifact",
+                "title": "Linked cache",
+                "status": "done",
+                "path": "artifacts/clear_cache",
+                "retention": {"class": "disposable_cache"},
+            },
+        )
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["linked_artifacts"] = ["artifact_linked_cache"]
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        external_dir = self.tmp_root.parent / f"external_artifact_{uuid.uuid4().hex}"
+        external_dir.mkdir(parents=True)
+        self.addCleanup(lambda: shutil.rmtree(external_dir, ignore_errors=True))
+        (external_dir / "payload.bin").write_bytes(b"x" * 8)
+        write_node(
+            self.root,
+            {
+                "id": "artifact_external_cache",
+                "type": "artifact",
+                "title": "External cache",
+                "status": "done",
+                "path": str(external_dir),
+                "retention": {"class": "disposable_cache"},
+            },
+        )
+        create_run(
+            self.root,
+            run_id="run_active_output",
+            experiment_id="exp_t5",
+            status="running",
+            output_root="artifacts/active_output",
+            rebuild_dashboard=False,
+        )
+
+        payload = artifact_retention_audit_payload(self.root, repo=repo, min_size_bytes=1)
+        by_id = {item["artifact_id"]: item for item in payload["artifacts"]}
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["schema_version"], "artifact_retention_audit_v1")
+        self.assertTrue(by_id["artifact_large_missing"]["large"])
+        self.assertTrue(by_id["artifact_large_missing"]["missing_retention"])
+        self.assertIn("missing_retention", by_id["artifact_large_missing"]["warnings"])
+        self.assertFalse(by_id["artifact_large_missing"]["cleanup_candidate"])
+        self.assertTrue(by_id["artifact_active_output"]["large"])
+        self.assertEqual(by_id["artifact_active_output"]["retention_class"], "disposable_cache")
+        self.assertEqual(by_id["artifact_active_output"]["active_resource_references"][0]["run_id"], "run_active_output")
+        self.assertIn("active_resource", by_id["artifact_active_output"]["blockers"])
+        self.assertFalse(by_id["artifact_active_output"]["cleanup_candidate"])
+        self.assertTrue(by_id["artifact_clear_cache"]["cleanup_candidate"])
+        self.assertIn("artifact_large_missing", payload["large_artifact_candidates"])
+        self.assertIn("artifact_clear_cache", payload["cleanup_candidates"])
+        self.assertIn("linked_reference", by_id["artifact_linked_cache"]["blockers"])
+        self.assertFalse(by_id["artifact_linked_cache"]["cleanup_candidate"])
+        self.assertIn("external_path", by_id["artifact_external_cache"]["blockers"])
+        self.assertIn("external_path", by_id["artifact_external_cache"]["warnings"])
+        self.assertFalse(by_id["artifact_external_cache"]["cleanup_candidate"])
+
+    def test_artifact_retention_audit_blocks_active_subtree_and_baseline_artifacts(self) -> None:
+        self.start_t5_assignment()
+        repo = self.tmp_root
+        for rel_path in (
+            "artifacts/active_subtree/cache.bin",
+            "artifacts/baseline_cache/cache.bin",
+        ):
+            path = repo / rel_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x" * 8)
+        write_node(
+            self.root,
+            {
+                "id": "artifact_active_subtree",
+                "type": "artifact",
+                "title": "Active subtree artifact",
+                "status": "done",
+                "parent": "option_t5",
+                "path": "artifacts/active_subtree",
+                "retention": {"class": "disposable_cache"},
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_baseline_cache",
+                "type": "artifact",
+                "title": "Baseline cache",
+                "status": "done",
+                "path": "artifacts/baseline_cache",
+                "retention": {"class": "disposable_cache"},
+            },
+        )
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["baseline"] = {
+            "option": "option_t5",
+            "artifacts": ["artifact_baseline_cache"],
+            "reason": "Current baseline artifact.",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        payload = artifact_retention_audit_payload(self.root, repo=repo, min_size_bytes=1)
+        by_id = {item["artifact_id"]: item for item in payload["artifacts"]}
+
+        self.assertIn("active_assignment", by_id["artifact_active_subtree"]["blockers"])
+        self.assertFalse(by_id["artifact_active_subtree"]["cleanup_candidate"])
+        self.assertIn("linked_reference", by_id["artifact_baseline_cache"]["blockers"])
+        self.assertEqual(by_id["artifact_baseline_cache"]["linked_references"][0]["source"], "baseline.artifacts")
+        self.assertFalse(by_id["artifact_baseline_cache"]["cleanup_candidate"])
+
+    def test_maintenance_audit_aggregates_sections_and_next_actions(self) -> None:
+        session = self.start_t5_assignment()
+        repo = self.tmp_root
+        output_file = repo / "artifacts" / "maintenance_large" / "payload.bin"
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.write_bytes(b"x" * 8)
+        write_node(
+            self.root,
+            {
+                "id": "artifact_maintenance_large",
+                "type": "artifact",
+                "title": "Maintenance large artifact",
+                "status": "done",
+                "path": "artifacts/maintenance_large",
+            },
+        )
+        create_run(
+            self.root,
+            run_id="run_maintenance_active",
+            experiment_id="exp_t5",
+            status="running",
+            output_root="artifacts/maintenance_large",
+            progress_file="artifacts/maintenance_large/progress.json",
+            config_file="artifacts/maintenance_large/config.yaml",
+            rebuild_dashboard=False,
+        )
+        run_data = load_yaml(self.root / "runs" / "run_maintenance_active.yaml")
+        run_data["resources"] = {"gpu_ids": ["0"], "cache": "artifacts/maintenance_large/cache"}
+        save_yaml(self.root / "runs" / "run_maintenance_active.yaml", run_data)
+        agent_worktree = self.tmp_root / "worktrees" / "agent_t5"
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return (
+                    f"worktree {repo}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/main\n"
+                    "\n"
+                    f"worktree {agent_worktree}\n"
+                    "HEAD def456\n"
+                    "branch refs/heads/agent/option_t5\n"
+                )
+            if args == ("-c", "status.refreshIndex=false", "status", "--porcelain"):
+                return ""
+            if args == ("branch", "--format=%(refname:short)"):
+                return "main\nagent/option_t5\n"
+            if args == ("branch", "--merged", "main", "--format=%(refname:short)"):
+                return "main\n"
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = maintenance_audit_payload(self.root, repo=repo, min_size_bytes=1)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["schema_version"], "maintenance_audit_v1")
+        self.assertEqual(payload["active_assignments"][0]["assignment_id"], session["assignment_id"])
+        self.assertEqual(payload["running_runs"][0]["run_id"], "run_maintenance_active")
+        self.assertEqual(payload["active_resources"][0]["resources"]["cache"], "artifacts/maintenance_large/cache")
+        self.assertEqual(payload["active_resources"][0]["progress_file"], "artifacts/maintenance_large/progress.json")
+        self.assertFalse(payload["worktree_candidates"])
+        self.assertFalse(payload["branch_candidates"])
+        self.assertTrue(payload["blocked_worktrees"])
+        self.assertTrue(payload["blocked_branches"])
+        self.assertIn("artifact_maintenance_large", payload["large_artifact_candidates"])
+        self.assertIn("artifacts/maintenance_large", payload["large_output_candidates"])
+        self.assertIn("active_assignment", payload["unsafe_cleanup_blockers"])
+        self.assertIn("active_run", payload["unsafe_cleanup_blockers"])
+        self.assertTrue(payload["recommended_next_actions"])
+
+    def test_retention_and_maintenance_audit_manifest_metadata(self) -> None:
+        manifest = {item["name"]: item for item in agent_command_manifest()}
+
+        self.assertFalse(manifest["artifact-retention-audit"]["mutating"])
+        self.assertFalse(manifest["maintenance-audit"]["mutating"])
+        self.assertIn("maintenance", manifest["artifact-retention-audit"]["workflow_tags"])
+        self.assertIn("maintenance", manifest["maintenance-audit"]["workflow_tags"])
+        self.assertIn("--repo", manifest["artifact-retention-audit"]["supported_flags"])
+        self.assertIn("--min-size-gb", manifest["artifact-retention-audit"]["supported_flags"])
+        self.assertIn("--repo", manifest["maintenance-audit"]["supported_flags"])
+        self.assertIn("--base", manifest["maintenance-audit"]["supported_flags"])
+        self.assertIn("--min-size-gb", manifest["maintenance-audit"]["supported_flags"])
 
     def test_list_agent_commands_manifest_marks_mutating_commands(self) -> None:
         manifest = agent_command_manifest()

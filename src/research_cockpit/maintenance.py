@@ -3,9 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 from typing import Any
+from urllib.parse import urlparse
 
 from research_cockpit.model import (
     ACTIVE_ASSIGNMENT_STATUSES,
+    AssignmentRecord,
     ResearchNode,
     RunRecord,
     load_assignments,
@@ -18,6 +20,7 @@ from research_cockpit.model import (
 from research_cockpit.run_summaries import ACTIVE_RUN_STATUSES
 
 ACTIVE_WORKSTREAM_STATUSES = {"claimed", "in_progress", "blocked"}
+RETENTION_CLEANUP_CLASSES = {"disposable_cache", "reproducible_output", "deprecated_payload"}
 
 
 def _git_output(repo: Path, *args: str) -> str:
@@ -397,4 +400,511 @@ def build_branch_audit(root: Path, *, repo: Path, base: str) -> dict[str, Any]:
         "base": base,
         "branch_count": len(branches),
         "branches": branches,
+    }
+
+
+def _is_external_target(target: str) -> bool:
+    if Path(target).is_absolute():
+        return False
+    parsed = urlparse(target)
+    if len(parsed.scheme) == 1:
+        return False
+    return bool(parsed.scheme and parsed.scheme != "file")
+
+
+def _resolve_local_path(root: Path, repo: Path, target: Any) -> Path | None:
+    if target in (None, ""):
+        return None
+    text = str(target)
+    path = Path(text)
+    if path.is_absolute():
+        return path
+    if _is_external_target(text):
+        return None
+    candidates = [repo / path, root / path, root.parent / path]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def _within_allowed_roots(path: Path, *, root: Path, repo: Path) -> bool:
+    resolved = path.resolve(strict=False)
+    allowed_roots = [root.resolve(strict=False), root.parent.resolve(strict=False), repo.resolve(strict=False)]
+    for allowed in allowed_roots:
+        try:
+            resolved.relative_to(allowed)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    left_resolved = left.resolve(strict=False)
+    right_resolved = right.resolve(strict=False)
+    try:
+        right_resolved.relative_to(left_resolved)
+        return True
+    except ValueError:
+        pass
+    try:
+        left_resolved.relative_to(right_resolved)
+        return True
+    except ValueError:
+        return False
+
+
+def _scan_path(path: Path, *, max_files: int) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "exists": False,
+            "file_count": 0,
+            "size_bytes": 0,
+            "truncated": False,
+        }
+    if path.is_file():
+        return {
+            "exists": True,
+            "file_count": 1,
+            "size_bytes": path.stat().st_size,
+            "truncated": False,
+        }
+    if not path.is_dir():
+        return {
+            "exists": True,
+            "file_count": 0,
+            "size_bytes": 0,
+            "truncated": False,
+        }
+    size_bytes = 0
+    file_count = 0
+    truncated = False
+    for child in path.rglob("*"):
+        if child.is_symlink() or not child.is_file():
+            continue
+        file_count += 1
+        if file_count > max_files:
+            truncated = True
+            break
+        size_bytes += child.stat().st_size
+    return {
+        "exists": True,
+        "file_count": min(file_count, max_files),
+        "size_bytes": size_bytes,
+        "truncated": truncated,
+    }
+
+
+def _resource_strings(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        strings: list[str] = []
+        for item in value.values():
+            strings.extend(_resource_strings(item))
+        return strings
+    if isinstance(value, list):
+        strings = []
+        for item in value:
+            strings.extend(_resource_strings(item))
+        return strings
+    return []
+
+
+def _active_resource_references(
+    *,
+    root: Path,
+    repo: Path,
+    artifact_paths: list[Path],
+    runs: dict[str, RunRecord],
+) -> list[dict[str, Any]]:
+    references: list[dict[str, Any]] = []
+    for run in sorted(runs.values(), key=lambda item: item.run_id):
+        if run.status not in ACTIVE_RUN_STATUSES:
+            continue
+        raw_paths: list[tuple[str, Any]] = [
+            ("output_root", run.output_root),
+            ("log_root", run.log_root),
+            ("progress_file", run.progress_file),
+            ("config_file", run.config_file),
+        ]
+        raw_paths.extend(("resources", item) for item in _resource_strings(run.raw.get("resources")))
+        for source, target in raw_paths:
+            resolved = _resolve_local_path(root, repo, target)
+            if resolved is None:
+                continue
+            if any(_paths_overlap(path, resolved) for path in artifact_paths):
+                references.append({
+                    "run_id": run.run_id,
+                    "status": run.status,
+                    "source": source,
+                    "target": str(target),
+                })
+                break
+    return references
+
+
+def _artifact_targets(node: ResearchNode) -> list[tuple[str, str]]:
+    targets: list[tuple[str, str]] = []
+    path = node.raw.get("path")
+    if path not in (None, ""):
+        targets.append(("path", str(path)))
+    links = node.raw.get("links")
+    if isinstance(links, dict):
+        for label, target in links.items():
+            if target not in (None, ""):
+                targets.append((f"links.{label}", str(target)))
+    return targets
+
+
+def _artifact_reference_index(nodes: dict[str, ResearchNode]) -> dict[str, list[dict[str, str]]]:
+    references: dict[str, list[dict[str, str]]] = {}
+    for node in sorted(nodes.values(), key=lambda item: item.id):
+        linked = node.raw.get("linked_artifacts")
+        if isinstance(linked, list):
+            for artifact_id in linked:
+                references.setdefault(str(artifact_id), []).append({
+                    "node_id": node.id,
+                    "node_type": node.type,
+                    "source": "linked_artifacts",
+                })
+        baseline = node.raw.get("baseline")
+        if isinstance(baseline, dict):
+            artifacts = baseline.get("artifacts")
+            if isinstance(artifacts, list):
+                for artifact_id in artifacts:
+                    references.setdefault(str(artifact_id), []).append({
+                        "node_id": node.id,
+                        "node_type": node.type,
+                        "source": "baseline.artifacts",
+                    })
+        findings = node.raw.get("findings")
+        if isinstance(findings, list):
+            for index, finding in enumerate(findings):
+                if not isinstance(finding, dict):
+                    continue
+                for artifact_id in finding.get("linked_artifacts", []) or []:
+                    references.setdefault(str(artifact_id), []).append({
+                        "node_id": node.id,
+                        "node_type": node.type,
+                        "source": f"findings[{index}].linked_artifacts",
+                    })
+    return references
+
+
+def _active_assignment_references(
+    *,
+    nodes: dict[str, ResearchNode],
+    assignments: dict[str, AssignmentRecord],
+    artifact_id: str,
+) -> list[dict[str, str]]:
+    references: list[dict[str, str]] = []
+    for assignment in sorted(assignments.values(), key=lambda item: item.assignment_id):
+        if assignment.status not in ACTIVE_ASSIGNMENT_STATUSES:
+            continue
+        scoped_ids = _subtree_ids(nodes, assignment.root_node)
+        if artifact_id in scoped_ids:
+            references.append({
+                "assignment_id": assignment.assignment_id,
+                "node_id": artifact_id,
+                "source": "subtree_node",
+            })
+        for node_id in sorted(scoped_ids):
+            node = nodes.get(node_id)
+            if not node:
+                continue
+            linked = node.raw.get("linked_artifacts")
+            if isinstance(linked, list) and artifact_id in {str(item) for item in linked}:
+                references.append({
+                    "assignment_id": assignment.assignment_id,
+                    "node_id": node_id,
+                    "source": "linked_artifacts",
+                })
+            findings = node.raw.get("findings")
+            if not isinstance(findings, list):
+                continue
+            for index, finding in enumerate(findings):
+                if not isinstance(finding, dict):
+                    continue
+                if artifact_id in {str(item) for item in finding.get("linked_artifacts", []) or []}:
+                    references.append({
+                        "assignment_id": assignment.assignment_id,
+                        "node_id": node_id,
+                        "source": f"findings[{index}].linked_artifacts",
+                    })
+    return references
+
+
+def _retention_class(node: ResearchNode) -> tuple[str | None, list[str]]:
+    retention = node.raw.get("retention")
+    if retention is None:
+        return None, []
+    if not isinstance(retention, dict):
+        return None, ["invalid_retention"]
+    value = retention.get("class")
+    return (None if value in (None, "") else str(value)), []
+
+
+def build_artifact_retention_audit(
+    root: Path,
+    *,
+    repo: Path,
+    min_size_bytes: int,
+    max_files: int = 1000,
+) -> dict[str, Any]:
+    nodes, assignments, runs = _load_validated(root)
+    artifact_references = _artifact_reference_index(nodes)
+    artifacts: list[dict[str, Any]] = []
+    for node in sorted(nodes.values(), key=lambda item: item.id):
+        if node.type != "artifact":
+            continue
+        warnings: list[str] = []
+        retention_class, retention_warnings = _retention_class(node)
+        warnings.extend(retention_warnings)
+        target_rows: list[dict[str, Any]] = []
+        local_paths: list[Path] = []
+        for label, target in _artifact_targets(node):
+            resolved = _resolve_local_path(root, repo, target)
+            if resolved is None:
+                target_rows.append({
+                    "label": label,
+                    "target": target,
+                    "local": False,
+                    "exists": None,
+                    "resolved_path": None,
+                    "size_bytes": 0,
+                    "file_count": 0,
+                    "truncated": False,
+                })
+                continue
+            if not _within_allowed_roots(resolved, root=root, repo=repo):
+                warnings.append("external_path")
+                target_rows.append({
+                    "label": label,
+                    "target": target,
+                    "local": True,
+                    "external": True,
+                    "exists": resolved.exists(),
+                    "resolved_path": str(resolved),
+                    "size_bytes": 0,
+                    "file_count": 0,
+                    "truncated": False,
+                })
+                continue
+            scan = _scan_path(resolved, max_files=max_files)
+            if not scan["exists"]:
+                warnings.append("missing_path")
+            target_rows.append({
+                "label": label,
+                "target": target,
+                "local": True,
+                "resolved_path": str(resolved),
+                **scan,
+            })
+            local_paths.append(resolved)
+        total_size = sum(int(target["size_bytes"]) for target in target_rows)
+        large = total_size >= min_size_bytes and any(target.get("exists") for target in target_rows)
+        missing_retention = large and retention_class is None
+        if missing_retention:
+            warnings.append("missing_retention")
+        active_refs = _active_resource_references(root=root, repo=repo, artifact_paths=local_paths, runs=runs)
+        blockers: list[str] = []
+        linked_refs = artifact_references.get(node.id, [])
+        active_assignment_refs = _active_assignment_references(
+            nodes=nodes,
+            assignments=assignments,
+            artifact_id=node.id,
+        )
+        if linked_refs:
+            blockers.append("linked_reference")
+        if active_assignment_refs:
+            blockers.append("active_assignment")
+        if any(target.get("external") for target in target_rows):
+            blockers.append("external_path")
+        if active_refs:
+            blockers.append("active_resource")
+        cleanup_candidate = (
+            retention_class in RETENTION_CLEANUP_CLASSES
+            and large
+            and not blockers
+            and any(target.get("exists") for target in target_rows)
+        )
+        artifacts.append({
+            "artifact_id": node.id,
+            "title": node.title,
+            "path": node.raw.get("path"),
+            "retention_class": retention_class,
+            "targets": target_rows,
+            "total_size_bytes": total_size,
+            "file_count": sum(int(target["file_count"]) for target in target_rows),
+            "large": large,
+            "missing_retention": missing_retention,
+            "active_resource_references": active_refs,
+            "linked_references": linked_refs,
+            "active_assignment_references": active_assignment_refs,
+            "blockers": blockers,
+            "warnings": sorted(set(warnings)),
+            "cleanup_candidate": cleanup_candidate,
+        })
+
+    return {
+        "ok": True,
+        "schema_version": "artifact_retention_audit_v1",
+        "root": str(root),
+        "repo": str(repo),
+        "min_size_bytes": min_size_bytes,
+        "max_files": max_files,
+        "artifact_count": len(artifacts),
+        "artifacts": artifacts,
+        "large_artifact_candidates": [item["artifact_id"] for item in artifacts if item["large"]],
+        "cleanup_candidates": [item["artifact_id"] for item in artifacts if item["cleanup_candidate"]],
+        "warnings": sorted({warning for item in artifacts for warning in item["warnings"]}),
+    }
+
+
+def _active_assignment_rows(root: Path) -> list[dict[str, Any]]:
+    assignments = load_assignments(root)
+    return [
+        {
+            "assignment_id": assignment.assignment_id,
+            "agent_id": assignment.agent_id,
+            "status": assignment.status,
+            "root_node": assignment.root_node,
+            "current_node": assignment.current_node,
+            "worktree": assignment.worktree,
+        }
+        for assignment in sorted(assignments.values(), key=lambda item: item.assignment_id)
+        if assignment.status in ACTIVE_ASSIGNMENT_STATUSES
+    ]
+
+
+def _running_run_rows(root: Path) -> list[dict[str, Any]]:
+    runs = load_runs(root)
+    return [
+        {
+            "run_id": run.run_id,
+            "status": run.status,
+            "experiment_id": run.experiment_id,
+            "output_root": run.output_root,
+            "log_root": run.log_root,
+            "progress_file": run.progress_file,
+            "config_file": run.config_file,
+            "resources": run.raw.get("resources"),
+        }
+        for run in sorted(runs.values(), key=lambda item: item.run_id)
+        if run.status in ACTIVE_RUN_STATUSES
+    ]
+
+
+def _large_output_candidates(artifact_audit: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    for artifact in artifact_audit.get("artifacts", []):
+        if not artifact.get("large"):
+            continue
+        for target in artifact.get("targets", []):
+            if target.get("exists") and target.get("target"):
+                out.append(str(target["target"]))
+    return sorted(set(out))
+
+
+def _dashboard_performance_warnings(root: Path) -> list[dict[str, Any]]:
+    node_count = len(load_nodes(root))
+    if node_count <= 500:
+        return []
+    return [{
+        "code": "large_graph",
+        "node_count": node_count,
+        "message": "Graph has more than 500 nodes; prefer compact context and profile dashboard builds.",
+    }]
+
+
+def build_maintenance_audit(
+    root: Path,
+    *,
+    repo: Path,
+    base: str = "main",
+    min_size_bytes: int,
+    max_files: int = 1000,
+) -> dict[str, Any]:
+    active_assignments = _active_assignment_rows(root)
+    running_runs = _running_run_rows(root)
+    worktree_audit = build_worktree_audit(root, repo=repo)
+    branch_audit = build_branch_audit(root, repo=repo, base=base)
+    artifact_audit = build_artifact_retention_audit(root, repo=repo, min_size_bytes=min_size_bytes, max_files=max_files)
+    active_resources = [
+        {
+            "run_id": run["run_id"],
+            "status": run["status"],
+            "output_root": run.get("output_root"),
+            "log_root": run.get("log_root"),
+            "progress_file": run.get("progress_file"),
+            "config_file": run.get("config_file"),
+            "resources": run.get("resources"),
+        }
+        for run in running_runs
+    ]
+    worktree_candidates = [
+        row for row in worktree_audit["worktrees"] if row.get("safe_to_remove")
+    ]
+    branch_candidates = [
+        row for row in branch_audit["branches"] if row.get("delete_candidate")
+    ]
+    blocked_worktrees = [
+        row
+        for row in worktree_audit["worktrees"]
+        if not row.get("safe_to_remove") and "primary_worktree" not in row.get("blockers", [])
+    ]
+    blocked_branches = [
+        row
+        for row in branch_audit["branches"]
+        if row.get("recommended_action") not in {"keep_base", "delete_candidate"}
+    ]
+    unsafe_blockers = sorted(
+        {
+            blocker
+            for row in blocked_worktrees
+            for blocker in row.get("blockers", [])
+        }
+        | {
+            blocker
+            for row in blocked_branches
+            for blocker in row.get("blockers", [])
+        }
+        | {
+            blocker
+            for row in artifact_audit["artifacts"]
+            for blocker in row.get("blockers", [])
+        }
+    )
+    next_actions: list[str] = []
+    if unsafe_blockers:
+        next_actions.append("Clear unsafe cleanup blockers before removing worktrees, branches, or artifacts.")
+    if any(item.get("missing_retention") for item in artifact_audit["artifacts"]):
+        next_actions.append("Add retention metadata for large artifacts before cleanup decisions.")
+    if any(item.get("cleanup_candidate") for item in artifact_audit["artifacts"]):
+        next_actions.append("Review cleanup candidates and preserve summaries before deleting payloads.")
+    if branch_candidates:
+        next_actions.append("Review branch candidates; promote useful unmerged work to research/* before deletion.")
+    return {
+        "ok": True,
+        "schema_version": "maintenance_audit_v1",
+        "root": str(root),
+        "repo": str(repo),
+        "base": base,
+        "active_assignments": active_assignments,
+        "running_runs": running_runs,
+        "active_resources": active_resources,
+        "worktree_candidates": worktree_candidates,
+        "branch_candidates": branch_candidates,
+        "blocked_worktrees": blocked_worktrees,
+        "blocked_branches": blocked_branches,
+        "large_artifact_candidates": artifact_audit["large_artifact_candidates"],
+        "large_output_candidates": _large_output_candidates(artifact_audit),
+        "dashboard_performance_warnings": _dashboard_performance_warnings(root),
+        "unsafe_cleanup_blockers": unsafe_blockers,
+        "recommended_next_actions": next_actions,
+        "artifact_retention_audit": artifact_audit,
     }
