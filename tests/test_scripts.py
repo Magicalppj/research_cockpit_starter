@@ -35,6 +35,7 @@ from research_cockpit.baselines import (
 )
 from research_cockpit.commands.accept_decision import accept_decision
 from research_cockpit.commands.add_node import add_node, add_node_result
+from research_cockpit.commands.active_resources import active_resources_payload
 from research_cockpit.commands.agent_bootstrap import (
     BootstrapIdentityError,
     agent_bootstrap_payload,
@@ -4791,6 +4792,120 @@ class ScriptBehaviorTests(unittest.TestCase):
 
                 self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
                 self.assertIn("run_human_compact", out.stdout)
+
+    def test_active_resources_payload_lists_only_active_runs_by_default(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_gpu_active.yaml",
+            {
+                "run_id": "run_gpu_active",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "tmux_session": "rc_gpu_active",
+                "pid": 4242,
+                "output_root": "artifacts/exp_t5/run_gpu_active",
+                "log_root": "artifacts/exp_t5/run_gpu_active/logs",
+                "progress_file": "artifacts/exp_t5/run_gpu_active/progress.json",
+                "resources": {
+                    "gpu_ids": ["0"],
+                    "ports": [7860],
+                    "worktree": "../agent-a",
+                },
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_done.yaml",
+            {
+                "run_id": "run_done",
+                "status": "completed",
+                "experiment_id": "exp_t5",
+                "finished_at": "2026-05-27T03:00:00Z",
+                "resources": {"gpu_ids": ["1"]},
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_running_finished_at.yaml",
+            {
+                "run_id": "run_running_finished_at",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "finished_at": "2026-05-27T03:30:00Z",
+                "resources": {"ports": [7861]},
+            },
+        )
+
+        payload = active_resources_payload(self.root)
+        by_id = {item["run_id"]: item for item in payload["runs"]}
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["schema_version"], "active_resources_v1")
+        self.assertEqual(payload["active_count"], 2)
+        self.assertEqual(payload["selected_count"], 2)
+        self.assertNotIn("active", payload)
+        self.assertEqual(set(by_id), {"run_gpu_active", "run_running_finished_at"})
+        self.assertEqual(by_id["run_gpu_active"]["resources"]["gpu_ids"], ["0"])
+        self.assertEqual(by_id["run_gpu_active"]["tmux_session"], "rc_gpu_active")
+        self.assertNotIn("run_done", by_id)
+
+        with_terminal = active_resources_payload(self.root, include_terminal=True)
+        self.assertEqual(with_terminal["active_count"], 2)
+        self.assertEqual(with_terminal["selected_count"], 3)
+
+    def test_active_resources_cli_json_and_manifest_metadata(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_cli_active_resources.yaml",
+            {
+                "run_id": "run_cli_active_resources",
+                "status": "queued",
+                "experiment_id": "exp_t5",
+                "config_file": "artifacts/exp_t5/run_cli_active_resources/config.yaml",
+                "resources": {"ports": [9001]},
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_cli_active_resources_list.yaml",
+            {
+                "run_id": "run_cli_active_resources_list",
+                "status": "running",
+                "experiment_id": "exp_t5",
+                "resources": ["gpu:1"],
+            },
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("active-resources"),
+                "--root",
+                str(self.root),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        by_id = {item["run_id"]: item for item in payload["runs"]}
+        manifest = {item["name"]: item for item in agent_command_manifest()}
+        human_out = subprocess.run(
+            [
+                *cli_command("active-resources"),
+                "--root",
+                str(self.root),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(by_id["run_cli_active_resources"]["resources"]["ports"], [9001])
+        self.assertEqual(by_id["run_cli_active_resources_list"]["resources"], ["gpu:1"])
+        self.assertEqual(human_out.returncode, 0, human_out.stdout + human_out.stderr)
+        self.assertIn("resources=list", human_out.stdout)
+        self.assertIn("active-resources", manifest)
+        self.assertFalse(manifest["active-resources"]["mutating"])
+        self.assertIn("maintenance", manifest["active-resources"]["workflow_tags"])
+        self.assertIn("--include-terminal", manifest["active-resources"]["supported_flags"])
+        self.assertIn("resources", manifest["active-resources"]["fields_supported"])
 
     def test_list_agent_commands_manifest_marks_mutating_commands(self) -> None:
         manifest = agent_command_manifest()
