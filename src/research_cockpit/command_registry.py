@@ -34,6 +34,8 @@ COMMAND_MODULES: dict[str, str] = {
     "complete-run": "complete_run",
     "list-runs": "list_runs",
     "active-resources": "active_resources",
+    "worktree-audit": "worktree_audit",
+    "branch-audit": "branch_audit",
     "run-context": "run_context",
     "record-gate-result": "record_gate_result",
     "ingest-gate-result": "ingest_gate_result",

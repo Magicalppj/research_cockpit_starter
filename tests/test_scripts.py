@@ -46,6 +46,7 @@ from research_cockpit.commands.apply_graph_plan import apply_graph_plan
 from research_cockpit.commands.apply_suggestion import apply_suggestion
 from research_cockpit.commands.agent_session_context import agent_session_context_payload
 from research_cockpit.commands.assignment_view import assignment_view_payload
+from research_cockpit.commands.branch_audit import branch_audit_payload
 from research_cockpit.commands.build_dashboard import build_dashboard, dashboard_watch_signature, watch_dashboard
 from research_cockpit.commands.check_decision_acceptance import decision_acceptance_payload
 from research_cockpit.commands.claim_option import claim_option
@@ -94,6 +95,7 @@ from research_cockpit.commands.update_run import update_run
 from research_cockpit.commands.update_workstream_fields import update_workstream_fields
 from research_cockpit.commands.update_suggestion_state import update_suggestion_state
 from research_cockpit.commands.update_status import update_status
+from research_cockpit.commands.worktree_audit import worktree_audit_payload
 from research_cockpit.context_packs import build_agent_context
 from research_cockpit.gate_results import load_gate_result, normalize_gate_result
 from research_cockpit.graph_views import upsert_graph_view
@@ -4906,6 +4908,272 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("maintenance", manifest["active-resources"]["workflow_tags"])
         self.assertIn("--include-terminal", manifest["active-resources"]["supported_flags"])
         self.assertIn("resources", manifest["active-resources"]["fields_supported"])
+
+    def test_worktree_audit_joins_git_worktrees_to_assignments_and_runs(self) -> None:
+        session = self.start_t5_assignment()
+        create_run(
+            self.root,
+            run_id="run_worktree_audit",
+            experiment_id="exp_t5",
+            status="running",
+            rebuild_dashboard=False,
+        )
+        repo = self.tmp_root / "repo"
+        main_worktree = repo
+        agent_worktree = self.tmp_root / "worktrees" / "agent_t5"
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return (
+                    f"worktree {main_worktree}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/main\n"
+                    "\n"
+                    f"worktree {agent_worktree}\n"
+                    "HEAD def456\n"
+                    "branch refs/heads/agent/option_t5\n"
+                )
+            if args == ("-c", "status.refreshIndex=false", "status", "--porcelain"):
+                return ""
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = worktree_audit_payload(self.root, repo=repo)
+
+        by_branch = {item["branch"]: item for item in payload["worktrees"]}
+        agent_row = by_branch["agent/option_t5"]
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["schema_version"], "worktree_audit_v1")
+        self.assertEqual(agent_row["label"], "agent_t5")
+        self.assertEqual(agent_row["active_assignment_ids"], [session["assignment_id"]])
+        self.assertEqual(agent_row["option_workstream_node_ids"], ["option_t5"])
+        self.assertIn("option_t5", agent_row["active_node_ids"])
+        self.assertEqual(agent_row["run_statuses"], [{"run_id": "run_worktree_audit", "status": "running"}])
+        self.assertIn("active_assignment", agent_row["blockers"])
+        self.assertIn("active_run", agent_row["blockers"])
+        self.assertFalse(agent_row["safe_to_remove"])
+
+    def test_worktree_audit_blocks_active_workstream_and_locked_or_bare_rows(self) -> None:
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["agent_workstream"] = {
+            "status": "in_progress",
+            "git_branch": "agent/option_t5",
+            "worktree_label": "agent_t5",
+            "session_id": "session_t5",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        repo = self.tmp_root / "repo"
+        agent_worktree = self.tmp_root / "worktrees" / "agent_t5"
+        bare_worktree = self.tmp_root / "bare_repo"
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return (
+                    f"worktree {agent_worktree}\n"
+                    "HEAD def456\n"
+                    "branch refs/heads/agent/option_t5\n"
+                    "locked cleanup pending\n"
+                    "\n"
+                    f"worktree {bare_worktree}\n"
+                    "bare\n"
+                )
+            if args == ("-c", "status.refreshIndex=false", "status", "--porcelain"):
+                return ""
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = worktree_audit_payload(self.root, repo=repo)
+
+        by_path = {item["path"]: item for item in payload["worktrees"]}
+        agent_row = by_path[str(agent_worktree)]
+        bare_row = by_path[str(bare_worktree)]
+
+        self.assertIn("active_workstream", agent_row["blockers"])
+        self.assertIn("locked_worktree", agent_row["blockers"])
+        self.assertFalse(agent_row["safe_to_remove"])
+        self.assertIn("bare_worktree", bare_row["blockers"])
+        self.assertFalse(bare_row["safe_to_remove"])
+
+    def test_worktree_audit_blocks_run_from_retired_assignment_and_prunable_rows(self) -> None:
+        session = self.start_t5_assignment()
+        assignment = load_yaml(self.root / "assignments" / f"{session['assignment_id']}.yaml")
+        assignment["status"] = "completed"
+        save_yaml(self.root / "assignments" / f"{session['assignment_id']}.yaml", assignment)
+        create_run(
+            self.root,
+            run_id="run_retired_assignment",
+            experiment_id="exp_t5",
+            status="running",
+            rebuild_dashboard=False,
+        )
+        repo = self.tmp_root / "repo"
+        agent_worktree = self.tmp_root / "worktrees" / "agent_t5"
+        prunable_worktree = self.tmp_root / "worktrees" / "missing"
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return (
+                    f"worktree {agent_worktree}\n"
+                    "HEAD def456\n"
+                    "branch refs/heads/agent/option_t5\n"
+                    "\n"
+                    f"worktree {prunable_worktree}\n"
+                    "HEAD 000000\n"
+                    "branch refs/heads/agent/missing\n"
+                    "prunable gitdir file points to non-existent location\n"
+                )
+            if args == ("-c", "status.refreshIndex=false", "status", "--porcelain"):
+                if git_repo == prunable_worktree:
+                    raise AssertionError("prunable worktree should not run git status")
+                return ""
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = worktree_audit_payload(self.root, repo=repo)
+
+        by_path = {item["path"]: item for item in payload["worktrees"]}
+
+        self.assertIn("active_run", by_path[str(agent_worktree)]["blockers"])
+        self.assertEqual(
+            by_path[str(agent_worktree)]["run_statuses"],
+            [{"run_id": "run_retired_assignment", "status": "running"}],
+        )
+        self.assertIn("prunable_worktree", by_path[str(prunable_worktree)]["blockers"])
+        self.assertFalse(by_path[str(prunable_worktree)]["safe_to_remove"])
+
+    def test_branch_audit_classifies_checked_out_merged_and_research_candidates(self) -> None:
+        session = self.start_t5_assignment()
+        write_node(
+            self.root,
+            {
+                "id": "artifact_candidate_branch",
+                "type": "artifact",
+                "title": "Candidate branch evidence",
+                "status": "done",
+                "path": "artifacts/candidate_branch",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "option_candidate_branch",
+                "type": "option",
+                "title": "Candidate branch",
+                "status": "active",
+                "parent": "problem_text",
+                "linked_artifacts": ["artifact_candidate_branch"],
+                "agent_workstream": {
+                    "status": "reported",
+                    "git_branch": "codex/candidate",
+                    "worktree_label": "candidate",
+                    "session_id": "session_candidate",
+                },
+            },
+        )
+        repo = self.tmp_root / "repo"
+        agent_worktree = self.tmp_root / "worktrees" / "agent_t5"
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return (
+                    f"worktree {repo}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/main\n"
+                    "\n"
+                    f"worktree {agent_worktree}\n"
+                    "HEAD def456\n"
+                    "branch refs/heads/agent/option_t5\n"
+                )
+            if args == ("branch", "--format=%(refname:short)"):
+                return "main\nagent/option_t5\ncodex/done\ncodex/candidate\nresearch/keep\n"
+            if args == ("branch", "--merged", "main", "--format=%(refname:short)"):
+                return "main\ncodex/done\n"
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = branch_audit_payload(self.root, repo=repo, base="main")
+
+        by_name = {item["name"]: item for item in payload["branches"]}
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["schema_version"], "branch_audit_v1")
+        self.assertTrue(by_name["agent/option_t5"]["checked_out"])
+        self.assertEqual(by_name["agent/option_t5"]["active_assignment_ids"], [session["assignment_id"]])
+        self.assertIn(str(agent_worktree), by_name["agent/option_t5"]["checked_out_worktrees"])
+        self.assertTrue(by_name["codex/done"]["merged"])
+        self.assertEqual(by_name["codex/done"]["recommended_action"], "delete_candidate")
+        self.assertFalse(by_name["codex/candidate"]["merged"])
+        self.assertEqual(by_name["codex/candidate"]["recommended_action"], "preserve_as_research_candidate")
+        self.assertEqual(by_name["codex/candidate"]["evidence_count"], 1)
+        self.assertEqual(by_name["research/keep"]["recommended_action"], "keep_research")
+
+    def test_branch_audit_keeps_active_workstream_and_descendant_evidence(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_descendant_branch",
+                "type": "artifact",
+                "title": "Descendant branch evidence",
+                "status": "done",
+                "path": "artifacts/descendant_branch",
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "exp_descendant_branch",
+                "type": "experiment",
+                "title": "Descendant evidence experiment",
+                "status": "done",
+                "parent": "option_t5",
+                "linked_artifacts": ["artifact_descendant_branch"],
+            },
+        )
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["agent_workstream"] = {
+            "status": "in_progress",
+            "git_branch": "codex/active-workstream",
+            "worktree_label": "active_workstream",
+            "session_id": "session_active",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        repo = self.tmp_root / "repo"
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return f"worktree {repo}\nHEAD abc123\nbranch refs/heads/main\n"
+            if args == ("branch", "--format=%(refname:short)"):
+                return "main\ncodex/active-workstream\n"
+            if args == ("branch", "--merged", "main", "--format=%(refname:short)"):
+                return "main\ncodex/active-workstream\n"
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = branch_audit_payload(self.root, repo=repo, base="main")
+
+        row = {item["name"]: item for item in payload["branches"]}["codex/active-workstream"]
+
+        self.assertEqual(row["active_workstream_node_ids"], ["option_t5"])
+        self.assertIn("active_workstream", row["blockers"])
+        self.assertEqual(row["recommended_action"], "keep_active")
+        self.assertEqual(row["evidence_node_ids"], ["artifact_descendant_branch"])
+
+    def test_worktree_and_branch_audit_manifest_metadata(self) -> None:
+        manifest = {item["name"]: item for item in agent_command_manifest()}
+
+        self.assertFalse(manifest["worktree-audit"]["mutating"])
+        self.assertFalse(manifest["branch-audit"]["mutating"])
+        self.assertIn("maintenance", manifest["worktree-audit"]["workflow_tags"])
+        self.assertIn("maintenance", manifest["branch-audit"]["workflow_tags"])
+        self.assertIn("--repo", manifest["worktree-audit"]["supported_flags"])
+        self.assertIn("--include-nested", manifest["worktree-audit"]["supported_flags"])
+        self.assertIn("label", manifest["worktree-audit"]["fields_supported"])
+        self.assertNotIn("worktree_label", manifest["worktree-audit"]["fields_supported"])
+        self.assertIn("--repo", manifest["branch-audit"]["supported_flags"])
+        self.assertIn("--base", manifest["branch-audit"]["supported_flags"])
+        self.assertIn("name", manifest["branch-audit"]["fields_supported"])
+        self.assertNotIn("branch", manifest["branch-audit"]["fields_supported"])
 
     def test_list_agent_commands_manifest_marks_mutating_commands(self) -> None:
         manifest = agent_command_manifest()
