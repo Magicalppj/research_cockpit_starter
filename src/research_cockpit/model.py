@@ -1148,6 +1148,7 @@ def build_search_index(
     link_rows: list[dict[str, Any]] | None = None,
     topology: GraphTopology | None = None,
     include_resource_text: bool = True,
+    resource_scan_settings: Any | None = None,
 ) -> list[dict[str, Any]]:
     from research_cockpit.search_index import build_search_index as _build_search_index
 
@@ -1158,6 +1159,7 @@ def build_search_index(
         link_rows=link_rows,
         topology=topology,
         include_resource_text=include_resource_text,
+        resource_scan_settings=resource_scan_settings,
     )
 
 

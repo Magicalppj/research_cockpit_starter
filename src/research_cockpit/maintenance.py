@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import subprocess
 from typing import Any
@@ -849,14 +850,28 @@ def _large_output_candidates(artifact_audit: dict[str, Any]) -> list[str]:
 
 
 def _dashboard_performance_warnings(root: Path) -> list[dict[str, Any]]:
+    warnings: list[dict[str, Any]] = []
+    profile_path = root / "dashboards" / "build_profile.json"
+    if profile_path.exists():
+        try:
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            profile = {}
+        for warning in profile.get("warnings", []) if isinstance(profile, dict) else []:
+            if not isinstance(warning, dict):
+                continue
+            warnings.append({
+                **warning,
+                "source": "build_profile",
+            })
     node_count = len(load_nodes(root))
-    if node_count <= 500:
-        return []
-    return [{
-        "code": "large_graph",
-        "node_count": node_count,
-        "message": "Graph has more than 500 nodes; prefer compact context and profile dashboard builds.",
-    }]
+    if node_count > 500:
+        warnings.append({
+            "code": "large_graph",
+            "node_count": node_count,
+            "message": "Graph has more than 500 nodes; prefer compact context and profile dashboard builds.",
+        })
+    return warnings
 
 
 def build_maintenance_audit(

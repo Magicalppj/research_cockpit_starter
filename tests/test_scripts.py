@@ -986,6 +986,72 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(profile["counts"]["search_resource_bytes_read"], 0)
         self.assertGreaterEqual(profile["counts"]["search_resource_disabled_count"], 1)
 
+    def test_build_resource_scan_limits_summarize_dirs_and_skip_generated_payloads(self) -> None:
+        artifact_dir = self.root / "artifacts" / "heavy_payload"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        (artifact_dir / "summary.md").write_text("# Summary\nSearchable summary text.\n", encoding="utf-8")
+        (artifact_dir / "audio.wav").write_bytes(b"Searchable raw audio should not be indexed.")
+        (artifact_dir / "checkpoint.pt").write_bytes(b"Searchable checkpoint should not be indexed.")
+        cache_dir = self.root / "artifacts" / "cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        (cache_dir / "summary.md").write_text("Cache summary should not be indexed.\n", encoding="utf-8")
+        write_node(
+            self.root,
+            {
+                "id": "artifact_heavy_payload",
+                "type": "artifact",
+                "title": "Heavy payload",
+                "status": "done",
+                "path": "artifacts/heavy_payload",
+            },
+        )
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["linked_artifacts"] = ["artifact_heavy_payload"]
+        problem["links"] = {
+            "raw_audio": "artifacts/heavy_payload/audio.wav",
+            "checkpoint": "artifacts/heavy_payload/checkpoint.pt",
+            "cache_dir": "artifacts/cache",
+        }
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+
+        out = subprocess.run(
+            [
+                *cli_command("build"),
+                "--root",
+                str(self.root),
+                "--json",
+                "--profile",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        profile = payload["profile"]
+        search_index = json.loads((self.root / "dashboards" / "search_index.json").read_text(encoding="utf-8"))
+        by_path = {item.get("path"): item for item in search_index if item.get("source") == "resource"}
+
+        self.assertIn("resource_scan_settings", profile)
+        self.assertIn("max_files_per_artifact", profile["resource_scan_settings"])
+        self.assertIn("max_bytes_per_artifact", profile["resource_scan_settings"])
+        self.assertIn("skip_patterns", profile["resource_scan_settings"])
+        self.assertIn("summary_files", profile["resource_scan_settings"])
+        self.assertIn("Searchable summary text", by_path["artifacts/heavy_payload"]["text"])
+        self.assertEqual(by_path["artifacts/heavy_payload"]["text"].count("Searchable summary text"), 1)
+        self.assertEqual(by_path["artifacts/heavy_payload"]["scan_kind"], "directory_summary")
+        self.assertEqual(by_path["artifacts/heavy_payload"]["scan_file_count"], 1)
+        self.assertEqual(by_path["artifacts/heavy_payload/audio.wav"]["skip_reason"], "resource_scan_skip_pattern")
+        self.assertEqual(by_path["artifacts/heavy_payload/checkpoint.pt"]["skip_reason"], "resource_scan_skip_pattern")
+        self.assertEqual(by_path["artifacts/cache"]["skip_reason"], "resource_scan_skip_pattern")
+        self.assertNotIn("raw audio should not be indexed", json.dumps(search_index))
+        self.assertNotIn("checkpoint should not be indexed", json.dumps(search_index))
+        self.assertNotIn("Cache summary should not be indexed", json.dumps(search_index))
+        self.assertGreaterEqual(profile["counts"]["search_resource_directory_summary_count"], 1)
+        self.assertGreaterEqual(profile["counts"]["search_resource_scan_skip_pattern_count"], 3)
+        self.assertTrue(any(warning["code"] == "resource_scan_skipped_payload" for warning in profile["warnings"]))
+
     def test_generate_large_cockpit_fixture_cli_creates_valid_profile_fixture(self) -> None:
         fixture_root = self.tmp_root / "perf_fixture"
 
@@ -5593,6 +5659,42 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("active_assignment", payload["unsafe_cleanup_blockers"])
         self.assertIn("active_run", payload["unsafe_cleanup_blockers"])
         self.assertTrue(payload["recommended_next_actions"])
+
+    def test_maintenance_audit_reuses_dashboard_profile_warnings(self) -> None:
+        profile_path = self.root / "dashboards" / "build_profile.json"
+        profile_path.parent.mkdir(parents=True, exist_ok=True)
+        profile_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": "build_profile_v1",
+                    "warnings": [
+                        {
+                            "code": "resource_scan_skipped_payload",
+                            "message": "Generated payload resources were skipped.",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        repo = self.tmp_root
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return f"worktree {repo}\nHEAD abc123\nbranch refs/heads/main\n"
+            if args == ("-c", "status.refreshIndex=false", "status", "--porcelain"):
+                return ""
+            if args == ("branch", "--format=%(refname:short)"):
+                return "main\n"
+            if args == ("branch", "--merged", "main", "--format=%(refname:short)"):
+                return "main\n"
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = maintenance_audit_payload(self.root, repo=repo, min_size_bytes=1)
+
+        self.assertEqual(payload["dashboard_performance_warnings"][0]["code"], "resource_scan_skipped_payload")
+        self.assertEqual(payload["dashboard_performance_warnings"][0]["source"], "build_profile")
 
     def test_retention_and_maintenance_audit_manifest_metadata(self) -> None:
         manifest = {item["name"]: item for item in agent_command_manifest()}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fnmatch
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -8,8 +9,9 @@ import re
 from research_cockpit.graph_core import GraphTopology, focus_related_ids
 from research_cockpit.storage import load_yaml, normalize_relative_path, relative_to_root
 from research_cockpit.types import (
+    DEFAULT_RESOURCE_SCAN_SETTINGS,
     RESOURCE_SEARCH_ALLOWED_SUFFIXES,
-    RESOURCE_SEARCH_MAX_BYTES,
+    ResourceScanSettings,
     SEARCH_NODE_TEXT_FIELDS,
     ResearchNode,
 )
@@ -91,6 +93,9 @@ def _resource_search_entry(
     truncated: bool = False,
     bytes_read: int = 0,
     skip_reason: str = "",
+    scan_kind: str = "",
+    scan_file_count: int = 0,
+    summary_files: list[str] | None = None,
 ) -> dict[str, Any]:
     node_id = str(row.get("node_id") or "")
     label = str(row.get("label") or row.get("kind") or "")
@@ -112,6 +117,9 @@ def _resource_search_entry(
         "truncated": truncated,
         "bytes_read": bytes_read,
         "skip_reason": skip_reason,
+        "scan_kind": scan_kind,
+        "scan_file_count": scan_file_count,
+        "summary_files": summary_files or [],
     }
 
 
@@ -130,10 +138,21 @@ def _resource_path_under_root(root: Path, target: str) -> tuple[Path | None, str
     return candidate, normalized
 
 
+def _matches_skip_pattern(path: str, settings: ResourceScanSettings) -> bool:
+    normalized = normalize_relative_path(path).lower()
+    name = Path(normalized).name
+    for pattern in settings.skip_patterns:
+        lowered = pattern.lower()
+        if fnmatch.fnmatch(normalized, lowered) or fnmatch.fnmatch(name, lowered):
+            return True
+    return False
+
+
 def _resource_skip_reason(
     root: Path,
     row: dict[str, Any],
     normalized_note_paths: set[str],
+    settings: ResourceScanSettings,
 ) -> tuple[str, Path | None, str]:
     target = str(row.get("target") or "")
     normalized = normalize_relative_path(target)
@@ -155,19 +174,71 @@ def _resource_skip_reason(
         return "missing", path, normalized
     if row.get("exists") is not True:
         return "unknown", path, normalized
+    if _matches_skip_pattern(normalized or target, settings):
+        return "resource_scan_skip_pattern", None, normalized or target
+    if not path.is_file():
+        if path.is_dir():
+            return "", path, normalized
+        return "not_file", path, normalized
     if path.suffix.lower() not in RESOURCE_SEARCH_ALLOWED_SUFFIXES:
         return "unsupported_extension", path, normalized
-    if not path.is_file():
-        return "not_file", path, normalized
     return "", path, normalized
 
 
-def _read_resource_text(path: Path) -> tuple[str, bool, int]:
+def _read_resource_text(path: Path, *, max_bytes: int) -> tuple[str, bool, int]:
     with path.open("rb") as handle:
-        data = handle.read(RESOURCE_SEARCH_MAX_BYTES + 1)
-    truncated = len(data) > RESOURCE_SEARCH_MAX_BYTES
-    data = data[:RESOURCE_SEARCH_MAX_BYTES]
+        data = handle.read(max_bytes + 1)
+    truncated = len(data) > max_bytes
+    data = data[:max_bytes]
     return data.decode("utf-8", errors="replace"), truncated, len(data)
+
+
+def _read_directory_summary(
+    path: Path,
+    *,
+    normalized: str,
+    settings: ResourceScanSettings,
+) -> tuple[str, bool, int, int, list[str], str]:
+    chunks: list[str] = []
+    bytes_read = 0
+    truncated = False
+    read_files: list[str] = []
+    seen_file_keys: set[tuple[object, ...]] = set()
+    max_files = max(0, settings.max_files_per_artifact)
+    max_bytes = max(0, settings.max_bytes_per_artifact)
+    for relative_name in settings.summary_files:
+        if len(read_files) >= max_files or bytes_read >= max_bytes:
+            truncated = True
+            break
+        summary_path = path / relative_name
+        if not summary_path.is_file():
+            continue
+        try:
+            stat = summary_path.stat()
+        except OSError:
+            continue
+        file_key = (
+            ("stat", stat.st_dev, stat.st_ino)
+            if stat.st_ino
+            else ("path", str(summary_path.resolve(strict=False)).lower())
+        )
+        if file_key in seen_file_keys:
+            continue
+        seen_file_keys.add(file_key)
+        summary_normalized = normalize_relative_path(f"{normalized}/{relative_name}")
+        if _matches_skip_pattern(summary_normalized, settings):
+            continue
+        if summary_path.suffix.lower() not in RESOURCE_SEARCH_ALLOWED_SUFFIXES:
+            continue
+        remaining = max_bytes - bytes_read
+        text, file_truncated, file_bytes = _read_resource_text(summary_path, max_bytes=remaining)
+        bytes_read += file_bytes
+        truncated = truncated or file_truncated
+        read_files.append(summary_normalized)
+        chunks.append(f"# {relative_name}\n{text}")
+    if not read_files:
+        return "", False, 0, 0, [], "directory_no_summary_files"
+    return "\n\n".join(chunks), truncated, bytes_read, len(read_files), read_files, ""
 
 
 def _resource_search_entries(
@@ -180,7 +251,9 @@ def _resource_search_entries(
     focus_ids: set[str] | None = None,
     topology: GraphTopology | None = None,
     include_resource_text: bool = True,
+    resource_scan_settings: ResourceScanSettings | None = None,
 ) -> list[dict[str, Any]]:
+    settings = resource_scan_settings or DEFAULT_RESOURCE_SCAN_SETTINGS
     focus_ids = focus_ids if focus_ids is not None else (
         focus_related_ids(nodes, current, topology=topology) if current else set()
     )
@@ -192,13 +265,13 @@ def _resource_search_entries(
     def skip_reason(row: dict[str, Any]) -> tuple[str, Path | None, str]:
         key = (str(row.get("kind") or ""), str(row.get("target") or ""), row.get("exists"))
         if key not in skip_cache:
-            skip_cache[key] = _resource_skip_reason(root, row, normalized_note_paths)
+            skip_cache[key] = _resource_skip_reason(root, row, normalized_note_paths, settings)
         return skip_cache[key]
 
     def read_resource_text(path: Path, normalized: str) -> tuple[str, bool, int]:
         key = normalized or path.as_posix()
         if key not in text_cache:
-            text_cache[key] = _read_resource_text(path)
+            text_cache[key] = _read_resource_text(path, max_bytes=settings.max_bytes_per_artifact)
         return text_cache[key]
 
     for row in link_rows if link_rows is not None else build_link_rows(root, nodes):
@@ -211,6 +284,35 @@ def _resource_search_entries(
             entry = _resource_search_entry(row, path=normalized, skip_reason="resource_search_disabled")
         else:
             assert path is not None
+            if path.is_dir():
+                text, truncated, bytes_read, file_count, summary_files, read_skip_reason = _read_directory_summary(
+                    path,
+                    normalized=normalized,
+                    settings=settings,
+                )
+                if read_skip_reason:
+                    entry = _resource_search_entry(
+                        row,
+                        path=normalized,
+                        skip_reason=read_skip_reason,
+                        scan_kind="directory",
+                    )
+                    entry["is_focus_related"] = bool(entry.get("node_id") in focus_ids)
+                    entries.append(entry)
+                    continue
+                entry = _resource_search_entry(
+                    row,
+                    path=normalized,
+                    text=text,
+                    truncated=truncated,
+                    bytes_read=bytes_read,
+                    scan_kind="directory_summary",
+                    scan_file_count=file_count,
+                    summary_files=summary_files,
+                )
+                entry["is_focus_related"] = bool(entry.get("node_id") in focus_ids)
+                entries.append(entry)
+                continue
             text, truncated, bytes_read = read_resource_text(path, normalized)
             entry = _resource_search_entry(
                 row,
@@ -218,6 +320,8 @@ def _resource_search_entries(
                 text=text,
                 truncated=truncated,
                 bytes_read=bytes_read,
+                scan_kind="file",
+                scan_file_count=1,
             )
         entry["is_focus_related"] = bool(entry.get("node_id") in focus_ids)
         entries.append(entry)
@@ -232,6 +336,7 @@ def build_search_index(
     link_rows: list[dict[str, Any]] | None = None,
     topology: GraphTopology | None = None,
     include_resource_text: bool = True,
+    resource_scan_settings: ResourceScanSettings | None = None,
 ) -> list[dict[str, Any]]:
     current = current or {}
     focus_ids = focus_related_ids(nodes, current, topology=topology) if current else set()
@@ -282,6 +387,7 @@ def build_search_index(
         focus_ids=focus_ids,
         topology=topology,
         include_resource_text=include_resource_text,
+        resource_scan_settings=resource_scan_settings,
     ))
     return entries
 
@@ -427,7 +533,11 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
     resource_truncated_count = 0
     resource_skipped_count = 0
     resource_search_disabled_count = 0
+    resource_scan_skip_pattern_count = 0
+    resource_directory_summary_count = 0
+    resource_directory_no_summary_count = 0
     resource_bytes_read = 0
+    resource_skipped_by_reason: dict[str, int] = {}
     resource_seen_paths: set[str] = set()
     focus_resource_count = 0
     unlinked_note_count = 0
@@ -445,10 +555,18 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
         if source == "resource":
             if entry.get("skip_reason"):
                 resource_skipped_count += 1
+                reason = str(entry.get("skip_reason") or "")
+                resource_skipped_by_reason[reason] = resource_skipped_by_reason.get(reason, 0) + 1
                 if entry.get("skip_reason") == "resource_search_disabled":
                     resource_search_disabled_count += 1
+                if entry.get("skip_reason") == "resource_scan_skip_pattern":
+                    resource_scan_skip_pattern_count += 1
+                if entry.get("skip_reason") == "directory_no_summary_files":
+                    resource_directory_no_summary_count += 1
             else:
                 resource_count += 1
+                if entry.get("scan_kind") == "directory_summary":
+                    resource_directory_summary_count += 1
                 resource_path = str(entry.get("path") or entry.get("target") or entry.get("entry_id") or "")
                 if resource_path not in resource_seen_paths:
                     resource_seen_paths.add(resource_path)
@@ -472,7 +590,11 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
         "resource_truncated_count": resource_truncated_count,
         "resource_skipped_count": resource_skipped_count,
         "resource_search_disabled_count": resource_search_disabled_count,
+        "resource_scan_skip_pattern_count": resource_scan_skip_pattern_count,
+        "resource_directory_summary_count": resource_directory_summary_count,
+        "resource_directory_no_summary_count": resource_directory_no_summary_count,
         "resource_bytes_read": resource_bytes_read,
+        "resource_skipped_by_reason": resource_skipped_by_reason,
         "focus_resource_count": focus_resource_count,
         "unlinked_note_count": unlinked_note_count,
         "focus_entry_count": focus_entry_count,

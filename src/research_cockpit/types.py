@@ -59,6 +59,60 @@ SEARCH_NODE_TEXT_FIELDS = (
 
 RESOURCE_SEARCH_ALLOWED_SUFFIXES = {".md", ".txt", ".yaml", ".yml", ".json", ".toml", ".csv", ".tsv"}
 RESOURCE_SEARCH_MAX_BYTES = 128 * 1024
+RESOURCE_SCAN_SKIP_PATTERNS = (
+    "*.wav",
+    "*.mp3",
+    "*.flac",
+    "*.ogg",
+    "*.pt",
+    "*.pth",
+    "*.ckpt",
+    "*.safetensors",
+    "checkpoints",
+    "checkpoints/**",
+    "**/checkpoints/**",
+    "optimizer",
+    "optimizer/**",
+    "**/optimizer/**",
+    "cache",
+    "cache/**",
+    "**/cache/**",
+    ".cache",
+    ".cache/**",
+    "**/.cache/**",
+    "precompute",
+    "precompute/**",
+    "**/precompute/**",
+    "precomputed",
+    "precomputed/**",
+    "**/precomputed/**",
+    "generated_audio",
+    "generated_audio/**",
+    "**/generated_audio/**",
+)
+RESOURCE_SCAN_SUMMARY_FILES = (
+    "summary.md",
+    "SUMMARY.md",
+    "README.md",
+    "readme.md",
+    "report.md",
+    "metrics.json",
+    "results.json",
+    "manifest.json",
+    "config.yaml",
+    "config.yml",
+)
+
+
+@dataclass(frozen=True)
+class ResourceScanSettings:
+    max_files_per_artifact: int = 8
+    max_bytes_per_artifact: int = RESOURCE_SEARCH_MAX_BYTES
+    skip_patterns: tuple[str, ...] = RESOURCE_SCAN_SKIP_PATTERNS
+    summary_files: tuple[str, ...] = RESOURCE_SCAN_SUMMARY_FILES
+
+
+DEFAULT_RESOURCE_SCAN_SETTINGS = ResourceScanSettings()
 
 DEFAULT_FOCUS_MODE = {
     "default_depth": 2,

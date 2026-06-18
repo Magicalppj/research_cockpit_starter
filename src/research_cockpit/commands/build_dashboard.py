@@ -40,6 +40,7 @@ from research_cockpit.gate_result_records import gate_result_signature
 from research_cockpit.run_summaries import run_progress_signature, run_staleness_signature
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.storage import save_text
+from research_cockpit.types import DEFAULT_RESOURCE_SCAN_SETTINGS, ResourceScanSettings
 
 
 def _truth_source_files(root: Path) -> list[Path]:
@@ -112,13 +113,23 @@ class _BuildProfiler:
         finally:
             self.stages.append({"name": name, "duration_ms": _duration_ms(started_at)})
 
-    def payload(self, *, root: Path, counts: dict[str, int], outputs: list[Path]) -> dict[str, object]:
+    def payload(
+        self,
+        *,
+        root: Path,
+        counts: dict[str, int],
+        outputs: list[Path],
+        warnings: list[dict[str, object]],
+        resource_scan_settings: ResourceScanSettings,
+    ) -> dict[str, object]:
         return {
             "schema_version": PROFILE_SCHEMA_VERSION,
             "generated_at": _utc_timestamp(),
             "total_duration_ms": _duration_ms(self._started_at),
             "stages": self.stages,
             "counts": counts,
+            "warnings": warnings,
+            "resource_scan_settings": _resource_scan_settings_payload(resource_scan_settings),
             "output_files": _output_file_metrics(root, outputs),
         }
 
@@ -199,9 +210,48 @@ def _search_index_profile_metrics(search_index: list[dict[str, Any]]) -> dict[st
         "search_resource_total_count": resource_indexed_count + resource_skipped_count,
         "search_resource_truncated_count": int(summary.get("resource_truncated_count") or 0),
         "search_resource_disabled_count": int(summary.get("resource_search_disabled_count") or 0),
+        "search_resource_scan_skip_pattern_count": int(summary.get("resource_scan_skip_pattern_count") or 0),
+        "search_resource_directory_summary_count": int(summary.get("resource_directory_summary_count") or 0),
+        "search_resource_directory_no_summary_count": int(summary.get("resource_directory_no_summary_count") or 0),
         "search_resource_bytes_read": int(summary.get("resource_bytes_read") or 0),
         "search_unlinked_note_count": int(summary.get("unlinked_note_count") or 0),
     }
+
+
+def _resource_scan_settings_payload(settings: ResourceScanSettings) -> dict[str, object]:
+    return {
+        "max_files_per_artifact": settings.max_files_per_artifact,
+        "max_bytes_per_artifact": settings.max_bytes_per_artifact,
+        "skip_patterns": list(settings.skip_patterns),
+        "summary_files": list(settings.summary_files),
+    }
+
+
+def _build_profile_warnings(search_index: list[dict[str, Any]]) -> list[dict[str, object]]:
+    summary = build_search_index_summary(search_index, focus_entry_limit=0)
+    warnings: list[dict[str, object]] = []
+    skipped_payloads = int(summary.get("resource_scan_skip_pattern_count") or 0)
+    if skipped_payloads:
+        warnings.append({
+            "code": "resource_scan_skipped_payload",
+            "count": skipped_payloads,
+            "message": "Generated payload resources were skipped by resource scan settings.",
+        })
+    directories_without_summary = int(summary.get("resource_directory_no_summary_count") or 0)
+    if directories_without_summary:
+        warnings.append({
+            "code": "resource_directory_without_summary",
+            "count": directories_without_summary,
+            "message": "Directory resources without configured summary files were skipped.",
+        })
+    truncated = int(summary.get("resource_truncated_count") or 0)
+    if truncated:
+        warnings.append({
+            "code": "resource_scan_truncated",
+            "count": truncated,
+            "message": "Some resource text was truncated by byte limits.",
+        })
+    return warnings
 
 
 def _write_dashboard_outputs(
@@ -269,6 +319,7 @@ def _build_dashboard_payload(
     *,
     profiler: _BuildProfiler | None = None,
     include_resource_search: bool = True,
+    resource_scan_settings: ResourceScanSettings = DEFAULT_RESOURCE_SCAN_SETTINGS,
 ) -> dict[str, object]:
     nodes = _profiled(profiler, "load_nodes", lambda: load_nodes(root))
     current = _profiled(profiler, "load_current_state", lambda: load_yaml(root / "current_state.yaml"))
@@ -304,6 +355,7 @@ def _build_dashboard_payload(
             link_rows=linked_resources,
             topology=topology,
             include_resource_text=include_resource_search,
+            resource_scan_settings=resource_scan_settings,
         ),
     )
     option_workstreams = _profiled(
@@ -377,7 +429,12 @@ def _build_dashboard_payload(
         include_resource_search=include_resource_search,
         include_profile_metrics=profiler is not None,
     )
-    return {"outputs": outputs, "counts": counts}
+    return {
+        "outputs": outputs,
+        "counts": counts,
+        "warnings": _build_profile_warnings(search_index),
+        "resource_scan_settings": resource_scan_settings,
+    }
 
 
 def build_dashboard(root: Path = ROOT) -> list[Path]:
@@ -420,7 +477,17 @@ def build_dashboard_once(
         )
         outputs = list(build_payload["outputs"])
         counts = dict(build_payload["counts"])
-        profile_payload = profiler.payload(root=root, counts=counts, outputs=outputs) if profiler else None
+        profile_payload = (
+            profiler.payload(
+                root=root,
+                counts=counts,
+                outputs=outputs,
+                warnings=list(build_payload["warnings"]),
+                resource_scan_settings=build_payload["resource_scan_settings"],
+            )
+            if profiler
+            else None
+        )
         if resolved_profile_output and profile_payload:
             save_text(resolved_profile_output, json.dumps(profile_payload, indent=2, ensure_ascii=False))
 
