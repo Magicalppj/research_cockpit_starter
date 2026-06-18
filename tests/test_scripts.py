@@ -98,6 +98,7 @@ from research_cockpit.commands.update_workstream_fields import update_workstream
 from research_cockpit.commands.update_suggestion_state import update_suggestion_state
 from research_cockpit.commands.update_status import update_status
 from research_cockpit.commands.worktree_audit import worktree_audit_payload
+from research_cockpit.commands.worktree_closeout import worktree_closeout_payload
 from research_cockpit.context_packs import build_agent_context
 from research_cockpit.gate_results import load_gate_result, normalize_gate_result
 from research_cockpit.graph_views import upsert_graph_view
@@ -5044,6 +5045,189 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("prunable_worktree", by_path[str(prunable_worktree)]["blockers"])
         self.assertFalse(by_path[str(prunable_worktree)]["safe_to_remove"])
 
+    def test_worktree_closeout_dry_run_generates_cleanup_plan(self) -> None:
+        session = self.start_t5_assignment()
+        assignment = load_yaml(self.root / "assignments" / f"{session['assignment_id']}.yaml")
+        assignment["status"] = "completed"
+        save_yaml(self.root / "assignments" / f"{session['assignment_id']}.yaml", assignment)
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["agent_workstream"]["status"] = "reported"
+        option["linked_artifacts"] = ["artifact_closeout"]
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["status"] = "done"
+        experiment["findings"] = [
+            {
+                "id": "finding_closeout",
+                "statement": "Closeout evidence is preserved.",
+                "confidence": "medium",
+                "evidence": ["exp_t5"],
+                "linked_artifacts": ["artifact_closeout"],
+            }
+        ]
+        experiment["linked_artifacts"] = ["artifact_closeout"]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        artifact_dir = self.tmp_root / "artifacts" / "closeout"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        (artifact_dir / "summary.txt").write_text("preserved", encoding="utf-8")
+        write_node(
+            self.root,
+            {
+                "id": "artifact_closeout",
+                "type": "artifact",
+                "title": "Closeout evidence",
+                "status": "done",
+                "path": "artifacts/closeout",
+                "retention": {"class": "portable_review_bundle"},
+            },
+        )
+        create_run(
+            self.root,
+            run_id="run_closeout",
+            experiment_id="exp_t5",
+            status="completed",
+            output_root="artifacts/closeout",
+            output_retention={"class": "portable_review_bundle"},
+            rebuild_dashboard=False,
+        )
+        repo = self.tmp_root
+        agent_worktree = self.tmp_root / "worktrees" / "agent_t5"
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return (
+                    f"worktree {repo}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/main\n"
+                    "\n"
+                    f"worktree {agent_worktree}\n"
+                    "HEAD def456\n"
+                    "branch refs/heads/agent/option_t5\n"
+                )
+            if args == ("-c", "status.refreshIndex=false", "status", "--porcelain"):
+                return ""
+            if args == ("branch", "--format=%(refname:short)"):
+                return "main\nagent/option_t5\n"
+            if args == ("branch", "--merged", "main", "--format=%(refname:short)"):
+                return "main\nagent/option_t5\n"
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = worktree_closeout_payload(
+                self.root,
+                repo=repo,
+                worktree=agent_worktree,
+                classification="discard_after_recording",
+                min_size_bytes=1,
+            )
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["schema_version"], "worktree_closeout_v1")
+        self.assertEqual(payload["classification"], "discard_after_recording")
+        self.assertEqual(payload["blockers"], [])
+        self.assertEqual(payload["target_worktree"]["branch"], "agent/option_t5")
+        self.assertEqual(payload["evidence_summary"]["finding_count"], 1)
+        self.assertEqual(payload["evidence_summary"]["artifact_ids"], ["artifact_closeout"])
+        self.assertEqual(payload["rc_state_updates_needed"], [])
+        self.assertIn(f"git -C {repo} worktree remove {agent_worktree}", payload["execution_commands"])
+        self.assertIn("git -C", payload["execution_commands"][1])
+        self.assertIn("branch -d agent/option_t5", payload["execution_commands"][1])
+
+    def test_worktree_closeout_blocks_active_dirty_and_unrecorded_work(self) -> None:
+        session = self.start_t5_assignment()
+        repo = self.tmp_root
+        agent_worktree = self.tmp_root / "worktrees" / "agent_t5"
+        create_run(
+            self.root,
+            run_id="run_closeout_active",
+            experiment_id="exp_t5",
+            status="running",
+            output_root=str(agent_worktree / "outputs" / "run_closeout_active"),
+            rebuild_dashboard=False,
+        )
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return (
+                    f"worktree {repo}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/main\n"
+                    "\n"
+                    f"worktree {agent_worktree}\n"
+                    "HEAD def456\n"
+                    "branch refs/heads/agent/option_t5\n"
+                )
+            if args == ("-c", "status.refreshIndex=false", "status", "--porcelain"):
+                return " M file.py\n" if git_repo == repo else " M train.py\n"
+            if args == ("branch", "--format=%(refname:short)"):
+                return "main\nagent/option_t5\n"
+            if args == ("branch", "--merged", "main", "--format=%(refname:short)"):
+                return "main\n"
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = worktree_closeout_payload(
+                self.root,
+                repo=repo,
+                worktree=agent_worktree,
+                classification="discard_after_recording",
+                min_size_bytes=1,
+            )
+
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["safe_to_closeout"])
+        self.assertEqual(payload["assignment_ids"], [session["assignment_id"]])
+        for blocker in (
+            "active_assignment",
+            "active_workstream",
+            "active_run",
+            "dirty_worktree",
+            "dirty_outer_repo",
+            "active_resource",
+            "missing_finding_or_evidence",
+        ):
+            self.assertIn(blocker, payload["blockers"])
+        self.assertTrue(payload["rc_state_updates_needed"])
+        self.assertTrue(payload["execution_commands"])
+
+    def test_worktree_closeout_blocks_base_branch_deletion_draft(self) -> None:
+        repo = self.tmp_root
+        secondary_main = self.tmp_root / "worktrees" / "main_copy"
+
+        def fake_git(git_repo: Path, *args: str) -> str:
+            if args == ("worktree", "list", "--porcelain"):
+                return (
+                    f"worktree {repo}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/main\n"
+                    "\n"
+                    f"worktree {secondary_main}\n"
+                    "HEAD abc123\n"
+                    "branch refs/heads/main\n"
+                )
+            if args == ("-c", "status.refreshIndex=false", "status", "--porcelain"):
+                return ""
+            if args == ("branch", "--format=%(refname:short)"):
+                return "main\n"
+            if args == ("branch", "--merged", "main", "--format=%(refname:short)"):
+                return "main\n"
+            raise AssertionError(f"unexpected git call: {git_repo} {args}")
+
+        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+            payload = worktree_closeout_payload(
+                self.root,
+                repo=repo,
+                worktree=secondary_main,
+                classification="discard_after_recording",
+                min_size_bytes=1,
+            )
+
+        self.assertFalse(payload["safe_to_closeout"])
+        self.assertIn("base_branch", payload["blockers"])
+        self.assertEqual(payload["execution_commands"], [f"git -C {repo} worktree remove {secondary_main}"])
+        self.assertFalse(any("branch -d main" in command for command in payload["execution_commands"]))
+
     def test_branch_audit_classifies_checked_out_merged_and_research_candidates(self) -> None:
         session = self.start_t5_assignment()
         write_node(
@@ -5166,8 +5350,10 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertFalse(manifest["worktree-audit"]["mutating"])
         self.assertFalse(manifest["branch-audit"]["mutating"])
+        self.assertFalse(manifest["worktree-closeout"]["mutating"])
         self.assertIn("maintenance", manifest["worktree-audit"]["workflow_tags"])
         self.assertIn("maintenance", manifest["branch-audit"]["workflow_tags"])
+        self.assertIn("maintenance", manifest["worktree-closeout"]["workflow_tags"])
         self.assertIn("--repo", manifest["worktree-audit"]["supported_flags"])
         self.assertIn("--include-nested", manifest["worktree-audit"]["supported_flags"])
         self.assertIn("label", manifest["worktree-audit"]["fields_supported"])
@@ -5176,6 +5362,15 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--base", manifest["branch-audit"]["supported_flags"])
         self.assertIn("name", manifest["branch-audit"]["fields_supported"])
         self.assertNotIn("branch", manifest["branch-audit"]["fields_supported"])
+        self.assertIn("--worktree", manifest["worktree-closeout"]["supported_flags"])
+        self.assertIn("--classification", manifest["worktree-closeout"]["supported_flags"])
+        self.assertIn("execution_commands", manifest["worktree-closeout"]["fields_supported"])
+
+        maintenance_manifest = {
+            item["name"]: item
+            for item in agent_command_manifest(compact=True, workflow="maintenance")
+        }
+        self.assertIn("worktree-closeout", maintenance_manifest)
 
     def test_artifact_retention_audit_flags_large_missing_and_active_blockers(self) -> None:
         repo = self.tmp_root

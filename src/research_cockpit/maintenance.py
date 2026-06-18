@@ -21,6 +21,12 @@ from research_cockpit.run_summaries import ACTIVE_RUN_STATUSES
 
 ACTIVE_WORKSTREAM_STATUSES = {"claimed", "in_progress", "blocked"}
 RETENTION_CLEANUP_CLASSES = {"disposable_cache", "reproducible_output", "deprecated_payload"}
+WORKTREE_CLOSEOUT_CLASSIFICATIONS = {
+    "merge_to_main",
+    "preserve_as_research_branch",
+    "extract_partial",
+    "discard_after_recording",
+}
 
 
 def _git_output(repo: Path, *args: str) -> str:
@@ -178,6 +184,38 @@ def _evidence_node_ids(nodes: dict[str, ResearchNode], node_ids: set[str]) -> li
         if isinstance(linked, list):
             evidence.update(str(item) for item in linked)
     return sorted(evidence)
+
+
+def _evidence_summary(nodes: dict[str, ResearchNode], node_ids: set[str]) -> dict[str, Any]:
+    scoped_ids: set[str] = set()
+    for node_id in node_ids:
+        scoped_ids.update(_subtree_ids(nodes, node_id))
+    artifact_ids: set[str] = set()
+    finding_count = 0
+    for node_id in scoped_ids:
+        node = nodes.get(node_id)
+        if not node:
+            continue
+        if node.type == "artifact":
+            artifact_ids.add(node.id)
+        linked = node.raw.get("linked_artifacts")
+        if isinstance(linked, list):
+            artifact_ids.update(str(item) for item in linked)
+        findings = node.raw.get("findings")
+        if not isinstance(findings, list):
+            continue
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            finding_count += 1
+            linked_artifacts = finding.get("linked_artifacts")
+            if isinstance(linked_artifacts, list):
+                artifact_ids.update(str(item) for item in linked_artifacts)
+    return {
+        "scoped_node_ids": sorted(scoped_ids),
+        "finding_count": finding_count,
+        "artifact_ids": sorted(artifact_ids),
+    }
 
 
 def _same_path(left: Path, right: Path) -> bool:
@@ -907,4 +945,226 @@ def build_maintenance_audit(
         "unsafe_cleanup_blockers": unsafe_blockers,
         "recommended_next_actions": next_actions,
         "artifact_retention_audit": artifact_audit,
+    }
+
+
+def _find_worktree_row(worktrees: list[dict[str, Any]], target: Path) -> dict[str, Any]:
+    for row in worktrees:
+        if _same_path(Path(str(row["path"])), target):
+            return row
+    raise ValueError(f"Worktree not found in git worktree list: {target}")
+
+
+def _classification_commands(
+    *,
+    repo: Path,
+    worktree: Path,
+    branch: str | None,
+    base: str,
+    classification: str,
+    delete_branch: bool = True,
+) -> list[str]:
+    if not branch:
+        return [f"git -C {repo} worktree remove {worktree}"]
+    remove = f"git -C {repo} worktree remove {worktree}"
+    delete = f"git -C {repo} branch -d {branch}"
+    if classification == "merge_to_main":
+        return [
+            f"git -C {repo} checkout {base}",
+            f"git -C {repo} merge --no-ff {branch}",
+            remove,
+            *([delete] if delete_branch else []),
+        ]
+    if classification == "preserve_as_research_branch":
+        target_branch = branch if branch.startswith("research/") else f"research/{Path(worktree).name}"
+        commands = []
+        if delete_branch and target_branch != branch:
+            commands.append(f"git -C {repo} branch -m {branch} {target_branch}")
+        commands.append(remove)
+        return commands
+    if classification == "extract_partial":
+        return [
+            f"git -C {repo} diff {base}...{branch} > closeout.patch",
+            remove,
+            *([delete] if delete_branch else []),
+        ]
+    return [remove, *([delete] if delete_branch else [])]
+
+
+def _closeout_rc_updates(
+    *,
+    root: Path,
+    target_row: dict[str, Any],
+    evidence_summary: dict[str, Any],
+    missing_run_retention: list[RunRecord],
+    missing_artifact_retention: list[str],
+) -> list[dict[str, str]]:
+    updates: list[dict[str, str]] = []
+    for assignment_id in target_row.get("active_assignment_ids", []):
+        updates.append({
+            "reason": "active_assignment",
+            "command": (
+                f"research-cockpit set-cursor --root {root} --assignment {assignment_id} "
+                "--node <next_node> --no-build"
+            ),
+        })
+    for node_id in target_row.get("active_workstream_node_ids", []):
+        updates.append({
+            "reason": "active_workstream",
+            "command": (
+                f"research-cockpit update-workstream-fields --root {root} --option {node_id} "
+                "--status reported --no-build"
+            ),
+        })
+    if not evidence_summary["finding_count"] or not evidence_summary["artifact_ids"]:
+        updates.append({
+            "reason": "missing_finding_or_evidence",
+            "command": (
+                f"research-cockpit complete-experiment --root {root} --id <experiment_id> "
+                "--finding \"<finding>\" --confidence medium --artifact-id <artifact_id> --no-build"
+            ),
+        })
+    for run in missing_run_retention:
+        updates.append({
+            "reason": "missing_run_retention_policy",
+            "command": (
+                f"research-cockpit complete-run --root {root} --id {run.run_id} --status completed "
+                "--output-retention-file output_retention.yaml --no-build"
+            ),
+        })
+    for artifact_id in missing_artifact_retention:
+        updates.append({
+            "reason": "missing_artifact_retention_policy",
+            "command": (
+                f"research-cockpit update-node-fields --root {root} --id {artifact_id} "
+                "--metadata-file retention.yaml --no-build"
+            ),
+        })
+    return updates
+
+
+def build_worktree_closeout_plan(
+    root: Path,
+    *,
+    repo: Path,
+    worktree: Path,
+    classification: str,
+    base: str = "main",
+    min_size_bytes: int,
+    max_files: int = 1000,
+    include_nested: list[Path] | None = None,
+) -> dict[str, Any]:
+    if classification not in WORKTREE_CLOSEOUT_CLASSIFICATIONS:
+        allowed = ", ".join(sorted(WORKTREE_CLOSEOUT_CLASSIFICATIONS))
+        raise ValueError(f"Invalid classification {classification!r}; allowed: {allowed}")
+    resolved_worktree = worktree if worktree.is_absolute() else repo / worktree
+    nodes, assignments, runs = _load_validated(root)
+    worktree_audit = build_worktree_audit(root, repo=repo)
+    branch_audit = build_branch_audit(root, repo=repo, base=base)
+    artifact_audit = build_artifact_retention_audit(
+        root,
+        repo=repo,
+        min_size_bytes=min_size_bytes,
+        max_files=max_files,
+    )
+    target_row = _find_worktree_row(worktree_audit["worktrees"], resolved_worktree)
+    branch = target_row.get("branch")
+    branch_row = next(
+        (row for row in branch_audit["branches"] if row.get("name") == branch),
+        None,
+    )
+    delete_branch = not (
+        branch in {base, "main", "master"}
+        or (branch_row and branch_row.get("recommended_action") == "keep_base")
+    )
+    root_node_ids = {
+        assignments[assignment_id].root_node
+        for assignment_id in target_row.get("assignment_ids", [])
+        if assignment_id in assignments
+    }
+    root_node_ids.update(str(node_id) for node_id in target_row.get("option_workstream_node_ids", []))
+    evidence = _evidence_summary(nodes, root_node_ids)
+    related_runs = [
+        run
+        for run in sorted(runs.values(), key=lambda item: item.run_id)
+        if run.experiment_id in set(evidence["scoped_node_ids"])
+    ]
+    missing_run_retention = [
+        run
+        for run in related_runs
+        if run.status == "completed" and run.output_root and run.output_retention is None
+    ]
+    artifact_by_id = {
+        str(row["artifact_id"]): row
+        for row in artifact_audit.get("artifacts", [])
+    }
+    missing_artifact_retention = [
+        artifact_id
+        for artifact_id in evidence["artifact_ids"]
+        if artifact_by_id.get(artifact_id, {}).get("missing_retention")
+    ]
+    active_resource_refs = _active_resource_references(
+        root=root,
+        repo=repo,
+        artifact_paths=[resolved_worktree],
+        runs=runs,
+    )
+    blockers = list(target_row.get("blockers", []))
+    if _worktree_dirty(repo):
+        blockers.append("dirty_outer_repo")
+    if not delete_branch:
+        blockers.append("base_branch")
+    nested_dirty = [
+        str(nested)
+        for nested in (include_nested or [])
+        if _worktree_dirty(nested)
+    ]
+    if nested_dirty:
+        blockers.append("dirty_nested_repo")
+    if active_resource_refs:
+        blockers.append("active_resource")
+    if not evidence["finding_count"] or not evidence["artifact_ids"]:
+        blockers.append("missing_finding_or_evidence")
+    if missing_run_retention:
+        blockers.append("missing_run_retention_policy")
+    if missing_artifact_retention:
+        blockers.append("missing_artifact_retention_policy")
+    unique_blockers = sorted(set(blockers))
+    return {
+        "ok": not unique_blockers,
+        "schema_version": "worktree_closeout_v1",
+        "root": str(root),
+        "repo": str(repo),
+        "base": base,
+        "dry_run": True,
+        "classification": classification,
+        "safe_to_closeout": not unique_blockers,
+        "blockers": unique_blockers,
+        "target_worktree": target_row,
+        "branch": branch_row,
+        "assignment_ids": target_row.get("assignment_ids", []),
+        "option_workstream_node_ids": target_row.get("option_workstream_node_ids", []),
+        "run_ids": [run.run_id for run in related_runs],
+        "active_resource_references": active_resource_refs,
+        "nested_dirty_repos": nested_dirty,
+        "evidence_summary": evidence,
+        "missing_retention": {
+            "runs": [run.run_id for run in missing_run_retention],
+            "artifacts": missing_artifact_retention,
+        },
+        "rc_state_updates_needed": _closeout_rc_updates(
+            root=root,
+            target_row=target_row,
+            evidence_summary=evidence,
+            missing_run_retention=missing_run_retention,
+            missing_artifact_retention=missing_artifact_retention,
+        ),
+        "execution_commands": _classification_commands(
+            repo=repo,
+            worktree=resolved_worktree,
+            branch=branch,
+            base=base,
+            classification=classification,
+            delete_branch=delete_branch,
+        ),
     }

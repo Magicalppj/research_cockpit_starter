@@ -147,6 +147,12 @@ research-cockpit update-node-fields --root research_cockpit --id <node_id> --que
 research-cockpit update-workstream-fields --root research_cockpit --option <option_id> --status reported --objective "..." --no-build
 research-cockpit sync-focus-actions --root research_cockpit --from-node <node_id> --dry-run --json --show-diff
 research-cockpit lint --root research_cockpit --semantic --json
+research-cockpit active-resources --root research_cockpit --json
+research-cockpit worktree-audit --root research_cockpit --repo . --json
+research-cockpit branch-audit --root research_cockpit --repo . --base main --json
+research-cockpit artifact-retention-audit --root research_cockpit --repo . --min-size-gb 10 --json
+research-cockpit maintenance-audit --root research_cockpit --repo . --base main --json
+research-cockpit worktree-closeout --root research_cockpit --repo . --worktree ../worktrees/<label> --classification discard_after_recording --dry-run --json
 research-cockpit update-suggestion-state --root research_cockpit --id <suggestion_id> --state dismissed --reason "..." --dry-run --json --show-diff
 research-cockpit update-decision-evidence --root research_cockpit --id <decision_id> --dry-run --json --show-diff
 research-cockpit update-decision-checklist --root research_cockpit --id <decision_id> --alternative <option_id> --consequence "..." --next-required-action "..." --dry-run --json --show-diff
@@ -226,9 +232,10 @@ research-cockpit build --root D:/main_repo/research_cockpit --watch --interval 5
 
 `build --watch --json` prints one JSON object per iteration. Each event includes `last_build_at`, `last_build_status`, and `last_build_error`; the watcher only refreshes generated dashboards and does not replace final `validate` or `smoke`. `import-worktree-findings` is only a recovery tool for evidence accidentally written in a worktree-local cockpit root. It imports artifact nodes, experiment findings, result summaries, experiment-local `next_actions`, and workstream reports; it refuses structural graph changes, global/per-agent focus changes, and decision acceptance.
 
-Before deleting a worktree, ingest any useful run directory into the canonical artifact store and record the conclusion:
+Before deleting a worktree, generate a closeout plan, ingest any useful run directory into the canonical artifact store, and record the conclusion:
 
 ```sh
+research-cockpit worktree-closeout --root D:/main_repo/research_cockpit --repo D:/main_repo --worktree ../worktrees/agent_option_x --classification discard_after_recording --dry-run --json
 research-cockpit ingest-artifact --root D:/main_repo/research_cockpit --node experiment_x --from ../worktrees/agent_option_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --json --compact
 research-cockpit complete-experiment --root D:/main_repo/research_cockpit --id experiment_x --finding "..." --confidence medium --artifact-id artifact_experiment_x_run_x --no-build
 research-cockpit validate --root D:/main_repo/research_cockpit --json

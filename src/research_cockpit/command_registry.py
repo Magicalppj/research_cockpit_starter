@@ -38,6 +38,7 @@ COMMAND_MODULES: dict[str, str] = {
     "branch-audit": "branch_audit",
     "artifact-retention-audit": "artifact_retention_audit",
     "maintenance-audit": "maintenance_audit",
+    "worktree-closeout": "worktree_closeout",
     "run-context": "run_context",
     "record-gate-result": "record_gate_result",
     "ingest-gate-result": "ingest_gate_result",
