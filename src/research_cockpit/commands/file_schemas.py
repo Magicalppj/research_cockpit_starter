@@ -129,6 +129,10 @@ title: Result bundle
 status: done
 summary: Collected outputs and metrics.
 path: artifacts/experiment_x/run_x
+artifact_kind: portable_review_bundle
+retention:
+  class: portable_review_bundle
+  reason: Contains reviewable summary files.
 links:
   metrics: artifacts/experiment_x/run_x/metrics.json
   review: notes/review.md

@@ -472,6 +472,8 @@ def node_context(node: ResearchNode) -> dict[str, Any]:
         "supporting_decisions": node.raw.get("supporting_decisions", []),
         "linked_artifacts": node.raw.get("linked_artifacts", []),
         "links": node_link_entries(node),
+        "artifact_kind": node.raw.get("artifact_kind"),
+        "retention": node.raw.get("retention"),
         "findings": node.raw.get("findings", []),
         "implementation_steps": node.raw.get("implementation_steps", []),
         "success_criteria": node.raw.get("success_criteria", []),

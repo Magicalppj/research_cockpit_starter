@@ -5412,6 +5412,217 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--base", manifest["maintenance-audit"]["supported_flags"])
         self.assertIn("--min-size-gb", manifest["maintenance-audit"]["supported_flags"])
 
+    def test_run_metadata_write_support_and_context_output(self) -> None:
+        resources_file = self.tmp_root / "resources.json"
+        resources_file.write_text(json.dumps({"gpu_ids": ["1"], "ports": [9001]}), encoding="utf-8")
+        output_retention_file = self.tmp_root / "output_retention.json"
+        output_retention_file.write_text(
+            json.dumps({"class": "reproducible_output", "reason": "Can regenerate from config."}),
+            encoding="utf-8",
+        )
+        create_out = subprocess.run(
+            [
+                *cli_command("create-run"),
+                "--root",
+                str(self.root),
+                "--id",
+                "run_metadata",
+                "--experiment",
+                "exp_t5",
+                "--status",
+                "running",
+                "--resources-json",
+                '{"gpu_ids":["0"],"ports":[7860]}',
+                "--output-retention-json",
+                '{"class":"disposable_cache","reason":"Warm cache."}',
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(create_out.returncode, 0, create_out.stdout + create_out.stderr)
+
+        update_out = subprocess.run(
+            [
+                *cli_command("update-run"),
+                "--root",
+                str(self.root),
+                "--id",
+                "run_metadata",
+                "--resources-file",
+                str(resources_file),
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(update_out.returncode, 0, update_out.stdout + update_out.stderr)
+
+        complete_out = subprocess.run(
+            [
+                *cli_command("complete-run"),
+                "--root",
+                str(self.root),
+                "--id",
+                "run_metadata",
+                "--output-retention-file",
+                str(output_retention_file),
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(complete_out.returncode, 0, complete_out.stdout + complete_out.stderr)
+
+        saved = load_yaml(self.root / "runs" / "run_metadata.yaml")
+        context = run_context_payload(self.root, run_id="run_metadata")
+        compact = run_context_payload(self.root, run_id="run_metadata", compact=True)
+
+        self.assertEqual(saved["resources"]["gpu_ids"], ["1"])
+        self.assertEqual(saved["output_retention"]["class"], "reproducible_output")
+        self.assertEqual(context["run"]["resources"]["ports"], [9001])
+        self.assertEqual(context["run"]["output_retention"]["reason"], "Can regenerate from config.")
+        self.assertEqual(compact["resources"]["gpu_ids"], ["1"])
+        self.assertEqual(compact["output_retention"]["class"], "reproducible_output")
+
+    def test_artifact_retention_write_support_and_context_output(self) -> None:
+        artifact_file = self.tmp_root / "artifact_retention.yaml"
+        save_yaml(
+            artifact_file,
+            {
+                "id": "artifact_retention_write",
+                "title": "Retention write",
+                "status": "done",
+                "path": "artifacts/retention_write",
+                "artifact_kind": "portable_review_bundle",
+                "retention": {"class": "portable_review_bundle", "reason": "Small review bundle."},
+                "link_to": ["exp_t5"],
+            },
+        )
+        create_out = subprocess.run(
+            [
+                *cli_command("create-artifact"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(artifact_file),
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(create_out.returncode, 0, create_out.stdout + create_out.stderr)
+
+        metadata_file = self.tmp_root / "artifact_metadata.yaml"
+        save_yaml(
+            metadata_file,
+            {
+                "artifact_kind": "reproducible_output",
+                "retention": {
+                    "class": "reproducible_output",
+                    "reason": "Regenerable payload.",
+                    "regenerate_command": "python run.py",
+                },
+            },
+        )
+        update_out = subprocess.run(
+            [
+                *cli_command("update-node-fields"),
+                "--root",
+                str(self.root),
+                "--id",
+                "artifact_retention_write",
+                "--metadata-file",
+                str(metadata_file),
+                "--no-build",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        context = context_payload(self.root, node_id="exp_t5", with_artifacts=True)
+        artifact_node = {
+            item["id"]: item
+            for item in context["artifacts"]["nodes"]
+        }["artifact_retention_write"]
+        saved = load_yaml(self.root / "graph" / "nodes" / "artifact_retention_write.yaml")
+
+        self.assertEqual(update_out.returncode, 0, update_out.stdout + update_out.stderr)
+        self.assertEqual(saved["artifact_kind"], "reproducible_output")
+        self.assertEqual(saved["retention"]["class"], "reproducible_output")
+        self.assertEqual(artifact_node["artifact_kind"], "reproducible_output")
+        self.assertEqual(artifact_node["retention"]["regenerate_command"], "python run.py")
+
+    def test_retention_metadata_rejects_invalid_shapes(self) -> None:
+        bad_run = subprocess.run(
+            [
+                *cli_command("create-run"),
+                "--root",
+                str(self.root),
+                "--id",
+                "run_bad_metadata",
+                "--experiment",
+                "exp_t5",
+                "--resources-json",
+                '["gpu0"]',
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        bad_artifact_file = self.tmp_root / "bad_artifact_retention.yaml"
+        save_yaml(
+            bad_artifact_file,
+            {
+                "id": "artifact_bad_retention",
+                "title": "Bad retention",
+                "retention": {"class": "not_a_retention_class"},
+            },
+        )
+        bad_artifact = subprocess.run(
+            [
+                *cli_command("create-artifact"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(bad_artifact_file),
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertNotEqual(bad_run.returncode, 0)
+        self.assertIn("resources must be a mapping", bad_run.stdout + bad_run.stderr)
+        self.assertNotEqual(bad_artifact.returncode, 0)
+        self.assertIn("Invalid retention.class", bad_artifact.stdout + bad_artifact.stderr)
+
+    def test_metadata_write_manifest_flags(self) -> None:
+        manifest = {item["name"]: item for item in agent_command_manifest()}
+
+        for command_name in ("create-run", "update-run", "complete-run"):
+            with self.subTest(command_name=command_name):
+                self.assertIn("--resources-json", manifest[command_name]["supported_flags"])
+                self.assertIn("--resources-file", manifest[command_name]["supported_flags"])
+                self.assertIn("--output-retention-json", manifest[command_name]["supported_flags"])
+                self.assertIn("--output-retention-file", manifest[command_name]["supported_flags"])
+                self.assertIn("resources", manifest[command_name]["fields_supported"])
+                self.assertIn("output_retention", manifest[command_name]["fields_supported"])
+        self.assertIn("--metadata-file", manifest["update-node-fields"]["supported_flags"])
+        self.assertIn("artifact_kind", manifest["update-node-fields"]["fields_supported"])
+        self.assertIn("retention", manifest["update-node-fields"]["fields_supported"])
+
     def test_list_agent_commands_manifest_marks_mutating_commands(self) -> None:
         manifest = agent_command_manifest()
         by_name = {item["name"]: item for item in manifest}

@@ -21,6 +21,7 @@ from research_cockpit.commands._runtime import (
 from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runs import update_fields, run_path
 from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
+from research_cockpit.retention import load_mapping_argument
 from research_cockpit.model import (
     RunRecord,
     VALID_RUN_STATUSES,
@@ -50,6 +51,8 @@ def update_run(
     stop_command: str | None = None,
     progress_file: str | None = None,
     config_file: str | None = None,
+    resources: dict[str, Any] | None = None,
+    output_retention: dict[str, Any] | None = None,
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
@@ -80,6 +83,8 @@ def update_run(
         stop_command=stop_command,
         progress_file=progress_file,
         config_file=config_file,
+        resources=resources,
+        output_retention=output_retention,
     )
     if not updates:
         raise ValueError("At least one run field update is required")
@@ -155,6 +160,10 @@ def main() -> None:
     parser.add_argument("--stop-command")
     parser.add_argument("--progress-file")
     parser.add_argument("--config-file")
+    parser.add_argument("--resources-json")
+    parser.add_argument("--resources-file", type=Path)
+    parser.add_argument("--output-retention-json")
+    parser.add_argument("--output-retention-file", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--compact", action="store_true")
@@ -181,6 +190,17 @@ def main() -> None:
             stop_command=args.stop_command,
             progress_file=args.progress_file,
             config_file=args.config_file,
+            resources=load_mapping_argument(
+                json_text=args.resources_json,
+                file_path=args.resources_file,
+                field_name="resources",
+            ),
+            output_retention=load_mapping_argument(
+                json_text=args.output_retention_json,
+                file_path=args.output_retention_file,
+                field_name="output_retention",
+                validate_retention_class=True,
+            ),
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,

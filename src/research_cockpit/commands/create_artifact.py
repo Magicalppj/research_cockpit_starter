@@ -33,6 +33,7 @@ from research_cockpit.model import (
     validate_cockpit,
     validate_status,
 )
+from research_cockpit.retention import validate_retention
 
 
 def _optional_text(data: dict[str, Any], key: str) -> str | None:
@@ -78,7 +79,7 @@ def load_artifact_spec(path: Path) -> dict[str, Any]:
 
 
 def artifact_spec_from_mapping(data: dict[str, Any]) -> dict[str, Any]:
-    return {
+    spec = {
         "artifact_id": _required_text(data, "id"),
         "title": _required_text(data, "title"),
         "status": _optional_text(data, "status"),
@@ -87,6 +88,12 @@ def artifact_spec_from_mapping(data: dict[str, Any]) -> dict[str, Any]:
         "links": _string_mapping(data.get("links"), "links"),
         "link_to": _string_list(data.get("link_to", data.get("link-to")), "link_to"),
     }
+    artifact_kind = _optional_text(data, "artifact_kind")
+    if artifact_kind is not None:
+        spec["artifact_kind"] = artifact_kind
+    if data.get("retention") is not None:
+        spec["retention"] = validate_retention(data.get("retention"), "retention")
+    return spec
 
 
 def _merge_cli_over_file(
@@ -129,6 +136,8 @@ def create_artifact(
     summary: str = "",
     path: str | None = None,
     links: dict[str, str] | None = None,
+    artifact_kind: str | None = None,
+    retention: dict[str, Any] | None = None,
     link_to: list[str] | None = None,
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
@@ -160,6 +169,10 @@ def create_artifact(
         artifact_data["path"] = path
     if links:
         artifact_data["links"] = links
+    if artifact_kind:
+        artifact_data["artifact_kind"] = artifact_kind
+    if retention is not None:
+        artifact_data["retention"] = validate_retention(retention, "retention")
 
     candidate = dict(nodes)
     candidate[artifact_id] = ResearchNode.from_dict(artifact_data)
@@ -219,6 +232,8 @@ def create_artifact(
                 "status": node_status,
                 "path": path,
                 "links": sorted(links),
+                "artifact_kind": artifact_kind,
+                "retention_class": (retention or {}).get("class") if isinstance(retention, dict) else None,
                 "linked_to": linked_to,
             },
         },
@@ -272,6 +287,8 @@ def main() -> None:
             summary=spec.get("summary", ""),
             path=spec.get("path"),
             links=spec.get("links", {}),
+            artifact_kind=spec.get("artifact_kind"),
+            retention=spec.get("retention"),
             link_to=spec.get("link_to", []),
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,

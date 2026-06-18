@@ -223,6 +223,8 @@ class RunRecord:
     stop_command: str | None = None
     progress_file: str | None = None
     config_file: str | None = None
+    resources: dict[str, Any] | None = None
+    output_retention: dict[str, Any] | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -247,6 +249,8 @@ class RunRecord:
             stop_command=optional_str("stop_command"),
             progress_file=optional_str("progress_file"),
             config_file=optional_str("config_file"),
+            resources=data.get("resources") if isinstance(data.get("resources"), dict) else None,
+            output_retention=data.get("output_retention") if isinstance(data.get("output_retention"), dict) else None,
             raw=data,
         )
 
@@ -532,6 +536,7 @@ def validate_explicit_edges(nodes: dict[str, ResearchNode], explicit_edges: list
 
 def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
     from research_cockpit.baselines import validate_baseline_for_node
+    from research_cockpit.retention import validate_retention
 
     errors: list[str] = []
 
@@ -665,6 +670,22 @@ def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
         validate_list_refs(node.id, "depends_on")
         validate_list_refs(node.id, "blocked_by")
 
+    def validate_artifact_metadata(node: ResearchNode) -> None:
+        if node.type != "artifact":
+            if node.raw.get("retention") is not None:
+                errors.append(f"{node.id}: retention is only supported on artifact nodes")
+            if node.raw.get("artifact_kind") is not None:
+                errors.append(f"{node.id}: artifact_kind is only supported on artifact nodes")
+            return
+        artifact_kind = node.raw.get("artifact_kind")
+        if artifact_kind is not None and not str(artifact_kind).strip():
+            errors.append(f"{node.id}: artifact_kind cannot be empty")
+        if node.raw.get("retention") is not None:
+            try:
+                validate_retention(node.raw.get("retention"), "retention")
+            except ValueError as exc:
+                errors.append(f"{node.id}: {exc}")
+
     for node in nodes.values():
         if not node.id:
             errors.append("node has empty id")
@@ -700,10 +721,13 @@ def validate_nodes(nodes: dict[str, ResearchNode]) -> list[str]:
         validate_findings(node)
         validate_option_workstream(node)
         validate_experiment_assignment(node)
+        validate_artifact_metadata(node)
     return errors
 
 
 def validate_runs(runs: dict[str, RunRecord], nodes: dict[str, ResearchNode]) -> list[str]:
+    from research_cockpit.retention import validate_retention
+
     errors: list[str] = []
     for run in runs.values():
         if not run.run_id:
@@ -720,6 +744,13 @@ def validate_runs(runs: dict[str, RunRecord], nodes: dict[str, ResearchNode]) ->
                 f"{run.run_id}: experiment_id references {run.experiment_id!r} "
                 f"with type {nodes[run.experiment_id].type!r}; expected 'experiment'"
             )
+        if "resources" in run.raw and not isinstance(run.raw.get("resources"), dict):
+            errors.append(f"{run.run_id}: resources must be a mapping")
+        if "output_retention" in run.raw:
+            try:
+                validate_retention(run.raw.get("output_retention"), "output_retention")
+            except ValueError as exc:
+                errors.append(f"{run.run_id}: {exc}")
     return errors
 
 
@@ -1186,6 +1217,8 @@ def node_context(node: ResearchNode) -> dict[str, Any]:
         "supporting_decisions": node.raw.get("supporting_decisions", []),
         "linked_artifacts": node.raw.get("linked_artifacts", []),
         "links": _node_link_entries(node),
+        "artifact_kind": node.raw.get("artifact_kind"),
+        "retention": node.raw.get("retention"),
         "findings": node.raw.get("findings", []),
         "implementation_steps": node.raw.get("implementation_steps", []),
         "success_criteria": node.raw.get("success_criteria", []),

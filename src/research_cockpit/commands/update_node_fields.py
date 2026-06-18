@@ -15,6 +15,7 @@ from research_cockpit.commands._assignment_scope_cli import add_assignment_scope
 from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import ResearchNode, ValidationError, load_yaml, script_command, validate_cockpit
+from research_cockpit.retention import validate_retention
 
 
 SCALAR_FIELDS = {
@@ -63,6 +64,11 @@ BOOL_FIELDS = {
     "ready_for_agent",
 }
 
+METADATA_FIELDS = {
+    "artifact_kind",
+    "retention",
+}
+
 FIELD_ALIASES = {
     "tag": "tags",
     "success_criterion": "success_criteria",
@@ -88,9 +94,11 @@ def supported_field_names() -> list[str]:
         *SCALAR_FIELDS,
         *LIST_APPEND_FIELDS,
         *BOOL_FIELDS,
+        *METADATA_FIELDS,
         "clear_next_actions",
         "current_best_option",
         "replace_next_actions",
+        "metadata_file",
     ])
 
 
@@ -214,10 +222,12 @@ def apply_node_field_updates(
     scalar_updates: dict[str, Any] | None = None,
     list_appends: dict[str, list[str]] | None = None,
     bool_updates: dict[str, bool] | None = None,
+    metadata_updates: dict[str, Any] | None = None,
 ) -> list[str]:
     scalar_updates = scalar_updates or {}
     list_appends = list_appends or {}
     bool_updates = bool_updates or {}
+    metadata_updates = metadata_updates or {}
     if replace_next_actions is not None and list_appends.get("next_actions"):
         raise ValueError("--next-action cannot be used together with --replace-next-actions")
 
@@ -230,6 +240,9 @@ def apply_node_field_updates(
     for field_name in bool_updates:
         if field_name not in BOOL_FIELDS:
             raise ValueError(f"Unsupported boolean node field: {field_name}")
+    for field_name in metadata_updates:
+        if field_name not in METADATA_FIELDS:
+            raise ValueError(f"Unsupported metadata field: {field_name}")
 
     node = nodes[node_id]
     touched: list[str] = []
@@ -253,6 +266,18 @@ def apply_node_field_updates(
     for field_name, value in bool_updates.items():
         data[field_name] = bool(value)
         touched.append(field_name)
+    if metadata_updates:
+        if node.type != "artifact":
+            raise ValueError("--metadata-file is only supported for artifact nodes")
+        if "artifact_kind" in metadata_updates:
+            artifact_kind = str(metadata_updates["artifact_kind"]).strip()
+            if not artifact_kind:
+                raise ValueError("artifact_kind cannot be empty")
+            data["artifact_kind"] = artifact_kind
+            touched.append("artifact_kind")
+        if "retention" in metadata_updates:
+            data["retention"] = validate_retention(metadata_updates["retention"], "retention")
+            touched.append("retention")
     return sorted(set(touched))
 
 
@@ -270,6 +295,7 @@ def update_node_fields(
     scalar_updates: dict[str, Any] | None = None,
     list_appends: dict[str, list[str]] | None = None,
     bool_updates: dict[str, bool] | None = None,
+    metadata_updates: dict[str, Any] | None = None,
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
@@ -279,11 +305,19 @@ def update_node_fields(
     scalar_updates = scalar_updates or {}
     list_appends = list_appends or {}
     bool_updates = bool_updates or {}
+    metadata_updates = metadata_updates or {}
     if clear_next_actions and replace_next_actions is not None:
         raise ValueError("--clear-next-actions cannot be used together with --replace-next-actions")
     if clear_next_actions:
         replace_next_actions = list_appends.pop("next_actions", [])
-    if current_best_option is None and replace_next_actions is None and not scalar_updates and not list_appends and not bool_updates:
+    if (
+        current_best_option is None
+        and replace_next_actions is None
+        and not scalar_updates
+        and not list_appends
+        and not bool_updates
+        and not metadata_updates
+    ):
         raise ValueError("At least one field update is required")
     if replace_next_actions is not None and list_appends.get("next_actions"):
         raise ValueError("--next-action cannot be used together with --replace-next-actions")
@@ -316,6 +350,7 @@ def update_node_fields(
         scalar_updates=scalar_updates,
         list_appends=list_appends,
         bool_updates=bool_updates,
+        metadata_updates=metadata_updates,
     )
     data["updated_at"] = str(date.today())
 
@@ -406,6 +441,7 @@ def main() -> None:
     parser.add_argument("--derived-from", action="append", dest="derived_from")
     parser.add_argument("--depends-on", action="append", dest="depends_on")
     parser.add_argument("--blocked-by", action="append", dest="blocked_by")
+    parser.add_argument("--metadata-file", type=Path)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--compact", action="store_true")
@@ -455,6 +491,15 @@ def main() -> None:
         bool_updates["ready_for_agent"] = True
     elif args.not_ready_for_agent:
         bool_updates["ready_for_agent"] = False
+    metadata_updates: dict[str, Any] = {}
+    if args.metadata_file:
+        metadata_data = load_yaml(args.metadata_file)
+        if not isinstance(metadata_data, dict):
+            raise SystemExit("--metadata-file must contain a mapping")
+        unsupported = sorted(set(metadata_data) - METADATA_FIELDS)
+        if unsupported:
+            raise SystemExit(f"Unsupported metadata fields: {', '.join(unsupported)}")
+        metadata_updates = dict(metadata_data)
 
     try:
         result = update_node_fields(
@@ -466,6 +511,7 @@ def main() -> None:
             scalar_updates=scalar_updates,
             list_appends=list_appends,
             bool_updates=bool_updates,
+            metadata_updates=metadata_updates,
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,

@@ -19,6 +19,8 @@ RUN_OPTIONAL_FIELDS = (
     "stop_command",
     "progress_file",
     "config_file",
+    "resources",
+    "output_retention",
 )
 
 RUN_FIELDS = ("run_id", "status", "experiment_id", *RUN_OPTIONAL_FIELDS)
@@ -89,6 +91,8 @@ def compact_run_payload(run: RunRecord, nodes: dict[str, ResearchNode] | None = 
         "output_root": run.output_root,
         "tmux_session": run.tmux_session,
         "pid": run.pid,
+        "resources": run.resources,
+        "output_retention": run.output_retention,
     }
     if nodes and run.experiment_id in nodes:
         payload["experiment_title"] = nodes[run.experiment_id].title
