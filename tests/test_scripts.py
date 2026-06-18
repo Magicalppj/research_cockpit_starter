@@ -5061,7 +5061,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "run_id": "run_cli_active_resources_list",
                 "status": "running",
                 "experiment_id": "exp_t5",
-                "resources": ["gpu:1"],
+                "resources": {"gpu_ids": ["1"]},
             },
         )
 
@@ -5076,6 +5076,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             text=True,
             check=False,
         )
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         payload = json.loads(out.stdout)
         by_id = {item["run_id"]: item for item in payload["runs"]}
         manifest = {item["name"]: item for item in agent_command_manifest()}
@@ -5090,11 +5091,10 @@ class ScriptBehaviorTests(unittest.TestCase):
             check=False,
         )
 
-        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         self.assertEqual(by_id["run_cli_active_resources"]["resources"]["ports"], [9001])
-        self.assertEqual(by_id["run_cli_active_resources_list"]["resources"], ["gpu:1"])
+        self.assertEqual(by_id["run_cli_active_resources_list"]["resources"]["gpu_ids"], ["1"])
         self.assertEqual(human_out.returncode, 0, human_out.stdout + human_out.stderr)
-        self.assertIn("resources=list", human_out.stdout)
+        self.assertIn("resources=gpu_ids", human_out.stdout)
         self.assertIn("active-resources", manifest)
         self.assertFalse(manifest["active-resources"]["mutating"])
         self.assertIn("maintenance", manifest["active-resources"]["workflow_tags"])
