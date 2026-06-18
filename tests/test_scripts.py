@@ -6789,6 +6789,52 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(out.returncode, 1)
         self.assertIn("terminal_parent_has_active_descendants", {item["id"] for item in cli_payload["warnings"]})
 
+    def test_semantic_lint_warns_on_missing_retention_metadata(self) -> None:
+        output_path = self.root / "artifacts" / "run_retention_missing"
+        output_path.mkdir(parents=True, exist_ok=True)
+        (output_path / "metrics.json").write_text("{}", encoding="utf-8")
+        save_yaml(
+            self.root / "runs" / "run_missing_retention.yaml",
+            {
+                "run_id": "run_missing_retention",
+                "status": "completed",
+                "experiment_id": "exp_t5",
+                "output_root": "artifacts/run_retention_missing",
+            },
+        )
+        artifact_path = self.root / "artifacts" / "artifact_retention_missing"
+        artifact_path.mkdir(parents=True, exist_ok=True)
+        (artifact_path / "payload.bin").write_bytes(b"large")
+        write_node(
+            self.root,
+            {
+                "id": "artifact_retention_missing",
+                "type": "artifact",
+                "title": "Large artifact without retention",
+                "status": "done",
+                "path": "artifacts/artifact_retention_missing",
+            },
+        )
+
+        validation_errors = validate_cockpit(self.root)
+        payload = semantic_lint(self.root, artifact_min_size_bytes=1)
+
+        self.assertEqual(validation_errors, [])
+        self.assertTrue(payload["valid"])
+        warning_ids = {warning["id"] for warning in payload["warnings"]}
+        self.assertIn("run_completed_without_retention_policy", warning_ids)
+        self.assertIn("artifact_missing_retention_policy", warning_ids)
+        run_warning = next(
+            warning for warning in payload["warnings"] if warning["id"] == "run_completed_without_retention_policy"
+        )
+        artifact_warning = next(
+            warning for warning in payload["warnings"] if warning["id"] == "artifact_missing_retention_policy"
+        )
+        self.assertEqual(run_warning["run_id"], "run_missing_retention")
+        self.assertEqual(artifact_warning["node_id"], "artifact_retention_missing")
+        self.assertIn("complete-run", run_warning["command"])
+        self.assertIn("update-node-fields", artifact_warning["command"])
+
     def test_semantic_lint_does_not_suggest_invalid_followup_for_failed_experiment(self) -> None:
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
         experiment["status"] = "failed"

@@ -12,10 +12,12 @@ from research_cockpit.lifecycle_guards import (
     TERMINAL_PARENT_ACTIVE_DESCENDANTS_ERROR,
     active_descendant_blockers,
 )
-from research_cockpit.model import load_nodes, load_yaml, validate_cockpit
+from research_cockpit.maintenance import build_artifact_retention_audit
+from research_cockpit.model import load_nodes, load_runs, load_yaml, ValidationError, validate_cockpit
 from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
+DEFAULT_ARTIFACT_RETENTION_MIN_SIZE_BYTES = 10 * 1024 * 1024 * 1024
 
 TERMINAL_STATUSES = {
     "accepted",
@@ -83,7 +85,68 @@ def _mentions_node_id(action: str, node_id: str) -> bool:
     return re.search(pattern, action) is not None
 
 
-def semantic_lint(root: Path = ROOT) -> dict[str, Any]:
+def _missing_run_retention_warnings(root: Path) -> list[dict[str, Any]]:
+    try:
+        runs = load_runs(root)
+    except ValidationError:
+        return []
+    warnings: list[dict[str, Any]] = []
+    for run in sorted(runs.values(), key=lambda item: item.run_id):
+        if run.status != "completed" or not run.output_root or run.output_retention is not None:
+            continue
+        warnings.append(_warning(
+            "run_completed_without_retention_policy",
+            f"completed run {run.run_id!r} has output_root but no output_retention policy.",
+            command=(
+                f"research-cockpit complete-run --root {root} --id {run.run_id} "
+                "--status completed --output-retention-file output_retention.yaml --no-build"
+            ),
+            extra={
+                "run_id": run.run_id,
+                "experiment_id": run.experiment_id,
+                "output_root": run.output_root,
+            },
+        ))
+    return warnings
+
+
+def _missing_artifact_retention_warnings(
+    root: Path,
+    *,
+    artifact_min_size_bytes: int,
+) -> list[dict[str, Any]]:
+    audit = build_artifact_retention_audit(
+        root,
+        repo=root.parent,
+        min_size_bytes=artifact_min_size_bytes,
+    )
+    warnings: list[dict[str, Any]] = []
+    for artifact in audit.get("artifacts", []):
+        if not artifact.get("missing_retention"):
+            continue
+        artifact_id = str(artifact["artifact_id"])
+        warnings.append(_warning(
+            "artifact_missing_retention_policy",
+            f"artifact {artifact_id!r} is large but has no retention policy.",
+            node_id=artifact_id,
+            command=(
+                f"research-cockpit update-node-fields --root {root} --id {artifact_id} "
+                "--metadata-file retention.yaml --no-build"
+            ),
+            extra={
+                "path": artifact.get("path"),
+                "total_size_bytes": artifact.get("total_size_bytes"),
+                "min_size_bytes": audit.get("min_size_bytes"),
+            },
+        ))
+    return warnings
+
+
+def semantic_lint(
+    root: Path = ROOT,
+    *,
+    artifact_min_size_bytes: int = DEFAULT_ARTIFACT_RETENTION_MIN_SIZE_BYTES,
+) -> dict[str, Any]:
     nodes = load_nodes(root)
     current = load_yaml(root / "current_state.yaml")
     validation_errors = validate_cockpit(root, nodes, current)
@@ -233,6 +296,13 @@ def semantic_lint(root: Path = ROOT) -> dict[str, Any]:
                     f"option {node.id!r} workstream is active but all child experiments are terminal.",
                     node_id=node.id,
                 ))
+
+    warnings.extend(_missing_run_retention_warnings(root))
+    if not validation_errors:
+        warnings.extend(_missing_artifact_retention_warnings(
+            root,
+            artifact_min_size_bytes=artifact_min_size_bytes,
+        ))
 
     return {
         "ok": not warnings,
