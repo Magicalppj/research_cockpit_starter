@@ -52,8 +52,11 @@ Use filtered command discovery when you only need one workflow surface:
 
 ```sh
 research-cockpit commands --json --compact --workflow focus
+research-cockpit commands --json --compact --group context
 research-cockpit commands --json --compact --name context
 ```
+
+Compact command discovery includes `group`, `canonical_name`, `status`, `aliases`, and `input_modes`. Use `--group` for a stable workflow surface such as `context`, `graph`, `run`, `artifact`, or `maintenance`; use `--workflow` when you need cross-cutting tags such as `focus` or `evidence`.
 
 For a downstream agent launched in a git worktree, start from the canonical root scoped context instead of unscoped global bootstrap:
 

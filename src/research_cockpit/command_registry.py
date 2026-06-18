@@ -68,10 +68,114 @@ COMMAND_MODULES: dict[str, str] = {
     "create-note": "create_note",
 }
 
+GROUPED_COMMAND_ALIASES: dict[str, dict[str, str]] = {
+    "artifact": {
+        "create": "create-artifact",
+        "ingest": "ingest-artifact",
+        "link": "link-artifact",
+    },
+    "run": {
+        "create": "create-run",
+        "update": "update-run",
+        "complete": "complete-run",
+        "list": "list-runs",
+        "context": "run-context",
+    },
+}
+
+COMMAND_STATUS_CHOICES = ("active", "compatibility", "deprecated")
+
+COMMAND_GROUP_BY_COMMAND = {
+    "init": "maintenance",
+    "ui": "ui",
+    "bootstrap": "context",
+    "validate": "maintenance",
+    "lint": "maintenance",
+    "repair-interaction-log": "maintenance",
+    "build": "build",
+    "smoke": "maintenance",
+    "search": "context",
+    "suggest-next-actions": "focus",
+    "commands": "maintenance",
+    "node-context": "context",
+    "context": "context",
+    "assignment-view": "context",
+    "option-workstream-context": "context",
+    "agent-session-context": "context",
+    "check-decision-acceptance": "decision",
+    "add-node": "graph",
+    "apply-graph-plan": "graph",
+    "create-workstream": "graph",
+    "close-branch": "graph",
+    "update-status": "graph",
+    "set-focus": "focus",
+    "set-agent-focus": "focus",
+    "set-cursor": "focus",
+    "sync-focus-actions": "focus",
+    "claim-option": "context",
+    "claim-workstream": "context",
+    "start-agent-session": "context",
+    "create-run": "run",
+    "update-run": "run",
+    "complete-run": "run",
+    "list-runs": "run",
+    "active-resources": "maintenance",
+    "worktree-audit": "maintenance",
+    "branch-audit": "maintenance",
+    "artifact-retention-audit": "maintenance",
+    "maintenance-audit": "maintenance",
+    "worktree-closeout": "maintenance",
+    "run-context": "run",
+    "record-gate-result": "run",
+    "ingest-gate-result": "run",
+    "report-option-workstream": "context",
+    "finalize-workstream": "context",
+    "import-worktree-findings": "maintenance",
+    "ingest-artifact": "artifact",
+    "record-finding": "run",
+    "update-finding": "run",
+    "create-artifact": "artifact",
+    "link-artifact": "artifact",
+    "complete-experiment": "run",
+    "close-current-experiment": "run",
+    "complete-experiments": "run",
+    "create-followup-experiment": "graph",
+    "migrate-terminal-next-actions": "graph",
+    "promote-decision": "decision",
+    "update-decision-evidence": "decision",
+    "update-decision-checklist": "decision",
+    "accept-decision": "decision",
+    "set-baseline": "decision",
+    "update-node-fields": "graph",
+    "update-workstream-fields": "context",
+    "apply-suggestion": "focus",
+    "update-suggestion-state": "focus",
+    "cleanup-suggestion-lifecycle": "focus",
+    "create-note": "graph",
+}
+
+COMMAND_GROUP_CHOICES = tuple(sorted(set(COMMAND_GROUP_BY_COMMAND.values())))
+
+AUDIT_COMMANDS = {
+    "active-resources",
+    "artifact-retention-audit",
+    "branch-audit",
+    "check-decision-acceptance",
+    "maintenance-audit",
+    "suggest-next-actions",
+    "worktree-audit",
+    "worktree-closeout",
+}
+
 SCRIPT_TO_SUBCOMMAND = {
     f"{module_name}.py": command_name
     for command_name, module_name in COMMAND_MODULES.items()
 }
+
+GROUPED_ALIASES_BY_COMMAND: dict[str, list[str]] = {}
+for group_name, actions in GROUPED_COMMAND_ALIASES.items():
+    for action_name, command_name in actions.items():
+        GROUPED_ALIASES_BY_COMMAND.setdefault(command_name, []).append(f"{group_name} {action_name}")
 
 
 def subcommand_for_script(script_name: str) -> str:
@@ -85,3 +189,24 @@ def cli_command_for_script(script_name: str, *parts: str) -> str:
     command = ["research-cockpit", subcommand_for_script(script_name)]
     command.extend(parts)
     return " ".join(str(part) for part in command if part not in ("", None))
+
+
+def grouped_aliases_for_command(command_name: str) -> list[str]:
+    return sorted(GROUPED_ALIASES_BY_COMMAND.get(command_name, []))
+
+
+def command_group_for_command(command_name: str) -> str:
+    try:
+        return COMMAND_GROUP_BY_COMMAND[command_name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown Research Cockpit command group target: {command_name}") from exc
+
+
+def command_lifecycle_for_command(command_name: str, *, mutating: bool) -> str:
+    if command_name == "build":
+        return "build"
+    if command_name in AUDIT_COMMANDS:
+        return "audit"
+    if mutating:
+        return "mutate"
+    return "read"

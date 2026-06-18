@@ -26,6 +26,12 @@ os.environ["PYTHONPATH"] = str(SRC_DIR) if not existing_pythonpath else str(SRC_
 
 from research_cockpit.model import ValidationError, load_nodes, load_yaml, save_yaml, validate_cockpit
 from research_cockpit.assignment_scope import AssignmentScopeError
+from research_cockpit.command_registry import (
+    COMMAND_GROUP_BY_COMMAND,
+    COMMAND_GROUP_CHOICES,
+    COMMAND_MODULES,
+    GROUPED_COMMAND_ALIASES,
+)
 from research_cockpit.baselines import (
     build_accepted_decision_rows,
     build_accepted_option_rows,
@@ -6078,10 +6084,24 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_name["create-artifact"]["file_schema"], "artifact_v1")
         self.assertIn("link_to:", by_name["create-artifact"]["example_file"])
         self.assertIn("--print-schema", by_name["create-artifact"]["schema_command"])
+        self.assertIn("--file", by_name["create-artifact"]["supported_flags"])
+        self.assertIn("--print-schema", by_name["create-artifact"]["supported_flags"])
+        self.assertIn("artifact_kind", by_name["create-artifact"]["fields_supported"])
+        self.assertIn("retention", by_name["create-artifact"]["fields_supported"])
+        self.assertEqual(by_name["create-artifact"]["group"], "artifact")
+        self.assertEqual(by_name["create-artifact"]["canonical_name"], "create-artifact")
+        self.assertEqual(by_name["create-artifact"]["status"], "active")
+        self.assertIn("artifact create", by_name["create-artifact"]["aliases"])
+        self.assertIn("flags", by_name["create-artifact"]["input_modes"])
+        self.assertIn("file", by_name["create-artifact"]["input_modes"])
+        self.assertIn("schema", by_name["create-artifact"]["input_modes"])
         self.assertTrue(by_name["link-artifact"]["supports_no_build"])
+        self.assertEqual(by_name["link-artifact"]["group"], "artifact")
+        self.assertIn("flags", by_name["link-artifact"]["input_modes"])
         self.assertFalse(by_name["context"]["mutating"])
         self.assertTrue(by_name["context"]["supports_json"])
         self.assertTrue(by_name["context"]["supports_compact"])
+        self.assertEqual(by_name["context"]["group"], "context")
         self.assertIn("focus", by_name["context"]["workflow_tags"])
         self.assertIn("--assignment", by_name["bootstrap"]["supported_flags"])
         for command_name in (
@@ -6106,6 +6126,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["add-node"]["supports_no_build"])
         self.assertTrue(by_name["add-node"]["supports_show_diff"])
         self.assertIn("graph", by_name["add-node"]["workflow_tags"])
+        self.assertEqual(by_name["add-node"]["group"], "graph")
         self.assertTrue(by_name["add-node"]["writes_truth_source"])
         self.assertTrue(by_name["add-node"]["writes_generated_files"])
         self.assertTrue(by_name["add-node"]["can_batch"])
@@ -6144,6 +6165,16 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("option -> problem -> option", by_name["create-workstream"]["hierarchy_guidance"])
         self.assertEqual(by_name["create-workstream"]["status_aliases"], {"option": {"planned": "open"}})
         self.assertTrue(by_name["sync-focus-actions"]["supports_dry_run"])
+        for command in manifest:
+            with self.subTest(command=command["name"]):
+                self.assertIn("group", command)
+                self.assertIn("canonical_name", command)
+                self.assertIn("status", command)
+                self.assertIn("aliases", command)
+                self.assertIn("input_modes", command)
+                self.assertEqual(command["status"], "active")
+                self.assertIsInstance(command["aliases"], list)
+                self.assertIn("flags", command["input_modes"])
         self.assertTrue(by_name["sync-focus-actions"]["supports_compact"])
         self.assertTrue(by_name["complete-experiment"]["mutating"])
         self.assertTrue(by_name["complete-experiment"]["supports_json"])
@@ -6329,18 +6360,132 @@ class ScriptBehaviorTests(unittest.TestCase):
             text=True,
             check=False,
         )
+        group_out = subprocess.run(
+            [*cli_command("commands"), "--json", "--compact", "--group", "artifact"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        active_status_out = subprocess.run(
+            [*cli_command("commands"), "--json", "--compact", "--group", "artifact", "--status", "active"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        deprecated_out = subprocess.run(
+            [*cli_command("commands"), "--json", "--compact", "--deprecated"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
         by_name_payload = json.loads(by_name_out.stdout)
         workflow_payload = json.loads(workflow_out.stdout)
+        group_payload = json.loads(group_out.stdout)
+        active_status_payload = json.loads(active_status_out.stdout)
+        deprecated_payload = json.loads(deprecated_out.stdout)
 
         self.assertEqual(by_name_out.returncode, 0, by_name_out.stderr or by_name_out.stdout)
         self.assertEqual([item["name"] for item in by_name_payload["commands"]], ["context"])
         self.assertTrue(by_name_payload["commands"][0]["supports_compact"])
+        self.assertEqual(by_name_payload["commands"][0]["group"], "context")
+        self.assertEqual(by_name_payload["commands"][0]["status"], "active")
         self.assertEqual(workflow_out.returncode, 0, workflow_out.stderr or workflow_out.stdout)
         self.assertIn("complete-experiments", {item["name"] for item in workflow_payload["commands"]})
         self.assertIn("create-artifact", {item["name"] for item in workflow_payload["commands"]})
         self.assertIn("ingest-artifact", {item["name"] for item in workflow_payload["commands"]})
         self.assertIn("start-agent-session", {item["name"] for item in workflow_payload["commands"]})
         self.assertTrue(all("evidence" in item["workflow_tags"] for item in workflow_payload["commands"]))
+        self.assertEqual(group_out.returncode, 0, group_out.stderr or group_out.stdout)
+        self.assertIn("create-artifact", {item["name"] for item in group_payload["commands"]})
+        self.assertIn("ingest-artifact", {item["name"] for item in group_payload["commands"]})
+        self.assertIn("link-artifact", {item["name"] for item in group_payload["commands"]})
+        self.assertTrue(all(item["group"] == "artifact" for item in group_payload["commands"]))
+        self.assertEqual(active_status_out.returncode, 0, active_status_out.stderr or active_status_out.stdout)
+        self.assertEqual(
+            {item["name"] for item in active_status_payload["commands"]},
+            {item["name"] for item in group_payload["commands"]},
+        )
+        self.assertTrue(all(item["status"] == "active" for item in active_status_payload["commands"]))
+        self.assertEqual(deprecated_out.returncode, 0, deprecated_out.stderr or deprecated_out.stdout)
+        self.assertTrue(all(item["status"] != "active" for item in deprecated_payload["commands"]))
+
+    def test_command_contract_group_and_alias_metadata_are_consistent(self) -> None:
+        manifest = agent_command_manifest()
+        by_name = {item["name"]: item for item in manifest}
+        command_names = set(by_name)
+
+        self.assertEqual(command_names, {*COMMAND_MODULES, "init", "ui"})
+        self.assertEqual(set(COMMAND_GROUP_BY_COMMAND), command_names)
+        self.assertEqual(set(COMMAND_GROUP_CHOICES), {str(item["group"]) for item in manifest})
+
+        for group_name, actions in GROUPED_COMMAND_ALIASES.items():
+            with self.subTest(group=group_name):
+                self.assertIn(group_name, COMMAND_GROUP_CHOICES)
+            for action_name, command_name in actions.items():
+                with self.subTest(group=group_name, action=action_name):
+                    self.assertIn(command_name, command_names)
+                    self.assertIn(f"{group_name} {action_name}", by_name[command_name]["aliases"])
+
+    def test_grouped_command_aliases_route_without_replacing_top_level_commands(self) -> None:
+        group_help = subprocess.run(
+            [sys.executable, "-m", "research_cockpit.cli", "artifact", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        artifact_create_help = subprocess.run(
+            [sys.executable, "-m", "research_cockpit.cli", "artifact", "create", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        run_list_help = subprocess.run(
+            [sys.executable, "-m", "research_cockpit.cli", "run", "list", "--help"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        artifact_schema = subprocess.run(
+            [*cli_command("create-artifact"), "--print-schema"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        artifact_alias_schema = subprocess.run(
+            [sys.executable, "-m", "research_cockpit.cli", "artifact", "create", "--print-schema"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        run_list = subprocess.run(
+            [*cli_command("list-runs"), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        run_alias_list = subprocess.run(
+            [sys.executable, "-m", "research_cockpit.cli", "run", "list", "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(group_help.returncode, 0, group_help.stderr or group_help.stdout)
+        self.assertIn("research-cockpit artifact <action>", group_help.stdout)
+        self.assertIn("create", group_help.stdout)
+        self.assertIn("ingest", group_help.stdout)
+        self.assertEqual(artifact_create_help.returncode, 0, artifact_create_help.stderr or artifact_create_help.stdout)
+        self.assertIn("research-cockpit artifact create", artifact_create_help.stdout)
+        self.assertIn("--print-schema", artifact_create_help.stdout)
+        self.assertEqual(run_list_help.returncode, 0, run_list_help.stderr or run_list_help.stdout)
+        self.assertIn("research-cockpit run list", run_list_help.stdout)
+        self.assertIn("--status", run_list_help.stdout)
+        self.assertEqual(artifact_schema.returncode, 0, artifact_schema.stderr or artifact_schema.stdout)
+        self.assertEqual(artifact_alias_schema.returncode, 0, artifact_alias_schema.stderr or artifact_alias_schema.stdout)
+        self.assertEqual(artifact_alias_schema.stdout, artifact_schema.stdout)
+        self.assertEqual(run_list.returncode, 0, run_list.stderr or run_list.stdout)
+        self.assertEqual(run_alias_list.returncode, 0, run_alias_list.stderr or run_alias_list.stdout)
+        self.assertEqual(json.loads(run_alias_list.stdout), json.loads(run_list.stdout))
 
     def test_workflow_metrics_detects_manual_truth_patch_even_after_build(self) -> None:
         metrics = workflow_metrics(

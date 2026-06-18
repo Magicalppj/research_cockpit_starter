@@ -3,17 +3,33 @@ from __future__ import annotations
 import argparse
 import json
 
-from research_cockpit.command_registry import subcommand_for_script
+from research_cockpit.command_registry import (
+    COMMAND_GROUP_CHOICES,
+    COMMAND_STATUS_CHOICES,
+    command_group_for_command,
+    command_lifecycle_for_command,
+    grouped_aliases_for_command,
+    subcommand_for_script,
+)
 from research_cockpit.commands.file_schemas import file_schema_for_script
 from research_cockpit.commands.update_node_fields import supported_field_names
 
 WORKFLOW_CHOICES = ("graph", "evidence", "decision", "focus", "maintenance", "read")
+GROUP_CHOICES = COMMAND_GROUP_CHOICES
+STATUS_CHOICES = COMMAND_STATUS_CHOICES
 STATUS_ALIASES = {"option": {"planned": "open"}}
 CONFLICT_POLICY = "Truth-source mutation fails without writing if target files changed after command planning; reread context and retry."
 COMPACT_COMMAND_KEYS = {
     "name",
+    "canonical_name",
     "purpose",
     "command",
+    "group",
+    "lifecycle",
+    "status",
+    "aliases",
+    "replacement",
+    "input_modes",
     "workflow_tags",
     "mutating",
     "supports_json",
@@ -978,8 +994,17 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": True,
         "supports_no_build": True,
         "supports_compact": True,
-        "extra_supported_flags": ASSIGNMENT_SCOPE_FLAGS,
-        "fields_supported": ["title", "status", "summary", "path", "links", "linked_artifacts"],
+        "extra_supported_flags": ["--file", "--print-schema", *ASSIGNMENT_SCOPE_FLAGS],
+        "fields_supported": [
+            "title",
+            "status",
+            "summary",
+            "path",
+            "links",
+            "linked_artifacts",
+            "artifact_kind",
+            "retention",
+        ],
         **file_schema_for_script("create_artifact.py"),
         "recommended_when": "Record experiment result folders, review bundles, metrics directories, or other evidence artifacts.",
     },
@@ -1244,6 +1269,15 @@ def _flag_support(row: dict[str, object]) -> tuple[list[str], list[str]]:
     return sorted(supported), sorted(unsupported)
 
 
+def _input_modes(row: dict[str, object], supported_flags: list[str]) -> list[str]:
+    modes = ["flags"]
+    if row.get("file_schema") or any(flag == "--file" or flag.endswith("-file") for flag in supported_flags):
+        modes.append("file")
+    if row.get("schema_command"):
+        modes.append("schema")
+    return modes
+
+
 def _batch_policy(
     *,
     mutating: bool,
@@ -1272,6 +1306,9 @@ def agent_command_manifest(
     compact: bool = False,
     name: str | None = None,
     workflow: str | None = None,
+    group: str | None = None,
+    status: str | None = None,
+    deprecated: bool = False,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for command in COMMANDS:
@@ -1290,6 +1327,11 @@ def agent_command_manifest(
         row = {
             **command,
             "name": subcommand,
+            "canonical_name": str(command.get("canonical_name", subcommand)),
+            "group": command_group_for_command(subcommand),
+            "status": str(command.get("status", "active")),
+            "aliases": [*list(command.get("aliases", [])), *grouped_aliases_for_command(subcommand)],
+            "replacement": command.get("replacement"),
             "capability_file": CAPABILITY_BY_COMMAND[command_name],
             "command": " ".join(["research-cockpit", subcommand, *required_flags]),
             "python_module_command": " ".join(
@@ -1311,6 +1353,7 @@ def agent_command_manifest(
             "rebuild_default": rebuild_default,
             "fields_supported": command.get("fields_supported", []),
             "workflow_tags": WORKFLOW_TAGS_BY_COMMAND.get(subcommand, []),
+            "lifecycle": command_lifecycle_for_command(subcommand, mutating=mutating),
             "supports_show_diff": subcommand in SHOW_DIFF_COMMANDS,
             "supports_root": bool(command.get("supports_root", True)),
         }
@@ -1318,7 +1361,14 @@ def agent_command_manifest(
         row.pop("extra_supported_flags", None)
         row["supported_flags"] = supported_flags
         row["unsupported_flags"] = unsupported_flags
+        row["input_modes"] = _input_modes(row, supported_flags)
         if workflow and workflow not in row["workflow_tags"]:
+            continue
+        if group and row["group"] != group:
+            continue
+        if status and row["status"] != status:
+            continue
+        if deprecated and row["status"] == "active":
             continue
         if compact:
             row = {key: value for key, value in row.items() if key in COMPACT_COMMAND_KEYS}
@@ -1332,9 +1382,25 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true", help="Print a short agent discovery payload.")
     parser.add_argument("--name", help="Return only one command by subcommand name.")
     parser.add_argument("--workflow", choices=WORKFLOW_CHOICES, help="Return commands tagged for one workflow.")
+    parser.add_argument("--group", choices=GROUP_CHOICES, help="Return commands in one canonical command group.")
+    parser.add_argument("--status", choices=STATUS_CHOICES, help="Return commands with one lifecycle status.")
+    parser.add_argument(
+        "--deprecated",
+        action="store_true",
+        help="Return only compatibility or deprecated commands.",
+    )
     args = parser.parse_args()
+    if args.status and args.deprecated:
+        parser.error("--status and --deprecated cannot be combined")
 
-    commands = agent_command_manifest(compact=args.compact, name=args.name, workflow=args.workflow)
+    commands = agent_command_manifest(
+        compact=args.compact,
+        name=args.name,
+        workflow=args.workflow,
+        group=args.group,
+        status=args.status,
+        deprecated=args.deprecated,
+    )
     if args.json:
         print(json.dumps({"commands": commands}, indent=2, ensure_ascii=False))
         return

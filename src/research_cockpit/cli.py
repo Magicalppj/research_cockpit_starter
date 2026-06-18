@@ -9,18 +9,18 @@ import shutil
 import subprocess
 import sys
 
-from research_cockpit.command_registry import COMMAND_MODULES
+from research_cockpit.command_registry import COMMAND_MODULES, GROUPED_COMMAND_ALIASES
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.paths import default_data_root, plugin_root
 
-COMMAND_CHOICES = [*COMMAND_MODULES.keys(), "init", "ui"]
+COMMAND_CHOICES = [*COMMAND_MODULES.keys(), "init", "ui", *GROUPED_COMMAND_ALIASES.keys()]
 
 
-def _run_module(command_name: str, argv: list[str]) -> None:
+def _run_module(command_name: str, argv: list[str], *, display_command_name: str | None = None) -> None:
     module_name = COMMAND_MODULES[command_name]
     module = import_module(f"research_cockpit.commands.{module_name}")
     old_argv = sys.argv
-    sys.argv = [f"research-cockpit {command_name}", *argv]
+    sys.argv = [f"research-cockpit {display_command_name or command_name}", *argv]
     try:
         module.main()
     except MutationError as exc:
@@ -115,6 +115,15 @@ def _top_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _print_group_help(group_name: str) -> None:
+    actions = GROUPED_COMMAND_ALIASES[group_name]
+    print(f"usage: research-cockpit {group_name} <action> [args]")
+    print()
+    print("actions:")
+    for action_name, command_name in sorted(actions.items()):
+        print(f"  {action_name:<12} alias for research-cockpit {command_name}")
+
+
 def main(argv: list[str] | None = None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = _top_parser()
@@ -135,6 +144,19 @@ def main(argv: list[str] | None = None) -> None:
         return
     if command == "ui":
         ui_command(rest)
+        return
+    if command in GROUPED_COMMAND_ALIASES:
+        if not rest or rest[0] in ("-h", "--help"):
+            _print_group_help(command)
+            return
+        action = rest[0]
+        actions = GROUPED_COMMAND_ALIASES[command]
+        if action not in actions:
+            parser.error(
+                f"argument action: invalid choice: {action!r} "
+                f"(choose from {', '.join(repr(item) for item in sorted(actions))})"
+            )
+        _run_module(actions[action], rest[1:], display_command_name=f"{command} {action}")
         return
     _run_module(command, rest)
 
