@@ -47,6 +47,23 @@ Temporary worktrees usually do not need:
 
 The canonical cockpit root should still be passed as an absolute `--root` pointing at the main checkout.
 
+Research Cockpit can generate a sparse worktree command plan:
+
+```sh
+research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label cache_probe --objective "Run cache probe" --branch agent/option_x-cache_probe --worktree ../worktrees/cache_probe --base main --dry-run --json --sparse --sparse-profile ml-experiment
+```
+
+The `ml-experiment` profile is plan-only. It recommends `git worktree add --no-checkout`, `git sparse-checkout init --no-cone`, a pattern-based `sparse-checkout set`, and `git checkout`. The profile starts from the repository root and excludes:
+
+- `/research_cockpit/`
+- `/outputs/`
+- `/logs/`
+- `/data/`
+- `/datasets/**/artifacts/`
+- `/.venv/`, `/.venvs/`, and `/venv/`
+
+Run the generated command sequence manually after review. Then launch or record the agent session with the canonical main-checkout `research_cockpit/` root; do not initialize or mutate a worktree-local cockpit root.
+
 ## Watcher Excludes
 
 Recommended excludes for IDEs, file watchers, and repo-wide developer scanners:

@@ -1928,6 +1928,58 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["git_command"][7], str(expected_worktree))
         self.assertEqual(payload["handoff"]["worktree"], str(expected_worktree))
 
+    def test_start_agent_session_sparse_dry_run_outputs_command_plan(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+
+        payload = start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=worktree,
+            base="main",
+            dry_run=True,
+            sparse=True,
+            sparse_profile="ml-experiment",
+        )
+
+        sparse = payload["sparse_worktree"]
+        self.assertTrue(sparse["enabled"])
+        self.assertEqual(sparse["profile"], "ml-experiment")
+        self.assertEqual(sparse["mode"], "manual_command_plan")
+        self.assertIn("--no-checkout", payload["git_command"])
+        self.assertIn("/research_cockpit/", sparse["excluded_paths"])
+        self.assertIn("/outputs/", sparse["excluded_paths"])
+        self.assertIn("/logs/", sparse["excluded_paths"])
+        self.assertIn("/data/", sparse["excluded_paths"])
+        command_argvs = [item["argv"] for item in sparse["commands"]]
+        self.assertIn(["git", "-C", str(worktree.resolve()), "sparse-checkout", "init", "--no-cone"], command_argvs)
+        self.assertIn(
+            ["git", "-C", str(worktree.resolve()), "sparse-checkout", "set", "--no-cone", "--stdin"],
+            command_argvs,
+        )
+        set_command = next(item for item in sparse["commands"] if "--stdin" in item["argv"])
+        self.assertIn("!/research_cockpit/", set_command["stdin"])
+        self.assertIn("!/outputs/", set_command["stdin"])
+        self.assertTrue(any("canonical" in item for item in sparse["notes"]))
+
+    def test_start_agent_session_sparse_requires_dry_run(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+
+        with self.assertRaises(ValueError) as ctx:
+            start_agent_session(
+                self.root,
+                option_id="option_t5",
+                agent_id="agent_t5",
+                objective="Run T5 branch",
+                branch="agent/option_t5",
+                worktree=worktree,
+                sparse=True,
+            )
+
+        self.assertIn("--sparse currently provides dry-run", str(ctx.exception))
+
     def test_start_agent_session_reports_created_worktree_if_yaml_write_fails(self) -> None:
         worktree = self.tmp_root / "worktrees" / "agent_t5"
         failure = MutationError(
@@ -2139,6 +2191,77 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue((self.root / "agents" / f"{payload['agent_id']}.yaml").exists())
         self.assertTrue((self.root / "assignments" / f"{payload['assignment_id']}.yaml").exists())
         self.assertEqual(payload["launch_env"]["RESEARCH_COCKPIT_ASSIGNMENT_ID"], payload["assignment_id"])
+
+    def test_start_agent_session_cli_sparse_dry_run_outputs_plan(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "cache_probe"
+
+        out = subprocess.run(
+            [
+                *cli_command("start-agent-session"),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--agent",
+                "agent_t5",
+                "--objective",
+                "Run cache probe",
+                "--branch",
+                "agent/option_t5",
+                "--worktree",
+                str(worktree),
+                "--dry-run",
+                "--json",
+                "--sparse",
+                "--sparse-profile",
+                "ml-experiment",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        payload = json.loads(out.stdout)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["sparse_worktree"]["profile"], "ml-experiment")
+        self.assertIn("--no-checkout", payload["git_command"])
+        self.assertTrue(any("--stdin" in item["argv"] for item in payload["sparse_worktree"]["commands"]))
+        self.assertFalse((self.root / "agents").exists())
+        self.assertFalse(worktree.exists())
+
+    def test_start_agent_session_cli_sparse_text_dry_run_points_to_json_plan(self) -> None:
+        worktree = self.tmp_root / "worktrees" / "cache_probe"
+
+        out = subprocess.run(
+            [
+                *cli_command("start-agent-session"),
+                "--root",
+                str(self.root),
+                "--option",
+                "option_t5",
+                "--agent",
+                "agent_t5",
+                "--objective",
+                "Run cache probe",
+                "--branch",
+                "agent/option_t5",
+                "--worktree",
+                str(worktree),
+                "--dry-run",
+                "--sparse",
+                "--sparse-profile",
+                "ml-experiment",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        self.assertIn("sparse_worktree.commands", out.stdout)
+        self.assertIn("--json", out.stdout)
+        self.assertFalse(worktree.exists())
 
     def test_start_agent_session_rejects_unsafe_identity_ids(self) -> None:
         worktree = self.tmp_root / "worktrees" / "agent_t5"
@@ -6098,6 +6221,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["claim-workstream"]["supports_dry_run"])
         self.assertTrue(by_name["start-agent-session"]["supports_dry_run"])
         self.assertIn("git_branch", by_name["start-agent-session"]["fields_supported"])
+        self.assertIn("sparse_worktree.command_plan", by_name["start-agent-session"]["fields_supported"])
+        self.assertIn("--sparse", by_name["start-agent-session"]["supported_flags"])
+        self.assertIn("--sparse-profile", by_name["start-agent-session"]["supported_flags"])
         self.assertTrue(by_name["report-option-workstream"]["supports_json"])
         self.assertTrue(by_name["report-option-workstream"]["supports_dry_run"])
         self.assertTrue(by_name["import-worktree-findings"]["supports_dry_run"])

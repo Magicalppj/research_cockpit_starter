@@ -561,6 +561,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "extra_supported_flags": ["--sparse", "--sparse-profile"],
         "fields_supported": [
             "agent_id",
             "assignment_id",
@@ -571,6 +572,7 @@ COMMANDS: list[dict[str, object]] = [
             "worktree_label",
             "launch_env",
             "startup_command",
+            "sparse_worktree.command_plan",
         ],
         "recommended_when": "Launch a downstream agent on a branch while keeping Research Cockpit writes in the main root.",
     },

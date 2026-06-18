@@ -47,10 +47,36 @@ from research_cockpit.storage import find_node_file
 
 ROOT = default_data_root()
 IDENTITY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+DEFAULT_SPARSE_PROFILE = "ml-experiment"
+SPARSE_WORKTREE_PROFILES: dict[str, dict[str, object]] = {
+    "ml-experiment": {
+        "description": "Keep source/config/test/docs context while excluding bulky generated research payloads.",
+        "include_patterns": ["/*"],
+        "excluded_paths": [
+            "/research_cockpit/",
+            "/outputs/",
+            "/logs/",
+            "/data/",
+            "/datasets/**/artifacts/",
+            "/.venv/",
+            "/.venvs/",
+            "/venv/",
+        ],
+    },
+}
 
 
-def _git_worktree_command(repo_root: Path, branch: str, worktree: Path, base: str | None) -> list[str]:
+def _git_worktree_command(
+    repo_root: Path,
+    branch: str,
+    worktree: Path,
+    base: str | None,
+    *,
+    no_checkout: bool = False,
+) -> list[str]:
     command = ["git", "-C", str(repo_root), "worktree", "add", "-b", branch, str(worktree)]
+    if no_checkout:
+        command.insert(5, "--no-checkout")
     if base:
         command.append(base)
     return command
@@ -65,6 +91,54 @@ def _run_git_worktree_add(command: list[str]) -> None:
     if completed.returncode != 0:
         message = completed.stderr.strip() or completed.stdout.strip() or "git worktree add failed"
         raise RuntimeError(message)
+
+
+def _command_plan_entry(command: list[str], *, stdin: str | None = None) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "argv": command,
+        "shell": shell_join(command),
+    }
+    if stdin is not None:
+        entry["stdin"] = stdin
+    return entry
+
+
+def _sparse_worktree_plan(
+    repo_root: Path,
+    *,
+    branch: str,
+    worktree: Path,
+    base: str | None,
+    profile_name: str,
+) -> dict[str, Any]:
+    profile = SPARSE_WORKTREE_PROFILES.get(profile_name)
+    if profile is None:
+        names = ", ".join(sorted(SPARSE_WORKTREE_PROFILES))
+        raise ValueError(f"Unknown sparse profile {profile_name!r}; supported profiles: {names}")
+    include_patterns = [str(item) for item in profile["include_patterns"]]
+    excluded_paths = [str(item) for item in profile["excluded_paths"]]
+    sparse_patterns = [*include_patterns, *[f"!{item}" for item in excluded_paths]]
+    worktree_add = _git_worktree_command(repo_root, branch, worktree, base, no_checkout=True)
+    sparse_set = ["git", "-C", str(worktree), "sparse-checkout", "set", "--no-cone", "--stdin"]
+    return {
+        "enabled": True,
+        "mode": "manual_command_plan",
+        "profile": profile_name,
+        "description": profile["description"],
+        "include_patterns": include_patterns,
+        "excluded_paths": excluded_paths,
+        "commands": [
+            _command_plan_entry(worktree_add),
+            _command_plan_entry(["git", "-C", str(worktree), "sparse-checkout", "init", "--no-cone"]),
+            _command_plan_entry(sparse_set, stdin="\n".join(sparse_patterns) + "\n"),
+            _command_plan_entry(["git", "-C", str(worktree), "checkout"]),
+        ],
+        "notes": [
+            "This is a dry-run command plan; run it manually after review.",
+            "Keep RESEARCH_COCKPIT_ROOT pointed at the canonical main checkout research_cockpit directory.",
+            "The worktree remains disposable; ingest useful outputs before closeout.",
+        ],
+    }
 
 
 def _identity_date() -> str:
@@ -278,6 +352,7 @@ def _build_start_session_result(
     assignment_data: dict[str, Any],
     boundary: dict[str, Any],
     git_command: list[str],
+    sparse_worktree: dict[str, Any] | None,
     show_diff: bool,
     changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any]]],
 ) -> dict[str, Any]:
@@ -317,6 +392,8 @@ def _build_start_session_result(
         ),
         "created_worktree": False,
     }
+    if sparse_worktree is not None:
+        result["sparse_worktree"] = sparse_worktree
     if show_diff:
         result["diff"] = yaml_change_diff(changes)
     return result
@@ -338,6 +415,8 @@ def start_agent_session(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    sparse: bool = False,
+    sparse_profile: str | None = None,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
     nodes = state.nodes
@@ -350,6 +429,10 @@ def start_agent_session(
     repo_root = root.resolve().parent
     resolved_worktree = _resolve_worktree(repo_root, worktree)
     boundary = ensure_worktree_boundary(root, resolved_worktree)
+    if sparse_profile and not sparse:
+        raise ValueError("--sparse-profile requires --sparse")
+    if sparse and not dry_run:
+        raise ValueError("--sparse currently provides dry-run command planning only; pass --dry-run --json")
     if create_worktree and resolved_worktree.exists():
         raise ValueError(f"Worktree path already exists: {resolved_worktree}")
 
@@ -454,7 +537,22 @@ def start_agent_session(
         raise_on_error=True,
     )
 
-    git_command = _git_worktree_command(repo_root, branch, resolved_worktree, base)
+    sparse_worktree = (
+        _sparse_worktree_plan(
+            repo_root,
+            branch=branch,
+            worktree=resolved_worktree,
+            base=base,
+            profile_name=sparse_profile or DEFAULT_SPARSE_PROFILE,
+        )
+        if sparse
+        else None
+    )
+    git_command = (
+        list(sparse_worktree["commands"][0]["argv"])
+        if sparse_worktree is not None
+        else _git_worktree_command(repo_root, branch, resolved_worktree, base)
+    )
     changes = [
         (option_path, before_data, data),
         (agent_path, before_agent, agent_data),
@@ -482,6 +580,7 @@ def start_agent_session(
         assignment_data=assignment_data,
         boundary=boundary,
         git_command=git_command,
+        sparse_worktree=sparse_worktree,
         show_diff=show_diff,
         changes=changes,
     )
@@ -578,6 +677,8 @@ def main() -> None:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    parser.add_argument("--sparse", action="store_true")
+    parser.add_argument("--sparse-profile")
     args = parser.parse_args()
 
     try:
@@ -596,6 +697,8 @@ def main() -> None:
             rebuild_dashboard=not args.no_build,
             dry_run=args.dry_run,
             show_diff=args.show_diff,
+            sparse=args.sparse,
+            sparse_profile=args.sparse_profile,
         )
     except MutationError as exc:
         if args.json and exc.payload:
@@ -624,6 +727,8 @@ def main() -> None:
         return
     if args.dry_run:
         safe_print(f"Would start session for {payload['agent_id']} on {args.option_id}.")
+        if args.sparse:
+            safe_print("Sparse worktree command plan is available in JSON at sparse_worktree.commands; rerun with --json.")
     else:
         safe_print(f"Started session for {payload['agent_id']} on {args.option_id}.")
 
