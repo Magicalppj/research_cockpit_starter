@@ -138,6 +138,9 @@ npm run build
 | 检查语义陈旧状态 | `research-cockpit lint --root research_cockpit --semantic --json` |
 | 生成 dashboard/context | `research-cockpit build --root research_cockpit` |
 | 诊断大图 build 性能 | `research-cockpit build --root research_cockpit --json --profile` |
+| 综合维护审计 | `research-cockpit maintenance-audit --root research_cockpit --repo . --json` |
+| 生成 worktree closeout 计划 | `research-cockpit worktree-closeout --root research_cockpit --repo . --worktree ../worktrees/<label> --classification discard_after_recording --dry-run --json` |
+| 生成 sparse worktree 命令计划 | `research-cockpit start-agent-session --root research_cockpit --option <option_id> --label <label> --objective "..." --branch agent/<branch> --worktree ../worktrees/<label> --base main --dry-run --json --sparse --sparse-profile ml-experiment` |
 | 启动 UI | `research-cockpit ui --root research_cockpit --server.port 8501` |
 | 查看可用命令 | `research-cockpit commands --json --compact` |
 | 全局启动上下文 | `research-cockpit bootstrap --root research_cockpit --json` |
@@ -299,7 +302,10 @@ research-cockpit option-workstream-context --root research_cockpit --id <option_
 
 ```sh
 research-cockpit commands --json --compact --workflow evidence
+research-cockpit commands --json --compact --group artifact
+research-cockpit commands --json --compact --group run --status active
 research-cockpit commands --json --compact --name create-workstream
+research-cockpit artifact create --help
 ```
 
 不要在已知节点任务里重复串联 `bootstrap`、生成 context packs 和 `node-context`。直接用 `context` 更短、更稳定。
@@ -376,7 +382,7 @@ SKILL.md
 - Worktree 里做代码改动、运行实验、保存本地输出。
 - 用 `ingest-artifact` 把有价值的 `.agent_runs/<run_id>/` 复制到 `research_cockpit/artifacts/<node_id>/<run_id>/`，再记录 finding。
 - 不在 worktree 里 `research-cockpit init`，也不把 worktree-local path 当作长期 `--evidence-path`。
-- 下游 agent 用 `set-agent-focus` 汇报进展；全局 `set-focus`、`validate`、`build` 由 coordinator 串行处理。
+- 下游 agent 用 `set-cursor --assignment <assignment_id>` 更新 assignment-local 进展；全局 `set-focus`、`validate`、`build` 由 coordinator 串行处理。`set-agent-focus` 只保留给旧 per-agent focus 兼容场景。
 
 删除 worktree 前检查：
 

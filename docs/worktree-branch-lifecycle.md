@@ -17,19 +17,27 @@ Git worktrees are execution sandboxes for parallel agents. They are not long-ter
 Before deleting a worktree:
 
 1. Identify the associated assignment, option, experiment, run, branch, and worktree label.
-2. Read scoped context through `bootstrap --assignment`, `agent-session-context`, or `option-workstream-context`.
-3. Check active assignments and queued/running runs.
-4. Check active resource declarations.
-5. Check outer and nested repo dirty state.
-6. Classify the code changes:
+2. Generate a read-only closeout plan:
+
+```sh
+research-cockpit worktree-closeout --root research_cockpit --repo . --worktree ../worktrees/<label> --classification discard_after_recording --dry-run --json
+```
+
+3. Read scoped context through `bootstrap --assignment`, `agent-session-context`, or `option-workstream-context`.
+4. Check active assignments and queued/running runs.
+5. Check active resource declarations.
+6. Check outer and nested repo dirty state.
+7. Classify the code changes:
    - `merge_to_main`
    - `preserve_as_research_branch`
    - `extract_partial`
    - `discard_after_recording`
-7. Ingest or link useful evidence.
-8. Record findings, decisions, baseline updates, or follow-up work.
-9. Move assignment cursors away from terminal nodes.
-10. Remove the worktree and temporary branch only after review.
+8. Ingest or link useful evidence.
+9. Record findings, decisions, baseline updates, or follow-up work.
+10. Move assignment cursors away from terminal nodes.
+11. Remove the worktree and temporary branch only after review.
+
+`worktree-closeout` is a planner only. It reports blockers, Research Cockpit updates still needed, and shell command drafts for human review; it does not delete worktrees, delete branches, merge branches, or edit YAML.
 
 ## Branch Cleanup Rules
 

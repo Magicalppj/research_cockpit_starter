@@ -58,7 +58,7 @@ research-cockpit build --root research_cockpit
 research-cockpit smoke --root research_cockpit --json
 ```
 
-Use `research-cockpit commands --json --compact --name <command>` to check `supports_no_build`, `can_batch`, and `batch_policy.mode` before choosing a write path. Prefer file-based batch commands such as `apply-graph-plan`, `create-workstream`, and `complete-experiments` when several changes share one intent; otherwise run smaller commands one after another.
+Use `research-cockpit commands --json --compact --name <command>` to check `supports_no_build`, `can_batch`, and `batch_policy.mode` before choosing a write path. Use `--group run` or `--group artifact` when selecting among experiment/run or artifact commands, and use `--workflow evidence` when you need the broader evidence-tagged surface. Prefer file-based batch commands such as `apply-graph-plan`, `create-workstream`, and `complete-experiments` when several changes share one intent; otherwise run smaller commands one after another.
 
 An optional `research-cockpit build --root research_cockpit --watch --interval 5 --json` process can keep generated dashboards fresh during a batch, but it only runs dashboard builds. It does not replace the final `validate` and `smoke` checks.
 
@@ -256,7 +256,7 @@ Both commands create a `gate_results/<gate_id>.yaml` metadata record. `record-ga
 
 For long-running or disk-heavy experiments, record enough run metadata to support later cleanup decisions. Existing run fields such as `pid`, `tmux_session`, `log_root`, `output_root`, `progress_file`, and `config_file` are operational hints; they do not by themselves prove a path is safe to remove.
 
-When a run consumes resources that cleanup must respect, record an active resource declaration in the run record when the current CLI supports it, or preserve the same details in the launcher output until it can be written through a command:
+When a run consumes resources that cleanup must respect, persist an active resource declaration in the run record with `create-run`, `update-run`, or `complete-run` using `--resources-json` or `--resources-file`. Launcher output and artifact manifests may still duplicate the same details for human review, but they are no longer the primary write path.
 
 ```yaml
 resources:
@@ -291,8 +291,7 @@ output_retention:
   cleanup_notes: "Metrics and bundle preserved; intermediate generations are reproducible."
 ```
 
-Retention metadata is advisory unless a project has explicitly opted into stricter lint rules. Missing retention information should be handled as a maintenance warning, not as a reason to bypass normal finding or run completion workflows. For the full cleanup and branch/worktree policy, read `capabilities/maintenance.md`.
-P0 note: this section documents the intended metadata shape. Until nested metadata write support is implemented, do not assume `create-run`, `update-run`, or `complete-run` will persist `resources` or `output_retention`; keep those details in launcher output, artifact manifests, or review bundles.
+Persist retention intent with `create-run`, `update-run`, or `complete-run` using `--output-retention-json` or `--output-retention-file`. Retention metadata is advisory unless a project has explicitly opted into stricter lint rules. Missing retention information should be handled as a maintenance warning, not as a reason to bypass normal finding or run completion workflows. For the full cleanup and branch/worktree policy, read `capabilities/maintenance.md`.
 
 ## Artifacts
 

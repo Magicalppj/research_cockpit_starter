@@ -38,7 +38,7 @@ The full raw payload does not always need to remain in `research_cockpit/artifac
 
 ## Suggested Metadata
 
-P0 note: this policy documents the intended metadata shape. Until CLI write support is implemented, do not assume existing commands will persist nested retention fields. Preserve the same information in launcher output, artifact manifests, portable review bundles, or notes instead of hand-editing YAML.
+Persist artifact retention metadata through `create-artifact --file` when creating an artifact node, or `update-node-fields --metadata-file` when adding or changing retention on an existing artifact node. The same information can also appear in launcher output, artifact manifests, portable review bundles, or notes for review, but the artifact node metadata is the structured source used by audits and context payloads.
 
 ```yaml
 retention:

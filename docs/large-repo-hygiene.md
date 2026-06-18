@@ -87,7 +87,10 @@ Use profiling before guessing:
 
 ```sh
 research-cockpit build --root research_cockpit --json --profile
+research-cockpit build --root research_cockpit --json --profile --profile-output dashboards/build_profile.json
 ```
+
+The `build_profile_v1` payload includes stage timings, output file sizes, search index counts, `resource_scan_settings`, and resource-scan warnings. Persisting it under `dashboards/build_profile.json` lets `maintenance-audit` surface dashboard performance warnings alongside worktree, branch, and artifact cleanup checks.
 
 If local linked resource full-text indexing dominates the build, use:
 
@@ -96,6 +99,8 @@ research-cockpit build --root research_cockpit --json --profile --skip-resource-
 ```
 
 This keeps node and note search while marking local linked resource text as disabled for that build.
+
+Default resource scans are bounded for large repositories. Generated payloads matching configured skip patterns are indexed as skipped resources instead of reading their bytes, directory resources prefer configured summary files such as `summary.md`, and profile warnings can report `resource_scan_skipped_payload`, `resource_directory_without_summary`, or `resource_scan_truncated`.
 
 ## Evidence Shape
 

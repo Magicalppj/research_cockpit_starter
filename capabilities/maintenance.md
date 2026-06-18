@@ -20,6 +20,20 @@ See also:
 - Prefer read-only audits before cleanup. If a cleanup step is destructive, present explicit commands for human review instead of running them automatically.
 - In multi-agent runs, check active assignments, queued/running runs, and declared resources before moving or deleting paths.
 
+## Read-Only Audit Entrypoints
+
+Use these commands before proposing cleanup:
+
+```sh
+research-cockpit active-resources --root research_cockpit --json
+research-cockpit worktree-audit --root research_cockpit --repo . --json
+research-cockpit branch-audit --root research_cockpit --repo . --base main --json
+research-cockpit artifact-retention-audit --root research_cockpit --repo . --min-size-gb 10 --json
+research-cockpit maintenance-audit --root research_cockpit --repo . --base main --min-size-gb 10 --json
+```
+
+`maintenance-audit` aggregates active resources, worktree state, branch state, artifact retention candidates, dashboard performance warnings, blockers, and `recommended_next_actions`. The narrower audit commands are useful when an agent needs to inspect one subsystem without mixing cleanup concerns.
+
 ## Worktree Closeout Checklist
 
 Before deleting a worktree:
@@ -135,7 +149,7 @@ For large experiment repositories:
 - Keep large artifact roots in git-ignored or external storage when payloads are too large for normal repository operations.
 - Prefer small summary files and portable review bundles as long-lived evidence.
 - Exclude `.worktrees/`, `outputs/`, `logs/`, `data/`, `datasets/**/artifacts/`, and `research_cockpit/artifacts/**` from IDE or repo watchers when they contain large generated files.
-- Use `research-cockpit build --json --profile` to find build/search pressure.
+- Use `research-cockpit build --root research_cockpit --json --profile --profile-output dashboards/build_profile.json` to find build/search pressure and feed `maintenance-audit` dashboard performance warnings.
 - Use `research-cockpit build --skip-resource-search` when linked resource full-text indexing is too expensive for a large payload tree.
 
 ## Cleanup Boundaries
