@@ -28,7 +28,7 @@ Choose one startup path instead of chaining every context command.
 3. If the target is unknown or the task is global triage, run `research-cockpit bootstrap --root <data-root> --coordinator --json`.
 4. If continuing an older minimal handoff, use `research-cockpit node-context --root <data-root> --id <node_id> --compact --json`.
 5. Read `<data-root>/dashboards/agent_context_pack.json` and `<data-root>/dashboards/focus_context_pack.json` only when generated dashboard context or a broad focus scan is needed.
-6. Use `research-cockpit search --root <data-root> --query "..." --json` when more context is needed.
+6. Use bounded search such as `research-cockpit search --root <data-root> --query "..." --json --limit 5 --source node` when more context is needed.
 7. Use `research-cockpit commands --json --compact` to choose safe workflow commands.
 
 Do not run both `bootstrap` and `context --with-bootstrap` for normal known-node work. If the working directory is unreliable, use absolute `--root` paths.
@@ -50,8 +50,10 @@ After code or YAML changes, run:
 ```sh
 research-cockpit validate --root <data-root>
 research-cockpit build --root <data-root>
-research-cockpit smoke --root <data-root> --json
+research-cockpit smoke --root <data-root> --json --progress
 ```
+
+Default `smoke` is compact for large roots. Use `--full` only when explicitly diagnosing the older full subprocess workflow.
 
 For plugin development, run:
 

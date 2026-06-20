@@ -240,10 +240,10 @@ research-cockpit update-workstream-fields --root research_cockpit --option optio
 Read suggestions:
 
 ```sh
-research-cockpit suggest-next-actions --root research_cockpit --json
+research-cockpit suggest-next-actions --root research_cockpit --json --limit 10 --focus-only
 ```
 
-Run this once before choosing work. Re-run only after changing `next_actions` or suggestion lifecycle state.
+Run this bounded read once before choosing work. Re-run only after changing `next_actions` or suggestion lifecycle state. Use full unbounded output only when auditing the complete suggestion list.
 JSON output includes stable `suggestion_id` (`sg_...`) and human display `display_id` (`next_action_...`). Older fields remain: `key` equals `suggestion_id`, and `id` equals `display_id`.
 
 Apply suggestions through `research-cockpit` commands, not direct YAML edits:

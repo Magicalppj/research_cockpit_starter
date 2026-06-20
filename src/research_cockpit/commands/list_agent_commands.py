@@ -269,7 +269,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_no_build": False,
         "supports_build": True,
         "extra_supported_flags": ["--agent", "--assignment", "--option", "--coordinator"],
-        "recommended_when": "Start every agent session here.",
+        "recommended_when": "Use for assignment-scoped startup or unknown/global triage; known-node tasks should start with compact context.",
     },
     {
         "name": "validate_cockpit.py",
@@ -339,6 +339,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
+        "extra_supported_flags": ["--limit", "--source", "--node-type", "--focus-only"],
         "recommended_when": "Find relevant research context before editing.",
     },
     {
@@ -348,6 +349,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
+        "extra_supported_flags": ["--limit", "--kind", "--focus-only", "--include-inactive", "--state"],
         "recommended_when": "Decide what work should happen next.",
     },
     {

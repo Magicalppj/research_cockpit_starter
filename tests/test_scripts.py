@@ -6060,6 +6060,15 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse(by_name["repair-interaction-log"]["writes_truth_source"])
         self.assertIn("maintenance", by_name["repair-interaction-log"]["workflow_tags"])
         self.assertFalse(by_name["search"]["mutating"])
+        self.assertIn("--limit", by_name["search"]["supported_flags"])
+        self.assertIn("--source", by_name["search"]["supported_flags"])
+        self.assertIn("--node-type", by_name["search"]["supported_flags"])
+        self.assertIn("--focus-only", by_name["search"]["supported_flags"])
+        self.assertFalse(by_name["suggest-next-actions"]["mutating"])
+        self.assertIn("--limit", by_name["suggest-next-actions"]["supported_flags"])
+        self.assertIn("--kind", by_name["suggest-next-actions"]["supported_flags"])
+        self.assertIn("--focus-only", by_name["suggest-next-actions"]["supported_flags"])
+        self.assertNotIn("every agent session", by_name["bootstrap"]["recommended_when"])
         self.assertFalse(by_name["smoke"]["mutating"])
         self.assertIn("--full", by_name["smoke"]["supported_flags"])
         self.assertIn("--progress", by_name["smoke"]["supported_flags"])
@@ -6186,8 +6195,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_name["complete-experiment"]["batch_policy"]["mode"], "serial_no_build")
         self.assertTrue(by_name["complete-experiment"]["batch_policy"]["use_no_build"])
         self.assertIn(
-            "smoke --root <root> --json",
-            " ".join(by_name["complete-experiment"]["batch_policy"]["finish_commands"]),
+            "research-cockpit smoke --root <root> --json --progress",
+            by_name["complete-experiment"]["batch_policy"]["finish_commands"],
         )
         self.assertIn("evidence_path", by_name["complete-experiment"]["fields_supported"])
         self.assertNotIn("next_actions", by_name["complete-experiment"]["fields_supported"])
@@ -6258,6 +6267,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--sparse", by_name["start-agent-session"]["supported_flags"])
         self.assertIn("--sparse-profile", by_name["start-agent-session"]["supported_flags"])
         self.assertTrue(by_name["report-option-workstream"]["supports_json"])
+
         self.assertTrue(by_name["report-option-workstream"]["supports_dry_run"])
         self.assertTrue(by_name["import-worktree-findings"]["supports_dry_run"])
         self.assertIn("workstream_report", by_name["import-worktree-findings"]["fields_supported"])
@@ -6323,6 +6333,30 @@ class ScriptBehaviorTests(unittest.TestCase):
                 self.assertIn("changed after command planning", command["conflict_policy"])
         self.assertTrue(all(item["command"].startswith("research-cockpit ") for item in manifest))
         self.assertTrue(all("plugin_command" not in item for item in manifest))
+
+    def test_agent_facing_docs_prefer_bounded_large_root_reads(self) -> None:
+        docs = [
+            SKILL_ROOT / "SKILL.md",
+            SKILL_ROOT / "AGENTS.md",
+            SKILL_ROOT / "README.md",
+            SKILL_ROOT / "capabilities" / "experiment-tracking.md",
+            SKILL_ROOT / "capabilities" / "node-management.md",
+            SKILL_ROOT / "capabilities" / "troubleshooting.md",
+        ]
+
+        for path in docs:
+            with self.subTest(path=path.name):
+                text = path.read_text(encoding="utf-8")
+                bad_smoke = re.findall(r"research-cockpit smoke --root [^\n`]*--json(?![^\n`]*--progress)", text)
+                self.assertEqual(bad_smoke, [])
+
+        skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn('research-cockpit search --root research_cockpit --query "..." --json --limit 5 --source node', skill_text)
+        self.assertIn(
+            "research-cockpit suggest-next-actions --root research_cockpit --json --limit 10 --focus-only",
+            skill_text,
+        )
+        self.assertIn("Default `smoke` is compact", skill_text)
 
     def test_list_agent_commands_cli_outputs_json(self) -> None:
         command = "commands"

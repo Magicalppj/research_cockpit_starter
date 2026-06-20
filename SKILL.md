@@ -157,8 +157,8 @@ research-cockpit update-suggestion-state --root research_cockpit --id <suggestio
 research-cockpit update-decision-evidence --root research_cockpit --id <decision_id> --dry-run --json --show-diff
 research-cockpit update-decision-checklist --root research_cockpit --id <decision_id> --alternative <option_id> --consequence "..." --next-required-action "..." --dry-run --json --show-diff
 research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
-research-cockpit search --root research_cockpit --query "..." --json
-research-cockpit suggest-next-actions --root research_cockpit --json
+research-cockpit search --root research_cockpit --query "..." --json --limit 5 --source node
+research-cockpit suggest-next-actions --root research_cockpit --json --limit 10 --focus-only
 research-cockpit commands --json --compact --workflow evidence
 research-cockpit commands --json --compact --name <command>
 research-cockpit repair-interaction-log --root research_cockpit --dry-run --json --show-diff
@@ -171,8 +171,10 @@ When making several related state changes, run mutating commands sequentially. D
 ```sh
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
-research-cockpit smoke --root research_cockpit --json
+research-cockpit smoke --root research_cockpit --json --progress
 ```
+
+Default `smoke` is compact for large roots and avoids full `bootstrap`, full `suggest-next-actions`, and full `node-context` JSON. Keep `--progress` in copied commands so long checks emit stage updates; use `--full` only when explicitly diagnosing the older full subprocess workflow.
 
 For several node creations or rich field edits, prefer a single plan file:
 
@@ -181,7 +183,7 @@ research-cockpit apply-graph-plan --root research_cockpit --file graph_update.ya
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --no-build
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
-research-cockpit smoke --root research_cockpit --json
+research-cockpit smoke --root research_cockpit --json --progress
 ```
 
 `apply-graph-plan` supports `updates[*].status` at the update entry top level. Put content fields under `updates[*].fields`; `status` inside `fields` is rejected. Run `apply-graph-plan --print-schema` for the supported field list, including experiment assignment fields: `owner`, `blocked_by`, `depends_on`, `ready_for_agent`, and `handoff_context`. For dispatch ordering, keep `priority` coarse and put stable sequence labels in `order` or `rank`.
@@ -240,7 +242,7 @@ research-cockpit ingest-artifact --root D:/main_repo/research_cockpit --node exp
 research-cockpit complete-experiment --root D:/main_repo/research_cockpit --id experiment_x --finding "..." --confidence medium --artifact-id artifact_experiment_x_run_x --no-build
 research-cockpit validate --root D:/main_repo/research_cockpit --json
 research-cockpit build --root D:/main_repo/research_cockpit
-research-cockpit smoke --root D:/main_repo/research_cockpit --json
+research-cockpit smoke --root D:/main_repo/research_cockpit --json --progress
 ```
 
 Do not use worktree-local paths as long-lived `--evidence-path` values. Keep run directories free of symlinks before `ingest-artifact`; v1 rejects symlinked files or directories instead of copying through them. Deletion is safe only after artifact files, finding/decision/baseline updates, and any useful commit/patch have been preserved outside the worktree.
@@ -250,7 +252,7 @@ For terse machine-readable mutation feedback, add `--compact` with `--json` on s
 For legacy mutation commands without `--compact`, use `--dry-run --json --show-diff` to preview writes and keep the JSON payload focused on `changed/would_change`, affected path, before/after summary, and optional diff. Dry-run also performs mutation preflight; if `interaction_log.yaml` is malformed, it fails before showing a misleading successful preview.
 Use `commands --json --compact --workflow <graph|evidence|decision|focus|maintenance|read>` or `--name <command>` to read the short discovery manifest. It omits long examples and Python/cwd metadata; use full `commands --json` only when you need the complete command contract. If `validate` or a mutating dry-run reports malformed interaction log schema, use `repair-interaction-log --dry-run --json --show-diff`; it can drop non-mapping event items with a backup, but it refuses YAML scanner errors.
 
-Run `suggest-next-actions` once before choosing work. Re-run it only after you changed `next_actions` or suggestion lifecycle state.
+Use bounded `search` and `suggest-next-actions` reads. Prefer `context` and `bootstrap.top_suggestions` for normal startup; run `suggest-next-actions --limit 10 --focus-only` once before choosing work, and re-run it only after you changed `next_actions` or suggestion lifecycle state.
 
 ## Write Boundary
 

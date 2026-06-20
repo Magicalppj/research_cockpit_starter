@@ -75,7 +75,7 @@ From the plugin repo root:
 
 ```sh
 python -m unittest discover -s tests
-research-cockpit smoke --root examples/demo_research_cockpit --json
+research-cockpit smoke --root examples/demo_research_cockpit --json --progress
 python dev/scripts/run_skill_release_check.py --json --skip-mutating
 python dev/scripts/run_subagent_forward_check.py --json
 git diff --check
