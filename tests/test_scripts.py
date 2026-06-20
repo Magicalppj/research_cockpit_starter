@@ -6061,6 +6061,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("maintenance", by_name["repair-interaction-log"]["workflow_tags"])
         self.assertFalse(by_name["search"]["mutating"])
         self.assertFalse(by_name["smoke"]["mutating"])
+        self.assertIn("--full", by_name["smoke"]["supported_flags"])
+        self.assertIn("--progress", by_name["smoke"]["supported_flags"])
         self.assertFalse(by_name["commands"]["mutating"])
         self.assertTrue(by_name["commands"]["supports_compact"])
         self.assertFalse(by_name["commands"]["supports_root"])
@@ -6874,6 +6876,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         payload = skill_smoke_test_payload(root=self.root, query="t5", python_executable=sys.executable)
 
         self.assertTrue(payload["ok"])
+        self.assertEqual(payload["mode"], "compact")
         self.assertEqual(payload["root"], str(self.root))
         by_name = {item["name"]: item for item in payload["checks"]}
         self.assertTrue(by_name["validate_cockpit"]["passed"])
@@ -6882,6 +6885,19 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["search_knowledge"]["passed"])
         self.assertTrue(by_name["suggest_next_actions"]["passed"])
         self.assertGreaterEqual(by_name["list_agent_commands"]["summary"]["command_count"], 1)
+        self.assertFalse(by_name["search_knowledge"]["summary"]["resource_text_enabled"])
+        self.assertEqual(by_name["node_context"]["summary"]["schema_version"], "node_context_compact_v1")
+        self.assertEqual(by_name["node_context"]["summary"]["smoke_scope"], "compact_node_context")
+        self.assertIn("--compact", by_name["node_context"]["command"])
+
+    def test_skill_smoke_test_full_payload_preserves_subprocess_workflow(self) -> None:
+        payload = skill_smoke_test_payload(root=self.root, query="t5", python_executable=sys.executable, full=True)
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["mode"], "full")
+        by_name = {item["name"]: item for item in payload["checks"]}
+        self.assertTrue(by_name["agent_bootstrap"]["passed"])
+        self.assertIn("-m", by_name["agent_bootstrap"]["command"])
 
     def test_skill_smoke_test_uses_python_environment_override(self) -> None:
         with patch.dict(os.environ, {"RESEARCH_COCKPIT_PYTHON": sys.executable}):

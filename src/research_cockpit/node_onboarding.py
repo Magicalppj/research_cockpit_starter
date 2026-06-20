@@ -614,6 +614,8 @@ def build_node_onboarding_context(
     *,
     compact: bool = False,
     command_style: str = "console",
+    link_rows: list[dict[str, Any]] | None = None,
+    suggestions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if command_style not in VALID_COMMAND_STYLES:
         raise ValueError(f"Invalid command style: {command_style}")
@@ -626,8 +628,8 @@ def build_node_onboarding_context(
     if node.parent and node.parent in nodes:
         sibling_ids = [child_id for child_id in child_ids(nodes, nodes[str(node.parent)]) if child_id != node.id]
     related_ids = set(path_ids + child_ids_for_node + sibling_ids)
-    link_rows = build_link_rows(root, nodes)
-    suggestions = build_action_suggestions(root, nodes, current, link_rows)
+    link_rows = link_rows if link_rows is not None else build_link_rows(root, nodes)
+    suggestions = suggestions if suggestions is not None else build_action_suggestions(root, nodes, current, link_rows)
 
     if node.type == "option":
         type_context = _option_onboarding_context(root, nodes, current, node, command_style=command_style)

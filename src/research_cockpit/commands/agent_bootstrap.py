@@ -19,7 +19,7 @@ REQUIRED_MODULES = {
 BATCH_FINISH_COMMANDS = [
     "research-cockpit validate --root <root> --json",
     "research-cockpit build --root <root>",
-    "research-cockpit smoke --root <root> --json",
+    "research-cockpit smoke --root <root> --json --progress",
 ]
 ASSIGNMENT_CURSOR_EXAMPLE_TEMPLATES = [
     'research-cockpit set-cursor --root <root>{scope} --node <node_id> --next-action "..." --no-build',

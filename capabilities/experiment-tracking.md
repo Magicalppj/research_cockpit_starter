@@ -55,8 +55,10 @@ In multi-agent workflows, each agent should mutate the canonical `research_cockp
 ```sh
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
-research-cockpit smoke --root research_cockpit --json
+research-cockpit smoke --root research_cockpit --json --progress
 ```
+
+`smoke` defaults to a compact read-only workflow for large roots. Use `--progress` to print per-check progress to stderr; use `--full` only when you specifically need the older full subprocess workflow and large JSON payloads.
 
 Use `research-cockpit commands --json --compact --name <command>` to check `supports_no_build`, `can_batch`, and `batch_policy.mode` before choosing a write path. Use `--group run` or `--group artifact` when selecting among experiment/run or artifact commands, and use `--workflow evidence` when you need the broader evidence-tagged surface. Prefer file-based batch commands such as `apply-graph-plan`, `create-workstream`, and `complete-experiments` when several changes share one intent; otherwise run smaller commands one after another.
 

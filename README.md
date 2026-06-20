@@ -146,7 +146,7 @@ npm run build
 | 全局启动上下文 | `research-cockpit bootstrap --root research_cockpit --json` |
 | 单节点上下文 | `research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json` |
 | 搜索知识 | `research-cockpit search --root research_cockpit --query "keyword" --json` |
-| 冒烟测试 | `research-cockpit smoke --root research_cockpit --json` |
+| 冒烟测试 | `research-cockpit smoke --root research_cockpit --json --progress` |
 
 ## 常见工作流
 
@@ -222,10 +222,12 @@ research-cockpit ingest-artifact --root research_cockpit --node experiment_x --f
 research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --artifact-id artifact_experiment_x_run_x --no-build
 research-cockpit validate --root research_cockpit --json
 research-cockpit build --root research_cockpit
-research-cockpit smoke --root research_cockpit --json
+research-cockpit smoke --root research_cockpit --json --progress
 ```
 
 默认复制到 `research_cockpit/artifacts/<node_id>/<run_id>/`，并创建 `artifact_<node_id>_<run_id>`。最后一次 truth-source 写入后运行 `validate`、`build` 和 `smoke`，UI、context 和 Resources 才会看到最新 finding 与 artifact，并且能确认生成上下文可读；更完整的多 agent 规则见文末“并行 Agent 和 Worktree”。
+
+`smoke` 默认使用 compact 检查路径，避免在大图仓库里生成完整 `bootstrap`、`suggest-next-actions` 和 `node-context` JSON。大 root 下建议加 `--progress` 把阶段进度输出到 stderr；需要旧的完整子命令工作流时使用 `research-cockpit smoke --root research_cockpit --json --full`。
 
 ### 4. 跟踪长任务 run / gate
 

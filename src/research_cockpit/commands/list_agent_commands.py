@@ -55,7 +55,7 @@ COMPACT_COMMAND_KEYS = {
 BATCH_FINISH_COMMANDS = [
     "research-cockpit validate --root <root> --json",
     "research-cockpit build --root <root>",
-    "research-cockpit smoke --root <root> --json",
+    "research-cockpit smoke --root <root> --json --progress",
 ]
 ASSIGNMENT_SCOPE_FLAGS = ["--assignment", "--coordinator"]
 
@@ -323,12 +323,13 @@ COMMANDS: list[dict[str, object]] = [
     },
     {
         "name": "skill_smoke_test.py",
-        "purpose": "Run a read-only agent workflow smoke test through the package CLI.",
+        "purpose": "Run a read-only compact agent workflow smoke test, with an opt-in full workflow.",
         "mutating": False,
         "writes_generated_files": False,
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
+        "extra_supported_flags": ["--full", "--progress"],
         "recommended_when": "Check whether a copied skill package is usable by an agent.",
     },
     {
