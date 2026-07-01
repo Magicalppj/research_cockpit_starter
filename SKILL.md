@@ -17,7 +17,7 @@ Research Cockpit stores project-local research state in a repository `research_c
    - If the caller repository has no data root yet, initialize one with `research-cockpit init --root research_cockpit` from the caller repository root. Use `research-cockpit init --root research_cockpit --build --json` when the next step will read generated context packs.
 
 2. Choose one read path:
-   - Assigned downstream agent with an `assignment_id`: run scoped bootstrap or `agent-session-context`; treat global `current_state` focus and `coordinator_state` as coordinator metadata only. Use `--agent` only as a lookup convenience when that agent has exactly one active assignment.
+   - Assigned downstream agent with an `assignment_id`: run `agent-session-context --compact --json`; use scoped bootstrap only when validation/search/global summaries are needed. Treat global `current_state` focus and `coordinator_state` as coordinator metadata only. Use `--agent` only as a lookup convenience when that agent has exactly one active assignment.
    - Known node id: use compact `context` directly; do not run a separate bootstrap first.
    - Unknown target or global triage: run read-only bootstrap.
    - Minimal older handoff: use compact `node-context` only when artifact/bootstrap aggregation is unnecessary.
@@ -25,11 +25,12 @@ Research Cockpit stores project-local research state in a repository `research_c
 Assigned agent handoff:
 
 ```sh
-research-cockpit bootstrap --root research_cockpit --assignment <assignment_id> --json
 research-cockpit agent-session-context --root research_cockpit --assignment <assignment_id> --compact --json
+# Optional broad summary:
+research-cockpit bootstrap --root research_cockpit --assignment <assignment_id> --json
 ```
 
-In scoped bootstrap output, use `assignment_scope` / `agent_scope` and `assignment_cursor` as the primary task context. Do not switch to `focus.current_focus_node`, global `current_state.current_*`, or `coordinator_state.selected_node` unless the user explicitly assigns that other branch.
+In scoped bootstrap output, use `assignment_scope` / `agent_scope` and `assignment_cursor` as the primary task context. In `agent-session-context`, use the top-level assignment and option context as the primary task context. Do not switch to `focus.current_focus_node`, global `current_state.current_*`, or `coordinator_state.selected_node` unless the user explicitly assigns that other branch.
 
 Known node handoff:
 
@@ -92,6 +93,7 @@ Read only the capability files needed for the current task.
 
 ```sh
 research-cockpit validate --root research_cockpit
+research-cockpit validate --root research_cockpit --changed-node <node_id> --json
 research-cockpit validate --root research_cockpit --strict-lifecycle --json
 research-cockpit bootstrap --root research_cockpit --assignment <assignment_id> --json
 research-cockpit add-node --root research_cockpit --id <node_id> --type <type> --title "..." --parent <parent_id> --dry-run --json --show-diff
@@ -101,6 +103,7 @@ research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --json --compact
 research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
+research-cockpit smoke --root research_cockpit --scope changed --id <node_id> --json --progress
 research-cockpit assignment-view --root research_cockpit --json
 research-cockpit create-run --root research_cockpit --id <run_id> --experiment <experiment_id> --status running --launcher tmux --command "python train.py" --progress-file artifacts/<experiment_id>/<run_id>/progress.json --dry-run --json --show-diff
 research-cockpit create-run --root research_cockpit --id <run_id> --experiment <experiment_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build
@@ -115,8 +118,8 @@ research-cockpit create-artifact --print-schema
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --dry-run --json --show-diff
 research-cockpit create-artifact --root research_cockpit --file artifact.yaml --json --compact
 research-cockpit link-artifact --root research_cockpit --artifact <artifact_id> --to <node_id> --dry-run --json --show-diff
-research-cockpit ingest-artifact --root research_cockpit --node <node_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --link metrics=metrics.json --dry-run --json --show-diff
-research-cockpit ingest-artifact --root research_cockpit --node <node_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --link metrics=metrics.json --json --compact
+research-cockpit ingest-artifact --root research_cockpit --node <node_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --link metrics=metrics.json --record-only --dry-run --json --show-diff
+research-cockpit ingest-artifact --root research_cockpit --node <node_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --link metrics=metrics.json --record-only --json --compact --no-build
 research-cockpit complete-experiment --root research_cockpit --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --no-build
 research-cockpit complete-experiment --root research_cockpit --id <experiment_id> --finding "..." --confidence medium --evidence-path artifacts/<experiment_id>/<run_id> --evidence-link metrics=artifacts/<experiment_id>/<run_id>/metrics.json --json --compact
 research-cockpit complete-experiments --print-schema
@@ -151,6 +154,9 @@ research-cockpit active-resources --root research_cockpit --json
 research-cockpit worktree-audit --root research_cockpit --repo . --json
 research-cockpit branch-audit --root research_cockpit --repo . --base main --json
 research-cockpit artifact-retention-audit --root research_cockpit --repo . --min-size-gb 10 --json
+research-cockpit artifact-records --root research_cockpit --experiment <experiment_id> --json --compact
+research-cockpit promote-artifact-record --root research_cockpit --id <record_id> --artifact-id <artifact_id> --link-to <node_id> --json --compact
+research-cockpit compact-artifacts --root research_cockpit --dry-run --json --show-diff
 research-cockpit maintenance-audit --root research_cockpit --repo . --base main --json
 research-cockpit worktree-closeout --root research_cockpit --repo . --worktree ../worktrees/<label> --classification discard_after_recording --dry-run --json
 research-cockpit update-suggestion-state --root research_cockpit --id <suggestion_id> --state dismissed --reason "..." --dry-run --json --show-diff
@@ -159,14 +165,21 @@ research-cockpit update-decision-checklist --root research_cockpit --id <decisio
 research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
 research-cockpit search --root research_cockpit --query "..." --json --limit 5 --source node
 research-cockpit suggest-next-actions --root research_cockpit --json --limit 10 --focus-only
-research-cockpit commands --json --compact --workflow evidence
+research-cockpit commands --json --compact --summary-only --workflow evidence
 research-cockpit commands --json --compact --name <command>
 research-cockpit repair-interaction-log --root research_cockpit --dry-run --json --show-diff
 ```
 
 `node-context` is read-only and computed from truth-source YAML. Use `--compact --json` as the shortest older onboarding path when a human asks you to continue from one node; use full `--json` when you need parent chain, relations, resources, recent interactions, and type-specific traces. The combined `context` payload separates `target_context` from `current_global_focus`; use `context_boundary.warning` to notice when a target node differs from the global focus.
 
-When making several related state changes, run mutating commands sequentially. Do not parallelize mutating commands against the same data root; they share `graph/interaction_log.yaml` and are protected by a mutation lock. Truth-source mutations also verify that target files did not change after command planning; if a command reports a mutation conflict, reread compact context and retry the command. Pass `--no-build` to each supported mutating command, then validate, rebuild, and smoke once:
+When making several related state changes, run mutating commands sequentially. Do not parallelize mutating commands against the same data root; they share `graph/interaction_log.yaml` and are protected by a mutation lock. Truth-source mutations also verify that target files did not change after command planning; if a command reports a mutation conflict, reread compact context and retry the command. Pass `--no-build` to supported mutating commands. After a small worker edit, run the changed-scope commands printed in compact `verify_commands`, usually:
+
+```sh
+research-cockpit validate --root research_cockpit --changed-node <node_id> --json
+research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
+```
+
+Only the coordinator, release, or final handoff should run the full gate:
 
 ```sh
 research-cockpit validate --root research_cockpit --json
@@ -174,16 +187,17 @@ research-cockpit build --root research_cockpit
 research-cockpit smoke --root research_cockpit --json --progress
 ```
 
-Default `smoke` is compact for large roots and avoids full `bootstrap`, full `suggest-next-actions`, and full `node-context` JSON. Keep `--progress` in copied commands so long checks emit stage updates; use `--full` only when explicitly diagnosing the older full subprocess workflow.
+Default `smoke` is compact for large roots and avoids full `bootstrap`, full `suggest-next-actions`, and full `node-context` JSON. For one-node worker checks, use `smoke --scope changed --id <node_id> --json --progress`; use `--full` only when explicitly diagnosing the older full subprocess workflow.
 
-For several node creations or rich field edits, prefer a single plan file:
+For run output evidence, prefer ingest-artifact --record-only --json --compact --no-build; inspect records with `artifact-records`, promote only durable evidence with promote-artifact-record, and demote old graph artifact nodes only after compact-artifacts --dry-run classifies them as can_demote. compact-artifacts --execute --id <artifact_id> never deletes payload files, but it does remove the graph artifact node after writing an artifact record and migration report.
+
+For several node creations or rich field edits, prefer a single plan file. After applying, verify only the changed nodes in the worker loop:
 
 ```sh
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --no-build
-research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit
-research-cockpit smoke --root research_cockpit --json --progress
+research-cockpit validate --root research_cockpit --changed-node <node_id> --json
+research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
 ```
 
 `apply-graph-plan` supports `updates[*].status` at the update entry top level. Put content fields under `updates[*].fields`; `status` inside `fields` is rejected. Run `apply-graph-plan --print-schema` for the supported field list, including experiment assignment fields: `owner`, `blocked_by`, `depends_on`, `ready_for_agent`, and `handoff_context`. For dispatch ordering, keep `priority` coarse and put stable sequence labels in `order` or `rank`.
@@ -217,11 +231,12 @@ research-cockpit start-agent-session --root D:/main_repo/research_cockpit --opti
 research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label cache_probe --objective "Run downstream experiments" --branch agent/option_x-cache_probe --worktree ../worktrees/cache_probe --base main --create-worktree --no-build
 ```
 
-Send the JSON `handoff` to the downstream agent. It contains the generated `agent_id`, `assignment_id`, `launch_env`, and `startup_command`; the downstream agent should not invent its own id. Relative `--worktree` values resolve against the canonical repo root (`--root` parent). In the worktree, set `RESEARCH_COCKPIT_ROOT` and `RESEARCH_COCKPIT_ASSIGNMENT_ID` from `launch_env`, or pass the same absolute `--root` and `--assignment` on every command. The downstream agent starts with:
+Send the JSON `handoff` to the downstream agent. It contains the generated `agent_id`, `assignment_id`, `launch_env`, and `startup_command`; the downstream agent should not invent its own id. A dry-run previews generated ids but does not reserve them; pass explicit `--agent` and `--assignment` / `--assignment-id` on execute when you need the exact previewed ids. Relative `--worktree` values resolve against the canonical repo root (`--root` parent). In the worktree, set `RESEARCH_COCKPIT_ROOT` and `RESEARCH_COCKPIT_ASSIGNMENT_ID` from `launch_env`, or pass the same absolute `--root` and `--assignment` on every command. The downstream agent starts with:
 
 ```sh
-research-cockpit bootstrap --root D:/main_repo/research_cockpit --assignment <assignment_id> --json
 research-cockpit agent-session-context --root D:/main_repo/research_cockpit --assignment <assignment_id> --compact --json
+# Optional broad summary:
+research-cockpit bootstrap --root D:/main_repo/research_cockpit --assignment <assignment_id> --json
 ```
 
 For coordinator-side task dispatch, use `assignment-view --json` to list high-priority queued/running experiments with `owner`, `depends_on`, `blocked_by`, key artifacts, and first `next_action`. Prefer one small queued experiment per downstream agent handoff.
@@ -234,23 +249,24 @@ research-cockpit build --root D:/main_repo/research_cockpit --watch --interval 5
 
 `build --watch --json` prints one JSON object per iteration. Each event includes `last_build_at`, `last_build_status`, and `last_build_error`; the watcher only refreshes generated dashboards and does not replace final `validate` or `smoke`. `import-worktree-findings` is only a recovery tool for evidence accidentally written in a worktree-local cockpit root. It imports artifact nodes, experiment findings, result summaries, experiment-local `next_actions`, and workstream reports; it refuses structural graph changes, global/per-agent focus changes, and decision acceptance.
 
-Before deleting a worktree, generate a closeout plan, ingest any useful run directory into the canonical artifact store, and record the conclusion:
+Before deleting a worktree, generate a closeout plan, ingest any useful run directory into the canonical artifact store, and record the conclusion. The worker closeout verifies the changed experiment only:
 
 ```sh
 research-cockpit worktree-closeout --root D:/main_repo/research_cockpit --repo D:/main_repo --worktree ../worktrees/agent_option_x --classification discard_after_recording --dry-run --json
-research-cockpit ingest-artifact --root D:/main_repo/research_cockpit --node experiment_x --from ../worktrees/agent_option_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --json --compact
+research-cockpit ingest-artifact --root D:/main_repo/research_cockpit --node experiment_x --from ../worktrees/agent_option_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --record-only --json --compact --no-build
 research-cockpit complete-experiment --root D:/main_repo/research_cockpit --id experiment_x --finding "..." --confidence medium --artifact-id artifact_experiment_x_run_x --no-build
-research-cockpit validate --root D:/main_repo/research_cockpit --json
-research-cockpit build --root D:/main_repo/research_cockpit
-research-cockpit smoke --root D:/main_repo/research_cockpit --json --progress
+research-cockpit validate --root D:/main_repo/research_cockpit --changed-node experiment_x --json
+research-cockpit context --root D:/main_repo/research_cockpit --id experiment_x --with-bootstrap --with-artifacts --compact --json
 ```
+
+Coordinator or final handoff later runs the full gate once across the canonical root.
 
 Do not use worktree-local paths as long-lived `--evidence-path` values. Keep run directories free of symlinks before `ingest-artifact`; v1 rejects symlinked files or directories instead of copying through them. Deletion is safe only after artifact files, finding/decision/baseline updates, and any useful commit/patch have been preserved outside the worktree.
 For large experiment repositories, prefer sparse or minimal worktrees and keep generated outputs, caches, logs, and bulky artifacts outside temporary worktree checkouts. Before deleting or moving any worktree, branch, output, cache, checkpoint, or large artifact payload, follow the maintenance closeout checklist in `capabilities/maintenance.md`.
 
-For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `close-branch`, `create-run`, `update-run`, `complete-run`, `create-artifact`, `ingest-artifact`, `record-gate-result`, `ingest-gate-result`, `complete-experiment`, `complete-experiments`, `close-current-experiment`, `create-followup-experiment`, `migrate-terminal-next-actions`, `update-finding`, `update-workstream-fields`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, and final verify commands. `close-branch --compact` additionally keeps `parent_ready_for_terminal_status`, `skipped`, and `remaining_active_descendants`; read those before retrying a parent terminal transition. `--show-diff` still includes the full diff; use it only when reviewing write content.
+For terse machine-readable mutation feedback, add `--compact` with `--json` on supported high-level commands such as `apply-graph-plan`, `create-workstream`, `close-branch`, `create-run`, `update-run`, `complete-run`, `create-artifact`, `ingest-artifact`, `record-gate-result`, `ingest-gate-result`, `complete-experiment`, `complete-experiments`, `close-current-experiment`, `create-followup-experiment`, `migrate-terminal-next-actions`, `update-finding`, `update-workstream-fields`, and `finalize-workstream`. Compact output keeps only target, changed status, created/updated ids, changed file count, resolved inputs where useful, changed-scope `verify_commands`, `post_apply_verify_commands`, and full `final_handoff_commands`. Worker agents should run `verify_commands` after a real write. If changed-scope `validate` reports `fallback.used_full_validation: true`, follow `fallback.recommended_commands` to refresh `dashboards/validation_index.json`; do not escalate to full `smoke` unless this is coordinator/final handoff. For dry-runs, `verify_commands` is empty; inspect `post_apply_verify_commands` and run those only after applying without `--dry-run`. Coordinator/final handoff should run `final_handoff_commands`. `close-branch --compact` additionally keeps `parent_ready_for_terminal_status`, `skipped`, and `remaining_active_descendants`; read those before retrying a parent terminal transition. `--show-diff` still includes the full diff; use it only when reviewing write content.
 For legacy mutation commands without `--compact`, use `--dry-run --json --show-diff` to preview writes and keep the JSON payload focused on `changed/would_change`, affected path, before/after summary, and optional diff. Dry-run also performs mutation preflight; if `interaction_log.yaml` is malformed, it fails before showing a misleading successful preview.
-Use `commands --json --compact --workflow <graph|evidence|decision|focus|maintenance|read>` or `--name <command>` to read the short discovery manifest. It omits long examples and Python/cwd metadata; use full `commands --json` only when you need the complete command contract. If `validate` or a mutating dry-run reports malformed interaction log schema, use `repair-interaction-log --dry-run --json --show-diff`; it can drop non-mapping event items with a backup, but it refuses YAML scanner errors.
+Use `commands --json --compact --summary-only --workflow <graph|evidence|decision|focus|maintenance|read>` for broad command discovery, then `commands --json --compact --name <command>` for one command's detailed batching flags such as `batch_policy`. The summary payload is intentionally terse; use full `commands --json` only when you need the complete command contract. If `validate` or a mutating dry-run reports malformed interaction log schema, use `repair-interaction-log --dry-run --json --show-diff`; it can drop non-mapping event items with a backup, but it refuses YAML scanner errors.
 
 Use bounded `search` and `suggest-next-actions` reads. Prefer `context` and `bootstrap.top_suggestions` for normal startup; run `suggest-next-actions --limit 10 --focus-only` once before choosing work, and re-run it only after you changed `next_actions` or suggestion lifecycle state.
 
@@ -269,12 +285,14 @@ Allowed project-state writes are under:
 - `research_cockpit/runs/*.yaml`
 - `research_cockpit/gate_results/*.yaml`
 - `research_cockpit/gate_results/*.json`
+- `research_cockpit/artifact_records/*.yaml`
+- `research_cockpit/artifact_migrations/*.yaml`
 - `research_cockpit/notes/**/*.md`
 - `research_cockpit/artifacts/**`
 
 Agents should normally write structured state files through `research-cockpit` CLI commands. Direct YAML repair is a last-resort structural fix and must be followed by validation and dashboard rebuild.
 
-Markdown notes under `research_cockpit/notes/**/*.md` may be edited directly for human-readable detail. Artifact payloads under `research_cockpit/artifacts/**` may be copied or preserved by launcher handoff and `ingest-artifact`, but structured metadata should still be written through CLI commands. Keep structured findings, status, coordinator focus, assignment cursor, decision state, run records, gate results, `baseline`, `current_best_option`, and `next_actions` in YAML via CLI where a command exists.
+Markdown notes under `research_cockpit/notes/**/*.md` may be edited directly for human-readable detail. Artifact payloads under `research_cockpit/artifacts/**` may be copied or preserved by launcher handoff and `ingest-artifact`, but structured metadata should still be written through CLI commands. Keep structured findings, status, coordinator focus, assignment cursor, decision state, run records, gate results, artifact records, artifact migration reports, `baseline`, `current_best_option`, and `next_actions` in YAML via CLI where a command exists.
 
 Generated files under `research_cockpit/dashboards/` must be rebuilt, not hand-authored.
 

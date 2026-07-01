@@ -364,6 +364,78 @@ def _compact_smoke_checks(root: Path, *, query: str, progress: bool = False) -> 
         ))
     return checks
 
+def _changed_smoke_checks(root: Path, *, node_id: str, progress: bool = False) -> list[dict[str, Any]]:
+    from research_cockpit.commands.context import context_payload
+    from research_cockpit.commands.list_agent_commands import agent_command_manifest
+    from research_cockpit.commands.validate_cockpit import validation_payload
+
+    root_arg = str(root)
+
+    def validate_changed_check() -> dict[str, Any]:
+        payload = validation_payload(root, changed_nodes=[node_id])
+        if not payload.get("ok"):
+            raise ValueError("; ".join(str(error) for error in payload.get("errors", [])))
+        return {
+            "mode": payload.get("mode"),
+            "node_count": payload.get("node_count"),
+            "changed_nodes": payload.get("changed", {}).get("nodes", []),
+            "affected_node_count": len(payload.get("affected", {}).get("nodes", [])),
+            "fallback_used_full_validation": payload.get("fallback", {}).get("used_full_validation"),
+        }
+
+    def context_check() -> dict[str, Any]:
+        payload = context_payload(
+            root,
+            node_id=node_id,
+            with_bootstrap=False,
+            with_artifacts=True,
+            compact=True,
+        )
+        return {
+            "node_id": payload.get("node", {}).get("id"),
+            "node_type": payload.get("node", {}).get("type"),
+            "schema_version": payload.get("node_context", {}).get("schema_version"),
+            "validation_ok": payload.get("validation", {}).get("ok"),
+            "artifact_count": len(payload.get("artifacts", {}).get("artifact_ids", [])),
+            "smoke_scope": "changed_context",
+        }
+
+    def commands_check() -> dict[str, Any]:
+        commands = agent_command_manifest(compact=True)
+        return {"command_count": len(commands)}
+
+    checks = [
+        _run_direct_check(
+            "validate_changed",
+            ["in-process", "validate", "--root", root_arg, "--changed-node", node_id, "--json"],
+            validate_changed_check,
+            progress=progress,
+        )
+    ]
+    if not checks[-1]["passed"]:
+        return checks
+
+    checks.extend([
+        _run_direct_check(
+            "context",
+            [
+                "in-process",
+                "context",
+                "--root",
+                root_arg,
+                "--id",
+                node_id,
+                "--with-artifacts",
+                "--compact",
+                "--json",
+            ],
+            context_check,
+            progress=progress,
+        ),
+        _run_direct_check("list_agent_commands", ["in-process", "commands", "--compact"], commands_check, progress=progress),
+    ])
+    return checks
+
 
 def _full_smoke_checks(python: str, root: Path, *, query: str, progress: bool = False) -> list[dict[str, Any]]:
     root_arg = str(root)
@@ -400,7 +472,16 @@ def skill_smoke_test_payload(
     python_executable: str | None = None,
     full: bool = False,
     progress: bool = False,
+    scope: str = "root",
+    node_id: str | None = None,
 ) -> dict[str, Any]:
+    if scope not in {"root", "changed"}:
+        raise ValueError(f"Unsupported smoke scope: {scope}")
+    if scope == "changed" and full:
+        raise ValueError("--full cannot be combined with --scope changed")
+    if scope == "changed" and not node_id:
+        raise ValueError("--scope changed requires --id")
+
     python = python_executable or os.environ.get("RESEARCH_COCKPIT_PYTHON", "").strip() or sys.executable
     missing = missing_modules_for_python(python)
     if missing:
@@ -413,15 +494,18 @@ def skill_smoke_test_payload(
             "checks": [_dependency_failure_check(python, missing)],
         }
 
-    mode = "full" if full else "compact"
-    if not full and not _same_python(python, sys.executable):
-        mode = "full_external_python"
-
-    if mode == "compact":
-        checks = _compact_smoke_checks(root, query=query, progress=progress)
+    if scope == "changed":
+        mode = "changed"
+        checks = _changed_smoke_checks(root, node_id=str(node_id), progress=progress)
     else:
-        checks = _full_smoke_checks(python, root, query=query, progress=progress)
+        mode = "full" if full else "compact"
+        if not full and not _same_python(python, sys.executable):
+            mode = "full_external_python"
 
+        if mode == "compact":
+            checks = _compact_smoke_checks(root, query=query, progress=progress)
+        else:
+            checks = _full_smoke_checks(python, root, query=query, progress=progress)
     failed = next((check for check in checks if not check["passed"]), None)
     if failed:
         _emit_progress(progress, f"smoke: failed at {failed['name']}")
@@ -461,9 +545,15 @@ def main() -> None:
     parser.add_argument("--query", default="demo")
     parser.add_argument("--python", dest="python_executable", default=None)
     parser.add_argument("--full", action="store_true", help="Run the legacy full subprocess smoke workflow.")
+    parser.add_argument("--scope", choices=["root", "changed"], default="root")
+    parser.add_argument("--id", dest="node_id", help="Node id required for --scope changed.")
     parser.add_argument("--progress", action="store_true", help="Print per-check progress to stderr.")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if args.full and args.scope == "changed":
+        parser.error("--full cannot be combined with --scope changed")
+    if args.scope == "changed" and not args.node_id:
+        parser.error("--scope changed requires --id")
 
     payload = skill_smoke_test_payload(
         args.root,
@@ -471,6 +561,8 @@ def main() -> None:
         python_executable=args.python_executable,
         full=args.full,
         progress=args.progress,
+        scope=args.scope,
+        node_id=args.node_id,
     )
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))

@@ -9,11 +9,12 @@ Choose one startup path. Do not run both bootstrap and `context --with-bootstrap
 1. Assigned downstream agent with an `assignment_id`:
 
 ```sh
-research-cockpit bootstrap --root research_cockpit --assignment <assignment_id> --json
 research-cockpit agent-session-context --root research_cockpit --assignment <assignment_id> --compact --json
+# Optional broad summary:
+research-cockpit bootstrap --root research_cockpit --assignment <assignment_id> --json
 ```
 
-Use `assignment_scope` / `agent_scope` and `assignment_cursor` as the primary task context. Global `current_state`, `coordinator_state`, and `focus.current_focus_node` are coordinator metadata and may point to another agent's branch. Use `--agent` only when it resolves to exactly one active assignment.
+Use `agent-session-context` assignment data as the primary task context; in scoped bootstrap output, use `assignment_scope` / `agent_scope` and `assignment_cursor`. Global `current_state`, `coordinator_state`, and `focus.current_focus_node` are coordinator metadata and may point to another agent's branch. Use `--agent` only when it resolves to exactly one active assignment.
 
 2. Known node id:
 
@@ -51,21 +52,22 @@ For a brand-new data root, use `research-cockpit init --root research_cockpit --
 Use filtered command discovery when you only need one workflow surface:
 
 ```sh
-research-cockpit commands --json --compact --workflow focus
-research-cockpit commands --json --compact --group context
+research-cockpit commands --json --compact --summary-only --workflow focus
+research-cockpit commands --json --compact --summary-only --group context
 research-cockpit commands --json --compact --name context
 ```
 
-Compact command discovery includes `group`, `canonical_name`, `status`, `aliases`, and `input_modes`. Use `--group` for a stable workflow surface such as `context`, `graph`, `run`, `artifact`, or `maintenance`; use `--workflow` when you need cross-cutting tags such as `focus` or `evidence`.
+Use `--summary-only` for broad command discovery. It includes only command selection fields such as `group`, `status`, `workflow_tags`, `input_modes`, support flags, and `batch_policy_mode`. Use `commands --json --compact --name <command>` when you need one command's full compact contract, aliases, or detailed `batch_policy`.
 
 For a downstream agent launched in a git worktree, start from the canonical root scoped context instead of unscoped global bootstrap:
 
 ```sh
-research-cockpit bootstrap --root D:/main_repo/research_cockpit --assignment <assignment_id> --json
 research-cockpit agent-session-context --root D:/main_repo/research_cockpit --assignment <assignment_id> --compact --json
+# Optional broad summary:
+research-cockpit bootstrap --root D:/main_repo/research_cockpit --assignment <assignment_id> --json
 ```
 
-The payload includes `required_root`, `do_not_mutate_worktree_root: true`, the assignment record, assignment cursor, compact option context, and handoff commands. Use the included `ingest-artifact` command template for worktree run outputs before recording findings or deleting the worktree.
+The payload includes `required_root`, `do_not_mutate_worktree_root: true`, the assignment record, assignment cursor, compact option context, and handoff commands. Use the included record-only `ingest-artifact` command template for ordinary worktree run outputs before recording findings or deleting the worktree; promote the record only for durable evidence.
 
 ## Node Handoff
 

@@ -1056,6 +1056,79 @@ def validate_current_state(
     return errors
 
 
+def validate_artifact_records(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    records: list[dict[str, Any]] | None = None,
+) -> list[str]:
+    from research_cockpit.artifact_records import list_artifact_records
+    from research_cockpit.retention import validate_retention
+
+    errors: list[str] = []
+    if records is None:
+        try:
+            records = list_artifact_records(root)
+        except (ValueError, FileNotFoundError) as exc:
+            return [str(exc)]
+
+    record_ids: set[str] = set()
+    duplicate_ids: set[str] = set()
+    for record in records:
+        record_id = str(record.get("record_id") or "").strip()
+        if not record_id:
+            errors.append("artifact record missing record_id")
+            continue
+        if record_id in record_ids:
+            duplicate_ids.add(record_id)
+        record_ids.add(record_id)
+        experiment_id = str(record.get("experiment_id") or "").strip()
+        if not experiment_id:
+            errors.append(f"artifact record {record_id!r}: experiment_id is required")
+        elif experiment_id not in nodes:
+            errors.append(f"artifact record {record_id!r}: experiment_id references missing node {experiment_id!r}")
+        elif nodes[experiment_id].type != "experiment":
+            errors.append(
+                f"artifact record {record_id!r}: experiment_id {experiment_id!r} has type "
+                f"{nodes[experiment_id].type!r}; expected 'experiment'"
+            )
+        links = record.get("links")
+        if links is not None and not isinstance(links, dict):
+            errors.append(f"artifact record {record_id!r}: links must be a mapping")
+        retention = record.get("retention")
+        if retention is not None:
+            try:
+                validate_retention(retention, "retention")
+            except ValueError as exc:
+                errors.append(f"artifact record {record_id!r}: {exc}")
+    for record_id in sorted(duplicate_ids):
+        errors.append(f"artifact record id {record_id!r} is duplicated")
+
+    def validate_record_refs(owner_id: str, field_name: str, value: Any) -> None:
+        if value is None:
+            return
+        if not isinstance(value, list):
+            errors.append(f"{owner_id}: {field_name} must be a list")
+            return
+        for record_id in value:
+            ref_id = str(record_id)
+            if ref_id not in record_ids:
+                errors.append(f"{owner_id}: {field_name} references missing artifact record {ref_id!r}")
+
+    for node in nodes.values():
+        validate_record_refs(node.id, "linked_artifact_records", node.raw.get("linked_artifact_records"))
+        findings = node.raw.get("findings")
+        if not isinstance(findings, list):
+            continue
+        for index, finding in enumerate(findings, start=1):
+            if not isinstance(finding, dict):
+                continue
+            validate_record_refs(
+                node.id,
+                f"findings[{index}].linked_artifact_records",
+                finding.get("linked_artifact_records"),
+            )
+    return errors
+
 def validate_cockpit(
     root: Path,
     nodes: dict[str, ResearchNode] | None = None,
@@ -1066,6 +1139,7 @@ def validate_cockpit(
     agents: dict[str, AgentRecord] | None = None,
     assignments: dict[str, AssignmentRecord] | None = None,
     coordinator_state: CoordinatorState | None = None,
+    artifact_records: list[dict[str, Any]] | None = None,
     include_interaction_log: bool = False,
     raise_on_error: bool = False,
 ) -> list[str]:
@@ -1101,6 +1175,7 @@ def validate_cockpit(
             coordinator_state = CoordinatorState()
             coordinator_load_errors = exc.errors
     errors = validate_nodes(nodes)
+    errors.extend(validate_artifact_records(root, nodes, artifact_records))
     errors.extend(validate_explicit_edges(nodes, explicit_edges))
     errors.extend(validate_current_state(current, nodes, explicit_edges))
     errors.extend(run_load_errors)
@@ -1149,6 +1224,7 @@ def build_search_index(
     topology: GraphTopology | None = None,
     include_resource_text: bool = True,
     resource_scan_settings: Any | None = None,
+    sources: set[str] | list[str] | None = None,
 ) -> list[dict[str, Any]]:
     from research_cockpit.search_index import build_search_index as _build_search_index
 
@@ -1160,6 +1236,7 @@ def build_search_index(
         topology=topology,
         include_resource_text=include_resource_text,
         resource_scan_settings=resource_scan_settings,
+        sources=sources,
     )
 
 

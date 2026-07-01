@@ -418,6 +418,51 @@ def _option_onboarding_context(
     }
 
 
+def _node_worker_verify_commands(root: Path, node: ResearchNode, *, command_style: str = "console") -> list[str]:
+    return [
+        _rooted_cli_command(root, "validate", "--changed-node", node.id, "--json", command_style=command_style),
+        _rooted_cli_command(
+            root,
+            "context",
+            "--id",
+            node.id,
+            "--with-bootstrap",
+            "--with-artifacts",
+            "--compact",
+            "--json",
+            command_style=command_style,
+        ),
+        _rooted_cli_command(root, "smoke", "--scope", "changed", "--id", node.id, "--json", "--progress", command_style=command_style),
+    ]
+
+
+def _node_final_handoff_commands(root: Path, *, command_style: str = "console") -> list[str]:
+    return [
+        _rooted_cli_command(root, "validate", "--json", command_style=command_style),
+        _rooted_cli_command(root, "build", command_style=command_style),
+        _rooted_cli_command(root, "smoke", "--json", "--progress", command_style=command_style),
+    ]
+
+
+def _compact_command_drafts(command_drafts: dict[str, str]) -> dict[str, str]:
+    compact_keys = [
+        "validate_changed",
+        "context_changed",
+        "smoke_changed",
+        "search_node",
+        "claim_option",
+        "option_workstream_context",
+        "report_option_workstream",
+        "mark_running",
+        "record_finding",
+        "create_child_workstream",
+        "create_single_followup",
+        "check_acceptance",
+        "accept_decision",
+    ]
+    return {key: command_drafts[key] for key in compact_keys if command_drafts.get(key)}
+
+
 def _node_command_drafts(
     root: Path,
     node: ResearchNode,
@@ -425,9 +470,17 @@ def _node_command_drafts(
     *,
     command_style: str = "console",
 ) -> dict[str, str]:
+    worker_verify_commands = _node_worker_verify_commands(root, node, command_style=command_style)
+    final_handoff_commands = _node_final_handoff_commands(root, command_style=command_style)
     drafts = {
-        "validate": _rooted_cli_command(root, "validate", "--json", command_style=command_style),
-        "build": _rooted_cli_command(root, "build", command_style=command_style),
+        "validate_changed": worker_verify_commands[0],
+        "context_changed": worker_verify_commands[1],
+        "smoke_changed": worker_verify_commands[2],
+        "final_validate": final_handoff_commands[0],
+        "final_build": final_handoff_commands[1],
+        "final_smoke": final_handoff_commands[2],
+        "validate": final_handoff_commands[0],
+        "build": final_handoff_commands[1],
         "search_node": _rooted_cli_command(root, "search", "--query", node.id, "--json", command_style=command_style),
     }
     if node.type == "option":
@@ -592,7 +645,10 @@ def _compact_node_onboarding_context(payload: dict[str, Any]) -> dict[str, Any]:
         "evidence_summary": _compact_evidence_summary(payload),
         "recommended_next_step": recommended_next_steps[0] if recommended_next_steps else None,
         "recommended_next_steps": recommended_next_steps,
-        "command_drafts": payload.get("command_drafts", {}) or {},
+        "worker_verify_commands": payload.get("worker_verify_commands", []) or [],
+        "final_handoff_commands": payload.get("final_handoff_commands", []) or [],
+        "verification_note": "Run worker_verify_commands after local edits; reserve final_handoff_commands for coordinator merge, release, or final handoff.",
+        "command_drafts": _compact_command_drafts(payload.get("command_drafts", {}) or {}),
         "context_freshness": payload.get("context_freshness", {}) or {},
     }
     type_context = payload.get("type_context", {})
@@ -641,6 +697,8 @@ def build_node_onboarding_context(
         type_context = {"kind": node.type}
 
     command_drafts = _node_command_drafts(root, node, type_context, command_style=command_style)
+    worker_verify_commands = _node_worker_verify_commands(root, node, command_style=command_style)
+    final_handoff_commands = _node_final_handoff_commands(root, command_style=command_style)
     payload = {
         "node": node_context(node),
         "parent_chain": ordered_node_contexts(nodes, path_ids),
@@ -664,6 +722,8 @@ def build_node_onboarding_context(
         "context_freshness": _node_context_freshness(root),
         "type_context": type_context,
         "command_drafts": command_drafts,
+        "worker_verify_commands": worker_verify_commands,
+        "final_handoff_commands": final_handoff_commands,
         "recommended_next_steps": _recommended_next_steps(node, type_context, command_drafts),
     }
     if compact:

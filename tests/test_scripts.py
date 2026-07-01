@@ -24,7 +24,15 @@ sys.path.insert(0, str(DEV_SCRIPTS_DIR))
 existing_pythonpath = os.environ.get("PYTHONPATH", "")
 os.environ["PYTHONPATH"] = str(SRC_DIR) if not existing_pythonpath else str(SRC_DIR) + os.pathsep + existing_pythonpath
 
-from research_cockpit.model import ValidationError, load_nodes, load_yaml, save_yaml, validate_cockpit
+from research_cockpit.model import (
+    ValidationError,
+    build_search_index,
+    build_search_index_summary,
+    load_nodes,
+    load_yaml,
+    save_yaml,
+    validate_cockpit,
+)
 from research_cockpit.assignment_scope import AssignmentScopeError
 from research_cockpit.command_registry import (
     COMMAND_GROUP_BY_COMMAND,
@@ -55,6 +63,7 @@ from research_cockpit.commands.artifact_retention_audit import artifact_retentio
 from research_cockpit.commands.assignment_view import assignment_view_payload
 from research_cockpit.commands.branch_audit import branch_audit_payload
 from research_cockpit.commands.build_dashboard import build_dashboard, dashboard_watch_signature, watch_dashboard
+from research_cockpit.commands.validate_cockpit import validation_payload
 from research_cockpit.commands.check_decision_acceptance import decision_acceptance_payload
 from research_cockpit.commands.claim_option import claim_option
 from research_cockpit.commands.cleanup_suggestion_lifecycle import cleanup_suggestion_lifecycle
@@ -69,6 +78,7 @@ from research_cockpit.commands.create_run import create_run
 from research_cockpit.commands.create_workstream import create_workstream
 from research_cockpit.commands.create_note import create_note
 from research_cockpit.commands.complete_run import complete_run
+from research_cockpit.commands.compact_artifacts import compact_artifacts_payload
 from research_cockpit.commands.finalize_workstream import finalize_workstream
 from research_cockpit.commands.ingest_artifact import ingest_artifact
 from research_cockpit.commands.import_worktree_findings import import_worktree_findings
@@ -361,6 +371,48 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertEqual(default_build.returncode, 0, default_build.stdout + default_build.stderr)
         self.assertTrue((self.root / "dashboards" / "graph_view.json").exists())
+
+        compact_add = subprocess.run(
+            [
+                *cli_command("add-node"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_compact",
+                "--type",
+                "experiment",
+                "--title",
+                "Compact experiment",
+                "--parent",
+                "option_t5",
+                "--no-build",
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        compact_payload = json.loads(compact_add.stdout)
+
+        self.assertEqual(compact_add.returncode, 0, compact_add.stdout + compact_add.stderr)
+        self.assertEqual(compact_payload["changed_scope"]["nodes"], ["exp_compact"])
+        self.assertIn("--changed-node exp_compact", compact_payload["verify_commands"][0])
+        self.assertIn("final_handoff_commands", compact_payload)
+
+        stale_index_validate = subprocess.run(
+            [*cli_command("validate"), "--root", str(self.root), "--changed-node", "exp_compact", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        stale_index_payload = json.loads(stale_index_validate.stdout)
+
+        self.assertEqual(stale_index_validate.returncode, 0, stale_index_validate.stdout + stale_index_validate.stderr)
+        self.assertTrue(stale_index_payload["ok"])
+        self.assertTrue(stale_index_payload["fallback"]["used_full_validation"])
+        self.assertEqual(stale_index_payload["fallback"]["reason"], "validation_index_unknown_changed_node")
+        self.assertIn(str(self.root), stale_index_payload["fallback"]["recommended_commands"][0])
 
     def test_cli_validation_errors_are_clean_without_traceback(self) -> None:
         add_failed = subprocess.run(
@@ -753,6 +805,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "decision_acceptance_checklists.json",
             "option_workstreams.json",
             "assignment_view.json",
+            "validation_index.json",
         }
 
         self.assertEqual({path.name for path in paths}, expected)
@@ -766,6 +819,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         checklists = json.loads((self.root / "dashboards" / "decision_acceptance_checklists.json").read_text(encoding="utf-8"))
         option_workstreams = json.loads((self.root / "dashboards" / "option_workstreams.json").read_text(encoding="utf-8"))
         assignment_view = json.loads((self.root / "dashboards" / "assignment_view.json").read_text(encoding="utf-8"))
+        validation_index = json.loads((self.root / "dashboards" / "validation_index.json").read_text(encoding="utf-8"))
         nodes = load_nodes(self.root)
 
         self.assertTrue(graph["nodes"])
@@ -786,6 +840,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIsInstance(checklists, list)
         self.assertIsInstance(option_workstreams, list)
         self.assertIn("assignments", assignment_view)
+        self.assertEqual(validation_index["schema_version"], "validation_index_v1")
+        self.assertIn("exp_t5", validation_index["nodes"])
+        self.assertIn("exp_t5", validation_index["reverse_refs"]["option_t5"])
         self.assertIn("active_option_workstreams", context)
         self.assertIn("assignment_view", context)
         self.assertIn("option_workstream_context", focus_context)
@@ -795,6 +852,253 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("metadata", context)
         self.assertIn("metadata", focus_context)
         self.assertIsInstance(context["metadata"]["worktree_dirty"], bool)
+
+    def test_build_cli_affected_refreshes_only_validation_index(self) -> None:
+        out = subprocess.run(
+            [*cli_command("build"), "--root", str(self.root), "--affected", "--id", "exp_t5", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["affected"])
+        self.assertEqual(payload["target_node"], "exp_t5")
+        self.assertFalse(payload["full_dashboard_refreshed"])
+        self.assertEqual(payload["refreshed_outputs"], ["dashboards/validation_index.json"])
+        self.assertEqual([Path(path).name for path in payload["written_files"]], ["validation_index.json"])
+        self.assertTrue((self.root / "dashboards" / "validation_index.json").exists())
+        self.assertFalse((self.root / "dashboards" / "graph_view.json").exists())
+
+    def test_validate_changed_node_uses_fresh_validation_index_after_edit(self) -> None:
+        build_dashboard(self.root)
+        node_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
+        node = load_yaml(node_path)
+        node["summary"] = "changed after index generation"
+        save_yaml(node_path, node)
+
+        with patch("research_cockpit.commands.validate_cockpit.load_nodes", side_effect=AssertionError("full node scan")):
+            payload = validation_payload(self.root, changed_nodes=["exp_t5"])
+
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["fallback"]["used_full_validation"])
+        self.assertTrue(payload["index"]["used"])
+        self.assertTrue(payload["index"]["fresh"])
+        self.assertEqual(payload["changed"]["nodes"], ["exp_t5"])
+        self.assertIn("exp_t5", payload["affected"]["nodes"])
+        self.assertIn("option_t5", payload["affected"]["nodes"])
+        self.assertIn("problem_text", payload["affected"]["nodes"])
+
+    def test_validate_changed_node_fresh_index_rejects_invalid_node_fields(self) -> None:
+        build_dashboard(self.root)
+        node_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
+        node = load_yaml(node_path)
+        node["findings"] = [{"confidence": "not-valid"}]
+        save_yaml(node_path, node)
+
+        payload = validation_payload(self.root, changed_nodes=["exp_t5"])
+
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["fallback"]["used_full_validation"])
+        self.assertTrue(payload["index"]["used"])
+        self.assertTrue(any("findings[1].statement is required" in error for error in payload["errors"]))
+        self.assertTrue(any("findings[1].confidence invalid" in error for error in payload["errors"]))
+
+    def test_validate_changed_node_fresh_index_rejects_missing_top_level_artifact_record(self) -> None:
+        build_dashboard(self.root)
+        node_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
+        node = load_yaml(node_path)
+        node["linked_artifact_records"] = ["missing_record"]
+        save_yaml(node_path, node)
+
+        payload = validation_payload(self.root, changed_nodes=["exp_t5"])
+
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["fallback"]["used_full_validation"])
+        self.assertTrue(payload["index"]["used"])
+        self.assertTrue(any("linked_artifact_records references missing artifact record" in error for error in payload["errors"]))
+
+    def test_validate_changed_record_uses_fresh_validation_index(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_index_record"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.91}', encoding="utf-8")
+        ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_index_record",
+            title="Indexed record evidence",
+            links={"metrics": "metrics.json"},
+            rebuild_dashboard=False,
+            record_only=True,
+        )
+        build_dashboard(self.root)
+        record_id = "artifact_exp_t5_run_index_record"
+
+        with patch("research_cockpit.commands.validate_cockpit.load_nodes", side_effect=AssertionError("full node scan")):
+            payload = validation_payload(self.root, changed_records=[f"artifact:{record_id}"])
+
+        self.assertTrue(payload["ok"])
+        self.assertFalse(payload["fallback"]["used_full_validation"])
+        self.assertTrue(payload["index"]["used"])
+        self.assertEqual(payload["changed"]["records"], [f"artifact:{record_id}"])
+        self.assertEqual(payload["affected"]["artifact_records"], [record_id])
+        self.assertIn("exp_t5", payload["affected"]["nodes"])
+        self.assertIn("run_index_record", payload["affected"]["runs"])
+    def test_validate_changed_node_type_change_with_artifact_record_falls_back(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_type_record"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.9}', encoding="utf-8")
+        ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_type_record",
+            title="Type-sensitive record evidence",
+            links={"metrics": "metrics.json"},
+            rebuild_dashboard=False,
+            record_only=True,
+        )
+        build_dashboard(self.root)
+        node_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
+        node = load_yaml(node_path)
+        node["type"] = "option"
+        node["status"] = "active"
+        save_yaml(node_path, node)
+
+        payload = validation_payload(self.root, changed_nodes=["exp_t5"])
+
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["fallback"]["used_full_validation"])
+        self.assertEqual(payload["fallback"]["reason"], "validation_index_affected_records_require_full_validation")
+        self.assertTrue(any("expected 'experiment'" in error for error in payload["errors"]))
+
+    def test_validate_changed_record_falls_back_when_record_file_changed(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_changed_record_file"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.92}', encoding="utf-8")
+        ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_changed_record_file",
+            title="Changed record file evidence",
+            links={"metrics": "metrics.json"},
+            rebuild_dashboard=False,
+            record_only=True,
+        )
+        build_dashboard(self.root)
+        record_id = "artifact_exp_t5_run_changed_record_file"
+        record_path = self.root / "artifact_records" / "exp_t5.yaml"
+        records = load_yaml(record_path)
+        records["records"][record_id]["links"] = ["not", "a", "mapping"]
+        save_yaml(record_path, records)
+
+        payload = validation_payload(self.root, changed_records=[f"artifact:{record_id}"])
+
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["fallback"]["used_full_validation"])
+        self.assertEqual(payload["fallback"]["reason"], "validation_index_file_hash_mismatch")
+        self.assertTrue(any("links must be a mapping" in error for error in payload["errors"]))
+    def test_validate_changed_node_fresh_index_rejects_node_id_mismatch(self) -> None:
+        build_dashboard(self.root)
+        node_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
+        node = load_yaml(node_path)
+        node["id"] = "exp_renamed"
+        save_yaml(node_path, node)
+
+        payload = validation_payload(self.root, changed_nodes=["exp_t5"])
+
+        self.assertFalse(payload["ok"])
+        self.assertFalse(payload["fallback"]["used_full_validation"])
+        self.assertTrue(any("node file id mismatch" in error for error in payload["errors"]))
+
+    def test_validate_changed_node_falls_back_when_explicit_edges_index_is_stale(self) -> None:
+        save_yaml(
+            self.root / "graph" / "edges.yaml",
+            {"edges": [{"from": "exp_t5", "to": "option_t5", "type": "related"}]},
+        )
+        build_dashboard(self.root)
+        save_yaml(
+            self.root / "graph" / "edges.yaml",
+            {"edges": [{"from": "exp_t5", "to": "missing_node", "type": "related"}]},
+        )
+
+        payload = validation_payload(self.root, changed_nodes=["exp_t5"])
+
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["fallback"]["used_full_validation"])
+        self.assertEqual(payload["fallback"]["reason"], "validation_index_explicit_edges_hash_mismatch")
+        self.assertTrue(any("missing_node" in error for error in payload["errors"]))
+
+    def test_validate_changed_node_falls_back_when_affected_run_needs_relationship_validation(self) -> None:
+        save_yaml(self.root / "runs" / "run_t5.yaml", {"run_id": "run_t5", "status": "running", "experiment_id": "exp_t5"})
+        build_dashboard(self.root)
+        node_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
+        node = load_yaml(node_path)
+        node["type"] = "option"
+        node["status"] = "active"
+        save_yaml(node_path, node)
+
+        payload = validation_payload(self.root, changed_nodes=["exp_t5"])
+
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["fallback"]["used_full_validation"])
+        self.assertEqual(payload["fallback"]["reason"], "validation_index_affected_records_require_full_validation")
+        self.assertTrue(any("expected 'experiment'" in error for error in payload["errors"]))
+
+    def test_validate_changed_run_file_falls_back_and_rejects_invalid_run(self) -> None:
+        save_yaml(self.root / "runs" / "run_t5.yaml", {"run_id": "run_t5", "status": "running", "experiment_id": "exp_t5"})
+        build_dashboard(self.root)
+        run_path = self.root / "runs" / "run_t5.yaml"
+        run = load_yaml(run_path)
+        run["status"] = "not-valid"
+        save_yaml(run_path, run)
+
+        payload = validation_payload(self.root, changed_files=["runs/run_t5.yaml"])
+
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["fallback"]["used_full_validation"])
+        self.assertEqual(payload["fallback"]["reason"], "validation_index_non_node_changed_file")
+        self.assertTrue(any("invalid run status" in error for error in payload["errors"]))
+
+    def test_validate_new_changed_file_falls_back_to_full_validation(self) -> None:
+        build_dashboard(self.root)
+        write_node(
+            self.root,
+            {
+                "id": "exp_new",
+                "type": "experiment",
+                "title": "New experiment",
+                "status": "planned",
+                "parent": "option_t5",
+            },
+        )
+
+        payload = validation_payload(self.root, changed_files=["graph/nodes/exp_new.yaml"])
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["fallback"]["used_full_validation"])
+        self.assertEqual(payload["fallback"]["reason"], "validation_index_unknown_changed_file")
+        self.assertEqual(payload["changed"]["nodes"], ["exp_new"])
+        self.assertIn("exp_new", payload["affected"]["nodes"])
+
+    def test_validate_changed_node_falls_back_when_unaffected_index_file_is_stale(self) -> None:
+        build_dashboard(self.root)
+        option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
+        option = load_yaml(option_path)
+        option["summary"] = "changed without being declared"
+        save_yaml(option_path, option)
+
+        payload = validation_payload(self.root, changed_nodes=["exp_t5"])
+
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["fallback"]["used_full_validation"])
+        self.assertEqual(payload["fallback"]["reason"], "validation_index_file_hash_mismatch")
+        self.assertFalse(payload["index"]["used"])
+        self.assertEqual(payload["index"]["fallback_reason"], "validation_index_file_hash_mismatch")
 
     def test_build_dashboard_reuses_read_models_in_context_packs(self) -> None:
         import research_cockpit.commands.build_dashboard as build_dashboard_module
@@ -1071,6 +1375,8 @@ class ScriptBehaviorTests(unittest.TestCase):
             "3",
             "--resource-count",
             "4",
+            "--artifacts",
+            "7",
             "--json",
         )
 
@@ -1079,6 +1385,23 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["node_count"], 24)
         self.assertEqual(payload["note_count"], 3)
         self.assertEqual(payload["resource_count"], 4)
+        self.assertEqual(payload["artifact_record_count"], 7)
+        self.assertEqual(payload["artifact_record_file_count"], 7)
+
+        record_files = sorted((fixture_root / "artifact_records").glob("*.yaml"))
+        self.assertEqual(len(record_files), 7)
+        record_count = sum(len(load_yaml(path).get("records", {})) for path in record_files)
+        self.assertEqual(record_count, 7)
+        first_record_file = load_yaml(record_files[0])
+        self.assertEqual(first_record_file["schema_version"], "artifact_records_v1")
+        self.assertEqual(first_record_file["experiment_id"], "experiment_perf_0000")
+        first_record = first_record_file["records"]["artifact_record_perf_0000"]
+        self.assertEqual(first_record["record_id"], "artifact_record_perf_0000")
+        self.assertEqual(first_record["run_id"], "run_perf_0000")
+        self.assertEqual(first_record["artifact_kind"], "run_output")
+        self.assertEqual(first_record["retention"]["class"], "reproducible_output")
+        self.assertIsNone(first_record["promoted_artifact_id"])
+        self.assertIn("metrics", first_record["links"])
 
         nodes = load_nodes(fixture_root)
         self.assertEqual(len(nodes), 24)
@@ -1163,6 +1486,8 @@ class ScriptBehaviorTests(unittest.TestCase):
             "3",
             "--resource-count",
             "4",
+            "--artifacts",
+            "7",
             "--json",
         )
         self.assertEqual(second.returncode, 0, second.stderr or second.stdout)
@@ -1172,6 +1497,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "graph/nodes/option_perf_0001.yaml",
             "artifacts/search_resources/resource_0000.md",
             "notes/note_0000.md",
+            "artifact_records/experiment_perf_0000.yaml",
         ):
             self.assertEqual(
                 (fixture_root / relative_path).read_text(encoding="utf-8"),
@@ -1257,6 +1583,9 @@ class ScriptBehaviorTests(unittest.TestCase):
             str(fixture_root),
             "--runs",
             "2",
+            "--include-worker-flow",
+            "--changed-node",
+            "experiment_perf_0000",
             "--json",
         )
 
@@ -1281,6 +1610,34 @@ class ScriptBehaviorTests(unittest.TestCase):
             self.assertIn("total_duration_ms", run)
             self.assertIsInstance(run["stages"], list)
         self.assertTrue((fixture_root / "dashboards" / "build_profile.json").exists())
+        worker_flow = payload["worker_edit_flow"]
+        self.assertTrue(worker_flow["ok"])
+        self.assertEqual(worker_flow["node_id"], "experiment_perf_0000")
+        self.assertEqual(
+            [step["name"] for step in worker_flow["steps"]],
+            ["mutate_no_build", "compact_context", "full_validate", "build", "compact_smoke"],
+        )
+        for step in worker_flow["steps"]:
+            self.assertEqual(step["returncode"], 0, step.get("stderr_preview") or step.get("stdout_preview") or step["name"])
+            self.assertTrue(step["passed"], step.get("summary"))
+            self.assertGreaterEqual(step["duration_ms"], 0)
+            self.assertIn("stdout_bytes", step)
+            self.assertIn("stderr_bytes", step)
+        self.assertTrue(worker_flow["steps"][0]["summary"]["changed"])
+        self.assertGreaterEqual(worker_flow["summary"]["total_stdout_bytes"], 1)
+
+        default_worker_flow = self.run_dev_script(
+            "benchmark_build.py",
+            "--root",
+            str(fixture_root),
+            "--runs",
+            "1",
+            "--json",
+        )
+        default_payload = json.loads(default_worker_flow.stdout)
+        self.assertEqual(default_worker_flow.returncode, 0, default_worker_flow.stderr or default_worker_flow.stdout)
+        self.assertIn("worker_edit_flow", default_payload)
+        self.assertTrue(default_payload["worker_edit_flow"]["steps"][0]["summary"]["changed"])
 
         light = self.run_dev_script(
             "benchmark_build.py",
@@ -1289,6 +1646,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "--runs",
             "1",
             "--skip-resource-search",
+            "--skip-worker-flow",
             "--json",
         )
         light_payload = json.loads(light.stdout)
@@ -1440,7 +1798,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["node_count"], 4)
-        self.assertEqual(len(payload["written_files"]), 12)
+        self.assertEqual(len(payload["written_files"]), 13)
         self.assertTrue((self.root / "dashboards" / "graph_view.json").exists())
 
     def test_build_watch_json_max_iterations_reports_one_iteration(self) -> None:
@@ -1471,7 +1829,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["last_build_status"], "success")
         self.assertTrue(payload["last_build_at"])
         self.assertEqual(payload["last_build_error"], "")
-        self.assertEqual(len(payload["written_files"]), 12)
+        self.assertEqual(len(payload["written_files"]), 13)
 
     def test_dashboard_watch_signature_changes_when_run_becomes_stale(self) -> None:
         save_yaml(
@@ -1903,12 +2261,18 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertTrue(payload["dry_run"])
         self.assertTrue(payload["preflight_ok"])
+        self.assertTrue(payload["identity_preview"]["preview_only"])
+        self.assertTrue(payload["identity_preview"]["generated_ids_are_not_reserved"])
+        self.assertFalse(payload["identity_preview"]["assignment_id_reserved"])
+        self.assertIn("--assignment", payload["identity_preview"]["stable_identity_hint"])
         self.assertEqual(payload["session_id"], "session_agent_t5_option_t5")
         self.assertEqual(payload["root_boundary"]["required_root"], str(self.root.resolve()))
         self.assertTrue(payload["root_boundary"]["do_not_mutate_worktree_root"])
         self.assertEqual(payload["handoff"]["launch_env"]["RESEARCH_COCKPIT_ROOT"], str(self.root.resolve()))
         self.assertEqual(payload["handoff"]["stable_artifact_root"], str((self.root / "artifacts").resolve()))
         self.assertIn("ingest-artifact", payload["handoff"]["commands"]["ingest_artifact"])
+        self.assertIn("--record-only", payload["handoff"]["commands"]["ingest_artifact"])
+        self.assertIn("--no-build", payload["handoff"]["commands"]["ingest_artifact"])
         self.assertTrue(any("worktree paths" in item for item in payload["handoff"]["guardrails"]))
         self.assertIn("git", payload["git_command"][0])
         self.assertIn("diff", payload)
@@ -2080,11 +2444,12 @@ class ScriptBehaviorTests(unittest.TestCase):
             payload["startup_command_args"],
             [
                 "research-cockpit",
-                "bootstrap",
+                "agent-session-context",
                 "--root",
                 str(self.root.resolve()),
                 "--assignment",
                 assignment_id,
+                "--compact",
                 "--json",
             ],
         )
@@ -2152,7 +2517,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn(f"'{data_root.resolve()}'", payload["startup_command"])
         out = subprocess.run(
             [
-                *cli_command("bootstrap"),
+                *cli_command("agent-session-context"),
                 *payload["startup_command_args"][2:],
             ],
             capture_output=True,
@@ -2160,8 +2525,8 @@ class ScriptBehaviorTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
-        bootstrap_payload = json.loads(out.stdout)
-        self.assertEqual(bootstrap_payload["scope"]["assignment_id"], payload["assignment_id"])
+        context_payload = json.loads(out.stdout)
+        self.assertEqual(context_payload["assignment"]["assignment_id"], payload["assignment_id"])
 
     def test_start_agent_session_cli_generates_identity_without_agent_arg(self) -> None:
         worktree = self.tmp_root / "worktrees" / "cache_probe"
@@ -2473,6 +2838,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["do_not_mutate_worktree_root"])
         self.assertEqual(payload["stable_artifact_root"], str((self.root / "artifacts").resolve()))
         self.assertIn("ingest-artifact", payload["handoff"]["commands"]["ingest_artifact"])
+        self.assertIn("--record-only", payload["handoff"]["commands"]["ingest_artifact"])
+        self.assertIn("--no-build", payload["handoff"]["commands"]["ingest_artifact"])
         self.assertEqual(payload["assignment"]["current_node"], "option_t5")
         self.assertEqual(payload["agent_focus"]["source"], "assignment")
         self.assertEqual(payload["agent_focus"]["current_focus_node"], "option_t5")
@@ -3492,6 +3859,17 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["current_global_focus"]["current_focus_node"], "problem_text")
         self.assertTrue(payload["context_boundary"]["target_differs_from_global_focus"])
         self.assertIn("target node", payload["context_boundary"]["warning"])
+        self.assertEqual(payload["node_context"]["node"]["id"], "option_t5")
+        self.assertTrue(payload["node_context"]["compact"])
+        self.assertIn("omitted_fields", payload["node_context"])
+        self.assertNotIn("recommended_next_steps", payload["node_context"])
+        self.assertIn("--changed-node option_t5", payload["node_context"]["worker_verify_commands"][0])
+        self.assertIn("smoke", payload["node_context"]["worker_verify_commands"][2])
+        self.assertIn("research-cockpit build", payload["node_context"]["final_handoff_commands"][1])
+        self.assertIn("validate_changed", payload["node_context"]["command_drafts"])
+        self.assertNotIn("validate", payload["node_context"]["command_drafts"])
+        self.assertNotIn("build", payload["node_context"]["command_drafts"])
+        self.assertLess(len(json.dumps(payload, ensure_ascii=False).encode("utf-8")), 30000)
 
     def test_context_payload_filters_claim_recommendation_for_closed_option(self) -> None:
         option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
@@ -3597,11 +3975,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("apply-graph-plan", " ".join(payload["mutation_guidance"]["command_skeletons"]))
         batch_mode = payload["mutation_guidance"]["multi_agent_batch_mode"]
         self.assertIn("coordinator", batch_mode["default"])
-        self.assertIn("does not replace validate/smoke", batch_mode["default"])
+        self.assertIn("does not replace final validate/smoke", batch_mode["default"])
         self.assertIn("commands --json --compact", " ".join(batch_mode["rules"]))
-        self.assertIn("smoke --root <root> --json", " ".join(batch_mode["finish_commands"]))
+        self.assertEqual(batch_mode["finish_commands"], [])
+        self.assertIn("--changed-node <node_id>", " ".join(batch_mode["worker_verify_commands"]))
+        self.assertIn("smoke --root <root> --json", " ".join(batch_mode["final_handoff_commands"]))
+        self.assertIn("--record-only", " ".join(payload["mutation_guidance"]["command_skeletons"]))
         self.assertIn("record-finding", " ".join(batch_mode["examples"]["findings"]))
-        self.assertIn("ingest-artifact", " ".join(batch_mode["examples"]["artifacts"]))
+        self.assertIn("--record-only", " ".join(batch_mode["examples"]["artifacts"]))
         self.assertIn("update-run", " ".join(batch_mode["examples"]["runs"]))
         self.assertIn("sync-focus-actions", " ".join(batch_mode["examples"]["next_actions"]))
         hierarchy = payload["mutation_guidance"]["hierarchy_policy"]
@@ -5720,6 +6101,161 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_id["artifact_baseline_cache"]["linked_references"][0]["source"], "baseline.artifacts")
         self.assertFalse(by_id["artifact_baseline_cache"]["cleanup_candidate"])
 
+    def test_compact_artifacts_dry_run_classifies_artifact_nodes_without_writes(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "artifact_demote_run_output",
+                "type": "artifact",
+                "title": "Demotable run output",
+                "status": "done",
+                "path": "artifacts/demote_run_output",
+                "artifact_kind": "run_output",
+                "retention": {"class": "reproducible_output"},
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_keep_critical",
+                "type": "artifact",
+                "title": "Critical evidence",
+                "status": "done",
+                "path": "artifacts/critical",
+                "retention": {"class": "evidence_critical"},
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_review_linked",
+                "type": "artifact",
+                "title": "Linked output",
+                "status": "done",
+                "path": "artifacts/linked",
+                "artifact_kind": "run_output",
+                "retention": {"class": "reproducible_output"},
+            },
+        )
+        write_node(
+            self.root,
+            {
+                "id": "artifact_missing_path",
+                "type": "artifact",
+                "title": "Missing path",
+                "status": "done",
+                "retention": {"class": "reproducible_output"},
+            },
+        )
+        option = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
+        option["linked_artifacts"] = ["artifact_review_linked"]
+        save_yaml(self.root / "graph" / "nodes" / "option_t5.yaml", option)
+        before_files = {
+            path.relative_to(self.root).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted((self.root / "graph" / "nodes").glob("*.yaml"))
+        }
+
+        out = subprocess.run(
+            [
+                *cli_command("compact-artifacts"),
+                "--root",
+                str(self.root),
+                "--dry-run",
+                "--json",
+                "--show-diff",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        by_id = {row["artifact_id"]: row for row in payload["artifacts"]}
+        after_files = {
+            path.relative_to(self.root).as_posix(): path.read_text(encoding="utf-8")
+            for path in sorted((self.root / "graph" / "nodes").glob("*.yaml"))
+        }
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["schema_version"], "artifact_compaction_plan_v1")
+        self.assertEqual(before_files, after_files)
+        self.assertEqual(by_id["artifact_demote_run_output"]["classification"], "can_demote")
+        self.assertEqual(by_id["artifact_keep_critical"]["classification"], "must_keep_node")
+        self.assertEqual(by_id["artifact_review_linked"]["classification"], "needs_review")
+        self.assertEqual(by_id["artifact_missing_path"]["classification"], "cannot_demote")
+        self.assertIn("artifact_demote_run_output", by_id["artifact_demote_run_output"]["recommended_command"])
+        self.assertIn("No payload files are deleted", payload["notes"][0])
+
+        missing_dry_run = subprocess.run(
+            [*cli_command("compact-artifacts"), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        missing_payload = json.loads(missing_dry_run.stdout)
+        self.assertEqual(missing_dry_run.returncode, 1)
+        self.assertIn("--dry-run", missing_payload["error"])
+
+    def test_compact_artifacts_execute_demotes_safe_artifact_node_without_deleting_payload(self) -> None:
+        payload_dir = self.root / "artifacts" / "exp_t5" / "run_demote"
+        payload_dir.mkdir(parents=True)
+        (payload_dir / "metrics.json").write_text('{"score": 0.98}', encoding="utf-8")
+        write_node(
+            self.root,
+            {
+                "id": "artifact_exp_t5_demote",
+                "type": "artifact",
+                "title": "Demotable T5 run output",
+                "status": "done",
+                "path": "artifacts/exp_t5/run_demote",
+                "links": {"metrics": "artifacts/exp_t5/run_demote/metrics.json"},
+                "artifact_kind": "run_output",
+                "retention": {"class": "reproducible_output"},
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["linked_artifacts"] = ["artifact_exp_t5_demote"]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+
+        out = subprocess.run(
+            [
+                *cli_command("compact-artifacts"),
+                "--root",
+                str(self.root),
+                "--id",
+                "artifact_exp_t5_demote",
+                "--execute",
+                "--no-build",
+                "--json",
+                "--show-diff",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        record_file = load_yaml(self.root / "artifact_records" / "exp_t5.yaml")
+        record = record_file["records"]["artifact_exp_t5_demote"]
+        updated_experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        validation = validation_payload(self.root)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["schema_version"], "artifact_compaction_result_v1")
+        self.assertFalse(payload["dry_run"])
+        self.assertTrue(payload["changed"])
+        self.assertFalse(payload["payload_files_deleted"])
+        self.assertTrue((payload_dir / "metrics.json").exists())
+        self.assertFalse((self.root / "graph" / "nodes" / "artifact_exp_t5_demote.yaml").exists())
+        self.assertEqual(record["demoted_from_artifact_id"], "artifact_exp_t5_demote")
+        self.assertEqual(record["stable_path"], "artifacts/exp_t5/run_demote")
+        self.assertEqual(record["links"]["metrics"], "artifacts/exp_t5/run_demote/metrics.json")
+        self.assertNotIn("artifact_exp_t5_demote", updated_experiment.get("linked_artifacts", []))
+        self.assertEqual(updated_experiment["linked_artifact_records"], ["artifact_exp_t5_demote"])
+        self.assertTrue((self.root / "artifact_migrations" / "artifact_exp_t5_demote.yaml").exists())
+        self.assertIn("research-cockpit validate", payload["verify_commands"][0])
+        self.assertIn("artifact_exp_t5_demote.yaml", payload["diff"])
+        self.assertTrue(validation["ok"], validation["errors"])
+
     def test_maintenance_audit_aggregates_sections_and_next_actions(self) -> None:
         session = self.start_t5_assignment()
         repo = self.tmp_root
@@ -5785,6 +6321,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["blocked_branches"])
         self.assertIn("artifact_maintenance_large", payload["large_artifact_candidates"])
         self.assertIn("artifacts/maintenance_large", payload["large_output_candidates"])
+        self.assertIn("artifact_compaction_counts", payload)
+        self.assertIn("record_only_candidates", payload)
+        self.assertIn("artifact_compaction_plan", payload)
         self.assertIn("active_assignment", payload["unsafe_cleanup_blockers"])
         self.assertIn("active_run", payload["unsafe_cleanup_blockers"])
         self.assertTrue(payload["recommended_next_actions"])
@@ -5837,6 +6376,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--repo", manifest["maintenance-audit"]["supported_flags"])
         self.assertIn("--base", manifest["maintenance-audit"]["supported_flags"])
         self.assertIn("--min-size-gb", manifest["maintenance-audit"]["supported_flags"])
+        self.assertTrue(manifest["compact-artifacts"]["mutating"])
+        self.assertIn("maintenance", manifest["compact-artifacts"]["workflow_tags"])
+        self.assertIn("--dry-run", manifest["compact-artifacts"]["supported_flags"])
+        self.assertIn("--show-diff", manifest["compact-artifacts"]["supported_flags"])
+        self.assertIn("--execute", manifest["compact-artifacts"]["supported_flags"])
+        self.assertIn("--no-build", manifest["compact-artifacts"]["supported_flags"])
 
     def test_run_metadata_write_support_and_context_output(self) -> None:
         resources_file = self.tmp_root / "resources.json"
@@ -6034,6 +6579,26 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotEqual(bad_artifact.returncode, 0)
         self.assertIn("Invalid retention.class", bad_artifact.stdout + bad_artifact.stderr)
 
+        bad_output_retention = subprocess.run(
+            [
+                *cli_command("create-run"),
+                "--root",
+                str(self.root),
+                "--id",
+                "run_bad_retention_json",
+                "--experiment",
+                "exp_t5",
+                "--output-retention-json",
+                "{bad",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(bad_output_retention.returncode, 0)
+        self.assertIn("--output-retention-file", bad_output_retention.stdout + bad_output_retention.stderr)
+
     def test_metadata_write_manifest_flags(self) -> None:
         manifest = {item["name"]: item for item in agent_command_manifest()}
 
@@ -6071,7 +6636,15 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("every agent session", by_name["bootstrap"]["recommended_when"])
         self.assertFalse(by_name["smoke"]["mutating"])
         self.assertIn("--full", by_name["smoke"]["supported_flags"])
+        self.assertIn("--scope", by_name["smoke"]["supported_flags"])
+        self.assertIn("--id", by_name["smoke"]["supported_flags"])
         self.assertIn("--progress", by_name["smoke"]["supported_flags"])
+        self.assertIn("--changed-node", by_name["validate"]["supported_flags"])
+        self.assertIn("--changed-file", by_name["validate"]["supported_flags"])
+        self.assertIn("--affected", by_name["build"]["supported_flags"])
+        self.assertIn("--id", by_name["build"]["supported_flags"])
+        self.assertIn("--changed-files", by_name["validate"]["supported_flags"])
+        self.assertIn("--changed-record", by_name["validate"]["supported_flags"])
         self.assertFalse(by_name["commands"]["mutating"])
         self.assertTrue(by_name["commands"]["supports_compact"])
         self.assertFalse(by_name["commands"]["supports_root"])
@@ -6135,6 +6708,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["add-node"]["supports_json"])
         self.assertTrue(by_name["add-node"]["supports_dry_run"])
         self.assertTrue(by_name["add-node"]["supports_no_build"])
+        self.assertTrue(by_name["add-node"]["supports_compact"])
         self.assertTrue(by_name["add-node"]["supports_show_diff"])
         self.assertIn("graph", by_name["add-node"]["workflow_tags"])
         self.assertEqual(by_name["add-node"]["group"], "graph")
@@ -6194,9 +6768,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(by_name["complete-experiment"]["supports_compact"])
         self.assertEqual(by_name["complete-experiment"]["batch_policy"]["mode"], "serial_no_build")
         self.assertTrue(by_name["complete-experiment"]["batch_policy"]["use_no_build"])
+        self.assertEqual(by_name["complete-experiment"]["batch_policy"]["finish_commands"], [])
+        self.assertIn(
+            "research-cockpit validate --root <root> --changed-node <node_id> --json",
+            by_name["complete-experiment"]["batch_policy"]["worker_verify_commands"],
+        )
         self.assertIn(
             "research-cockpit smoke --root <root> --json --progress",
-            by_name["complete-experiment"]["batch_policy"]["finish_commands"],
+            by_name["complete-experiment"]["batch_policy"]["final_handoff_commands"],
         )
         self.assertIn("evidence_path", by_name["complete-experiment"]["fields_supported"])
         self.assertNotIn("next_actions", by_name["complete-experiment"]["fields_supported"])
@@ -6273,8 +6852,24 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("workstream_report", by_name["import-worktree-findings"]["fields_supported"])
         self.assertTrue(by_name["ingest-artifact"]["supports_dry_run"])
         self.assertTrue(by_name["ingest-artifact"]["supports_compact"])
+        self.assertIn("--record-only", by_name["ingest-artifact"]["supported_flags"])
         self.assertIn("run_id", by_name["ingest-artifact"]["fields_supported"])
         self.assertIn("agent", by_name["ingest-artifact"]["fields_supported"])
+        self.assertIn("artifact-records", by_name)
+        self.assertFalse(by_name["artifact-records"]["mutating"])
+        self.assertTrue(by_name["artifact-records"]["supports_compact"])
+        self.assertEqual(by_name["artifact-records"]["group"], "artifact")
+        self.assertIn("artifact records", by_name["artifact-records"]["aliases"])
+        self.assertIn("--experiment", by_name["artifact-records"]["supported_flags"])
+        self.assertIn("promoted_artifact_id", by_name["artifact-records"]["fields_supported"])
+        self.assertIn("promote-artifact-record", by_name)
+        self.assertTrue(by_name["promote-artifact-record"]["mutating"])
+        self.assertTrue(by_name["promote-artifact-record"]["supports_dry_run"])
+        self.assertTrue(by_name["promote-artifact-record"]["supports_compact"])
+        self.assertEqual(by_name["promote-artifact-record"]["group"], "artifact")
+        self.assertIn("artifact promote-record", by_name["promote-artifact-record"]["aliases"])
+        self.assertIn("--artifact-id", by_name["promote-artifact-record"]["supported_flags"])
+        self.assertIn("promoted_artifact_id", by_name["promote-artifact-record"]["fields_supported"])
         self.assertIn("create-run", by_name)
         self.assertTrue(by_name["create-run"]["mutating"])
         self.assertTrue(by_name["create-run"]["supports_json"])
@@ -6691,6 +7286,25 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("fields_supported", by_name["create-workstream"])
         self.assertNotIn("example_file", by_name["complete-experiments"])
 
+    def test_list_agent_commands_summary_only_keeps_workflow_discovery_small(self) -> None:
+        out = subprocess.run(
+            [*cli_command("commands"), "--json", "--compact", "--summary-only", "--workflow", "evidence"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        by_name = {item["name"]: item for item in payload["commands"]}
+
+        self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
+        self.assertLess(len(out.stdout.encode("utf-8")), 25000)
+        self.assertIn("create-artifact", by_name)
+        self.assertIn("supported_flags", by_name["create-artifact"])
+        self.assertIn("batch_policy_mode", by_name["complete-experiment"])
+        self.assertNotIn("batch_policy", by_name["complete-experiment"])
+        self.assertNotIn("unsupported_flags", by_name["create-artifact"])
+        self.assertNotIn("schema_command", by_name["create-artifact"])
+
     def test_file_commands_expose_schema_help_and_print_schema(self) -> None:
         expectations = {
             "apply-graph-plan": "nodes:",
@@ -6902,7 +7516,15 @@ class ScriptBehaviorTests(unittest.TestCase):
                 self.assertTrue(payload["dry_run"])
                 self.assertTrue(payload["would_change"])
                 self.assertIn("changed_files_count", payload)
-                self.assertIn("research-cockpit validate", payload["verify_commands"][0])
+                self.assertEqual(payload["verify_commands"], [])
+                self.assertIn("research-cockpit validate", payload["post_apply_verify_commands"][0])
+                self.assertTrue(
+                    "--changed-node" in payload["post_apply_verify_commands"][0]
+                    or "--changed-file" in payload["post_apply_verify_commands"][0]
+                )
+                self.assertIn("Dry-run did not write", payload["verification_note"])
+                self.assertIn("final_handoff_commands", payload)
+                self.assertIn("research-cockpit build", payload["final_handoff_commands"][1])
                 self.assertNotIn("before", payload)
                 self.assertNotIn("after", payload)
 
@@ -6923,6 +7545,48 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_name["node_context"]["summary"]["schema_version"], "node_context_compact_v1")
         self.assertEqual(by_name["node_context"]["summary"]["smoke_scope"], "compact_node_context")
         self.assertIn("--compact", by_name["node_context"]["command"])
+
+    def test_skill_smoke_test_changed_scope_checks_targeted_workflow(self) -> None:
+        with patch("research_cockpit.commands.context.agent_bootstrap_payload") as bootstrap:
+            bootstrap.side_effect = AssertionError("changed smoke must not run bootstrap")
+            payload = skill_smoke_test_payload(
+                root=self.root,
+                query="t5",
+                python_executable=sys.executable,
+                scope="changed",
+                node_id="exp_t5",
+            )
+
+        bootstrap.assert_not_called()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["mode"], "changed")
+        self.assertEqual([item["name"] for item in payload["checks"]], ["validate_changed", "context", "list_agent_commands"])
+        by_name = {item["name"]: item for item in payload["checks"]}
+        self.assertEqual(by_name["validate_changed"]["summary"]["changed_nodes"], ["exp_t5"])
+        self.assertTrue(by_name["validate_changed"]["summary"]["fallback_used_full_validation"])
+        self.assertEqual(by_name["context"]["summary"]["node_id"], "exp_t5")
+        self.assertEqual(by_name["context"]["summary"]["smoke_scope"], "changed_context")
+
+        out = subprocess.run(
+            [
+                *cli_command("smoke"),
+                "--root",
+                str(self.root),
+                "--scope",
+                "changed",
+                "--id",
+                "exp_t5",
+                "--json",
+                "--progress",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        cli_payload = json.loads(out.stdout)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(cli_payload["mode"], "changed")
+        self.assertIn("smoke: starting validate_changed", out.stderr)
 
     def test_skill_smoke_test_full_payload_preserves_subprocess_workflow(self) -> None:
         payload = skill_smoke_test_payload(root=self.root, query="t5", python_executable=sys.executable, full=True)
@@ -7046,6 +7710,159 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(malformed_log.returncode, 1)
         malformed_payload = json.loads(malformed_log.stdout)
         self.assertTrue(any("YAML parse error" in error for error in malformed_payload["errors"]))
+
+    def test_validate_changed_node_cli_reports_incremental_scope(self) -> None:
+        changed = subprocess.run(
+            [*cli_command("validate"), "--root", str(self.root), "--changed-node", "exp_t5", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(changed.stdout)
+
+        self.assertEqual(changed.returncode, 0, changed.stdout + changed.stderr)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["valid"])
+        self.assertEqual(payload["mode"], "incremental")
+        self.assertEqual(payload["changed"]["nodes"], ["exp_t5"])
+        self.assertEqual(payload["changed"]["files"], [])
+        self.assertIn("exp_t5", payload["affected"]["nodes"])
+        self.assertIn("option_t5", payload["affected"]["nodes"])
+        self.assertIn("problem_text", payload["affected"]["nodes"])
+        self.assertTrue(payload["fallback"]["used_full_validation"])
+        self.assertEqual(payload["fallback"]["reason"], "validation_index_missing_or_incompatible")
+        self.assertIn("recommended_fix", payload["fallback"])
+        self.assertIn("recommended_commands", payload["fallback"])
+        self.assertIn("research-cockpit build", payload["fallback"]["recommended_commands"][0])
+        self.assertIn(str(self.root), payload["fallback"]["recommended_commands"][0])
+        self.assertIn("recommended_fix", payload["index"])
+        self.assertIn("node_schema", {item["name"] for item in payload["checks"]})
+
+        validation_index_path = self.root / "dashboards" / "validation_index.json"
+        validation_index_path.parent.mkdir(parents=True, exist_ok=True)
+        validation_index_path.write_text("{ bad json", encoding="utf-8")
+        malformed_index = subprocess.run(
+            [*cli_command("validate"), "--root", str(self.root), "--changed-node", "exp_t5", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        malformed_payload = json.loads(malformed_index.stdout)
+        self.assertEqual(malformed_index.returncode, 0, malformed_index.stdout + malformed_index.stderr)
+        self.assertNotIn("Traceback", malformed_index.stderr)
+        self.assertTrue(malformed_payload["fallback"]["used_full_validation"])
+        self.assertEqual(malformed_payload["fallback"]["reason"], "validation_index_unreadable")
+        self.assertIn("recommended_fix", malformed_payload["fallback"])
+        self.assertIn("research-cockpit build", malformed_payload["fallback"]["recommended_commands"][0])
+        self.assertIn(str(self.root), malformed_payload["fallback"]["recommended_commands"][0])
+
+        by_file = subprocess.run(
+            [
+                *cli_command("validate"),
+                "--root",
+                str(self.root),
+                "--changed-file",
+                "graph/nodes/exp_t5.yaml",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        by_file_payload = json.loads(by_file.stdout)
+        self.assertEqual(by_file.returncode, 0, by_file.stdout + by_file.stderr)
+        self.assertEqual(by_file_payload["changed"]["nodes"], ["exp_t5"])
+        self.assertEqual(by_file_payload["changed"]["files"], ["graph/nodes/exp_t5.yaml"])
+
+        save_yaml(
+            self.root / "agents" / "agent_t5.yaml",
+            {
+                "agent_id": "agent_t5",
+                "status": "active",
+                "active_assignment_ids": ["assign_t5"],
+            },
+        )
+        save_yaml(
+            self.root / "assignments" / "assign_t5.yaml",
+            {
+                "assignment_id": "assign_t5",
+                "agent_id": "agent_t5",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_t5.yaml",
+            {"run_id": "run_t5", "status": "running", "experiment_id": "exp_t5"},
+        )
+        by_files = subprocess.run(
+            [
+                *cli_command("validate"),
+                "--root",
+                str(self.root),
+                "--changed-files",
+                "graph/nodes/exp_t5.yaml",
+                "runs/run_t5.yaml",
+                "assignments/assign_t5.yaml",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        by_files_payload = json.loads(by_files.stdout)
+        self.assertEqual(by_files.returncode, 0, by_files.stdout + by_files.stderr)
+        self.assertEqual(
+            by_files_payload["changed"]["files"],
+            ["graph/nodes/exp_t5.yaml", "runs/run_t5.yaml", "assignments/assign_t5.yaml"],
+        )
+        self.assertEqual(by_files_payload["changed"]["nodes"], ["exp_t5"])
+        self.assertIn("run_t5", by_files_payload["affected"]["runs"])
+        self.assertIn("assign_t5", by_files_payload["affected"]["assignments"])
+
+        artifact_records_dir = self.root / "artifact_records"
+        artifact_records_dir.mkdir(parents=True, exist_ok=True)
+        save_yaml(
+            artifact_records_dir / "exp_t5.yaml",
+            {
+                "schema_version": "artifact_records_v1",
+                "experiment_id": "exp_t5",
+                "records": {"record_t5": {"record_id": "record_t5", "run_id": "run_t5"}},
+            },
+        )
+        by_record = subprocess.run(
+            [
+                *cli_command("validate"),
+                "--root",
+                str(self.root),
+                "--changed-record",
+                "artifact:record_t5",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        by_record_payload = json.loads(by_record.stdout)
+        self.assertEqual(by_record.returncode, 0, by_record.stdout + by_record.stderr)
+        self.assertEqual(by_record_payload["changed"]["records"], ["artifact:record_t5"])
+        self.assertEqual(by_record_payload["affected"]["artifact_records"], ["record_t5"])
+        self.assertIn("exp_t5", by_record_payload["affected"]["nodes"])
+        self.assertIn("run_t5", by_record_payload["affected"]["runs"])
+        self.assertIn("assign_t5", by_record_payload["affected"]["assignments"])
+
+        missing = subprocess.run(
+            [*cli_command("validate"), "--root", str(self.root), "--changed-node", "missing_node", "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        missing_payload = json.loads(missing.stdout)
+        self.assertEqual(missing.returncode, 1)
+        self.assertFalse(missing_payload["ok"])
+        self.assertTrue(any("missing_node" in error for error in missing_payload["errors"]))
 
     def test_repair_interaction_log_dry_run_and_execute_schema_repair(self) -> None:
         log_path = self.root / "graph" / "interaction_log.yaml"
@@ -7614,6 +8431,25 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(empty.returncode, 0)
         self.assertEqual(json.loads(empty.stdout), [])
 
+    def test_search_json_output_is_utf8_when_process_stdio_uses_legacy_encoding(self) -> None:
+        problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
+        problem["summary"] = "\ufeffNeedle BOM summary."
+        save_yaml(self.root / "graph" / "nodes" / "problem_text.yaml", problem)
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "cp1252"
+
+        out = subprocess.run(
+            [*cli_command("search"), "--root", str(self.root), "--query", "needle", "--json"],
+            capture_output=True,
+            env=env,
+            check=False,
+        )
+        stdout = out.stdout.decode("utf-8")
+
+        self.assertEqual(out.returncode, 0, out.stderr.decode("utf-8", errors="replace") + stdout)
+        results = json.loads(stdout)
+        self.assertTrue(any("\ufeff" in item.get("snippet", "") for item in results))
+
     def test_search_knowledge_cli_fails_on_invalid_cockpit(self) -> None:
         command = "search"
         bad = load_yaml(self.root / "graph" / "nodes" / "option_t5.yaml")
@@ -8145,6 +8981,410 @@ class ScriptBehaviorTests(unittest.TestCase):
             for row in result["resource_rows"]
         ))
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "ingest_artifact")
+
+    def test_validate_rejects_missing_linked_artifact_record(self) -> None:
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment["linked_artifact_records"] = ["missing_record"]
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+
+        out = subprocess.run(
+            [*cli_command("validate"), "--root", str(self.root), "--json"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 1)
+        self.assertFalse(payload["valid"])
+        self.assertTrue(any("missing artifact record" in error for error in payload["errors"]))
+    def test_ingest_artifact_record_only_writes_sidecar_without_graph_node(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_record"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.92}', encoding="utf-8")
+
+        result = ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_record",
+            agent_id="agent_t5",
+            links={"metrics": "metrics.json"},
+            rebuild_dashboard=False,
+            record_only=True,
+        )
+        record_path = self.root / "artifact_records" / "exp_t5.yaml"
+        records = load_yaml(record_path)
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        record_id = "artifact_exp_t5_run_record"
+        record = records["records"][record_id]
+
+        self.assertTrue(result["changed"])
+        self.assertTrue(result["record_only"])
+        self.assertEqual(result["record_id"], record_id)
+        self.assertFalse((self.root / "graph" / "nodes" / f"{record_id}.yaml").exists())
+        self.assertTrue((self.root / "artifacts" / "exp_t5" / "run_record" / "metrics.json").exists())
+        self.assertEqual(records["schema_version"], "artifact_records_v1")
+        self.assertEqual(records["experiment_id"], "exp_t5")
+        self.assertEqual(record["run_id"], "run_record")
+        self.assertEqual(record["stable_path"], "artifacts/exp_t5/run_record")
+        self.assertEqual(record["links"]["metrics"], "artifacts/exp_t5/run_record/metrics.json")
+        self.assertEqual(experiment["linked_artifact_records"], [record_id])
+        self.assertIn(str(record_path), result["changed_files"])
+
+        validate_payload = validation_payload(self.root, changed_records=[f"artifact:{record_id}"])
+        self.assertTrue(validate_payload["ok"], validate_payload["errors"])
+        self.assertEqual(validate_payload["changed"]["records"], [f"artifact:{record_id}"])
+        self.assertEqual(validate_payload["affected"]["artifact_records"], [record_id])
+        self.assertIn("exp_t5", validate_payload["affected"]["nodes"])
+
+    def test_ingest_artifact_record_only_rejects_non_experiment_target(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_record_option"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.93}', encoding="utf-8")
+
+        with self.assertRaises(ValueError) as ctx:
+            ingest_artifact(
+                self.root,
+                node_id="option_t5",
+                source_dir=source,
+                run_id="run_record_option",
+                rebuild_dashboard=False,
+                record_only=True,
+            )
+
+        self.assertIn("experiment", str(ctx.exception))
+        self.assertFalse((self.root / "artifact_records" / "option_t5.yaml").exists())
+
+    def test_ingest_artifact_record_only_cli_compact_verifies_record_scope(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_cli_record"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.94}', encoding="utf-8")
+
+        out = subprocess.run(
+            [
+                *cli_command("ingest-artifact"),
+                "--root",
+                str(self.root),
+                "--node",
+                "exp_t5",
+                "--from",
+                str(source),
+                "--run-id",
+                "run_cli_record",
+                "--record-only",
+                "--no-build",
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        record_id = "artifact_exp_t5_run_cli_record"
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertTrue(payload["target"]["record_only"])
+        self.assertEqual(payload["changed_scope"]["nodes"], ["exp_t5"])
+        self.assertEqual(payload["changed_scope"]["records"], [f"artifact:{record_id}"])
+        self.assertIn("--changed-node exp_t5", payload["verify_commands"][0])
+        self.assertIn(f"--changed-record artifact:{record_id}", payload["verify_commands"][0])
+
+    def test_artifact_records_cli_lists_record_only_evidence(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_list_record"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.95}', encoding="utf-8")
+        ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_list_record",
+            title="Listable record",
+            rebuild_dashboard=False,
+            record_only=True,
+        )
+        record_id = "artifact_exp_t5_run_list_record"
+
+        full = subprocess.run(
+            [
+                *cli_command("artifact-records"),
+                "--root",
+                str(self.root),
+                "--experiment",
+                "exp_t5",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        compact = subprocess.run(
+            [
+                *cli_command("artifact-records"),
+                "--root",
+                str(self.root),
+                "--id",
+                record_id,
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        full_payload = json.loads(full.stdout)
+        compact_payload = json.loads(compact.stdout)
+
+        self.assertEqual(full.returncode, 0, full.stdout + full.stderr)
+        self.assertEqual(full_payload["schema_version"], "artifact_records_query_v1")
+        self.assertEqual(full_payload["count"], 1)
+        self.assertEqual(full_payload["records"][0]["record_id"], record_id)
+        self.assertEqual(full_payload["records"][0]["title"], "Listable record")
+        self.assertEqual(full_payload["records"][0]["stable_path"], "artifacts/exp_t5/run_list_record")
+        self.assertEqual(full_payload["records"][0]["source_file"], "artifact_records/exp_t5.yaml")
+        self.assertEqual(compact.returncode, 0, compact.stdout + compact.stderr)
+        self.assertEqual(compact_payload["records"][0]["record_id"], record_id)
+        self.assertEqual(compact_payload["records"][0]["experiment_id"], "exp_t5")
+        self.assertNotIn("links", compact_payload["records"][0])
+
+    def test_record_only_artifact_records_are_visible_in_context_resources_and_search(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_visible_record"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.97, "label": "record-only-search"}', encoding="utf-8")
+        ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_visible_record",
+            title="Searchable record evidence",
+            summary="Record-only summary needle.",
+            links={"metrics": "metrics.json"},
+            rebuild_dashboard=False,
+            record_only=True,
+        )
+        record_id = "artifact_exp_t5_run_visible_record"
+
+        rows = build_link_rows(self.root, load_nodes(self.root))
+        linked_record_rows = [
+            row
+            for row in rows
+            if row.get("kind") == "linked_artifact_record" and row.get("target") == record_id
+        ]
+        record_resource_rows = [row for row in rows if row.get("artifact_record_id") == record_id]
+
+        self.assertEqual(len(linked_record_rows), 1)
+        self.assertTrue(linked_record_rows[0]["exists"])
+        self.assertEqual(linked_record_rows[0]["resolution_base"], "artifact_records")
+        self.assertTrue(any(
+            row.get("kind") == "artifact_record_path"
+            and row.get("target") == "artifacts/exp_t5/run_visible_record"
+            and row.get("exists") is True
+            for row in record_resource_rows
+        ))
+        self.assertTrue(any(
+            row.get("kind") == "artifact_record_link"
+            and row.get("target") == "artifacts/exp_t5/run_visible_record/metrics.json"
+            and row.get("exists") is True
+            for row in record_resource_rows
+        ))
+
+        from research_cockpit import resources as resources_module
+        from research_cockpit.commands import context as context_command
+
+        context_record_calls = []
+        resource_record_calls = []
+        original_context_records = context_command.list_artifact_records
+        original_resource_records = resources_module.list_artifact_records
+
+        def list_related_artifact_records(root: Path, **kwargs: Any) -> list[dict[str, Any]]:
+            context_record_calls.append(dict(kwargs))
+            self.assertIsNotNone(kwargs.get("experiment_id"))
+            return original_context_records(root, **kwargs)
+
+        def list_scoped_resource_records(root: Path, **kwargs: Any) -> list[dict[str, Any]]:
+            resource_record_calls.append(dict(kwargs))
+            self.assertIsNotNone(kwargs.get("experiment_id"))
+            return original_resource_records(root, **kwargs)
+
+        with patch("research_cockpit.commands.context.list_artifact_records", side_effect=list_related_artifact_records), patch(
+            "research_cockpit.resources.list_artifact_records",
+            side_effect=list_scoped_resource_records,
+        ):
+            payload = context_payload(self.root, node_id="exp_t5", with_artifacts=True, compact=True)
+        self.assertEqual(context_record_calls, [{"experiment_id": "exp_t5"}])
+        self.assertEqual(resource_record_calls, [])
+        self.assertEqual(payload["artifacts"]["artifact_record_ids"], [record_id])
+        self.assertEqual(payload["artifacts"]["artifact_records"][0]["record_id"], record_id)
+        self.assertTrue(any(row.get("artifact_record_id") == record_id for row in payload["artifacts"]["resource_rows"]))
+
+        index = build_search_index(self.root, load_nodes(self.root), load_yaml(self.root / "current_state.yaml"))
+        summary = build_search_index_summary(index)
+        self.assertEqual(summary["artifact_record_count"], 1)
+        self.assertTrue(any(
+            entry.get("source") == "artifact_record"
+            and entry.get("entry_id") == f"artifact_record:{record_id}"
+            and entry.get("node_title") == "T5 ablation"
+            for entry in index
+        ))
+        with patch(
+            "research_cockpit.search_index._resource_search_entries",
+            side_effect=AssertionError("artifact_record-only search index should not build resource entries"),
+        ):
+            record_only_index = build_search_index(
+                self.root,
+                load_nodes(self.root),
+                load_yaml(self.root / "current_state.yaml"),
+                sources=["artifact_record"],
+            )
+        self.assertEqual({entry["source"] for entry in record_only_index}, {"artifact_record"})
+
+        search_out = subprocess.run(
+            [
+                *cli_command("search"),
+                "--root",
+                str(self.root),
+                "--query",
+                "Searchable record evidence",
+                "--source",
+                "artifact_record",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        search_results = json.loads(search_out.stdout)
+
+        self.assertEqual(search_out.returncode, 0, search_out.stdout + search_out.stderr)
+        self.assertEqual({item["source"] for item in search_results}, {"artifact_record"})
+        self.assertEqual(search_results[0]["entry_id"], f"artifact_record:{record_id}")
+
+    def test_non_experiment_direct_artifact_record_ref_is_visible_in_context(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_problem_record"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.88}', encoding="utf-8")
+        ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_problem_record",
+            title="Problem-level record evidence",
+            links={"metrics": "metrics.json"},
+            rebuild_dashboard=False,
+            record_only=True,
+        )
+        record_id = "artifact_exp_t5_run_problem_record"
+        problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
+        problem = load_yaml(problem_path)
+        problem["linked_artifact_records"] = [record_id]
+        save_yaml(problem_path, problem)
+
+        payload = context_payload(self.root, node_id="problem_text", with_artifacts=True, compact=True)
+
+        self.assertEqual(payload["artifacts"]["artifact_record_ids"], [record_id])
+        self.assertEqual(payload["artifacts"]["artifact_records"][0]["record_id"], record_id)
+        self.assertTrue(any(row.get("artifact_record_id") == record_id for row in payload["artifacts"]["resource_rows"]))
+    def test_promote_artifact_record_creates_graph_artifact_and_marks_record(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_promote_record"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.96}', encoding="utf-8")
+        ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_promote_record",
+            title="Promotable record",
+            links={"metrics": "metrics.json"},
+            rebuild_dashboard=False,
+            record_only=True,
+        )
+        record_id = "artifact_exp_t5_run_promote_record"
+        artifact_id = "artifact_promoted_record"
+
+        dry_run = subprocess.run(
+            [
+                *cli_command("promote-artifact-record"),
+                "--root",
+                str(self.root),
+                "--id",
+                record_id,
+                "--artifact-id",
+                artifact_id,
+                "--link-to",
+                "exp_t5",
+                "--dry-run",
+                "--json",
+                "--show-diff",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        dry_payload = json.loads(dry_run.stdout)
+        self.assertEqual(dry_run.returncode, 0, dry_run.stdout + dry_run.stderr)
+        self.assertFalse(dry_payload["changed"])
+        self.assertTrue(dry_payload["would_change"])
+        self.assertFalse((self.root / "graph" / "nodes" / f"{artifact_id}.yaml").exists())
+        self.assertNotIn(
+            "promoted_artifact_id: artifact_promoted_record",
+            (self.root / "artifact_records" / "exp_t5.yaml").read_text(encoding="utf-8"),
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("promote-artifact-record"),
+                "--root",
+                str(self.root),
+                "--id",
+                record_id,
+                "--artifact-id",
+                artifact_id,
+                "--link-to",
+                "exp_t5",
+                "--no-build",
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+        artifact = load_yaml(self.root / "graph" / "nodes" / f"{artifact_id}.yaml")
+        records = load_yaml(self.root / "artifact_records" / "exp_t5.yaml")
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(payload["command"], "research-cockpit promote-artifact-record")
+        self.assertEqual(payload["created"], [artifact_id])
+        self.assertEqual(payload["updated"], ["exp_t5"])
+        self.assertEqual(payload["changed_scope"]["records"], [f"artifact:{record_id}"])
+        self.assertIn("--changed-node", payload["verify_commands"][0])
+        self.assertIn(f"--changed-record artifact:{record_id}", payload["verify_commands"][0])
+        self.assertEqual(artifact["source_artifact_record"], record_id)
+        self.assertEqual(artifact["path"], "artifacts/exp_t5/run_promote_record")
+        self.assertEqual(artifact["links"]["metrics"], "artifacts/exp_t5/run_promote_record/metrics.json")
+        self.assertEqual(records["records"][record_id]["promoted_artifact_id"], artifact_id)
+        self.assertIn(artifact_id, experiment["linked_artifacts"])
+
+        duplicate = subprocess.run(
+            [
+                *cli_command("promote-artifact-record"),
+                "--root",
+                str(self.root),
+                "--id",
+                record_id,
+                "--artifact-id",
+                "artifact_promoted_record_again",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(duplicate.returncode, 1)
+        self.assertIn("already promoted", duplicate.stdout)
 
     def test_assignment_scope_guard_applies_to_run_gate_and_artifact_links(self) -> None:
         session = self.start_t5_assignment()
@@ -9646,7 +10886,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["target"], "exp_t5")
         self.assertTrue(payload["changed"])
         self.assertEqual(payload["updated"], ["exp_t5"])
+        self.assertEqual(payload["changed_scope"]["nodes"], ["exp_t5"])
         self.assertIn("research-cockpit validate", payload["verify_commands"][0])
+        self.assertIn("--changed-node exp_t5", payload["verify_commands"][0])
+        self.assertIn("final_handoff_commands", payload)
 
     def test_complete_experiment_rejects_malformed_interaction_log_without_partial_write(self) -> None:
         experiment_path = self.root / "graph" / "nodes" / "exp_t5.yaml"

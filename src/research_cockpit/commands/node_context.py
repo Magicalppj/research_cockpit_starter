@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 from research_cockpit.paths import default_data_root
 
@@ -25,11 +26,17 @@ def node_context_payload(
     node_id: str,
     compact: bool = False,
     command_style: str = "console",
+    nodes: dict[str, Any] | None = None,
+    current: dict[str, Any] | None = None,
+    explicit_edges: dict[str, Any] | None = None,
+    link_rows: list[dict[str, Any]] | None = None,
+    run_validation: bool = True,
 ) -> dict:
-    nodes = load_nodes(root)
-    current = load_yaml(root / "current_state.yaml")
-    explicit_edges = load_explicit_edges(root)
-    validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
+    nodes = nodes if nodes is not None else load_nodes(root)
+    current = current if current is not None else load_yaml(root / "current_state.yaml")
+    explicit_edges = explicit_edges if explicit_edges is not None else load_explicit_edges(root)
+    if run_validation:
+        validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
     payload = build_node_onboarding_context(
         root,
         nodes,
@@ -37,6 +44,7 @@ def node_context_payload(
         node_id,
         compact=compact,
         command_style=command_style,
+        link_rows=link_rows,
     )
     payload["warnings"] = interaction_log_warnings(root)
     return payload

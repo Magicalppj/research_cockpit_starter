@@ -16,7 +16,11 @@ REQUIRED_MODULES = {
     "networkx": "networkx",
     "yaml": "PyYAML",
 }
-BATCH_FINISH_COMMANDS = [
+BATCH_WORKER_VERIFY_COMMANDS = [
+    "research-cockpit validate --root <root> --changed-node <node_id> --json",
+    "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",
+]
+BATCH_FINAL_HANDOFF_COMMANDS = [
     "research-cockpit validate --root <root> --json",
     "research-cockpit build --root <root>",
     "research-cockpit smoke --root <root> --json --progress",
@@ -40,12 +44,12 @@ MUTATION_COMMAND_SKELETON_TEMPLATES = [
     "research-cockpit apply-graph-plan --root <root>{scope} --file graph_update.yaml --dry-run --json --show-diff",
     "research-cockpit create-workstream --root <root>{scope} --file workstream.yaml --dry-run --json --show-diff",
     'research-cockpit create-artifact --root <root>{scope} --id <artifact_id> --title "..." --path artifacts/<node_id>/<run_id> --link-to <node_id> --no-build',
-    "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --dry-run --json --show-diff",
-    'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type smoke_check --passed false --fatal-json "{{}}" --no-build',
-    'research-cockpit record-gate-result --root <root>{scope} --id <preflight_gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --no-build',
-    "research-cockpit ingest-gate-result --root <root>{scope} --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --artifact <artifact_id> --no-build",
-    'research-cockpit complete-experiment --root <root>{scope} --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --no-build',
-    "research-cockpit complete-experiments --root <root>{scope} --file findings.yaml --no-build",
+    "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --record-only --dry-run --json --show-diff",
+    'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type smoke_check --passed false --fatal-json "{{}}" --json --compact --no-build',
+    'research-cockpit record-gate-result --root <root>{scope} --id <preflight_gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --json --compact --no-build',
+    "research-cockpit ingest-gate-result --root <root>{scope} --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --json --compact --no-build",
+    'research-cockpit complete-experiment --root <root>{scope} --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --json --compact --no-build',
+    "research-cockpit complete-experiments --root <root>{scope} --file findings.yaml --json --compact --no-build",
     'research-cockpit create-followup-experiment --root <root>{scope} --from <done_or_running_experiment_id> --id <followup_id> --title "..." --priority high --next-action "..." --no-build',
     'research-cockpit migrate-terminal-next-actions --root <root>{scope} --id <done_experiment_id> --followup-id <followup_id> --title "..." --dry-run --json --show-diff',
 ]
@@ -59,11 +63,11 @@ GLOBAL_COMMAND_SKELETON_SUFFIX = [
 ]
 BATCH_EXAMPLE_TEMPLATES = {
     "findings": [
-        'research-cockpit record-finding --root <root>{scope} --experiment <experiment_id> --statement "..." --confidence medium --artifact-id <artifact_id> --no-build',
-        'research-cockpit complete-experiment --root <root>{scope} --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --no-build',
+        'research-cockpit record-finding --root <root>{scope} --experiment <experiment_id> --statement "..." --confidence medium --artifact-id <artifact_id> --json --compact --no-build',
+        'research-cockpit complete-experiment --root <root>{scope} --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --json --compact --no-build',
     ],
     "artifacts": [
-        "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --no-build",
+        "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --record-only --json --compact --no-build",
         "research-cockpit link-artifact --root <root>{scope} --artifact <artifact_id> --to <node_id> --no-build",
     ],
     "runs": [
@@ -72,7 +76,7 @@ BATCH_EXAMPLE_TEMPLATES = {
         "research-cockpit complete-run --root <root>{scope} --id <run_id> --status completed --no-build",
     ],
     "gates": [
-        'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --no-build',
+        'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --json --compact --no-build',
     ],
 }
 
@@ -290,16 +294,18 @@ def _mutation_guidance(
         "current_focus_node": focus_node_id,
         "current_best_option": current_best_option,
         "pause_candidate_options": sorted(pause_candidates),
-        "batching": "Use --dry-run --json --show-diff first, run mutating commands sequentially with --no-build, then let the coordinator or final handoff run validate, build, and smoke once. A build watcher only refreshes generated dashboards.",
+        "batching": "Use --dry-run --json --show-diff first, run mutating commands sequentially with --no-build, then run changed-scope worker verification for the changed node. Let the coordinator or final handoff run full validate, build, and smoke once. A build watcher only refreshes generated dashboards.",
         "multi_agent_batch_mode": {
-            "default": "Agents mutate only the canonical root, use --no-build on supported writes, and leave final validate/build/smoke to a coordinator or final handoff. An optional build watcher only refreshes generated dashboards and does not replace validate/smoke.",
+            "default": "Agents mutate only the canonical root, use --no-build on supported writes, run changed-scope worker verification, and leave full validate/build/smoke to a coordinator or final handoff. An optional build watcher only refreshes generated dashboards and does not replace final validate/smoke.",
             "rules": [
                 "Do not parallelize mutating commands against the same data root.",
                 "Use commands --json --compact to check supports_no_build and batch_policy before choosing a command.",
-                "Run lightweight read checks such as validate --json after local batches when useful.",
+                "Run changed-scope verify commands after local batches; do not run full build/root smoke after every worker edit.",
                 "On mutation conflict, reread compact context and retry the stale command.",
             ],
-            "finish_commands": BATCH_FINISH_COMMANDS,
+            "finish_commands": [],
+            "worker_verify_commands": BATCH_WORKER_VERIFY_COMMANDS,
+            "final_handoff_commands": BATCH_FINAL_HANDOFF_COMMANDS,
             "examples": batch_examples,
         },
         "hierarchy_policy": hierarchy_policy(parent_option_id=scope_option_id or current.get("current_option") or current_best_option),

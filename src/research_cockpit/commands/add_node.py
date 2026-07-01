@@ -16,7 +16,7 @@ from research_cockpit.assignment_scope import (
     ensure_created_artifacts_linked_in_scope,
 )
 from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
-from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, yaml_change_diff
+from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, finish_mutation, yaml_change_diff
 from research_cockpit.model import (
     VALID_NODE_TYPES,
     ResearchNode,
@@ -157,6 +157,7 @@ def main() -> None:
     parser.add_argument("--summary", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     add_assignment_scope_args(parser)
@@ -185,7 +186,14 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        payload = compact_mutation_result(
+            result,
+            command="add-node",
+            target=args.id,
+            root=args.root,
+            created=[args.id],
+        ) if args.compact else result
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
         return
     if args.dry_run:
         print(f"Would create {result['path']}")

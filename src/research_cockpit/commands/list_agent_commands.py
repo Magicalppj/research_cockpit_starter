@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import argparse
-import json
 
+from research_cockpit.commands._runtime import emit_json
 from research_cockpit.command_registry import (
     COMMAND_GROUP_CHOICES,
     COMMAND_STATUS_CHOICES,
@@ -52,7 +52,29 @@ COMPACT_COMMAND_KEYS = {
     "target_aliases",
     "status_aliases",
 }
-BATCH_FINISH_COMMANDS = [
+SUMMARY_COMMAND_KEYS = {
+    "name",
+    "canonical_name",
+    "purpose",
+    "group",
+    "status",
+    "input_modes",
+    "workflow_tags",
+    "mutating",
+    "supports_json",
+    "supports_dry_run",
+    "supports_no_build",
+    "supports_compact",
+    "supported_flags",
+    "can_batch",
+    "batch_policy_mode",
+    "primary_target",
+}
+BATCH_WORKER_VERIFY_COMMANDS = [
+    "research-cockpit validate --root <root> --changed-node <node_id> --json",
+    "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",
+]
+BATCH_FINAL_HANDOFF_COMMANDS = [
     "research-cockpit validate --root <root> --json",
     "research-cockpit build --root <root>",
     "research-cockpit smoke --root <root> --json --progress",
@@ -106,6 +128,9 @@ WORKFLOW_TAGS_BY_COMMAND = {
     "finalize-workstream": ["evidence", "focus"],
     "import-worktree-findings": ["evidence"],
     "ingest-artifact": ["evidence"],
+    "artifact-records": ["read", "evidence"],
+    "promote-artifact-record": ["evidence"],
+    "compact-artifacts": ["maintenance", "evidence"],
     "record-finding": ["evidence"],
     "update-finding": ["evidence"],
     "create-artifact": ["evidence"],
@@ -145,6 +170,8 @@ SHOW_DIFF_COMMANDS = {
     "finalize-workstream",
     "import-worktree-findings",
     "ingest-artifact",
+    "promote-artifact-record",
+    "compact-artifacts",
     "ingest-gate-result",
     "link-artifact",
     "record-finding",
@@ -215,6 +242,9 @@ CAPABILITY_BY_COMMAND = {
     "finalize_workstream.py": "capabilities/experiment-tracking.md",
     "import_worktree_findings.py": "capabilities/experiment-tracking.md",
     "ingest_artifact.py": "capabilities/experiment-tracking.md",
+    "list_artifact_records.py": "capabilities/experiment-tracking.md",
+    "promote_artifact_record.py": "capabilities/experiment-tracking.md",
+    "compact_artifacts.py": "capabilities/maintenance.md",
     "record_finding.py": "capabilities/experiment-tracking.md",
     "update_finding.py": "capabilities/experiment-tracking.md",
     "create_artifact.py": "capabilities/experiment-tracking.md",
@@ -278,8 +308,8 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
-        "extra_supported_flags": ["--strict-lifecycle"],
-        "recommended_when": "Run before and after mutating cockpit data.",
+        "extra_supported_flags": ["--strict-lifecycle", "--changed-node", "--changed-file", "--changed-files", "--changed-record"],
+        "recommended_when": "Use changed flags after small worker edits; use full validation for coordinator or final gates.",
     },
     {
         "name": "lint_semantic.py",
@@ -318,7 +348,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_no_build": False,
         "supports_watch": True,
         "supports_profile": True,
-        "extra_supported_flags": ["--skip-resource-search"],
+        "extra_supported_flags": ["--skip-resource-search", "--affected", "--id"],
         "recommended_when": "Refresh generated context after YAML changes.",
     },
     {
@@ -329,8 +359,8 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
-        "extra_supported_flags": ["--full", "--progress"],
-        "recommended_when": "Check whether a copied skill package is usable by an agent.",
+        "extra_supported_flags": ["--full", "--scope", "--id", "--progress"],
+        "recommended_when": "Use --scope changed --id after one node edit; use default compact smoke for coordinator/root checks.",
     },
     {
         "name": "search_knowledge.py",
@@ -361,6 +391,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_no_build": False,
         "supports_compact": True,
         "supports_root": False,
+        "extra_supported_flags": ["--summary-only"],
         "recommended_when": "Choose the shortest safe command for a workflow.",
     },
     {
@@ -448,6 +479,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "supports_compact": True,
         "extra_supported_flags": ASSIGNMENT_SCOPE_FLAGS,
         "recommended_when": "Add a stage, problem, option, experiment, decision, or long-lived artifact.",
     },
@@ -580,7 +612,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
-        "extra_supported_flags": ["--sparse", "--sparse-profile"],
+        "extra_supported_flags": ["--agent", "--assignment", "--assignment-id", "--label", "--base", "--create-worktree", "--force", "--sparse", "--sparse-profile"],
         "fields_supported": [
             "agent_id",
             "assignment_id",
@@ -953,9 +985,43 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": True,
         "supports_no_build": True,
         "supports_compact": True,
-        "extra_supported_flags": ASSIGNMENT_SCOPE_FLAGS,
-        "fields_supported": ["node", "from", "run_id", "artifact_id", "path", "links", "agent"],
+        "extra_supported_flags": [*ASSIGNMENT_SCOPE_FLAGS, "--record-only"],
+        "fields_supported": ["node", "from", "run_id", "artifact_id", "record_only", "path", "links", "agent"],
         "recommended_when": "Preserve experiment outputs before deleting an agent worktree or recording a finding.",
+    },
+    {
+        "name": "list_artifact_records.py",
+        "purpose": "List record-only artifact evidence without creating or loading graph artifact nodes.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_compact": True,
+        "extra_supported_flags": ["--experiment", "--id", "--run-id", "--status"],
+        "fields_supported": ["artifact_records", "experiment_id", "run_id", "status", "promoted_artifact_id", "retention"],
+        "recommended_when": "Inspect record-only run outputs before deciding whether to promote them to graph artifacts.",
+    },
+    {
+        "name": "promote_artifact_record.py",
+        "purpose": "Promote one record-only artifact evidence item into a graph artifact node and write back the promotion marker.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "supports_compact": True,
+        "extra_supported_flags": ["--id", "--artifact-id", "--link-to", *ASSIGNMENT_SCOPE_FLAGS],
+        "fields_supported": ["artifact_records", "artifact_id", "linked_artifacts", "promoted_artifact_id"],
+        "recommended_when": "Promote record-only evidence only when it must become long-lived graph evidence for navigation, decisions, or baselines.",
+    },
+    {
+        "name": "compact_artifacts.py",
+        "purpose": "Classify graph artifact nodes and explicitly demote can_demote run outputs into artifact records without deleting payload files.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": True,
+        "supports_show_diff": True,
+        "extra_supported_flags": ["--id", "--execute", "--no-build"],
+        "fields_supported": ["artifact_demotions", "artifact_records", "linked_artifact_records", "migration_report", "retention", "linked_artifacts", "classification"],
+        "recommended_when": "Dry-run audit graph artifact growth first; execute only a single can_demote artifact when demotion is intentional.",
     },
     {
         "name": "record_finding.py",
@@ -964,6 +1030,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "supports_compact": True,
         "extra_supported_flags": ASSIGNMENT_SCOPE_FLAGS,
         "fields_supported": [
             "statement",
@@ -1018,6 +1085,7 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
+        "supports_compact": True,
         "extra_supported_flags": ASSIGNMENT_SCOPE_FLAGS,
         "fields_supported": ["path", "links", "linked_artifacts"],
         "recommended_when": "Attach existing artifact evidence to experiments, options, problems, or decisions.",
@@ -1296,17 +1364,21 @@ def _batch_policy(
         mode = "generated_build"
     else:
         mode = "single_mutation"
+    serial_no_build = mode == "serial_no_build"
     return {
         "mode": mode,
         "use_no_build": bool(supports_no_build and writes_truth_source),
         "serial_required": bool(mutating),
-        "finish_commands": BATCH_FINISH_COMMANDS if mode == "serial_no_build" else [],
+        "finish_commands": [],
+        "worker_verify_commands": BATCH_WORKER_VERIFY_COMMANDS if serial_no_build else [],
+        "final_handoff_commands": BATCH_FINAL_HANDOFF_COMMANDS if serial_no_build else [],
     }
 
 
 def agent_command_manifest(
     *,
     compact: bool = False,
+    summary_only: bool = False,
     name: str | None = None,
     workflow: str | None = None,
     group: str | None = None,
@@ -1373,7 +1445,13 @@ def agent_command_manifest(
             continue
         if deprecated and row["status"] == "active":
             continue
-        if compact:
+        if summary_only:
+            batch_policy = row.get("batch_policy")
+            row["batch_policy_mode"] = (
+                str(batch_policy.get("mode") or "") if isinstance(batch_policy, dict) else ""
+            )
+            row = {key: value for key, value in row.items() if key in SUMMARY_COMMAND_KEYS}
+        elif compact:
             row = {key: value for key, value in row.items() if key in COMPACT_COMMAND_KEYS}
         rows.append(row)
     return rows
@@ -1383,6 +1461,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--json", action="store_true", help="Print machine-readable command manifest")
     parser.add_argument("--compact", action="store_true", help="Print a short agent discovery payload.")
+    parser.add_argument("--summary-only", action="store_true", help="Print minimal command selection fields.")
     parser.add_argument("--name", help="Return only one command by subcommand name.")
     parser.add_argument("--workflow", choices=WORKFLOW_CHOICES, help="Return commands tagged for one workflow.")
     parser.add_argument("--group", choices=GROUP_CHOICES, help="Return commands in one canonical command group.")
@@ -1398,6 +1477,7 @@ def main() -> None:
 
     commands = agent_command_manifest(
         compact=args.compact,
+        summary_only=args.summary_only,
         name=args.name,
         workflow=args.workflow,
         group=args.group,
@@ -1405,7 +1485,7 @@ def main() -> None:
         deprecated=args.deprecated,
     )
     if args.json:
-        print(json.dumps({"commands": commands}, indent=2, ensure_ascii=False))
+        emit_json({"commands": commands}, compact=args.summary_only)
         return
 
     for command in commands:

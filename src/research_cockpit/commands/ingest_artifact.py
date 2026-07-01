@@ -24,6 +24,7 @@ from research_cockpit.commands._runtime import (
 )
 from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands.record_finding import find_node_file
+from research_cockpit.artifact_records import build_artifact_record, list_artifact_records, upsert_artifact_record
 from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.model import (
     ResearchNode,
@@ -224,6 +225,7 @@ def ingest_artifact(
     show_diff: bool = False,
     assignment_id: str | None = None,
     coordinator: bool = False,
+    record_only: bool = False,
 ) -> dict[str, Any]:
     _validate_run_id(run_id)
     source_resolved = _validate_source_directory(source_dir)
@@ -235,6 +237,8 @@ def ingest_artifact(
         raise ValueError(f"Target node does not exist: {node_id}")
     if nodes[node_id].type == "artifact":
         raise ValueError("--node must be a non-artifact research node")
+    if record_only and nodes[node_id].type != "experiment":
+        raise ValueError("--record-only requires --node to target an experiment")
     ensure_assignment_scope(
         root,
         nodes,
@@ -284,23 +288,64 @@ def ingest_artifact(
     node_path = find_node_file(root, node_id)
     node_before = load_yaml(node_path)
     node_after = copy.deepcopy(node_before)
-    linked_artifacts, _ = append_unique(node_after.get("linked_artifacts"), [artifact_id], "linked_artifacts")
-    node_after["linked_artifacts"] = linked_artifacts
-    node_after["updated_at"] = today
-
     candidate = dict(nodes)
-    candidate[artifact_id] = ResearchNode.from_dict(artifact_data)
-    candidate[node_id] = ResearchNode.from_dict(node_after)
-    validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
 
-    artifact_path = root / "graph" / "nodes" / f"{artifact_id}.yaml"
-    changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any]]] = [
-        (artifact_path, None, artifact_data),
-        (node_path, node_before, node_after),
-    ]
+    if record_only:
+        record_id = artifact_id
+        record = build_artifact_record(
+            record_id=record_id,
+            experiment_id=node_id,
+            run_id=run_id,
+            artifact_id=artifact_id,
+            title=title or f"Artifact record for {node_id} {run_id}",
+            summary=summary,
+            stable_path=stable_path,
+            manifest_path=_stable_path(stable_path, MANIFEST_NAME),
+            source_file_count=file_count,
+            links=stable_links,
+            agent_id=agent_id,
+        )
+        record_path, record_before, record_after = upsert_artifact_record(root, node_id, record)
+        linked_records, _ = append_unique(
+            node_after.get("linked_artifact_records"),
+            [record_id],
+            "linked_artifact_records",
+        )
+        node_after["linked_artifact_records"] = linked_records
+        node_after["updated_at"] = today
+        candidate[node_id] = ResearchNode.from_dict(node_after)
+        validate_cockpit(
+            root,
+            candidate,
+            state.current,
+            state.explicit_edges,
+            artifact_records=[*list_artifact_records(root), record],
+            raise_on_error=True,
+        )
+        artifact_path = record_path
+        result_after = record
+        changes: list[tuple[Path, dict[str, Any] | None, dict[str, Any]]] = [
+            (record_path, record_before if record_path.exists() else None, record_after),
+            (node_path, node_before, node_after),
+        ]
+    else:
+        linked_artifacts, _ = append_unique(node_after.get("linked_artifacts"), [artifact_id], "linked_artifacts")
+        node_after["linked_artifacts"] = linked_artifacts
+        node_after["updated_at"] = today
+        candidate[artifact_id] = ResearchNode.from_dict(artifact_data)
+        candidate[node_id] = ResearchNode.from_dict(node_after)
+        validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
+        artifact_path = root / "graph" / "nodes" / f"{artifact_id}.yaml"
+        result_after = artifact_data
+        changes = [
+            (artifact_path, None, artifact_data),
+            (node_path, node_before, node_after),
+        ]
     result: dict[str, Any] = {
         "ok": True,
         "artifact_id": artifact_id,
+        "record_id": artifact_id if record_only else None,
+        "record_only": record_only,
         "node_id": node_id,
         "run_id": run_id,
         "dry_run": dry_run,
@@ -316,7 +361,7 @@ def ingest_artifact(
         "source_file_count": file_count,
         "links": stable_links,
         "before": None,
-        "after": artifact_data,
+        "after": result_after,
         "resolved_inputs": {
             "source_path_resolved": str(source_resolved),
             "manifest_source_path": manifest["source_path"],
@@ -326,7 +371,7 @@ def ingest_artifact(
             "manifest_path": str(target_dir / MANIFEST_NAME),
             "source_git": manifest["source_git"],
         },
-        "resource_rows": linked_resource_rows(root, candidate, [artifact_id, node_id]),
+        "resource_rows": linked_resource_rows(root, candidate, [artifact_id, node_id]) if not record_only else [],
     }
     if show_diff:
         result["diff"] = yaml_change_diff(changes)
@@ -355,6 +400,8 @@ def ingest_artifact(
                 ),
                 "after": {
                     "artifact_id": artifact_id,
+                    "record_id": artifact_id if record_only else None,
+                    "record_only": record_only,
                     "node_id": node_id,
                     "run_id": run_id,
                     "stable_path": stable_path,
@@ -368,7 +415,7 @@ def ingest_artifact(
         if copied and not exc.payload.get("partial_success"):
             shutil.rmtree(target_dir, ignore_errors=True)
         raise
-    result["resource_rows"] = linked_resource_rows(root, candidate, [artifact_id, node_id])
+    result["resource_rows"] = linked_resource_rows(root, candidate, [artifact_id, node_id]) if not record_only else []
     return result
 
 
@@ -388,6 +435,7 @@ def main() -> None:
     parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
+    parser.add_argument("--record-only", action="store_true", help="Record artifact metadata without creating a graph artifact node.")
     add_assignment_scope_args(parser)
     args = parser.parse_args()
 
@@ -407,6 +455,7 @@ def main() -> None:
             show_diff=args.show_diff,
             assignment_id=args.assignment,
             coordinator=args.coordinator,
+            record_only=args.record_only,
         )
     except AssignmentScopeError as exc:
         emit_assignment_scope_error(args, exc)
@@ -435,10 +484,11 @@ def main() -> None:
             compact_mutation_result(
                 result,
                 command="ingest-artifact",
-                target={"node_id": result["node_id"], "artifact_id": result["artifact_id"]},
+                target={"node_id": result["node_id"], "artifact_id": result["artifact_id"], "record_only": result.get("record_only")},
                 root=args.root,
-                created=[result["artifact_id"]],
+                created=[] if result.get("record_only") else [result["artifact_id"]],
                 updated=result.get("linked_to", []),
+                records=[f"artifact:{result['record_id']}"] if result.get("record_only") else [],
             ) if args.compact else result
         )
         return

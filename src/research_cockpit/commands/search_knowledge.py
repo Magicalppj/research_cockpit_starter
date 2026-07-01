@@ -41,7 +41,7 @@ def main() -> None:
     parser.add_argument("--query", required=True)
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--source", action="append", choices=["note", "node", "resource"], dest="sources")
+    parser.add_argument("--source", action="append", choices=["note", "node", "resource", "artifact_record"], dest="sources")
     parser.add_argument("--node-type", action="append", dest="node_types")
     parser.add_argument("--focus-only", action="store_true")
     args = parser.parse_args()
@@ -51,7 +51,7 @@ def main() -> None:
         current = load_yaml(args.root / "current_state.yaml")
         explicit_edges = load_explicit_edges(args.root)
         validate_cockpit(args.root, nodes, current, explicit_edges, raise_on_error=True)
-        index = build_search_index(args.root, nodes, current)
+        index = build_search_index(args.root, nodes, current, sources=args.sources)
         results = search_knowledge(
             index,
             args.query,

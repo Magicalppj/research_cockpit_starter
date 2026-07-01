@@ -35,7 +35,7 @@ Use sparse planning before starting a heavy temporary branch:
 research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label branch_probe --objective "Run branch experiments" --branch agent/option_x-branch_probe --worktree ../worktrees/branch_probe --base main --dry-run --json --sparse --sparse-profile ml-experiment
 ```
 
-The sparse output is a dry-run command plan. Review the `sparse_worktree.commands` sequence, create the sparse worktree manually, then run `start-agent-session` normally without `--sparse` to record the assignment. The `ml-experiment` profile excludes `research_cockpit/`, `outputs/`, `logs/`, `data/`, generated dataset artifact directories, and common virtual environments from the temporary checkout. Downstream agents still mutate the main checkout's canonical `research_cockpit/` root through `--root` or `RESEARCH_COCKPIT_ROOT`.
+The sparse output is a dry-run command plan. Dry-run generated ids are preview-only; pass explicit `--agent` and `--assignment` / `--assignment-id` if the execute step must reuse them. Review the `sparse_worktree.commands` sequence, create the sparse worktree manually, then run `start-agent-session` normally without `--sparse` to record the assignment. The `ml-experiment` profile excludes `research_cockpit/`, `outputs/`, `logs/`, `data/`, generated dataset artifact directories, and common virtual environments from the temporary checkout. Downstream agents still mutate the main checkout's canonical `research_cockpit/` root through `--root` or `RESEARCH_COCKPIT_ROOT`.
 
 Recommended watcher excludes for IDEs and repo watchers:
 

@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlparse
 import re
 
+from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.graph_core import GraphTopology, focus_related_ids
 from research_cockpit.storage import load_yaml, normalize_relative_path, relative_to_root
 from research_cockpit.types import (
@@ -79,6 +80,55 @@ def _node_search_text(node: ResearchNode) -> str:
     for field_name in SEARCH_NODE_TEXT_FIELDS:
         parts.extend(_flatten_search_values(node.raw.get(field_name)))
     return "\n".join(part for part in parts if part not in (None, ""))
+
+
+def _artifact_record_search_entries(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    focus_ids: set[str],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for record in list_artifact_records(root):
+        record_id = str(record.get("record_id") or "")
+        if not record_id:
+            continue
+        experiment_id = str(record.get("experiment_id") or "")
+        experiment_node = nodes.get(experiment_id) if experiment_id else None
+        links = record.get("links") if isinstance(record.get("links"), dict) else {}
+        retention = record.get("retention") if isinstance(record.get("retention"), dict) else {}
+        text = "\n".join(
+            str(value)
+            for value in [
+                record_id,
+                experiment_id,
+                record.get("run_id"),
+                record.get("title"),
+                record.get("summary"),
+                record.get("artifact_kind"),
+                record.get("status"),
+                record.get("stable_path"),
+                record.get("promoted_artifact_id"),
+                *(links.values() if isinstance(links, dict) else []),
+                *(retention.values() if isinstance(retention, dict) else []),
+            ]
+            if value not in (None, "")
+        )
+        entries.append({
+            "entry_id": f"artifact_record:{record_id}",
+            "source": "artifact_record",
+            "node_id": experiment_id or None,
+            "node_type": experiment_node.type if experiment_node else ("experiment" if experiment_id else None),
+            "node_title": experiment_node.title if experiment_node else (experiment_id or None),
+            "title": record.get("title") or record_id,
+            "path": record.get("stable_path") or record.get("source_file") or "",
+            "text": text,
+            "updated_at": str(record.get("updated_at") or ""),
+            "is_focus_related": bool(experiment_id and experiment_id in focus_ids),
+            "artifact_record_id": record_id,
+            "run_id": record.get("run_id"),
+            "promoted_artifact_id": record.get("promoted_artifact_id"),
+        })
+    return entries
 
 
 def _resource_entry_id(node_id: str, label: str, target: str) -> str:
@@ -163,6 +213,8 @@ def _resource_skip_reason(
         return "run_id", None, normalized or target
     if kind == "linked_artifact":
         return "linked_artifact", None, normalized or target
+    if kind == "linked_artifact_record":
+        return "linked_artifact_record", None, normalized or target
     if Path(target).is_absolute():
         return "absolute_path", None, normalized or target
     if urlparse(target).scheme in {"http", "https"}:
@@ -337,29 +389,36 @@ def build_search_index(
     topology: GraphTopology | None = None,
     include_resource_text: bool = True,
     resource_scan_settings: ResourceScanSettings | None = None,
+    sources: set[str] | list[str] | None = None,
 ) -> list[dict[str, Any]]:
     current = current or {}
+    selected_sources = set(sources or [])
+
+    def include_source(source: str) -> bool:
+        return not selected_sources or source in selected_sources
+
     focus_ids = focus_related_ids(nodes, current, topology=topology) if current else set()
-    node_paths = _node_file_paths(root)
-    note_paths = _node_note_paths(nodes)
+    node_paths = _node_file_paths(root) if include_source("node") else {}
+    note_paths = _node_note_paths(nodes) if include_source("note") or include_source("resource") else {}
     entries: list[dict[str, Any]] = []
 
-    for node in sorted(nodes.values(), key=lambda item: item.id):
-        entries.append({
-            "entry_id": f"node:{node.id}",
-            "source": "node",
-            "node_id": node.id,
-            "node_type": node.type,
-            "node_title": node.title,
-            "title": node.title,
-            "path": node_paths.get(node.id, ""),
-            "text": _node_search_text(node),
-            "updated_at": str(node.raw.get("updated_at") or ""),
-            "is_focus_related": node.id in focus_ids,
-        })
+    if include_source("node"):
+        for node in sorted(nodes.values(), key=lambda item: item.id):
+            entries.append({
+                "entry_id": f"node:{node.id}",
+                "source": "node",
+                "node_id": node.id,
+                "node_type": node.type,
+                "node_title": node.title,
+                "title": node.title,
+                "path": node_paths.get(node.id, ""),
+                "text": _node_search_text(node),
+                "updated_at": str(node.raw.get("updated_at") or ""),
+                "is_focus_related": node.id in focus_ids,
+            })
 
     notes_dir = root / "notes"
-    if notes_dir.exists():
+    if include_source("note") and notes_dir.exists():
         for path in sorted(notes_dir.glob("**/*.md")):
             rel_path = relative_to_root(root, path)
             normalized = normalize_relative_path(rel_path)
@@ -378,17 +437,20 @@ def build_search_index(
                 "updated_at": str(node.raw.get("updated_at") or "") if node else "",
                 "is_focus_related": bool(node and node.id in focus_ids),
             })
-    entries.extend(_resource_search_entries(
-        root,
-        nodes,
-        current,
-        note_paths,
-        link_rows=link_rows,
-        focus_ids=focus_ids,
-        topology=topology,
-        include_resource_text=include_resource_text,
-        resource_scan_settings=resource_scan_settings,
-    ))
+    if include_source("artifact_record"):
+        entries.extend(_artifact_record_search_entries(root, nodes, focus_ids))
+    if include_source("resource"):
+        entries.extend(_resource_search_entries(
+            root,
+            nodes,
+            current,
+            note_paths,
+            link_rows=link_rows,
+            focus_ids=focus_ids,
+            topology=topology,
+            include_resource_text=include_resource_text,
+            resource_scan_settings=resource_scan_settings,
+        ))
     return entries
 
 
@@ -528,6 +590,7 @@ def _search_summary_entry(entry: dict[str, Any]) -> dict[str, Any]:
 def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: int = 8) -> dict[str, Any]:
     note_count = 0
     node_count = 0
+    artifact_record_count = 0
     resource_count = 0
     resource_unique_count = 0
     resource_truncated_count = 0
@@ -552,6 +615,8 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
                 unlinked_note_count += 1
         if source == "node":
             node_count += 1
+        if source == "artifact_record":
+            artifact_record_count += 1
         if source == "resource":
             if entry.get("skip_reason"):
                 resource_skipped_count += 1
@@ -585,6 +650,7 @@ def build_search_index_summary(index: list[dict[str, Any]], focus_entry_limit: i
         "entry_count": len(index),
         "note_count": note_count,
         "node_count": node_count,
+        "artifact_record_count": artifact_record_count,
         "resource_count": resource_count,
         "resource_unique_count": resource_unique_count,
         "resource_truncated_count": resource_truncated_count,

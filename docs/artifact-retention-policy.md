@@ -38,7 +38,7 @@ The full raw payload does not always need to remain in `research_cockpit/artifac
 
 ## Suggested Metadata
 
-Persist artifact retention metadata through `create-artifact --file` when creating an artifact node, or `update-node-fields --metadata-file` when adding or changing retention on an existing artifact node. The same information can also appear in launcher output, artifact manifests, portable review bundles, or notes for review, but the artifact node metadata is the structured source used by audits and context payloads.
+For promoted graph artifact nodes, persist artifact retention metadata through `create-artifact --file` when creating the node, or `update-node-fields --metadata-file` when adding or changing retention later. For ordinary run output, prefer `ingest-artifact --record-only`; the artifact record carries the same retention class without adding another `graph/nodes/artifact_*.yaml` file. The same information can also appear in launcher output, artifact manifests, portable review bundles, or notes for review, but graph artifact metadata and artifact record metadata are the structured sources used by audits and context payloads.
 
 ```yaml
 retention:
@@ -83,8 +83,37 @@ Do not clean:
 - paths declared in active `resources`
 - paths whose retention class is unknown and whose linked finding/decision status has not been reviewed
 
+## Artifact Records, Promotion, And Demotion
+
+Use artifact records for ordinary run outputs, logs, metrics, reproducible outputs, disposable caches, and intermediate checkpoints:
+
+```sh
+research-cockpit ingest-artifact --root research_cockpit --node <experiment_id> --from <run_dir> --run-id <run_id> --record-only --json --compact --no-build
+research-cockpit artifact-records --root research_cockpit --experiment <experiment_id> --json --compact
+```
+
+Promote a record to a graph artifact node only when it needs durable navigation or must support a decision, baseline, strong finding, portable review bundle, or final checkpoint:
+
+```sh
+research-cockpit promote-artifact-record --root research_cockpit --id <record_id> --artifact-id <artifact_id> --link-to <node_id> --json --compact
+```
+
+Use graph artifact demotion as an audit-first maintenance workflow. Start with a dry-run:
+
+```sh
+research-cockpit compact-artifacts --root research_cockpit --dry-run --json --show-diff
+```
+
+Only rows classified as `can_demote` are automatic execution candidates. A safe execution command is explicit and single-artifact scoped:
+
+```sh
+research-cockpit compact-artifacts --root research_cockpit --id <artifact_id> --execute --no-build --json --show-diff
+research-cockpit validate --root research_cockpit --json
+```
+
+Demotion writes an artifact record, updates safe experiment `linked_artifacts` references to `linked_artifact_records`, removes the graph artifact node, and writes `artifact_migrations/<artifact_id>.yaml`. It does not delete payload files. Rows classified as `must_keep_node`, `needs_review`, or `cannot_demote` require human review or a different command path.
 ## Relationship To `ingest-artifact`
 
-`ingest-artifact` copies worktree output into the canonical artifact store so a disposable worktree can be removed. That does not mean every copied file must be kept forever. After the evidence is summarized and retention metadata exists, bulky reproducible files may still be candidates for cleanup or external archival.
+`ingest-artifact --record-only` copies worktree output into the canonical artifact store and records lightweight metadata without creating a graph artifact node. The older graph-node ingest path remains compatible, but worker agents should normally use record-only for run output. Copying files into the artifact store does not mean every copied file must be kept forever. After the evidence is summarized and retention metadata exists, bulky reproducible files may still be candidates for cleanup, demotion, or external archival.
 
 For very large payloads, prefer a stable external or git-ignored artifact root plus small Research Cockpit artifact nodes that point to manifests, summaries, and review bundles.

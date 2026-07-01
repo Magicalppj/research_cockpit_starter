@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from importlib import import_module
-import json
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +9,7 @@ import subprocess
 import sys
 
 from research_cockpit.command_registry import COMMAND_MODULES, GROUPED_COMMAND_ALIASES
+from research_cockpit.commands._runtime import configure_utf8_stdio, emit_json, safe_print
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.paths import default_data_root, plugin_root
 
@@ -25,12 +25,12 @@ def _run_module(command_name: str, argv: list[str], *, display_command_name: str
         module.main()
     except MutationError as exc:
         if "--json" in argv:
-            print(json.dumps(exc.payload or {"ok": False, "error": str(exc)}, indent=2, ensure_ascii=False))
+            emit_json(exc.payload or {"ok": False, "error": str(exc)})
         else:
-            print(str(exc))
+            safe_print(str(exc))
         raise SystemExit(1) from None
     except (ValueError, FileNotFoundError, FileExistsError) as exc:
-        print(str(exc))
+        safe_print(str(exc))
         raise SystemExit(1) from None
     finally:
         sys.argv = old_argv
@@ -77,11 +77,11 @@ def init_command(argv: list[str]) -> None:
         "dashboard_path": str(args.root / "dashboards") if args.build else None,
     }
     if args.json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        emit_json(payload)
         return
-    print(f"Initialized Research Cockpit state at {args.root}")
+    safe_print(f"Initialized Research Cockpit state at {args.root}")
     if args.build:
-        print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
+        safe_print(f"Rebuilt dashboards under {args.root / 'dashboards'}")
 
 
 def ui_command(argv: list[str]) -> None:
@@ -125,6 +125,7 @@ def _print_group_help(group_name: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    configure_utf8_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = _top_parser()
     if not argv or argv[0] in ("-h", "--help"):

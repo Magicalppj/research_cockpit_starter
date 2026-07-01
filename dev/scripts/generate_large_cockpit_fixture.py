@@ -170,6 +170,54 @@ def _link_notes_to_nodes(nodes: dict[str, dict[str, Any]], host_ids: list[str], 
         host["links"] = links
 
 
+def _write_artifact_records(
+    root: Path,
+    experiment_ids: list[str],
+    *,
+    artifact_record_count: int,
+    resource_count: int,
+) -> int:
+    if artifact_record_count <= 0:
+        return 0
+    if not experiment_ids:
+        raise ValueError("Cannot create artifact records without experiment nodes")
+
+    records_by_experiment: dict[str, dict[str, Any]] = {}
+    for index in range(artifact_record_count):
+        experiment_id = experiment_ids[index % len(experiment_ids)]
+        run_id = f"run_perf_{index:04d}"
+        record_id = f"artifact_record_perf_{index:04d}"
+        records_by_experiment.setdefault(experiment_id, {})[record_id] = {
+            "record_id": record_id,
+            "run_id": run_id,
+            "title": f"Synthetic artifact record {index:04d}",
+            "status": "available",
+            "path": f"artifacts/record_outputs/{experiment_id}/{run_id}",
+            "links": {
+                "metrics": _resource_path(index % resource_count),
+            },
+            "artifact_kind": "run_output",
+            "retention": {
+                "class": "reproducible_output",
+                "reason": "Synthetic record for benchmark fixture growth.",
+            },
+            "created_at": FIXTURE_DATE,
+            "updated_at": FIXTURE_DATE,
+            "promoted_artifact_id": None,
+        }
+
+    for experiment_id, records in sorted(records_by_experiment.items()):
+        save_yaml(
+            root / "artifact_records" / f"{experiment_id}.yaml",
+            {
+                "schema_version": "artifact_records_v1",
+                "experiment_id": experiment_id,
+                "records": records,
+            },
+        )
+    return len(records_by_experiment)
+
+
 def _write_marker(root: Path, payload: dict[str, Any]) -> None:
     marker_payload = {
         "kind": MARKER_KIND,
@@ -179,6 +227,8 @@ def _write_marker(root: Path, payload: dict[str, Any]) -> None:
         "note_count": payload["note_count"],
         "resource_count": payload["resource_count"],
         "linked_resource_count": payload["linked_resource_count"],
+        "artifact_record_count": payload.get("artifact_record_count", 0),
+        "artifact_record_file_count": payload.get("artifact_record_file_count", 0),
     }
     (root / MARKER_FILE).write_text(json.dumps(marker_payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -190,6 +240,7 @@ def generate_fixture(
     links_per_node: int,
     note_count: int,
     resource_count: int,
+    artifact_record_count: int = 0,
     force: bool = False,
 ) -> dict[str, Any]:
     if node_count < 5:
@@ -200,6 +251,8 @@ def generate_fixture(
         raise ValueError("--note-count must be non-negative")
     if resource_count < 1:
         raise ValueError("--resource-count must be at least 1")
+    if artifact_record_count < 0:
+        raise ValueError("--artifacts must be non-negative")
 
     level_count, artifact_count, experiment_count = _layout_counts(node_count, resource_count)
     if note_count > node_count:
@@ -306,6 +359,12 @@ def generate_fixture(
         [*experiment_ids, *option_ids, *problem_ids, stage_id, *artifact_ids],
         note_count=note_count,
     )
+    artifact_record_file_count = _write_artifact_records(
+        root,
+        experiment_ids,
+        artifact_record_count=artifact_record_count,
+        resource_count=resource_count,
+    )
 
     for node in nodes.values():
         save_yaml(root / "graph" / "nodes" / f"{node['id']}.yaml", node)
@@ -337,6 +396,8 @@ def generate_fixture(
         "note_count": note_count,
         "resource_count": resource_count,
         "links_per_node": links_per_node,
+        "artifact_record_count": artifact_record_count,
+        "artifact_record_file_count": artifact_record_file_count,
         "linked_resource_count": len(build_link_rows(root, loaded_nodes)),
     }
     _write_marker(root, payload)
@@ -350,6 +411,14 @@ def main() -> None:
     parser.add_argument("--links-per-node", type=int, default=2, help="Search resource links attached to each node.")
     parser.add_argument("--note-count", type=int, default=25, help="Markdown notes to create and link to generated nodes.")
     parser.add_argument("--resource-count", type=int, default=100, help="Search resource files to create.")
+    parser.add_argument(
+        "--artifacts",
+        "--artifact-records",
+        dest="artifact_record_count",
+        type=int,
+        default=0,
+        help="Artifact-like sidecar records to create outside graph/nodes.",
+    )
     parser.add_argument("--force", action="store_true", help="Replace an existing synthetic fixture root with a valid marker.")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable summary.")
     args = parser.parse_args()
@@ -361,6 +430,7 @@ def main() -> None:
             links_per_node=args.links_per_node,
             note_count=args.note_count,
             resource_count=args.resource_count,
+            artifact_record_count=args.artifact_record_count,
             force=args.force,
         )
     except (ValueError, FileExistsError) as exc:
@@ -375,6 +445,7 @@ def main() -> None:
         return
     print(f"Generated {payload['node_count']} nodes at {payload['root']}")
     print(f"Resources: {payload['resource_count']} files, notes: {payload['note_count']}")
+    print(f"Artifact records: {payload['artifact_record_count']} records in {payload['artifact_record_file_count']} files")
 
 
 if __name__ == "__main__":

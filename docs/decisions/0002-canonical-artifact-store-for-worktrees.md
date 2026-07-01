@@ -1,7 +1,7 @@
 # ADR-0002: Use Canonical Artifact Store For Worktree Outputs
 
 ## Status
-Accepted
+Accepted; amended on 2026-07-01 by the artifact record policy in `docs/artifact-retention-policy.md`. The canonical store decision still stands, but ordinary run output should use record-only ingest instead of creating graph artifact nodes by default.
 
 ## Date
 2026-05-09
@@ -18,7 +18,7 @@ Use the canonical data root as the long-lived artifact store:
 research_cockpit/artifacts/<node_id>/<run_id>/
 ```
 
-Agents must copy useful worktree outputs into this store with `research-cockpit ingest-artifact` before recording long-lived findings. The command creates a linked `artifact` node and writes `_research_cockpit_ingest.json` beside the copied files. Findings should then refer to the artifact id, not the original worktree path.
+Agents must copy useful worktree outputs into this store with `research-cockpit ingest-artifact` before deleting a worktree or using those outputs as evidence. Ordinary run output should use `ingest-artifact --record-only`, which writes `_research_cockpit_ingest.json` beside the copied files and records lightweight metadata under `artifact_records/*.yaml` without creating a graph artifact node. Promote the record to an `artifact` node only when the evidence needs durable navigation or must support a decision, baseline, strong finding, portable review bundle, or final checkpoint. Findings should never refer to the original worktree path.
 
 ## Alternatives Considered
 
@@ -38,7 +38,7 @@ Agents must copy useful worktree outputs into this store with `research-cockpit 
 - Rejected as the default. External URIs can still be recorded as artifact links when needed.
 
 ## Consequences
-- Deleting a worktree is safe only after useful outputs are ingested and findings/decisions/baselines reference canonical artifacts.
-- Small artifacts can be tracked in Git; large artifacts should use Git LFS or an external store while keeping a stable artifact node/path.
+- Deleting a worktree is safe only after useful outputs are ingested into the canonical store and any required findings/decisions/baselines reference canonical artifact records or promoted artifact nodes.
+- Small durable artifacts can be tracked in Git; large or ordinary run outputs should use artifact records, Git LFS, or an external store while keeping stable metadata in Research Cockpit.
 - Ingested run directories are copied as regular files and directories; symlinked files or directories are rejected to avoid pulling in data outside the run bundle.
-- Agent handoffs include `stable_artifact_root` and an `ingest-artifact` command template.
+- Agent handoffs include `stable_artifact_root` and a record-only `ingest-artifact` command template for ordinary run output.

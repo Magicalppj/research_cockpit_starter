@@ -233,11 +233,12 @@ def _load_existing_record(path: Path) -> dict[str, Any] | None:
 def _startup_command_args(root: Path, assignment_id: str) -> list[str]:
     return [
         "research-cockpit",
-        "bootstrap",
+        "agent-session-context",
         "--root",
         str(root.resolve()),
         "--assignment",
         assignment_id,
+        "--compact",
         "--json",
     ]
 
@@ -418,6 +419,9 @@ def start_agent_session(
     sparse: bool = False,
     sparse_profile: str | None = None,
 ) -> dict[str, Any]:
+    requested_agent_id = agent_id
+    requested_assignment_id = assignment_id
+    reused_assignment_id = False
     state = load_validated_state(root)
     nodes = state.nodes
     if option_id not in nodes:
@@ -446,9 +450,15 @@ def start_agent_session(
     agents = load_agents(root)
     assignments = load_assignments(root)
     if agent_id:
-        assignment_id = assignment_id or _existing_assignment_id(assignments, agent_id=agent_id, option_id=option_id)
+        existing_assignment_id = _existing_assignment_id(assignments, agent_id=agent_id, option_id=option_id)
+        if not assignment_id and existing_assignment_id:
+            assignment_id = existing_assignment_id
+            reused_assignment_id = True
     if force:
-        assignment_id = assignment_id or _active_assignment_id_for_root(assignments, option_id)
+        active_assignment_id = _active_assignment_id_for_root(assignments, option_id)
+        if not assignment_id and active_assignment_id:
+            assignment_id = active_assignment_id
+            reused_assignment_id = True
     agent_id, assignment_id = _resolve_identity(
         root,
         agents=agents,
@@ -586,6 +596,18 @@ def start_agent_session(
     )
     if dry_run:
         result["changed"] = False
+        result["identity_preview"] = {
+            "preview_only": True,
+            "agent_id_reserved": bool(requested_agent_id),
+            "assignment_id_reserved": bool(requested_assignment_id or reused_assignment_id),
+            "generated_ids_are_not_reserved": not bool(
+                requested_agent_id and (requested_assignment_id or reused_assignment_id)
+            ),
+            "stable_identity_hint": (
+                "Dry-run previews generated ids only; pass explicit --agent and --assignment "
+                "when executing if you need the same ids."
+            ),
+        }
         return dry_run_preflight_result(root, result)
 
     if create_worktree:
@@ -665,7 +687,12 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--option", required=True, dest="option_id")
     parser.add_argument("--agent", dest="agent_id")
-    parser.add_argument("--assignment", dest="assignment_id", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--assignment",
+        "--assignment-id",
+        dest="assignment_id",
+        help="Use an explicit assignment id; useful when executing after a dry-run preview.",
+    )
     parser.add_argument("--label")
     parser.add_argument("--objective", required=True)
     parser.add_argument("--branch", required=True)

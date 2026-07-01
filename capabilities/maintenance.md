@@ -29,10 +29,20 @@ research-cockpit active-resources --root research_cockpit --json
 research-cockpit worktree-audit --root research_cockpit --repo . --json
 research-cockpit branch-audit --root research_cockpit --repo . --base main --json
 research-cockpit artifact-retention-audit --root research_cockpit --repo . --min-size-gb 10 --json
+research-cockpit compact-artifacts --root research_cockpit --dry-run --json --show-diff
 research-cockpit maintenance-audit --root research_cockpit --repo . --base main --min-size-gb 10 --json
 ```
 
 `maintenance-audit` aggregates active resources, worktree state, branch state, artifact retention candidates, dashboard performance warnings, blockers, and `recommended_next_actions`. The narrower audit commands are useful when an agent needs to inspect one subsystem without mixing cleanup concerns.
+
+Use `compact-artifacts --dry-run` to classify graph artifact nodes before demotion. It reports `must_keep_node`, `can_demote`, `needs_review`, and `cannot_demote`. Do not execute a demotion from the dry-run output unless the row is `can_demote` and the task is explicitly maintenance/cleanup. To apply one safe demotion, run:
+
+```sh
+research-cockpit compact-artifacts --root research_cockpit --id <artifact_id> --execute --no-build --json --show-diff
+research-cockpit validate --root research_cockpit --json
+```
+
+Execution writes an artifact record, rewrites safe experiment `linked_artifacts` references to `linked_artifact_records`, removes the graph artifact node, and writes `artifact_migrations/<artifact_id>.yaml`. It never deletes payload files under `research_cockpit/artifacts/**`. Rows marked `needs_review` or `cannot_demote` are not automatic cleanup candidates.
 
 ## Worktree Closeout Checklist
 
@@ -93,7 +103,18 @@ Use retention metadata to separate evidence from disposable payload:
 
 Full schema examples live in `docs/artifact-retention-policy.md`.
 
-Use `create-artifact --file` or `update-node-fields --metadata-file` to persist artifact retention metadata.
+Use `create-artifact --file` or `update-node-fields --metadata-file` to persist retention metadata on promoted graph artifact nodes. Ordinary run output should usually be captured as a lightweight artifact record instead:
+
+```sh
+research-cockpit ingest-artifact --root research_cockpit --node <experiment_id> --from <run_dir> --run-id <run_id> --record-only --json --compact --no-build
+research-cockpit artifact-records --root research_cockpit --experiment <experiment_id> --json --compact
+```
+
+Promote a record only when it becomes long-lived evidence for navigation, decisions, or baselines:
+
+```sh
+research-cockpit promote-artifact-record --root research_cockpit --id <record_id> --artifact-id <artifact_id> --link-to <node_id> --json --compact
+```
 
 ## Run Closeout
 
@@ -112,7 +133,7 @@ output_retention:
 ```
 
 This metadata is advisory. A missing retention policy should be treated as a warning, not a hard validation failure, until a project explicitly opts into stricter rules.
-Use `create-run`, `update-run`, or `complete-run` with `--output-retention-json` / `--output-retention-file` to persist run retention metadata.
+Use `create-run`, `update-run`, or `complete-run` with `--output-retention-file` to persist generated run retention metadata; use `--output-retention-json` only for short hand-written JSON because shell quoting differs across platforms.
 
 ## Active Resource Declaration
 

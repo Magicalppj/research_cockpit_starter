@@ -126,6 +126,8 @@ Truth-source data lives in:
 - `<data-root>/runs/*.yaml` for concrete experiment executions
 - `<data-root>/gate_results/*.yaml` for gate metadata records
 - `<data-root>/gate_results/*.json` for gate payloads written by `record-gate-result`
+- `<data-root>/artifact_records/*.yaml` for lightweight evidence metadata created by record-only artifact ingest
+- `<data-root>/artifact_migrations/*.yaml` for artifact demotion audit reports
 - `<data-root>/artifacts/**` for long-lived evidence payloads and ingest manifests
 
 Generated output lives in `<data-root>/dashboards/` and can be rebuilt with:

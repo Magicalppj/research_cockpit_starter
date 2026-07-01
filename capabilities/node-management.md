@@ -22,14 +22,14 @@ Do not create `artifact` nodes for routine files, configs, JSON outputs, or expe
 ## Batch Graph Plans
 
 Use `apply-graph-plan` when creating or updating several graph nodes. It validates the candidate graph once, writes all YAML only after validation passes, and rebuilds once by default.
-Use one batch command or run smaller mutating commands sequentially. Mutating commands share `graph/interaction_log.yaml`, use `graph/.mutation.lock`, and refuse stale writes when target files changed after planning.
+Use one batch command or run smaller mutating commands sequentially. Mutating commands share `graph/interaction_log.yaml`, use `graph/.mutation.lock`, and refuse stale writes when target files changed after planning. After a small node edit, use changed-scope validation and compact context; reserve full build/smoke for coordinator or final handoff.
 
 ```sh
 research-cockpit apply-graph-plan --print-schema
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --dry-run --json --show-diff
 research-cockpit apply-graph-plan --root research_cockpit --file graph_update.yaml --no-build
-research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit
+research-cockpit validate --root research_cockpit --changed-node experiment_x --json
+research-cockpit context --root research_cockpit --id experiment_x --with-bootstrap --with-artifacts --compact --json
 ```
 
 Plan file v1:
@@ -271,8 +271,8 @@ Add a new problem + active option + experiments:
 research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
-research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit
+research-cockpit validate --root research_cockpit --changed-node experiment_x --changed-node option_x --json
+research-cockpit context --root research_cockpit --id option_x --with-bootstrap --with-artifacts --compact --json
 ```
 
 Pivot focus without deleting old branch:
@@ -281,8 +281,8 @@ Pivot focus without deleting old branch:
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build
 research-cockpit set-focus --root research_cockpit --focus-node problem_new --no-build
 research-cockpit sync-focus-actions --root research_cockpit --from-node problem_new --no-build
-research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit
+research-cockpit validate --root research_cockpit --changed-file current_state.yaml --changed-node problem_new --json
+research-cockpit context --root research_cockpit --id problem_new --with-bootstrap --with-artifacts --compact --json
 ```
 
 Pause old option and preserve it as supporting analysis:
@@ -290,8 +290,8 @@ Pause old option and preserve it as supporting analysis:
 ```sh
 research-cockpit update-status --root research_cockpit --id option_old --status paused --summary "Preserved as supporting analysis." --no-build
 research-cockpit update-node-fields --root research_cockpit --id problem_new --supporting-experiment experiment_old --no-build
-research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit
+research-cockpit validate --root research_cockpit --changed-node option_old --changed-node problem_new --json
+research-cockpit context --root research_cockpit --id problem_new --with-bootstrap --with-artifacts --compact --json
 ```
 
 Parallel agents with git worktrees:
@@ -300,7 +300,8 @@ Parallel agents with git worktrees:
 research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label branch_probe --objective "Run branch experiments" --branch agent/option_x-branch_probe --worktree ../worktrees/branch_probe --base main --create-worktree --dry-run --json --show-diff
 research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label branch_probe --objective "Run branch experiments" --branch agent/option_x-branch_probe --worktree ../worktrees/branch_probe --base main --create-worktree --no-build
 research-cockpit set-cursor --root D:/main_repo/research_cockpit --assignment <assignment_id> --node experiment_x --no-build
-research-cockpit validate --root D:/main_repo/research_cockpit --json
+research-cockpit validate --root D:/main_repo/research_cockpit --changed-file assignments/<assignment_id>.yaml --json
+research-cockpit context --root D:/main_repo/research_cockpit --id experiment_x --with-bootstrap --with-artifacts --compact --json
 ```
 
-The worktree is only for code/experiment isolation. Research graph mutations still go to the canonical root in the main repository. Relative `--worktree` values resolve against the canonical repository root (`--root` parent). Use `set-cursor --assignment <assignment_id>` for downstream progress and reserve `set-focus` for coordinator/UI selection. `set-agent-focus` is legacy compatibility only. Preserve useful run outputs with `ingest-artifact` before deleting the worktree; see `experiment-tracking.md` and `integrations.md`.
+Dry-run generated ids are preview-only; pass explicit `--agent` and `--assignment` / `--assignment-id` on execute when the same previewed ids must be reused. The worktree is only for code/experiment isolation. Research graph mutations still go to the canonical root in the main repository. Relative `--worktree` values resolve against the canonical repository root (`--root` parent). Use `set-cursor --assignment <assignment_id>` for downstream progress and reserve `set-focus` for coordinator/UI selection. `set-agent-focus` is legacy compatibility only. Preserve useful run outputs with `ingest-artifact` before deleting the worktree; see `experiment-tracking.md` and `integrations.md`.

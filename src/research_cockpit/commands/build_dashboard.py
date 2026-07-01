@@ -29,6 +29,7 @@ from research_cockpit.model import (
     load_assignments,
     load_explicit_edges,
     load_nodes,
+    load_runs,
     load_yaml,
     validate_cockpit,
 )
@@ -40,6 +41,7 @@ from research_cockpit.gate_result_records import gate_result_signature
 from research_cockpit.run_summaries import run_progress_signature, run_staleness_signature
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.storage import save_text
+from research_cockpit.validation_index import build_validation_index
 from research_cockpit.types import DEFAULT_RESOURCE_SCAN_SETTINGS, ResourceScanSettings
 
 
@@ -155,6 +157,7 @@ def _dashboard_outputs(root: Path) -> list[Path]:
         dash / "decision_acceptance_checklists.json",
         dash / "option_workstreams.json",
         dash / "assignment_view.json",
+        dash / "validation_index.json",
     ]
 
 
@@ -269,6 +272,7 @@ def _write_dashboard_outputs(
     decision_checklists: list[dict[str, Any]],
     option_workstreams: list[dict[str, Any]],
     assignment_view: dict[str, Any],
+    validation_index: dict[str, Any],
 ) -> None:
     save_text(outputs[0], json.dumps(graph_json, indent=2, ensure_ascii=False))
     save_text(outputs[1], json.dumps(context, indent=2, ensure_ascii=False))
@@ -282,6 +286,7 @@ def _write_dashboard_outputs(
     save_text(outputs[9], json.dumps(decision_checklists, indent=2, ensure_ascii=False))
     save_text(outputs[10], json.dumps(option_workstreams, indent=2, ensure_ascii=False))
     save_text(outputs[11], json.dumps(assignment_view, indent=2, ensure_ascii=False))
+    save_text(outputs[12], json.dumps(validation_index, indent=2, ensure_ascii=False))
 
 
 def _dashboard_counts(
@@ -326,6 +331,7 @@ def _build_dashboard_payload(
     explicit_edges = _profiled(profiler, "load_explicit_edges", lambda: load_explicit_edges(root))
     _profiled(profiler, "validate", lambda: validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True))
     assignments = _profiled(profiler, "load_assignments", lambda: load_assignments(root))
+    runs = _profiled(profiler, "load_runs", lambda: load_runs(root))
     topology = _profiled(profiler, "build_graph_topology", lambda: GraphTopology.from_nodes(nodes))
     graph_json = _profiled(
         profiler,
@@ -393,6 +399,11 @@ def _build_dashboard_payload(
         "build_decision_checklists",
         lambda: build_decision_acceptance_checklists(nodes),
     )
+    validation_index = _profiled(
+        profiler,
+        "build_validation_index",
+        lambda: build_validation_index(root, nodes, explicit_edges, runs, assignments),
+    )
 
     dash = root / "dashboards"
     dash.mkdir(parents=True, exist_ok=True)
@@ -415,6 +426,7 @@ def _build_dashboard_payload(
             decision_checklists=decision_checklists,
             option_workstreams=option_workstreams,
             assignment_view=assignment_view,
+            validation_index=validation_index,
         ),
     )
     counts = _dashboard_counts(
@@ -440,6 +452,47 @@ def _build_dashboard_payload(
 def build_dashboard(root: Path = ROOT) -> list[Path]:
     return list(_build_dashboard_payload(root)["outputs"])
 
+
+def build_affected_dashboard(root: Path, *, node_id: str, json_output: bool = False) -> dict[str, Any]:
+    with mutation_lock(root):
+        nodes = load_nodes(root)
+        if node_id not in nodes:
+            raise ValueError(f"changed node does not exist: {node_id!r}")
+        current = load_yaml(root / "current_state.yaml")
+        explicit_edges = load_explicit_edges(root)
+        validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
+        assignments = load_assignments(root)
+        runs = load_runs(root)
+        validation_index = build_validation_index(root, nodes, explicit_edges, runs, assignments)
+        output = root / "dashboards" / "validation_index.json"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        save_text(output, json.dumps(validation_index, indent=2, ensure_ascii=False))
+
+    return {
+        "ok": True,
+        "root": str(root),
+        "affected": True,
+        "experimental": True,
+        "target_node": node_id,
+        "full_dashboard_refreshed": False,
+        "refreshed_outputs": ["dashboards/validation_index.json"],
+        "stale_outputs": [
+            "dashboards/graph_view.json",
+            "dashboards/agent_context_pack.json",
+            "dashboards/focus_context_pack.json",
+            "dashboards/current_state.md",
+            "dashboards/current_state.json",
+            "dashboards/experiment_matrix.json",
+            "dashboards/linked_resources.json",
+            "dashboards/next_action_suggestions.json",
+            "dashboards/search_index.json",
+            "dashboards/decision_acceptance_checklists.json",
+            "dashboards/option_workstreams.json",
+            "dashboards/assignment_view.json",
+        ],
+        "written_files": [str(output)],
+        "json": json_output,
+    }
 
 def _resolve_profile_output(root: Path, profile_output: Path) -> Path:
     root_path = root.resolve(strict=False)
@@ -616,6 +669,8 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--watch", action="store_true")
+    parser.add_argument("--affected", action="store_true", help="Refresh only affected generated outputs for one node.")
+    parser.add_argument("--id", dest="affected_node_id", help="Node id for --affected.")
     parser.add_argument("--interval", type=float, default=5.0)
     parser.add_argument("--max-iterations", type=int)
     parser.add_argument("--profile", action="store_true", help="Include per-stage build timing in JSON output.")
@@ -631,6 +686,23 @@ def main() -> None:
     )
     args = parser.parse_args()
     profile_enabled = args.profile or args.profile_output is not None
+
+    if args.affected:
+        if args.watch:
+            parser.error("--affected cannot be combined with --watch")
+        if profile_enabled:
+            parser.error("--affected cannot be combined with --profile or --profile-output")
+        if not args.affected_node_id:
+            parser.error("--affected requires --id <node_id>")
+        payload = build_affected_dashboard(args.root, node_id=args.affected_node_id, json_output=args.json)
+        if args.json:
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            return
+        print(f"Refreshed affected generated outputs for {payload['target_node']}.")
+        print("Full dashboard was not refreshed.")
+        for output in payload["written_files"]:
+            print(f"Wrote: {output}")
+        return
 
     if args.watch:
         watch_dashboard(

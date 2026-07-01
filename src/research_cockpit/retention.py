@@ -48,7 +48,11 @@ def load_mapping_argument(
         try:
             data = json.loads(json_text)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"{field_name} JSON parse error: {exc}") from exc
+            file_flag = f"--{field_name.replace('_', '-')}-file"
+            raise ValueError(
+                f"{field_name} JSON parse error: {exc}. "
+                f"For shell-safe structured input, write the mapping to a file and pass {file_flag} <path>."
+            ) from exc
     else:
         if file_path is None:
             return None

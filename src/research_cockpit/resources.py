@@ -1,9 +1,10 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.paths import plugin_root
 from research_cockpit.types import ResearchNode
 
@@ -24,6 +25,17 @@ def node_link_entries(node: ResearchNode) -> list[dict[str, str]]:
     return entries
 
 
+def _unique_preserving_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out
+
+
 def node_artifact_ids(node: ResearchNode) -> list[str]:
     artifact_ids: list[str] = []
     artifact_ids.extend(str(item) for item in node.raw.get("linked_artifacts", []) or [] if str(item).strip())
@@ -37,14 +49,23 @@ def node_artifact_ids(node: ResearchNode) -> list[str]:
                 for item in finding.get("linked_artifacts", []) or []
                 if str(item).strip()
             )
-    seen: set[str] = set()
-    out: list[str] = []
-    for artifact_id in artifact_ids:
-        if artifact_id in seen:
-            continue
-        seen.add(artifact_id)
-        out.append(artifact_id)
-    return out
+    return _unique_preserving_order(artifact_ids)
+
+
+def node_artifact_record_ids(node: ResearchNode) -> list[str]:
+    record_ids: list[str] = []
+    record_ids.extend(str(item) for item in node.raw.get("linked_artifact_records", []) or [] if str(item).strip())
+    findings = node.raw.get("findings")
+    if isinstance(findings, list):
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            record_ids.extend(
+                str(item)
+                for item in finding.get("linked_artifact_records", []) or []
+                if str(item).strip()
+            )
+    return _unique_preserving_order(record_ids)
 
 
 def _is_external_target(target: str) -> bool:
@@ -80,7 +101,14 @@ def _display_resolution_path(root: Path, path: Path, label: str) -> str:
     return path.as_posix()
 
 
-def _target_resolution(root: Path, kind: str, target: str, nodes: dict[str, ResearchNode]) -> dict[str, Any]:
+def _target_resolution(
+    root: Path,
+    kind: str,
+    target: str,
+    nodes: dict[str, ResearchNode],
+    *,
+    artifact_record_ids: set[str] | None = None,
+) -> dict[str, Any]:
     if kind == "run_id" or _is_external_target(target):
         return {
             "exists": None,
@@ -93,6 +121,16 @@ def _target_resolution(root: Path, kind: str, target: str, nodes: dict[str, Rese
             "exists": target in nodes,
             "resolved_target": target,
             "resolution_base": "graph",
+            "resolution_attempts": [target],
+        }
+    if kind == "linked_artifact_record":
+        record_ids = artifact_record_ids
+        if record_ids is None:
+            record_ids = {str(record["record_id"]) for record in list_artifact_records(root)}
+        return {
+            "exists": target in record_ids,
+            "resolved_target": target,
+            "resolution_base": "artifact_records",
             "resolution_attempts": [target],
         }
     path = Path(target)
@@ -136,14 +174,82 @@ def _target_resolution(root: Path, kind: str, target: str, nodes: dict[str, Rese
     }
 
 
-def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str, Any]]:
+def build_link_rows(
+    root: Path,
+    nodes: dict[str, ResearchNode],
+    *,
+    artifact_records: dict[str, dict[str, Any]] | list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     resolution_cache: dict[tuple[str, str], dict[str, Any]] = {}
+    artifact_records_cache: dict[str, dict[str, Any]] | None = None
+    artifact_record_id_cache: set[str] | None = None
+
+    def normalize_artifact_records() -> dict[str, dict[str, Any]] | None:
+        if artifact_records is None:
+            return None
+        if isinstance(artifact_records, dict):
+            return {str(record_id): record for record_id, record in artifact_records.items()}
+        return {
+            str(record["record_id"]): record
+            for record in artifact_records
+            if str(record.get("record_id") or "").strip()
+        }
+
+    def scoped_artifact_records_by_id() -> dict[str, dict[str, Any]] | None:
+        wanted_by_experiment: dict[str, set[str]] = {}
+        linked_record_ids: set[str] = set()
+        for node in nodes.values():
+            record_ids = node_artifact_record_ids(node)
+            if not record_ids:
+                continue
+            linked_record_ids.update(record_ids)
+            if node.type == "experiment":
+                wanted_by_experiment.setdefault(node.id, set()).update(record_ids)
+        if not linked_record_ids:
+            return {}
+        records: dict[str, dict[str, Any]] = {}
+        for experiment_id, wanted_ids in wanted_by_experiment.items():
+            for record in list_artifact_records(root, experiment_id=experiment_id):
+                record_id = str(record.get("record_id") or "")
+                if record_id in wanted_ids and record_id not in records:
+                    records[record_id] = record
+        missing = linked_record_ids - set(records)
+        if missing:
+            for record in list_artifact_records(root):
+                record_id = str(record.get("record_id") or "")
+                if record_id in missing and record_id not in records:
+                    records[record_id] = record
+        return records
+
+    def artifact_records_by_id() -> dict[str, dict[str, Any]]:
+        nonlocal artifact_records_cache
+        if artifact_records_cache is None:
+            provided = normalize_artifact_records()
+            scoped = scoped_artifact_records_by_id() if provided is None else None
+            artifact_records_cache = provided if provided is not None else scoped if scoped is not None else {
+                str(record["record_id"]): record
+                for record in list_artifact_records(root)
+                if str(record.get("record_id") or "").strip()
+            }
+        return artifact_records_cache
+
+    def artifact_record_ids() -> set[str]:
+        nonlocal artifact_record_id_cache
+        if artifact_record_id_cache is None:
+            artifact_record_id_cache = set(artifact_records_by_id())
+        return artifact_record_id_cache
 
     def resolve_target(kind: str, target: str) -> dict[str, Any]:
         key = (kind, target)
         if key not in resolution_cache:
-            resolution_cache[key] = _target_resolution(root, kind, target, nodes)
+            resolution_cache[key] = _target_resolution(
+                root,
+                kind,
+                target,
+                nodes,
+                artifact_record_ids=artifact_record_ids() if kind == "linked_artifact_record" else None,
+            )
         return resolution_cache[key]
 
     def row_resolution(resolution: dict[str, Any]) -> dict[str, Any]:
@@ -157,6 +263,8 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
         entries = node_link_entries(node)
         for artifact_id in node_artifact_ids(node):
             entries.append({"kind": "linked_artifact", "label": "linked_artifact", "target": str(artifact_id)})
+        for record_id in node_artifact_record_ids(node):
+            entries.append({"kind": "linked_artifact_record", "label": "linked_artifact_record", "target": str(record_id)})
 
         for entry in entries:
             target = entry["target"]
@@ -183,5 +291,29 @@ def build_link_rows(root: Path, nodes: dict[str, ResearchNode]) -> list[dict[str
                         "label": f"{target}:{artifact_entry['label']}",
                         "target": artifact_entry["target"],
                         **row_resolution(artifact_resolution),
+                    })
+            if kind == "linked_artifact_record":
+                record = artifact_records_by_id().get(target)
+                if not record:
+                    continue
+                record_entries = []
+                if record.get("stable_path"):
+                    record_entries.append({"kind": "artifact_record_path", "label": "path", "target": str(record["stable_path"])})
+                links = record.get("links")
+                if isinstance(links, dict):
+                    for label, link_target in links.items():
+                        if link_target not in (None, ""):
+                            record_entries.append({"kind": "artifact_record_link", "label": str(label), "target": str(link_target)})
+                for record_entry in record_entries:
+                    record_resolution = resolve_target(record_entry["kind"], record_entry["target"])
+                    rows.append({
+                        "node_id": node.id,
+                        "node_title": node.title,
+                        "node_type": node.type,
+                        "artifact_record_id": target,
+                        "kind": record_entry["kind"],
+                        "label": f"{target}:{record_entry['label']}",
+                        "target": record_entry["target"],
+                        **row_resolution(record_resolution),
                     })
     return rows

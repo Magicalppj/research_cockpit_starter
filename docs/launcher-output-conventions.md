@@ -91,10 +91,10 @@ research-cockpit complete-run --root research_cockpit --id run_x --status comple
 }
 ```
 
-Failed gates should set `passed` to `false` and put blocking details in `fatal_failures`. Warning-only gates keep `passed: true` and list warnings. Preserve the run output directory first so the artifact id is stable, then attach the gate file:
+Failed gates should set `passed` to `false` and put blocking details in `fatal_failures`. Warning-only gates keep `passed: true` and list warnings. Preserve the run output directory first so the gate file path is stable, then attach the gate file. Add `--artifact <artifact_id>` only after promoting the run output to a graph artifact node:
 
 ```sh
-research-cockpit ingest-gate-result --root research_cockpit --id gate_x --file artifacts/experiment_x/run_x/gate_result.json --run run_x --artifact artifact_experiment_x_run_x --no-build
+research-cockpit ingest-gate-result --root research_cockpit --id gate_x --file artifacts/experiment_x/run_x/gate_result.json --run run_x --json --compact --no-build
 ```
 
 For long-run preflight checks, use `gate_type: "preflight"` and add a `preflight` object with disk, GPU, port, cache directory, and conflicting process observations. Failed preflight gates block `full_run` in context:
@@ -146,10 +146,10 @@ For long-run preflight checks, use `gate_type: "preflight"` and add a `preflight
 Use link values relative to the run output directory. When the output directory is disposable, first preserve it with `ingest-artifact`; repeated `--link key=relative/path` values should come from the manifest:
 
 ```sh
-research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link metrics=outputs/metrics.json --link config=config.yaml --link gate_result=gate_result.json --no-build --json --compact
+research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link metrics=outputs/metrics.json --link config=config.yaml --link gate_result=gate_result.json --record-only --json --compact --no-build
 ```
 
-The default artifact id is `artifact_<experiment_id>_<run_id>`; use that id when attaching gate results or findings.
+The default artifact record id is `artifact_<experiment_id>_<run_id>`. Keep it as a record for ordinary run output; promote it with `promote-artifact-record` before using it where a graph artifact id is required.
 
 If the run directory already lives at a stable path, create or link the artifact directly:
 

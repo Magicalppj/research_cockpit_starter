@@ -887,6 +887,9 @@ def build_maintenance_audit(
     worktree_audit = build_worktree_audit(root, repo=repo)
     branch_audit = build_branch_audit(root, repo=repo, base=base)
     artifact_audit = build_artifact_retention_audit(root, repo=repo, min_size_bytes=min_size_bytes, max_files=max_files)
+    from research_cockpit.artifact_compaction import artifact_compaction_plan
+
+    artifact_compaction = artifact_compaction_plan(root)
     active_resources = [
         {
             "run_id": run["run_id"],
@@ -939,6 +942,8 @@ def build_maintenance_audit(
         next_actions.append("Add retention metadata for large artifacts before cleanup decisions.")
     if any(item.get("cleanup_candidate") for item in artifact_audit["artifacts"]):
         next_actions.append("Review cleanup candidates and preserve summaries before deleting payloads.")
+    if artifact_compaction["counts"].get("can_demote"):
+        next_actions.append("Run compact-artifacts --dry-run before demoting ordinary run-output artifact nodes.")
     if branch_candidates:
         next_actions.append("Review branch candidates; promote useful unmerged work to research/* before deletion.")
     return {
@@ -956,10 +961,17 @@ def build_maintenance_audit(
         "blocked_branches": blocked_branches,
         "large_artifact_candidates": artifact_audit["large_artifact_candidates"],
         "large_output_candidates": _large_output_candidates(artifact_audit),
+        "artifact_compaction_counts": artifact_compaction["counts"],
+        "record_only_candidates": [
+            row["artifact_id"]
+            for row in artifact_compaction["artifacts"]
+            if row.get("classification") == "can_demote"
+        ],
         "dashboard_performance_warnings": _dashboard_performance_warnings(root),
         "unsafe_cleanup_blockers": unsafe_blockers,
         "recommended_next_actions": next_actions,
         "artifact_retention_audit": artifact_audit,
+        "artifact_compaction_plan": artifact_compaction,
     }
 
 
