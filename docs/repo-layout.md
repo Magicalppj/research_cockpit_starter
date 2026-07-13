@@ -43,8 +43,12 @@ The plugin stores reusable code and tools. The research repo stores project-spec
 - `commands/_runtime.py`: CLI output helpers plus compatibility wrappers for shared mutation/runtime calls.
 - `commands/_assignment_scope_cli.py`: shared assignment-scope CLI flags and structured error output.
 - `mutation_runtime.py` and `mutation_lock.py`: serial mutation lock, preflight, conflict checks, atomic truth-source writes, rollback, and dashboard rebuild handoff.
+- `root_snapshot.py` and `validation_index.py`: reusable root snapshots, file fingerprints, dependency-aware changed-scope validation, and explicit full-validation fallback.
+- `cli_progress.py`: stderr progress events that keep stdout machine-readable.
+- `maintenance.py`: repository, worktree, branch, resource, and retention audit domain logic.
 - `types.py`: core dataclasses, validation error type, node/status constants, and search constants.
 - `storage.py`: YAML IO and path normalization helpers.
+- `artifact_records.py` and `artifact_compaction.py`: lightweight evidence metadata, explicit graph promotion, and non-destructive artifact demotion planning.
 - `paths.py`: plugin and data-root discovery.
 - `graph_core.py`: node loading, explicit edge loading, graph traversal, focus path derivation, and graph JSON.
 - `resources.py`: node links, linked artifacts, and local resource row extraction.
@@ -52,7 +56,7 @@ The plugin stores reusable code and tools. The research repo stores project-spec
 - `agent_state.py`: agent, assignment, and coordinator state records plus sidecar loaders.
 - `agent_sessions.py` and `assignment_scope.py`: domain logic for parallel agent handoff and assignment-scoped mutation boundaries.
 - `decisions.py`, `option_workstreams.py`, and `suggestions.py`: domain logic for decisions, option workstreams, and action suggestions.
-- `run_summaries.py`, `progress.py`, `gate_results.py`, and `gate_result_records.py`: run/job summaries, heartbeat parsing, gate schema validation, preflight normalization, and gate metadata records.
+- `run_summaries.py`, `run_closeout.py`, `progress.py`, `gate_results.py`, and `gate_result_records.py`: run/job summaries, transactional closeout, heartbeat parsing, gate schema validation, preflight normalization, and gate metadata records.
 - `search_index.py`: search index construction and query helpers.
 - `node_onboarding.py`: single-node onboarding payloads for new agents.
 - `context_packs.py`: agent/focus/current-state context payload builders and dashboard Markdown writer.

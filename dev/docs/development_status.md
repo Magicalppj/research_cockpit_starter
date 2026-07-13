@@ -1,5 +1,8 @@
 # Research Cockpit 开发状态
 
+> **Historical record:** this file preserves design or implementation context and is not current operational guidance. Current operational guidance: repository-root `README.md`, `SKILL.md`, `AGENTS.md`, `capabilities/`, and `docs/internal-architecture.md`.
+
+
 ## Node Onboarding Context v1（2026-04-30）
 
 本批新增面向 agent 快速接手单个节点的只读上下文入口，目标是把“bootstrap、读 context pack、搜索、回读 YAML、再找安全命令”的流程压缩成一次命令。

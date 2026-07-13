@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 import uuid
 from pathlib import Path
 
@@ -18,6 +19,7 @@ os.environ["PYTHONPATH"] = str(SRC_DIR) if not existing_pythonpath else str(SRC_
 
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
 from research_cockpit.commands.node_context import node_context_payload
+from research_cockpit.interaction_log import append_interaction_log
 from research_cockpit.model import save_yaml
 
 
@@ -99,7 +101,7 @@ class NodeOnboardingTests(unittest.TestCase):
     def test_node_context_compact_payload_omits_repeated_context(self) -> None:
         payload = node_context_payload(self.root, node_id="option_t5", compact=True)
 
-        self.assertEqual(payload["schema_version"], "node_context_compact_v1")
+        self.assertEqual(payload["schema_version"], "node_context_compact_v2")
         self.assertEqual(payload["node"]["id"], "option_t5")
         self.assertEqual(payload["core_problem"]["id"], "problem_text")
         self.assertIn("next_actions", payload)
@@ -109,6 +111,81 @@ class NodeOnboardingTests(unittest.TestCase):
         self.assertNotIn("relations", payload)
         self.assertNotIn("recent_interactions", payload)
         self.assertNotIn("subtree_nodes", json.dumps(payload))
+
+    def test_node_context_compact_v2_bounds_growing_lists_and_keeps_worker_context(self) -> None:
+        experiment_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
+        experiment = {
+            "id": "exp_t5",
+            "type": "experiment",
+            "title": "T5 ablation",
+            "status": "planned",
+            "parent": "option_t5",
+            "success_criteria": [f"criterion-{index}" for index in range(20)],
+            "metrics": [f"metric-{index}" for index in range(20)],
+            "findings": [{"statement": f"finding-{index}", "confidence": "medium"} for index in range(20)],
+            "next_actions": [f"action-{index}" for index in range(20)],
+            "blockers": [f"blocker-{index}" for index in range(20)],
+            "linked_artifacts": ["artifact_t5"],
+        }
+        save_yaml(experiment_path, experiment)
+        write_node(
+            self.root,
+            {
+                "id": "artifact_t5",
+                "type": "artifact",
+                "title": "T5 evidence",
+                "status": "done",
+                "path": "artifacts/exp_t5/run_t5",
+            },
+        )
+        save_yaml(
+            self.root / "agents" / "agent_t5.yaml",
+            {
+                "agent_id": "agent_t5",
+                "status": "active",
+                "active_assignment_ids": ["assignment_t5"],
+            },
+        )
+        save_yaml(
+            self.root / "assignments" / "assignment_t5.yaml",
+            {
+                "assignment_id": "assignment_t5",
+                "agent_id": "agent_t5",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5"},
+                "next_actions": ["continue-t5"],
+            },
+        )
+
+        payload = node_context_payload(self.root, node_id="exp_t5", compact=True)
+
+        self.assertEqual(payload["schema_version"], "node_context_compact_v2")
+        self.assertLessEqual(len(payload["next_actions"]), 5)
+        self.assertEqual(payload["next_actions_count"], 22)
+        self.assertGreater(payload["next_actions_omitted_count"], 0)
+        self.assertLessEqual(len(payload["blockers"]), 10)
+        self.assertEqual(payload["success_criteria_summary"]["total_count"], 20)
+        self.assertEqual(payload["metrics_summary"]["total_count"], 20)
+        self.assertEqual(payload["latest_findings"]["total_count"], 20)
+        self.assertEqual(payload["latest_findings"]["items"][-1]["statement"], "finding-19")
+        self.assertEqual(payload["key_artifacts"]["items"], ["artifact_t5"])
+        self.assertEqual(payload["assignment_cursor"]["assignment_id"], "assignment_t5")
+        self.assertIn("warnings_count", payload)
+        self.assertLess(len(json.dumps(payload, ensure_ascii=False).encode("utf-8")), 20000)
+
+    def test_compact_node_context_reads_active_interaction_segment_once(self) -> None:
+        append_interaction_log(self.root, kind="test", node_id="option_t5")
+        from research_cockpit import interaction_log
+
+        with patch(
+            "research_cockpit.interaction_log._read_segment",
+            wraps=interaction_log._read_segment,
+        ) as reader:
+            node_context_payload(self.root, node_id="option_t5", compact=True)
+
+        self.assertLessEqual(reader.call_count, 1)
 
     def test_node_context_python_command_style_uses_module_entrypoint(self) -> None:
         payload = node_context_payload(
@@ -134,7 +211,7 @@ class NodeOnboardingTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["schema_version"], "node_context_compact_v1")
+        self.assertEqual(payload["schema_version"], "node_context_compact_v2")
         self.assertEqual(payload["node"]["id"], "option_t5")
         self.assertNotIn("relations", payload)
 

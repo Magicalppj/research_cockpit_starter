@@ -18,7 +18,7 @@ Use the canonical data root as the long-lived artifact store:
 research_cockpit/artifacts/<node_id>/<run_id>/
 ```
 
-Agents must copy useful worktree outputs into this store with `research-cockpit ingest-artifact` before deleting a worktree or using those outputs as evidence. Ordinary run output should use `ingest-artifact --record-only`, which writes `_research_cockpit_ingest.json` beside the copied files and records lightweight metadata under `artifact_records/*.yaml` without creating a graph artifact node. Promote the record to an `artifact` node only when the evidence needs durable navigation or must support a decision, baseline, strong finding, portable review bundle, or final checkpoint. Findings should never refer to the original worktree path.
+Agents must copy useful worktree outputs into this store with `research-cockpit ingest-artifact` before deleting a worktree or using those outputs as evidence. Ordinary experiment run output uses record mode by default (`--record-only` remains explicit), which writes `_research_cockpit_ingest.json` beside the copied files and records lightweight metadata under `artifact_records/*.yaml` without creating a graph artifact node. Promotion requires a recorded reason. Promote the record to an `artifact` node only when the evidence needs durable navigation or must support a decision, baseline, strong finding, portable review bundle, or final checkpoint. Findings should never refer to the original worktree path.
 
 ## Alternatives Considered
 

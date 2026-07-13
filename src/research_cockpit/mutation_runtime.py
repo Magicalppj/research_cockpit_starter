@@ -4,11 +4,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import shutil
 import tempfile
 from typing import Any
 import yaml
 
-from research_cockpit.interaction_log import append_interaction_log, load_interaction_log
+from research_cockpit.cli_progress import progress_phase, progress_traced
+from research_cockpit.interaction_log import (
+    _append_interaction_log_unlocked,
+    interaction_append_checkpoint,
+    restore_interaction_append_checkpoint,
+    validate_interaction_append_target,
+)
 from research_cockpit.mutation_lock import MutationError, mutation_lock
 from research_cockpit.storage import load_yaml, save_text
 
@@ -18,11 +25,29 @@ class CommandState:
     nodes: dict[str, Any]
     current: dict[str, Any]
     explicit_edges: list[dict[str, Any]]
+    runs: dict[str, Any] | None = None
+    artifact_records: list[dict[str, Any]] | None = None
+    validation_index: dict[str, Any] | None = None
+    targeted: bool = False
 
 
 YamlChange = tuple[Path, dict[str, Any] | None, dict[str, Any]]
 TextChange = tuple[Path, str | None, str]
+ReadDependency = tuple[Path, bytes | None]
 ReadBefore = Callable[[Path], Any]
+
+
+def patch_validation_index(root: Path, changed_paths: list[Path]) -> dict[str, Any]:
+    from research_cockpit.validation_index import patch_validation_index as patch
+
+    with progress_phase("index_update"):
+        return patch(root, changed_paths)
+
+
+def mark_validation_index_stale(root: Path, *, reason: str, detail: str = "") -> None:
+    from research_cockpit.validation_index import mark_validation_index_stale as mark_stale
+
+    mark_stale(root, reason=reason, detail=detail)
 
 
 def _interaction_log_error_payload(root: Path, message: str) -> dict[str, Any]:
@@ -37,12 +62,13 @@ def _interaction_log_error_payload(root: Path, message: str) -> dict[str, Any]:
 
 
 def ensure_interaction_log_valid(root: Path) -> None:
-    try:
-        load_interaction_log(root, strict=True)
-    except ValueError as exc:
-        raise MutationError(str(exc), _interaction_log_error_payload(root, str(exc))) from exc
+    errors = validate_interaction_append_target(root)
+    if errors:
+        message = errors[0]
+        raise MutationError(message, _interaction_log_error_payload(root, message))
 
 
+@progress_traced("load_and_validate")
 def load_validated_state(root: Path) -> CommandState:
     from research_cockpit.model import load_explicit_edges, load_nodes, load_yaml as model_load_yaml, validate_cockpit
 
@@ -53,6 +79,246 @@ def load_validated_state(root: Path) -> CommandState:
     ensure_interaction_log_valid(root)
     return CommandState(nodes=nodes, current=current, explicit_edges=explicit_edges)
 
+
+def _indexed_stub_node(node_id: str, row: dict[str, Any]) -> Any:
+    from research_cockpit.model import ResearchNode
+
+    raw: dict[str, Any] = {
+        "id": node_id,
+        "type": row.get("type") or "node",
+        "title": row.get("title") or node_id,
+        "status": row.get("status") or "open",
+    }
+    if row.get("parent"):
+        raw["parent"] = row["parent"]
+    if row.get("children"):
+        raw["children"] = list(row.get("children") or [])
+    return ResearchNode.from_dict(raw)
+
+
+def _targeted_node_ids(index: dict[str, Any], seeds: list[str]) -> list[str]:
+    rows = index.get("nodes", {}) or {}
+    reverse_refs = index.get("reverse_refs", {}) or {}
+    edge_neighbors = index.get("edge_neighbors", {}) or {}
+    selected: list[str] = []
+    seen: set[str] = set()
+
+    def add(node_id: str) -> None:
+        if node_id in rows and node_id not in seen:
+            selected.append(node_id)
+            seen.add(node_id)
+
+    for seed in seeds:
+        add(seed)
+        current_id = seed
+        while current_id in rows:
+            parent_id = str(rows[current_id].get("parent") or "")
+            if not parent_id or parent_id in seen:
+                break
+            add(parent_id)
+            current_id = parent_id
+        row = rows.get(seed, {})
+        for candidate in [
+            *list(row.get("children", []) or []),
+            *list(row.get("references", []) or []),
+            *list(reverse_refs.get(seed, []) or []),
+            *list(edge_neighbors.get(seed, []) or []),
+        ]:
+            add(str(candidate))
+    return selected
+
+
+def _targeted_artifact_records(
+    root: Path,
+    index: dict[str, Any],
+    experiment_ids: list[str],
+) -> list[dict[str, Any]]:
+    indexed_records = index.get("artifact_records", {}) or {}
+    records: dict[str, dict[str, Any]] = {
+        str(record_id): {
+            "record_id": str(record_id),
+            "experiment_id": str(row.get("experiment_id") or ""),
+            **({"run_id": str(row["run_id"])} if row.get("run_id") else {}),
+        }
+        for record_id, row in indexed_records.items()
+        if isinstance(row, dict)
+    }
+    file_rows = index.get("artifact_record_files", {}) or {}
+    for rel_path, file_row in file_rows.items():
+        if (
+            not isinstance(file_row, dict)
+            or str(file_row.get("experiment_id") or "") not in experiment_ids
+        ):
+            continue
+        for record_id in file_row.get("record_ids", []) or []:
+            records.pop(str(record_id), None)
+        data = load_yaml(root / str(rel_path))
+        raw_records = data.get("records", {}) if isinstance(data, dict) else {}
+        if not isinstance(raw_records, dict):
+            raise ValueError(f"{rel_path}: records must be a mapping")
+        experiment_id = str(data.get("experiment_id") or Path(rel_path).stem)
+        for record_id, record in raw_records.items():
+            if not isinstance(record, dict):
+                raise ValueError(f"artifact record {record_id!r}: record must be a mapping")
+            payload = dict(record)
+            payload.setdefault("record_id", str(record_id))
+            payload.setdefault("experiment_id", experiment_id)
+            records[str(record_id)] = payload
+    return list(records.values())
+
+@progress_traced("targeted_preflight")
+def load_targeted_state(
+    root: Path,
+    *,
+    node_ids: list[str] | None = None,
+    run_ids: list[str] | None = None,
+    include_artifact_records: bool = False,
+) -> CommandState:
+    from research_cockpit.commands.validate_cockpit import validation_payload
+    from research_cockpit.model import (
+        ResearchNode,
+        RunRecord,
+        load_explicit_edges,
+        load_yaml as model_load_yaml,
+    )
+    from research_cockpit.validation_index import is_index_schema_compatible, load_validation_index
+
+    node_ids = [str(node_id) for node_id in node_ids or [] if str(node_id).strip()]
+    run_ids = [str(run_id) for run_id in run_ids or [] if str(run_id).strip()]
+    index = load_validation_index(root)
+    if not is_index_schema_compatible(index):
+        return load_validated_state(root)
+    assert index is not None
+
+    indexed_runs = index.get("runs", {}) or {}
+    seed_node_ids = list(node_ids)
+    changed_files: list[str] = []
+    for run_id in run_ids:
+        row = indexed_runs.get(run_id)
+        if not isinstance(row, dict):
+            return load_validated_state(root)
+        experiment_id = str(row.get("experiment_id") or "")
+        if experiment_id:
+            seed_node_ids.append(experiment_id)
+        if row.get("file"):
+            changed_files.append(str(row["file"]))
+    seed_node_ids = list(dict.fromkeys(seed_node_ids))
+    if not seed_node_ids:
+        return load_validated_state(root)
+    if include_artifact_records:
+        for rel_path, row in (index.get("artifact_record_files", {}) or {}).items():
+            if (
+                isinstance(row, dict)
+                and str(row.get("experiment_id") or "") in seed_node_ids
+            ):
+                changed_files.append(str(rel_path))
+
+    validation = validation_payload(
+        root,
+        changed_nodes=node_ids,
+        changed_files=changed_files,
+    )
+    if validation.get("fallback", {}).get("used_full_validation"):
+        return load_validated_state(root)
+    if not validation.get("ok"):
+        from research_cockpit.types import ValidationError
+
+        raise ValidationError(list(validation.get("errors", []) or []))
+
+    rows = index.get("nodes", {}) or {}
+    nodes = {
+        str(current_id): _indexed_stub_node(str(current_id), row)
+        for current_id, row in rows.items()
+        if isinstance(row, dict)
+    }
+    for current_id in _targeted_node_ids(index, seed_node_ids):
+        row = rows.get(current_id, {})
+        rel_path = str(row.get("file") or "")
+        if not rel_path:
+            continue
+        data = model_load_yaml(root / rel_path)
+        if isinstance(data, dict):
+            nodes[current_id] = ResearchNode.from_dict(data)
+
+    runs: dict[str, RunRecord] = {}
+    for run_id in run_ids:
+        row = indexed_runs[run_id]
+        data = model_load_yaml(root / str(row["file"]))
+        runs[run_id] = RunRecord.from_dict(data)
+
+    artifact_records = (
+        _targeted_artifact_records(root, index, seed_node_ids)
+        if include_artifact_records
+        else None
+    )
+    ensure_interaction_log_valid(root)
+    return CommandState(
+        nodes=nodes,
+        current=model_load_yaml(root / "current_state.yaml"),
+        explicit_edges=load_explicit_edges(root),
+        runs=runs,
+        artifact_records=artifact_records,
+        validation_index=index,
+        targeted=True,
+    )
+
+
+def validate_mutation_candidate(
+    root: Path,
+    state: CommandState,
+    *,
+    nodes: dict[str, Any] | None = None,
+    runs: dict[str, Any] | None = None,
+    artifact_records: list[dict[str, Any]] | None = None,
+) -> None:
+    from research_cockpit.model import (
+        validate_artifact_records,
+        validate_cockpit,
+        validate_current_state,
+        validate_explicit_edges,
+        validate_nodes,
+        validate_runs,
+    )
+    from research_cockpit.types import ValidationError
+
+    candidate_nodes = nodes if nodes is not None else state.nodes
+    if not state.targeted:
+        validate_cockpit(
+            root,
+            candidate_nodes,
+            state.current,
+            state.explicit_edges,
+            runs=runs,
+            artifact_records=artifact_records,
+            raise_on_error=True,
+        )
+        return
+
+    errors = validate_nodes(candidate_nodes)
+    errors.extend(validate_explicit_edges(candidate_nodes, state.explicit_edges))
+    errors.extend(validate_current_state(state.current, candidate_nodes, state.explicit_edges))
+    if runs is not None:
+        errors.extend(validate_runs(runs, candidate_nodes))
+    if artifact_records is not None:
+        errors.extend(validate_artifact_records(root, candidate_nodes, artifact_records))
+    if errors:
+        raise ValidationError(errors)
+
+
+def indexed_artifact_record_stubs(state: CommandState) -> list[dict[str, Any]]:
+    if not state.targeted or not isinstance(state.validation_index, dict):
+        return []
+    if state.artifact_records is not None:
+        return [dict(record) for record in state.artifact_records]
+    return [
+        {
+            "record_id": str(record_id),
+            "experiment_id": str(row.get("experiment_id") or ""),
+            **({"run_id": str(row["run_id"])} if row.get("run_id") else {}),
+        }
+        for record_id, row in (state.validation_index.get("artifact_records", {}) or {}).items()
+        if isinstance(row, dict)
+    ]
 
 def preflight_mutation(root: Path) -> dict[str, bool]:
     ensure_interaction_log_valid(root)
@@ -96,6 +362,10 @@ def _read_text_before(path: Path) -> str | None:
     return path.read_text(encoding="utf-8") if path.exists() else None
 
 
+def _read_bytes_before(path: Path) -> bytes | None:
+    return path.read_bytes() if path.exists() else None
+
+
 def _coerce_changes(changes: list[tuple] | None, read_before: ReadBefore, label: str) -> list[tuple]:
     out: list[tuple] = []
     for change in changes or []:
@@ -126,16 +396,80 @@ def _conflicting_files(changes: list[tuple], read_before: ReadBefore) -> list[st
     return conflicts
 
 
-def finish_mutation(
+def _coerce_read_dependencies(
+    dependencies: list[tuple[Path, bytes | None]] | None,
+) -> list[ReadDependency]:
+    planned: list[ReadDependency] = []
+    for dependency in dependencies or []:
+        if len(dependency) != 2:
+            raise ValueError("Read dependencies must be (path, before_bytes)")
+        path, before = dependency
+        if before is not None and not isinstance(before, bytes):
+            raise ValueError("Read dependency signatures must be bytes or None")
+        planned.append((Path(path), before))
+    return planned
+
+
+def _conflicting_read_dependencies(dependencies: list[ReadDependency]) -> list[str]:
+    return [
+        str(path)
+        for path, before in dependencies
+        if _read_bytes_before(path) != before
+    ]
+
+
+def _path_key(path: Path) -> str:
+    return path.resolve(strict=False).as_posix().casefold()
+
+
+def _validate_unique_transaction_targets(paths: list[Path]) -> None:
+    seen: dict[str, Path] = {}
+    for path in paths:
+        key = _path_key(path)
+        if key in seen:
+            raise ValueError(
+                f"Mutation transaction has duplicate target paths: {seen[key]} and {path}"
+            )
+        seen[key] = path
+
+
+def _remove_staged_path(path: Path) -> None:
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink(missing_ok=True)
+
+@progress_traced("apply_transaction")
+def execute_mutation_transaction(
     root: Path,
     yaml_changes: list[tuple],
     *,
-    interaction: dict[str, Any],
+    interactions: list[dict[str, Any]],
     rebuild_dashboard: bool,
     text_changes: list[tuple] | None = None,
-) -> None:
+    staged_moves: list[tuple[Path, Path]] | None = None,
+    read_dependencies: list[tuple[Path, bytes | None]] | None = None,
+) -> dict[str, Any]:
+    if not interactions:
+        raise ValueError("mutation transaction requires at least one interaction event")
     planned_yaml = _coerce_yaml_changes(yaml_changes)
     planned_text = _coerce_text_changes(text_changes)
+    planned_reads = _coerce_read_dependencies(read_dependencies)
+    planned_moves = [
+        (Path(source), Path(target), Path(target).exists())
+        for source, target in staged_moves or []
+    ]
+    existing_move_targets = [str(target) for _, target, existed in planned_moves if existed]
+    if existing_move_targets:
+        raise ValueError(
+            "Staged move targets must not already exist: "
+            + ", ".join(existing_move_targets)
+        )
+    _validate_unique_transaction_targets([
+        *[path for path, _, _ in planned_yaml],
+        *[path for path, _, _ in planned_text],
+        *[target for _, target, _ in planned_moves],
+    ])
     written_files: list[str] = []
     backups: dict[Path, bytes | None] = {}
 
@@ -145,13 +479,20 @@ def finish_mutation(
         conflict_files = [
             *_conflicting_files(planned_yaml, _read_yaml_before),
             *_conflicting_files(planned_text, _read_text_before),
+            *_conflicting_read_dependencies(planned_reads),
         ]
+        for source, target, existed in planned_moves:
+            if not source.exists():
+                conflict_files.append(str(source))
+            if target.exists() != existed:
+                conflict_files.append(str(target))
         if conflict_files:
             error = "Mutation conflict: truth-source file changed after command planning"
             raise MutationError(
                 error,
                 {
                     "ok": False,
+                    "status": "conflict",
                     "partial_success": False,
                     "rolled_back": False,
                     "written_files": [],
@@ -166,6 +507,7 @@ def finish_mutation(
 
         for path, _, _ in [*planned_yaml, *planned_text]:
             backups[path] = path.read_bytes() if path.exists() else None
+        event_checkpoint = interaction_append_checkpoint(root)
         try:
             for path, _, after in planned_yaml:
                 _atomic_save_yaml(path, after)
@@ -173,13 +515,27 @@ def finish_mutation(
             for path, _, after_text in planned_text:
                 save_text(path, after_text)
                 written_files.append(str(path))
-            append_interaction_log(root, **interaction)
+            for source, target, _ in planned_moves:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                source.replace(target)
+                written_files.append(str(target))
+            for interaction in interactions:
+                _append_interaction_log_unlocked(root, prevalidated=True, **interaction)
         except Exception as exc:
-            rollback_errors = _restore_files(backups)
+            rollback_errors = restore_interaction_append_checkpoint(root, event_checkpoint)
+            rollback_errors.extend(_restore_files(backups))
+            for source, target, _ in planned_moves:
+                for staged_path in (target, source):
+                    try:
+                        _remove_staged_path(staged_path)
+                    except OSError as cleanup_exc:
+                        rollback_errors.append(f"{staged_path}: {cleanup_exc}")
             rolled_back = not rollback_errors
+            status = "rolled_back" if rolled_back else "partial_success"
             payload = {
                 "ok": False,
-                "partial_success": bool(written_files) and not rolled_back,
+                "status": status,
+                "partial_success": not rolled_back,
                 "rolled_back": rolled_back,
                 "written_files": written_files,
                 "error": str(exc),
@@ -190,7 +546,7 @@ def finish_mutation(
             }
             if rollback_errors:
                 payload["rollback_errors"] = rollback_errors
-            raise MutationError(f"Mutation failed while writing audit log; rolled_back={rolled_back}: {exc}", payload) from exc
+            raise MutationError(f"Mutation transaction failed; status={status}: {exc}", payload) from exc
 
         if rebuild_dashboard:
             try:
@@ -202,6 +558,7 @@ def finish_mutation(
                     f"Mutation succeeded but dashboard build failed: {exc}",
                     {
                         "ok": False,
+                        "status": "partial_success",
                         "partial_success": True,
                         "rolled_back": False,
                         "written_files": written_files,
@@ -209,3 +566,58 @@ def finish_mutation(
                         "recovery_commands": [f"research-cockpit build --root {root}"],
                     },
                 ) from exc
+
+    if not rebuild_dashboard:
+        changed_paths = [path for path, _, _ in [*planned_yaml, *planned_text]]
+        changed_paths.extend(target for _, target, _ in planned_moves)
+        try:
+            patch_validation_index(root, changed_paths)
+        except Exception as exc:
+            stale_error = ""
+            try:
+                mark_validation_index_stale(
+                    root,
+                    reason="incremental_patch_failed",
+                    detail=str(exc),
+                )
+            except Exception as stale_exc:
+                stale_error = f"; stale marker failed: {stale_exc}"
+            error = f"Mutation succeeded but validation index update failed: {exc}{stale_error}"
+            raise MutationError(
+                error,
+                {
+                    "ok": False,
+                    "status": "partial_success",
+                    "partial_success": True,
+                    "rolled_back": False,
+                    "written_files": written_files,
+                    "error": error,
+                    "recovery_commands": [f"research-cockpit build --root {root} --affected --id <node_id> --json"],
+                },
+            ) from exc
+
+    return {
+        "ok": True,
+        "status": "changed",
+        "partial_success": False,
+        "rolled_back": False,
+        "written_files": written_files,
+        "interaction_count": len(interactions),
+    }
+
+
+def finish_mutation(
+    root: Path,
+    yaml_changes: list[tuple],
+    *,
+    interaction: dict[str, Any],
+    rebuild_dashboard: bool,
+    text_changes: list[tuple] | None = None,
+) -> None:
+    execute_mutation_transaction(
+        root,
+        yaml_changes,
+        interactions=[interaction],
+        rebuild_dashboard=rebuild_dashboard,
+        text_changes=text_changes,
+    )

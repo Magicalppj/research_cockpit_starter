@@ -52,7 +52,8 @@ Typical run ingestion:
 ```sh
 research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher shell --command "python train.py --config config.yaml" --progress-file artifacts/experiment_x/run_x/progress.json --monitor-command "tail -f artifacts/experiment_x/run_x/logs/run.log" --no-build
 research-cockpit update-run --root research_cockpit --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
-research-cockpit complete-run --root research_cockpit --id run_x --status completed --finished-at 2026-05-27T10:00:00Z --no-build
+research-cockpit complete-run --print-schema
+research-cockpit complete-run --root research_cockpit --file closeout.yaml --assignment <assignment_id> --json --compact --no-build
 ```
 
 ## `progress.json`
@@ -146,10 +147,10 @@ For long-run preflight checks, use `gate_type: "preflight"` and add a `preflight
 Use link values relative to the run output directory. When the output directory is disposable, first preserve it with `ingest-artifact`; repeated `--link key=relative/path` values should come from the manifest:
 
 ```sh
-research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link metrics=outputs/metrics.json --link config=config.yaml --link gate_result=gate_result.json --record-only --json --compact --no-build
+research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link metrics=outputs/metrics.json --link config=config.yaml --link gate_result=gate_result.json --json --compact --no-build
 ```
 
-The default artifact record id is `artifact_<experiment_id>_<run_id>`. Keep it as a record for ordinary run output; promote it with `promote-artifact-record` before using it where a graph artifact id is required.
+The default artifact record id is `artifact_<experiment_id>_<run_id>`. Keep it as a record for ordinary run output; promote it with `promote-artifact-record --promotion-reason "..."` before using it where a graph artifact id is required.
 
 If the run directory already lives at a stable path, create or link the artifact directly:
 
@@ -166,6 +167,6 @@ Shell, Python, and manual launch flows should follow the same sequence:
 3. Update `progress.json` during long-running work.
 4. Write `gate_result.json` for each gate that should drive the next action.
 5. Write `artifact_manifest.json` before handoff so an agent can preserve only useful outputs.
-6. Record or update the run, ingest the artifact bundle, attach gate results, then record findings or next actions.
+6. Ingest the artifact bundle once, then use one `complete-run --file <closeout.yaml>` transaction to close the run, reference the returned `artifact_record.existing_record_id`, attach gate payloads, record the finding, and update next actions. Use separate mutation commands only for recovery or a deliberately partial update.
 
 Do not store machine-local absolute paths in canonical Research Cockpit records. Keep those details in local launcher logs unless they are needed as short human hints in `run_record.txt`.

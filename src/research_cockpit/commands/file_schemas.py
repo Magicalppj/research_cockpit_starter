@@ -183,6 +183,43 @@ locale: en
 """
 
 
+RUN_CLOSEOUT_EXAMPLE = """File schema v1: run_closeout_v1
+
+schema_version: run_closeout_v1
+run:
+  id: run_x
+  status: completed
+  finished_at: 2026-07-13T10:00:00Z
+artifact_record:
+  record_id: artifact_experiment_x_run_x
+  title: Run output record
+  stable_path: artifacts/experiment_x/run_x
+  manifest_path: artifacts/experiment_x/run_x/_research_cockpit_ingest.json
+  links:
+    metrics: artifacts/experiment_x/run_x/metrics.json
+gates:
+  - id: gate_run_x_smoke
+    file: artifacts/experiment_x/run_x/gate_result.json
+finding:
+  statement: The run met its success criterion.
+  confidence: strong
+  outcome: positive
+  metrics:
+    - score=0.91
+next_actions:
+  experiment:
+    - Review the closeout evidence.
+  assignment:
+    - Continue with the next assigned experiment.
+
+Notes:
+- assignment_id is required when next_actions.assignment is present.
+- Gate payload files must already exist and pass gate_result_v1 validation.
+- After ingest-artifact, replace the artifact_record mapping above with only existing_record_id: <record_id>.
+- Creating artifact_record metadata does not copy payload files; stable_path must already be canonical.
+- Dry-run validates the complete transaction and writes no truth files or interaction events.
+"""
+
 FILE_SCHEMAS = {
     "apply_graph_plan.py": {
         "file_schema": "graph_plan_v1",
@@ -198,6 +235,11 @@ FILE_SCHEMAS = {
         "file_schema": "artifact_v1",
         "example_file": CREATE_ARTIFACT_EXAMPLE,
         "schema_command": "research-cockpit create-artifact --print-schema",
+    },
+    "complete_run.py": {
+        "file_schema": "run_closeout_v1",
+        "example_file": RUN_CLOSEOUT_EXAMPLE,
+        "schema_command": "research-cockpit complete-run --print-schema",
     },
     "complete_experiments.py": {
         "file_schema": "experiment_completion_v1",

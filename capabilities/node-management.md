@@ -22,7 +22,7 @@ Do not create `artifact` nodes for routine files, configs, JSON outputs, or expe
 ## Batch Graph Plans
 
 Use `apply-graph-plan` when creating or updating several graph nodes. It validates the candidate graph once, writes all YAML only after validation passes, and rebuilds once by default.
-Use one batch command or run smaller mutating commands sequentially. Mutating commands share `graph/interaction_log.yaml`, use `graph/.mutation.lock`, and refuse stale writes when target files changed after planning. After a small node edit, use changed-scope validation and compact context; reserve full build/smoke for coordinator or final handoff.
+Use one batch command or run smaller mutating commands sequentially. Mutating commands share the active interaction backend, use `graph/.mutation.lock`, and refuse stale writes when target files changed after planning. After a small node edit, use changed-scope validation and compact context; reserve full build/smoke for coordinator or final handoff.
 
 ```sh
 research-cockpit apply-graph-plan --print-schema

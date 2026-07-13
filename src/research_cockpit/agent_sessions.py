@@ -147,7 +147,6 @@ def session_handoff(
             "<run_id>",
             "--agent",
             agent_id,
-            "--record-only",
             "--json",
             "--compact",
             "--no-build",

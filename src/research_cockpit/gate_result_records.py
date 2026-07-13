@@ -180,6 +180,91 @@ def _load_gate_records(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
     return records, warnings
 
 
+def validate_gate_result_records(
+    root: Path,
+    nodes: dict[str, Any],
+    runs: dict[str, Any],
+    *,
+    record_paths: list[Path] | None = None,
+) -> list[str]:
+    paths = record_paths
+    if paths is None:
+        record_dir = root / "gate_results"
+        paths = sorted(record_dir.glob("*.yaml")) if record_dir.exists() else []
+
+    errors: list[str] = []
+    for path in paths:
+        try:
+            rel_path = path.resolve(strict=False).relative_to(root.resolve(strict=False)).as_posix()
+        except ValueError:
+            rel_path = path.as_posix()
+        try:
+            data = load_yaml(path)
+        except (OSError, yaml.YAMLError) as exc:
+            errors.append(f"{rel_path}: YAML parse error: {exc}")
+            continue
+        if not isinstance(data, dict):
+            errors.append(f"{rel_path}: gate result record must be a mapping")
+            continue
+
+        gate_id = str(data.get("gate_id") or "").strip()
+        if not gate_id:
+            errors.append(f"{rel_path}: missing required field 'gate_id'")
+            gate_id = path.stem
+        elif gate_id != path.stem:
+            errors.append(f"{rel_path}: gate_id {gate_id!r} must match file name {path.stem!r}")
+        schema_version = data.get("schema_version")
+        if schema_version not in (None, GATE_RESULT_RECORD_SCHEMA_VERSION):
+            errors.append(f"{gate_id}: unsupported gate result record schema {schema_version!r}")
+
+        experiment_id = str(data.get("experiment_id") or "").strip()
+        if not experiment_id:
+            errors.append(f"{gate_id}: experiment_id is required")
+        elif experiment_id not in nodes:
+            errors.append(f"{gate_id}: experiment_id references missing node {experiment_id!r}")
+        elif getattr(nodes[experiment_id], "type", None) != "experiment":
+            errors.append(
+                f"{gate_id}: experiment_id references {experiment_id!r} "
+                f"with type {getattr(nodes[experiment_id], 'type', None)!r}; expected 'experiment'"
+            )
+
+        run_id = str(data.get("run_id") or "").strip()
+        if run_id:
+            run = runs.get(run_id)
+            if run is None:
+                errors.append(f"{gate_id}: run_id references missing run {run_id!r}")
+            elif str(getattr(run, "experiment_id", "")) != experiment_id:
+                errors.append(
+                    f"{gate_id}: run_id {run_id!r} belongs to experiment "
+                    f"{getattr(run, 'experiment_id', '')!r}, not {experiment_id!r}"
+                )
+
+        gate_file = str(data.get("gate_result_file") or "").strip()
+        try:
+            validate_gate_result_relative_path(root, gate_file)
+        except ValueError as exc:
+            errors.append(f"{gate_id}: {exc}")
+            continue
+        gate = load_gate_result(root, gate_file, experiment_id=experiment_id or None, run_id=run_id or None)
+        if gate is None:
+            errors.append(f"{gate_id}: missing gate result payload")
+            continue
+        for warning in gate.get("schema_warnings", []) or []:
+            errors.append(f"{gate_id}: {warning}")
+
+        artifact_id = str(data.get("artifact_id") or "").strip()
+        if artifact_id and experiment_id:
+            try:
+                validate_attached_gate_artifact(
+                    nodes,
+                    experiment_id=experiment_id,
+                    artifact_id=artifact_id,
+                    gate_result_file=gate_file,
+                )
+            except ValueError as exc:
+                errors.append(f"{gate_id}: {exc}")
+    return errors
+
 def _gate_sort_key(summary: dict[str, Any]) -> tuple[datetime, str]:
     timestamp = _parse_time(summary.get("recorded_at"))
     if timestamp is None:
@@ -210,8 +295,16 @@ def _invalid_gate_summary(record: dict[str, Any], gate_file: str, warning: str) 
     )
 
 
-def build_gate_summaries(root: Path) -> tuple[list[dict[str, Any]], list[str]]:
-    records, warnings = _load_gate_records(root)
+def build_gate_summaries(
+    root: Path,
+    *,
+    records: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    if records is None:
+        records, warnings = _load_gate_records(root)
+    else:
+        records = [dict(record) for record in records]
+        warnings = []
     summaries: list[dict[str, Any]] = []
     for record in records:
         gate_file = str(record.get("gate_result_file") or "").strip()
@@ -284,8 +377,9 @@ def build_gate_context(
     experiment_id: str | None = None,
     run_id: str | None = None,
     limit: int = 5,
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    summaries, warnings = build_gate_summaries(root)
+    summaries, warnings = build_gate_summaries(root, records=records)
     filtered = summaries
     if experiment_id:
         filtered = [item for item in filtered if item.get("experiment_id") == experiment_id]
@@ -309,8 +403,19 @@ def build_gate_context(
     }
 
 
-def build_experiment_gate_context(root: Path, experiment_id: str, *, limit: int = 5) -> dict[str, Any]:
-    return build_gate_context(root, experiment_id=experiment_id, limit=limit)
+def build_experiment_gate_context(
+    root: Path,
+    experiment_id: str,
+    *,
+    limit: int = 5,
+    records: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    return build_gate_context(
+        root,
+        experiment_id=experiment_id,
+        limit=limit,
+        records=records,
+    )
 
 
 def build_run_gate_context(root: Path, run_id: str, *, limit: int = 5) -> dict[str, Any]:

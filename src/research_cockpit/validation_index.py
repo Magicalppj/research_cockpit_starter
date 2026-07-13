@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import hashlib
+import json
 import yaml
 
 from research_cockpit.agent_state import AssignmentRecord
 from research_cockpit.model import ResearchNode, RunRecord
-from research_cockpit.storage import load_yaml
+from research_cockpit.storage import load_yaml, save_text
 
-SCHEMA_VERSION = "validation_index_v1"
+SCHEMA_VERSION = "validation_index_v2"
 
 REFERENCE_FIELDS = (
     "current_best_option",
@@ -80,35 +81,109 @@ def node_reference_ids(node: ResearchNode) -> list[str]:
     return sorted({ref for ref in refs if ref})
 
 
-def _artifact_records_payload(root: Path) -> tuple[dict[str, Any], dict[str, list[str]]]:
+def _artifact_records_payload(
+    root: Path,
+) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, Any]]:
     records: dict[str, Any] = {}
     by_experiment: dict[str, list[str]] = {}
+    files: dict[str, Any] = {}
     record_dir = root / "artifact_records"
     if not record_dir.exists():
-        return records, by_experiment
+        return records, by_experiment, files
     for path in sorted(record_dir.glob("*.yaml")):
         rel_path = relative_path(root, path)
+        signature = file_signature(path)
         data = load_yaml(path)
         if not isinstance(data, dict):
+            files[rel_path] = {
+                "experiment_id": path.stem,
+                "record_ids": [],
+                "run_ids": [],
+                "file_signature": signature,
+            }
             continue
-        experiment_id = str(data.get("experiment_id") or "").strip()
+        experiment_id = str(data.get("experiment_id") or path.stem).strip()
         raw_records = data.get("records", {}) if isinstance(data.get("records"), dict) else {}
+        file_record_ids: list[str] = []
+        file_run_ids: list[str] = []
         for record_id, record in raw_records.items():
             record_id = str(record_id)
             run_id = ""
             if isinstance(record, dict) and record.get("run_id"):
                 run_id = str(record["run_id"])
+                file_run_ids.append(run_id)
+            file_record_ids.append(record_id)
             records[record_id] = {
                 "experiment_id": experiment_id,
                 "run_id": run_id,
                 "file": rel_path,
-                "file_signature": file_signature(path),
+                "file_signature": signature,
             }
             if experiment_id:
                 by_experiment.setdefault(experiment_id, []).append(record_id)
+        files[rel_path] = {
+            "experiment_id": experiment_id,
+            "record_ids": sorted(file_record_ids),
+            "run_ids": sorted(set(file_run_ids)),
+            "file_signature": signature,
+        }
     for values in by_experiment.values():
         values.sort()
-    return records, by_experiment
+    return records, by_experiment, files
+
+
+def _gate_results_payload(
+    root: Path,
+) -> tuple[dict[str, Any], dict[str, list[str]], dict[str, list[str]], dict[str, str], dict[str, str]]:
+    gates: dict[str, Any] = {}
+    by_experiment: dict[str, list[str]] = {}
+    by_run: dict[str, list[str]] = {}
+    record_files: dict[str, str] = {}
+    payload_files: dict[str, str] = {}
+    record_dir = root / "gate_results"
+    if not record_dir.exists():
+        return gates, by_experiment, by_run, record_files, payload_files
+
+    for path in sorted(record_dir.glob("*.yaml")):
+        rel_path = relative_path(root, path)
+        try:
+            data = load_yaml(path)
+        except (OSError, yaml.YAMLError):
+            data = None
+        gate_id = str(data.get("gate_id") or path.stem).strip() if isinstance(data, dict) else path.stem
+        experiment_id = str(data.get("experiment_id") or "").strip() if isinstance(data, dict) else ""
+        run_id = str(data.get("run_id") or "").strip() if isinstance(data, dict) else ""
+        payload_file = str(data.get("gate_result_file") or "").replace("\\", "/").strip() if isinstance(data, dict) else ""
+        payload_path = root / payload_file if payload_file else None
+        gates[gate_id] = {
+            "gate_id": gate_id,
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "artifact_id": (
+                str(data.get("artifact_id") or "").strip()
+                if isinstance(data, dict)
+                else ""
+            ),
+            "record_file": rel_path,
+            "record_file_signature": file_signature(path),
+            "payload_file": payload_file,
+            "payload_file_signature": (
+                file_signature(payload_path)
+                if payload_path is not None and payload_path.is_file()
+                else None
+            ),
+        }
+        record_files[rel_path] = gate_id
+        if payload_file:
+            payload_files[payload_file] = gate_id
+        if experiment_id:
+            by_experiment.setdefault(experiment_id, []).append(gate_id)
+        if run_id:
+            by_run.setdefault(run_id, []).append(gate_id)
+
+    for values in (*by_experiment.values(), *by_run.values()):
+        values.sort()
+    return gates, by_experiment, by_run, record_files, payload_files
 
 
 def build_validation_index(
@@ -130,6 +205,7 @@ def build_validation_index(
         node_rows[node_id] = {
             "id": node.id,
             "type": node.type,
+            "title": node.title,
             "status": node.status,
             "parent": node.parent,
             "children": list(node.children),
@@ -163,6 +239,7 @@ def build_validation_index(
         rel_path = relative_path(root, path)
         run_rows[run_id] = {
             "run_id": run_id,
+            "status": run.status,
             "experiment_id": run.experiment_id,
             "file": rel_path,
             "file_signature": file_signature(path) if path.exists() else None,
@@ -182,6 +259,10 @@ def build_validation_index(
         refs = sorted({str(ref) for ref in refs if ref})
         assignment_rows[assignment_id] = {
             "assignment_id": assignment_id,
+            "agent_id": assignment.agent_id,
+            "status": assignment.status,
+            "root_node": assignment.root_node,
+            "current_node": assignment.current_node,
             "refs": refs,
             "allowed_root": allowed_root,
             "file": rel_path,
@@ -191,7 +272,14 @@ def build_validation_index(
         for ref_id in refs:
             assignments_by_node.setdefault(ref_id, []).append(assignment_id)
 
-    artifact_records, artifact_records_by_node = _artifact_records_payload(root)
+    artifact_records, artifact_records_by_node, artifact_record_files = _artifact_records_payload(root)
+    (
+        gate_results,
+        gate_results_by_experiment,
+        gate_results_by_run,
+        gate_record_files,
+        gate_payload_files,
+    ) = _gate_results_payload(root)
     for values in reverse_refs.values():
         values.sort()
     for values in edge_neighbors.values():
@@ -215,10 +303,17 @@ def build_validation_index(
         "assignments_by_node": assignments_by_node,
         "artifact_records": artifact_records,
         "artifact_records_by_node": artifact_records_by_node,
+        "artifact_record_files": artifact_record_files,
+        "gate_results": gate_results,
+        "gate_results_by_experiment": gate_results_by_experiment,
+        "gate_results_by_run": gate_results_by_run,
         "files": {
             "nodes": file_to_node,
             "runs": file_to_run,
             "assignments": file_to_assignment,
+            "artifact_records": {path: path for path in artifact_record_files},
+            "gate_results": gate_record_files,
+            "gate_payloads": gate_payload_files,
         },
     }
 
@@ -249,8 +344,342 @@ def is_index_schema_compatible(index: dict[str, Any] | None) -> bool:
         and index.get("schema_version") == SCHEMA_VERSION
         and isinstance(index.get("nodes"), dict)
         and isinstance(index.get("explicit_edges"), dict)
+        and not index.get("stale")
     )
 
+
+def _mark_validation_index_stale_unlocked(root: Path, *, reason: str, detail: str = "") -> None:
+    index = load_validation_index(root)
+    if not isinstance(index, dict):
+        return
+    index["stale"] = {
+        "reason": reason,
+        "detail": detail,
+        "marked_at": utc_timestamp(),
+    }
+    save_text(validation_index_path(root), json.dumps(index, indent=2, ensure_ascii=False))
+
+
+def mark_validation_index_stale(root: Path, *, reason: str, detail: str = "") -> None:
+    from research_cockpit.mutation_lock import mutation_lock
+
+    with mutation_lock(root, lock_name=".validation-index.lock"):
+        _mark_validation_index_stale_unlocked(root, reason=reason, detail=detail)
+
+def _changed_relative_path(root: Path, path: Path) -> str:
+    try:
+        return path.resolve(strict=False).relative_to(root.resolve(strict=False)).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _refresh_index_derived_maps(index: dict[str, Any]) -> None:
+    nodes = index.get("nodes", {}) or {}
+    reverse_refs: dict[str, list[str]] = {}
+    file_nodes: dict[str, str] = {}
+    for node_id, row in nodes.items():
+        if not isinstance(row, dict):
+            continue
+        if row.get("file"):
+            file_nodes[str(row["file"])] = str(node_id)
+        for ref_id in row.get("references", []) or []:
+            reverse_refs.setdefault(str(ref_id), []).append(str(node_id))
+    for values in reverse_refs.values():
+        values.sort()
+    index["reverse_refs"] = reverse_refs
+
+    runs = index.get("runs", {}) or {}
+    runs_by_experiment: dict[str, list[str]] = {}
+    file_runs: dict[str, str] = {}
+    for run_id, row in runs.items():
+        if not isinstance(row, dict):
+            continue
+        if row.get("file"):
+            file_runs[str(row["file"])] = str(run_id)
+        experiment_id = str(row.get("experiment_id") or "")
+        if experiment_id:
+            runs_by_experiment.setdefault(experiment_id, []).append(str(run_id))
+    for values in runs_by_experiment.values():
+        values.sort()
+    index["runs_by_experiment"] = runs_by_experiment
+
+    assignments = index.get("assignments", {}) or {}
+    assignments_by_node: dict[str, list[str]] = {}
+    file_assignments: dict[str, str] = {}
+    for assignment_id, row in assignments.items():
+        if not isinstance(row, dict):
+            continue
+        if row.get("file"):
+            file_assignments[str(row["file"])] = str(assignment_id)
+        for ref_id in row.get("refs", []) or []:
+            assignments_by_node.setdefault(str(ref_id), []).append(str(assignment_id))
+    for values in assignments_by_node.values():
+        values.sort()
+    index["assignments_by_node"] = assignments_by_node
+
+    artifact_records = index.get("artifact_records", {}) or {}
+    artifact_record_files = index.get("artifact_record_files", {}) or {}
+    artifact_by_node: dict[str, list[str]] = {}
+    for record_id, row in artifact_records.items():
+        if not isinstance(row, dict):
+            continue
+        experiment_id = str(row.get("experiment_id") or "")
+        if experiment_id:
+            artifact_by_node.setdefault(experiment_id, []).append(str(record_id))
+    for values in artifact_by_node.values():
+        values.sort()
+    index["artifact_records_by_node"] = artifact_by_node
+
+    gates = index.get("gate_results", {}) or {}
+    gates_by_experiment: dict[str, list[str]] = {}
+    gates_by_run: dict[str, list[str]] = {}
+    gate_record_files: dict[str, str] = {}
+    gate_payload_files: dict[str, str] = {}
+    for gate_id, row in gates.items():
+        if not isinstance(row, dict):
+            continue
+        if row.get("record_file"):
+            gate_record_files[str(row["record_file"])] = str(gate_id)
+        if row.get("payload_file"):
+            gate_payload_files[str(row["payload_file"])] = str(gate_id)
+        experiment_id = str(row.get("experiment_id") or "")
+        run_id = str(row.get("run_id") or "")
+        if experiment_id:
+            gates_by_experiment.setdefault(experiment_id, []).append(str(gate_id))
+        if run_id:
+            gates_by_run.setdefault(run_id, []).append(str(gate_id))
+    for values in (*gates_by_experiment.values(), *gates_by_run.values()):
+        values.sort()
+    index["gate_results_by_experiment"] = gates_by_experiment
+    index["gate_results_by_run"] = gates_by_run
+
+    files = index.setdefault("files", {})
+    files["nodes"] = file_nodes
+    files["runs"] = file_runs
+    files["assignments"] = file_assignments
+    files["artifact_records"] = {str(path): str(path) for path in artifact_record_files}
+    files["gate_results"] = gate_record_files
+    files["gate_payloads"] = gate_payload_files
+
+
+def _patch_node(index: dict[str, Any], root: Path, rel_path: str) -> None:
+    rows = index.setdefault("nodes", {})
+    old_id = (index.get("files", {}).get("nodes", {}) or {}).get(rel_path)
+    if old_id:
+        rows.pop(str(old_id), None)
+    path = root / rel_path
+    if not path.exists():
+        return
+    data = load_yaml(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"{rel_path}: node file must be a mapping")
+    node = ResearchNode.from_dict(data)
+    rows[node.id] = {
+        "id": node.id,
+        "type": node.type,
+        "title": node.title,
+        "status": node.status,
+        "parent": node.parent,
+        "children": list(node.children),
+        "file": rel_path,
+        "file_signature": file_signature(path),
+        "references": node_reference_ids(node),
+    }
+
+
+def _patch_run(index: dict[str, Any], root: Path, rel_path: str) -> None:
+    rows = index.setdefault("runs", {})
+    old_id = (index.get("files", {}).get("runs", {}) or {}).get(rel_path)
+    if old_id:
+        rows.pop(str(old_id), None)
+    path = root / rel_path
+    if not path.exists():
+        return
+    data = load_yaml(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"{rel_path}: run record must be a mapping")
+    run = RunRecord.from_dict(data)
+    rows[run.run_id] = {
+        "run_id": run.run_id,
+        "status": run.status,
+        "experiment_id": run.experiment_id,
+        "file": rel_path,
+        "file_signature": file_signature(path),
+    }
+
+
+def _patch_assignment(index: dict[str, Any], root: Path, rel_path: str) -> None:
+    rows = index.setdefault("assignments", {})
+    old_id = (index.get("files", {}).get("assignments", {}) or {}).get(rel_path)
+    if old_id:
+        rows.pop(str(old_id), None)
+    path = root / rel_path
+    if not path.exists():
+        return
+    data = load_yaml(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"{rel_path}: assignment record must be a mapping")
+    assignment = AssignmentRecord.from_dict(data)
+    allowed_root = str(assignment.allowed_subtree.get("root") or assignment.root_node or "")
+    refs = sorted({
+        str(ref)
+        for ref in (assignment.root_node, assignment.current_node, allowed_root)
+        if ref
+    })
+    rows[assignment.assignment_id] = {
+        "assignment_id": assignment.assignment_id,
+        "agent_id": assignment.agent_id,
+        "status": assignment.status,
+        "root_node": assignment.root_node,
+        "current_node": assignment.current_node,
+        "refs": refs,
+        "allowed_root": allowed_root,
+        "file": rel_path,
+        "file_signature": file_signature(path),
+    }
+
+
+def _patch_artifact_records(index: dict[str, Any], root: Path, rel_path: str) -> None:
+    rows = index.setdefault("artifact_records", {})
+    file_rows = index.setdefault("artifact_record_files", {})
+    for record_id, row in list(rows.items()):
+        if isinstance(row, dict) and row.get("file") == rel_path:
+            rows.pop(record_id, None)
+    file_rows.pop(rel_path, None)
+    path = root / rel_path
+    if not path.exists():
+        return
+    data = load_yaml(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"{rel_path}: artifact record file must be a mapping")
+    raw_records = data.get("records", {})
+    if not isinstance(raw_records, dict):
+        raise ValueError(f"{rel_path}: records must be a mapping")
+    experiment_id = str(data.get("experiment_id") or path.stem)
+    signature = file_signature(path)
+    record_ids: list[str] = []
+    run_ids: list[str] = []
+    for record_id, record in raw_records.items():
+        normalized_id = str(record_id)
+        run_id = str(record.get("run_id") or "") if isinstance(record, dict) else ""
+        record_ids.append(normalized_id)
+        if run_id:
+            run_ids.append(run_id)
+        rows[normalized_id] = {
+            "experiment_id": experiment_id,
+            "run_id": run_id,
+            "file": rel_path,
+            "file_signature": signature,
+        }
+    file_rows[rel_path] = {
+        "experiment_id": experiment_id,
+        "record_ids": sorted(record_ids),
+        "run_ids": sorted(set(run_ids)),
+        "file_signature": signature,
+    }
+
+
+def _patch_gate_record(index: dict[str, Any], root: Path, rel_path: str) -> None:
+    rows = index.setdefault("gate_results", {})
+    old_id = (index.get("files", {}).get("gate_results", {}) or {}).get(rel_path)
+    if old_id:
+        rows.pop(str(old_id), None)
+    path = root / rel_path
+    if not path.exists():
+        return
+    data = load_yaml(path)
+    if not isinstance(data, dict):
+        raise ValueError(f"{rel_path}: gate result record must be a mapping")
+    gate_id = str(data.get("gate_id") or path.stem)
+    payload_file = str(data.get("gate_result_file") or "").replace("\\", "/").strip()
+    payload_path = root / payload_file if payload_file else None
+    rows[gate_id] = {
+        "gate_id": gate_id,
+        "experiment_id": str(data.get("experiment_id") or ""),
+        "run_id": str(data.get("run_id") or ""),
+        "artifact_id": str(data.get("artifact_id") or ""),
+        "record_file": rel_path,
+        "record_file_signature": file_signature(path),
+        "payload_file": payload_file,
+        "payload_file_signature": (
+            file_signature(payload_path)
+            if payload_path is not None and payload_path.is_file()
+            else None
+        ),
+    }
+
+
+def _patch_explicit_edges(index: dict[str, Any], root: Path) -> None:
+    path = root / "graph" / "edges.yaml"
+    neighbors: dict[str, list[str]] = {}
+    if path.exists():
+        data = load_yaml(path)
+        edges = data.get("edges", []) if isinstance(data, dict) else data
+        if not isinstance(edges, list):
+            raise ValueError("graph/edges.yaml: edges must be a list")
+        for edge in edges:
+            if not isinstance(edge, dict):
+                continue
+            source = str(edge.get("from") or edge.get("source") or "")
+            target = str(edge.get("to") or edge.get("target") or "")
+            if source and target:
+                neighbors.setdefault(source, []).append(target)
+                neighbors.setdefault(target, []).append(source)
+    for values in neighbors.values():
+        values.sort()
+    index["edge_neighbors"] = neighbors
+    index["explicit_edges"] = {
+        "file": "graph/edges.yaml",
+        "exists": path.exists(),
+        "file_signature": file_signature(path) if path.exists() else None,
+    }
+
+
+def _patch_validation_index_unlocked(root: Path, changed_paths: list[Path]) -> dict[str, Any]:
+    index = load_validation_index(root)
+    if index is None:
+        return {"status": "missing", "updated": False}
+    if not is_index_schema_compatible(index):
+        return {"status": "unavailable", "updated": False}
+
+    rel_paths = sorted({_changed_relative_path(root, Path(path)) for path in changed_paths})
+    for rel_path in rel_paths:
+        parts = Path(rel_path).parts
+        suffix = Path(rel_path).suffix.lower()
+        if len(parts) >= 3 and parts[-3:-1] == ("graph", "nodes") and suffix in {".yaml", ".yml"}:
+            _patch_node(index, root, rel_path)
+        elif len(parts) >= 2 and parts[-2] == "runs" and suffix in {".yaml", ".yml"}:
+            _patch_run(index, root, rel_path)
+        elif len(parts) >= 2 and parts[-2] == "assignments" and suffix in {".yaml", ".yml"}:
+            _patch_assignment(index, root, rel_path)
+        elif len(parts) >= 2 and parts[-2] == "artifact_records" and suffix in {".yaml", ".yml"}:
+            _patch_artifact_records(index, root, rel_path)
+        elif len(parts) >= 2 and parts[-2] == "gate_results" and suffix in {".yaml", ".yml"}:
+            _patch_gate_record(index, root, rel_path)
+        elif rel_path == "graph/edges.yaml":
+            _patch_explicit_edges(index, root)
+
+    _refresh_index_derived_maps(index)
+    for rel_path in rel_paths:
+        gate_id = (index.get("files", {}).get("gate_payloads", {}) or {}).get(rel_path)
+        if not gate_id:
+            continue
+        row = (index.get("gate_results", {}) or {}).get(str(gate_id))
+        if not isinstance(row, dict):
+            continue
+        payload_path = root / rel_path
+        row["payload_file_signature"] = file_signature(payload_path) if payload_path.is_file() else None
+
+    index["generated_at"] = utc_timestamp()
+    index.pop("stale", None)
+    save_text(validation_index_path(root), json.dumps(index, indent=2, ensure_ascii=False))
+    return {"status": "updated", "updated": True, "changed_files": rel_paths}
+
+def patch_validation_index(root: Path, changed_paths: list[Path]) -> dict[str, Any]:
+    from research_cockpit.mutation_lock import mutation_lock
+
+    with mutation_lock(root, lock_name=".validation-index.lock"):
+        return _patch_validation_index_unlocked(root, changed_paths)
 
 def signature_matches(root: Path, rel_path: str, expected: dict[str, Any] | None) -> bool:
     if not expected:

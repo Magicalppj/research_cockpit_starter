@@ -1,3 +1,7 @@
+# Research Cockpit Historical Requirements
+
+> **Historical record:** this file preserves initial requirements and is not current operational guidance. Current operational guidance: repository-root `README.md`, `SKILL.md`, `AGENTS.md`, `capabilities/`, and `docs/internal-architecture.md`.
+
 本项目要解决的其实是四件事，同时服务 **人** 和 **agent**：
 
 1. **如何组织研究信息**

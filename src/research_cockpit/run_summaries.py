@@ -137,9 +137,14 @@ def build_run_summaries(
     *,
     now: datetime | None = None,
     stale_after_hours: int = RUN_STALE_AFTER_HOURS,
+    records: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    records, warnings = _load_run_records(root)
+    if records is None:
+        records, warnings = _load_run_records(root)
+    else:
+        records = [dict(record) for record in records]
+        warnings = []
     summaries: list[dict[str, Any]] = []
     for record in records:
         summary, warning = _record_summary(root, record, nodes, now=now, stale_after_hours=stale_after_hours)
@@ -226,8 +231,9 @@ def build_experiment_run_context(
     experiment_id: str,
     *,
     limit: int = 5,
+    records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    summaries, warnings = build_run_summaries(root, nodes)
+    summaries, warnings = build_run_summaries(root, nodes, records=records)
     experiment_runs = [item for item in summaries if item.get("experiment_id") == experiment_id]
     sorted_runs = sorted(experiment_runs, key=_run_sort_key, reverse=True)
     current = [item for item in sorted_runs if item.get("status") in ACTIVE_RUN_STATUSES]

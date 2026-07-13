@@ -1,5 +1,8 @@
 # Research Cockpit Skill 功能优化方案
 
+> **Historical record:** this file preserves design or implementation context and is not current operational guidance. Current operational guidance: repository-root `README.md`, `SKILL.md`, `AGENTS.md`, `capabilities/`, and `docs/internal-architecture.md`.
+
+
 ## 目标读者
 
 本文面向 `research-cockpit` skill 维护者，用于总结在大型音频实验仓库中长期使用 Research Cockpit 后暴露出的流程缺口，并提出可落地的 skill 文档、CLI、schema、dashboard 和维护工作流改进建议。

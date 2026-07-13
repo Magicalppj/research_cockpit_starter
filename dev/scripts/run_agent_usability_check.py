@@ -27,13 +27,20 @@ from workflow_metrics import workflow_metrics
 DEMO_DECISION_ID = "decision_demo_prompt_refinement"
 DEMO_OPTION_ID = "option_demo_prompt_refinement"
 DEMO_RETRIEVAL_OPTION_ID = "option_demo_retrieval_branch"
-SURFACE_DOCS = ("README.md", "SKILL.md")
+SURFACE_DOCS = (
+    "README.md",
+    "SKILL.md",
+    "AGENTS.md",
+    "templates/launcher/README.md",
+    "templates/launcher/manual_run_checklist.md",
+)
 CAPABILITY_FILES = (
     "decision-adr.md",
     "experiment-tracking.md",
     "focus-context.md",
     "graph-state.md",
     "integrations.md",
+    "maintenance.md",
     "node-management.md",
     "troubleshooting.md",
     "ui-dashboard.md",
@@ -118,6 +125,29 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _interaction_kinds(root: Path) -> list[str]:
+    legacy = _read_yaml(root / "graph" / "interaction_log.yaml")
+    legacy_events = legacy.get("events", []) if isinstance(legacy.get("events"), list) else []
+    events = [event for event in legacy_events if isinstance(event, dict)]
+    event_root = root / "graph" / "interaction_events"
+    manifest = _read_json(event_root / "manifest.json")
+    if not manifest:
+        return [str(event.get("kind")) for event in events if event.get("kind")]
+    if manifest.get("legacy_mode") == "migrated":
+        events = []
+    generation = str(manifest.get("generation") or "").strip()
+    segment_root = event_root.joinpath(*Path(generation).parts) if generation else event_root
+    for path in sorted(segment_root.glob("events-*.jsonl")):
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict):
+                events.append(event)
+    return [str(event.get("kind")) for event in events if event.get("kind")]
+
+
 def _write_yaml(path: Path, data: dict[str, Any]) -> None:
     import yaml
 
@@ -176,6 +206,26 @@ def _readability_findings(skill_path: Path) -> list[str]:
     node_text = (skill_path / "capabilities" / "node-management.md").read_text(encoding="utf-8", errors="ignore")
     if "--suggestion " in node_text:
         findings.append("node-management.md uses outdated suggestion id flag")
+    readme_text = (skill_path / "README.md").read_text(encoding="utf-8", errors="ignore")
+    if "--record-only --dry-run" in readme_text:
+        findings.append("README.md presents the compatibility record flag as the default ingest recipe")
+    if not re.search(r"research-cockpit create-run[^\n]*--assignment <assignment_id>", readme_text):
+        findings.append("README.md worker create-run recipe omits --assignment")
+
+    integrations_text = (skill_path / "capabilities" / "integrations.md").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    if "artifact_record.existing_record_id" not in integrations_text:
+        findings.append("integrations.md omits record-first structured closeout linkage")
+
+    graph_text = (skill_path / "capabilities" / "graph-state.md").read_text(encoding="utf-8", errors="ignore")
+    experiment_text = (skill_path / "capabilities" / "experiment-tracking.md").read_text(
+        encoding="utf-8", errors="ignore"
+    )
+    if "append compact events to `interaction_log.yaml`" in graph_text:
+        findings.append("graph-state.md describes the legacy interaction log as the active backend")
+    if "append compact events to `graph/interaction_log.yaml`" in experiment_text:
+        findings.append("experiment-tracking.md describes the legacy interaction log as the active backend")
     return findings
 
 
@@ -369,8 +419,7 @@ def agent_c_safe_option_workstream(skill_path: Path, python: str, parent: Path) 
     checks.append(_run_command(_cli(python, "validate", "--root", str(root), "--json"), cwd=research_repo, env=env))
 
     files_changed = _changed_files(repo_before, _file_manifest(research_repo))
-    log = _read_yaml(root / "graph" / "interaction_log.yaml")
-    interaction_kinds = [event.get("kind") for event in log.get("events", []) if isinstance(event, dict)]
+    interaction_kinds = _interaction_kinds(root)
     observations = {
         "dry_run_preserved_files": not claim_dry_run_changed and not report_dry_run_changed,
         "interaction_kinds": interaction_kinds,
@@ -484,6 +533,161 @@ def agent_e_ui_collaboration_docs(skill_path: Path, python: str, parent: Path) -
     )
 
 
+def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict[str, Any]:
+    research_repo, plugin_path = _new_research_repo(skill_path, parent, "f")
+    root = _copy_demo_state(plugin_path, research_repo)
+    run_id = "run_usability_closeout"
+    experiment_id = "experiment_demo_prompt_refinement"
+    record_id = f"artifact_{experiment_id}_{run_id}"
+    source = research_repo / ".agent_runs" / run_id
+    source.mkdir(parents=True)
+    (source / "metrics.json").write_text('{"score": 0.91}', encoding="utf-8")
+    closeout_path = research_repo / "closeout.yaml"
+    _write_yaml(
+        closeout_path,
+        {
+            "schema_version": "run_closeout_v1",
+            "run": {"id": run_id, "status": "completed"},
+            "artifact_record": {"existing_record_id": record_id},
+            "finding": {
+                "statement": "Usability closeout preserved and linked the run evidence.",
+                "confidence": "strong",
+                "outcome": "positive",
+            },
+            "next_actions": {"experiment": ["Review the structured closeout."]},
+        },
+    )
+    repo_before = _file_manifest(research_repo)
+    env = _package_env(plugin_path)
+    checks = [
+        _run_command(
+            _cli(
+                python,
+                "create-run",
+                "--root",
+                str(root),
+                "--id",
+                run_id,
+                "--experiment",
+                experiment_id,
+                "--status",
+                "running",
+                "--no-build",
+                "--json",
+                "--compact",
+            ),
+            cwd=research_repo,
+            env=env,
+        ),
+        _run_command(
+            _cli(
+                python,
+                "ingest-artifact",
+                "--root",
+                str(root),
+                "--node",
+                experiment_id,
+                "--from",
+                str(source),
+                "--run-id",
+                run_id,
+                "--link",
+                "metrics=metrics.json",
+                "--no-build",
+                "--json",
+                "--compact",
+            ),
+            cwd=research_repo,
+            env=env,
+        ),
+        _run_command(
+            _cli(
+                python,
+                "complete-run",
+                "--root",
+                str(root),
+                "--file",
+                str(closeout_path),
+                "--no-build",
+                "--json",
+                "--compact",
+            ),
+            cwd=research_repo,
+            env=env,
+        ),
+        _run_command(
+            _cli(
+                python,
+                "validate",
+                "--root",
+                str(root),
+                "--changed-node",
+                experiment_id,
+                "--changed-record",
+                f"artifact:{record_id}",
+                "--json",
+            ),
+            cwd=research_repo,
+            env=env,
+        ),
+        _run_command(
+            _cli(
+                python,
+                "context",
+                "--root",
+                str(root),
+                "--id",
+                experiment_id,
+                "--with-bootstrap",
+                "--with-artifacts",
+                "--compact",
+                "--json",
+            ),
+            cwd=research_repo,
+            env=env,
+        ),
+    ]
+
+    ingest_payload = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
+    closeout_payload = checks[2].get("json") if isinstance(checks[2].get("json"), dict) else {}
+    experiment = _read_yaml(root / "graph" / "nodes" / f"{experiment_id}.yaml")
+    run = _read_yaml(root / "runs" / f"{run_id}.yaml")
+    records = _read_yaml(root / "artifact_records" / f"{experiment_id}.yaml").get("records", {})
+    findings = experiment.get("findings", []) if isinstance(experiment.get("findings"), list) else []
+    latest_finding = findings[-1] if findings and isinstance(findings[-1], dict) else {}
+    files_changed = _changed_files(repo_before, _file_manifest(research_repo))
+    observations = {
+        "default_ingest_created_record": (
+            ingest_payload.get("target", {}).get("mode") == "record"
+            and ingest_payload.get("created") == []
+            and record_id in records
+            and not (root / "graph" / "nodes" / f"{record_id}.yaml").exists()
+        ),
+        "structured_closeout_linked_record": (
+            run.get("status") == "completed"
+            and latest_finding.get("linked_artifact_records") == [record_id]
+            and f"artifact:{record_id}" in closeout_payload.get("changed_scope", {}).get("records", [])
+        ),
+        "changed_scope_validation_passed": checks[3].get("json", {}).get("ok") is True,
+    }
+    findings_doc = _readability_findings(plugin_path)
+    passed = (
+        all(check["passed"] for check in checks)
+        and all(observations.values())
+        and not findings_doc
+        and not _unexpected_writes(files_changed)
+    )
+    return _case(
+        "agent_f_worker_closeout",
+        passed,
+        checks=checks,
+        files_changed=files_changed,
+        agent_observations=observations,
+        readability_findings=findings_doc,
+        unexpected_writes=_unexpected_writes(files_changed),
+    )
+
+
 def agent_usability_check_payload(
     skill_path: Path = DEFAULT_SKILL_PATH,
     *,
@@ -512,6 +716,7 @@ def agent_usability_check_payload(
                     "agent_c_safe_option_workstream",
                     "agent_d_decision_suggestion_dry_run",
                     "agent_e_ui_collaboration_docs",
+                    "agent_f_worker_closeout",
                 )
             ]
         else:
@@ -521,6 +726,7 @@ def agent_usability_check_payload(
                 agent_c_safe_option_workstream(skill_path, python, temp_run),
                 agent_d_decision_suggestion_dry_run(skill_path, python, temp_run),
                 agent_e_ui_collaboration_docs(skill_path, python, temp_run),
+                agent_f_worker_closeout(skill_path, python, temp_run),
             ]
         original_changed = source_before != _file_manifest(skill_path)
         return {

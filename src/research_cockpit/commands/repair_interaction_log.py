@@ -62,6 +62,11 @@ def repair_interaction_log(
     dry_run: bool = False,
     show_diff: bool = False,
 ) -> dict[str, Any]:
+    if (root / "graph" / "interaction_events" / "manifest.json").exists():
+        raise ValueError(
+            "The JSONL interaction backend is active; legacy graph/interaction_log.yaml is read-only. "
+            "Use validate or migrate-interaction-log instead."
+        )
     path = root / "graph" / "interaction_log.yaml"
     data = _load_interaction_log_document(path)
     candidate, dropped_count, warnings = _candidate_document(data)

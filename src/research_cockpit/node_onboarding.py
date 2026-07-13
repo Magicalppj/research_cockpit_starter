@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 import sys
 
+from research_cockpit.agent_state import load_assignments
 from research_cockpit.graph_core import (
     child_ids,
     derive_focus_path,
@@ -17,7 +18,7 @@ from research_cockpit.hierarchy_policy import hierarchy_policy
 from research_cockpit.decisions import build_decision_acceptance_checklist, build_decision_trace
 from research_cockpit.baselines import resolve_effective_baseline
 from research_cockpit.context_packs import build_next_action_scopes
-from research_cockpit.interaction_log import recent_interactions
+from research_cockpit.interaction_log import recent_interactions_with_warnings
 from research_cockpit.option_workstreams import build_option_workstream_context
 from research_cockpit.suggestions import build_action_suggestions
 from research_cockpit.storage import load_yaml, relative_to_root
@@ -124,9 +125,14 @@ def _node_relevant_suggestions(
     return relevant
 
 
-def _node_recent_interactions(root: Path, node_id: str, limit: int = 5) -> list[dict[str, Any]]:
+def _node_recent_interactions(
+    root: Path,
+    node_id: str,
+    limit: int = 5,
+) -> tuple[list[dict[str, Any]], list[str]]:
     rows = []
-    for event in recent_interactions(root, limit=25):
+    events, warnings = recent_interactions_with_warnings(root, limit=25)
+    for event in events:
         values = {str(event.get("node_id") or "")}
         for key in ("option_id", "experiment_id", "decision_id", "suggestion_id", "view_id"):
             if event.get(key):
@@ -135,8 +141,7 @@ def _node_recent_interactions(root: Path, node_id: str, limit: int = 5) -> list[
             rows.append(event)
         if len(rows) >= limit:
             break
-    return rows
-
+    return rows, warnings
 
 def _experiment_context(
     root: Path,
@@ -144,6 +149,8 @@ def _experiment_context(
     experiment: ResearchNode,
     *,
     command_style: str = "console",
+    run_records: list[dict[str, Any]] | None = None,
+    gate_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     option_id = _node_id_in_path(nodes, experiment.id, "option", nearest=True)
     problem_id = _node_id_in_path(nodes, experiment.id, "problem", nearest=True)
@@ -170,8 +177,8 @@ def _experiment_context(
         "outcome": experiment.raw.get("outcome"),
         "missing_evidence": missing_evidence,
         "related_decisions": ordered_node_contexts(nodes, decision_ids),
-        "runs": build_experiment_run_context(root, nodes, experiment.id),
-        "gate_results": build_experiment_gate_context(root, experiment.id),
+        "runs": build_experiment_run_context(root, nodes, experiment.id, records=run_records),
+        "gate_results": build_experiment_gate_context(root, experiment.id, records=gate_records),
         "hierarchy_policy": hierarchy_policy(parent_option_id=option_id, source_experiment_id=experiment.id),
         "suggested_commands": {
             "mark_running": _rooted_cli_command(
@@ -328,6 +335,8 @@ def _decision_context(
     decision: ResearchNode,
     *,
     command_style: str = "console",
+    run_records: list[dict[str, Any]] | None = None,
+    gate_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     checklist = build_decision_acceptance_checklist(nodes, decision.id)
     trace = build_decision_trace(nodes, decision.id)
@@ -365,6 +374,8 @@ def _option_onboarding_context(
     option: ResearchNode,
     *,
     command_style: str = "console",
+    run_records: list[dict[str, Any]] | None = None,
+    gate_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     workstream = build_option_workstream_context(root, nodes, current, option.id)
     workstream["hierarchy_policy"] = hierarchy_policy(parent_option_id=option.id)
@@ -564,6 +575,21 @@ def _recommended_next_steps(node: ResearchNode, type_context: dict[str, Any], dr
     return []
 
 
+def _bound_nested_lists(value: Any, limit: int = 10) -> Any:
+    if isinstance(value, list):
+        return [_bound_nested_lists(item, limit) for item in value[:limit]]
+    if not isinstance(value, dict):
+        return value
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        if isinstance(item, list):
+            out[key] = [_bound_nested_lists(entry, limit) for entry in item[:limit]]
+            out[f"{key}_count"] = len(item)
+            out[f"{key}_omitted_count"] = max(0, len(item) - limit)
+        else:
+            out[key] = _bound_nested_lists(item, limit)
+    return out
+
 def _compact_node_summary(node: dict[str, Any] | None) -> dict[str, Any] | None:
     if not node:
         return None
@@ -590,7 +616,8 @@ def _compact_node_summary(node: dict[str, Any] | None) -> dict[str, Any] | None:
         "blocked_by",
         "handoff_context",
     ]
-    return {field: node.get(field) for field in fields if node.get(field) not in (None, "", [])}
+    summary = {field: node.get(field) for field in fields if node.get(field) not in (None, "", [])}
+    return _bound_nested_lists(summary)
 
 
 def _compact_core_problem(parent_path: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -626,41 +653,144 @@ def _compact_evidence_summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _compact_node_onboarding_context(payload: dict[str, Any]) -> dict[str, Any]:
+def _bounded_items(values: Any, limit: int, *, latest: bool = False) -> dict[str, Any]:
+    items = list(values) if isinstance(values, list) else []
+    selected = items[-limit:] if latest and limit else items[:limit]
+    selected = [_bound_nested_lists(item) for item in selected]
+    return {
+        "items": selected,
+        "total_count": len(items),
+        "omitted_count": max(0, len(items) - len(selected)),
+        "limit": limit,
+    }
+
+
+def _bounded_list_fields(
+    target: dict[str, Any],
+    key: str,
+    values: Any,
+    limit: int,
+    *,
+    latest: bool = False,
+) -> None:
+    summary = _bounded_items(values, limit, latest=latest)
+    target[key] = summary["items"]
+    target[f"{key}_count"] = summary["total_count"]
+    target[f"{key}_omitted_count"] = summary["omitted_count"]
+
+
+def _compact_next_action_scopes(scopes: Any) -> dict[str, Any]:
+    if not isinstance(scopes, dict):
+        return {}
+    out: dict[str, Any] = {}
+    omitted_counts: dict[str, int] = {}
+    for key, value in scopes.items():
+        if isinstance(value, list):
+            limit = 8 if key == "focus_path_ids" else 3
+            summary = _bounded_items(value, limit)
+            out[key] = summary["items"]
+            omitted_counts[key] = summary["omitted_count"]
+        elif key != "counts":
+            out[key] = value
+    out["counts"] = dict(scopes.get("counts", {})) if isinstance(scopes.get("counts"), dict) else {}
+    out["omitted_counts"] = omitted_counts
+    return out
+
+
+def _compact_effective_baseline(value: Any) -> dict[str, Any]:
+    baseline = dict(value) if isinstance(value, dict) else {}
+    artifacts = _bounded_items(baseline.get("artifacts"), 10)
+    baseline["artifacts"] = artifacts["items"]
+    baseline["artifacts_count"] = artifacts["total_count"]
+    baseline["artifacts_omitted_count"] = artifacts["omitted_count"]
+    return baseline
+
+
+def _assignment_cursor(root: Path, node_id: str) -> dict[str, Any] | None:
+    assignments = sorted(load_assignments(root).values(), key=lambda item: item.assignment_id)
+    matches = [
+        item
+        for item in assignments
+        if item.current_node == node_id or item.root_node == node_id
+    ]
+    if not matches:
+        return None
+    assignment = sorted(
+        matches,
+        key=lambda item: (
+            item.current_node != node_id,
+            item.status not in {"active", "claimed", "in_progress"},
+            item.assignment_id,
+        ),
+    )[0]
+    return {
+        "assignment_id": assignment.assignment_id,
+        "agent_id": assignment.agent_id,
+        "status": assignment.status,
+        "root_node": assignment.root_node,
+        "current_node": assignment.current_node,
+        "objective": assignment.objective,
+        "next_action": assignment.next_actions[0] if assignment.next_actions else None,
+        "next_actions_count": len(assignment.next_actions),
+        "updated_at": assignment.updated_at,
+    }
+
+
+def _compact_node_onboarding_context(payload: dict[str, Any], *, root: Path) -> dict[str, Any]:
     parent_path = [
         summary
         for summary in (_compact_node_summary(item) for item in payload.get("parent_chain", []))
         if summary
     ]
     recommended_next_steps = payload.get("recommended_next_steps", []) or []
+    node = _compact_node_summary(payload.get("node")) or {}
+    type_context = payload.get("type_context", {})
+    findings = type_context.get("findings", []) if isinstance(type_context, dict) else []
+    metrics = type_context.get("metrics", []) if isinstance(type_context, dict) else []
+    success_criteria = payload.get("node", {}).get("success_criteria", [])
+    baseline = _compact_effective_baseline(payload.get("effective_baseline"))
+    linked_artifacts = payload.get("node", {}).get("linked_artifacts", []) or []
+    baseline_artifacts = [
+        str(item.get("id"))
+        for item in baseline.get("artifacts", [])
+        if isinstance(item, dict) and item.get("id")
+    ]
+    key_artifacts = list(dict.fromkeys([str(item) for item in [*linked_artifacts, *baseline_artifacts] if item]))
+
     out = {
-        "schema_version": "node_context_compact_v1",
-        "node": _compact_node_summary(payload.get("node")) or {},
-        "parent_path": parent_path,
+        "schema_version": "node_context_compact_v2",
+        "compact": True,
+        "node": node,
         "core_problem": _compact_core_problem(parent_path),
-        "effective_baseline": payload.get("effective_baseline") or {},
-        "blockers": payload.get("blockers", []) or [],
-        "next_actions": payload.get("next_actions", []) or [],
-        "next_action_scopes": payload.get("next_action_scopes", {}) or {},
-        "evidence_summary": _compact_evidence_summary(payload),
+        "effective_baseline": baseline,
+        "next_action_scopes": _compact_next_action_scopes(payload.get("next_action_scopes", {})),
+        "evidence_summary": _bound_nested_lists(_compact_evidence_summary(payload)),
         "recommended_next_step": recommended_next_steps[0] if recommended_next_steps else None,
-        "recommended_next_steps": recommended_next_steps,
-        "worker_verify_commands": payload.get("worker_verify_commands", []) or [],
-        "final_handoff_commands": payload.get("final_handoff_commands", []) or [],
+        "worker_verify_commands": list(payload.get("worker_verify_commands", []) or [])[:3],
+        "final_handoff_commands": list(payload.get("final_handoff_commands", []) or [])[:3],
         "verification_note": "Run worker_verify_commands after local edits; reserve final_handoff_commands for coordinator merge, release, or final handoff.",
         "command_drafts": _compact_command_drafts(payload.get("command_drafts", {}) or {}),
         "context_freshness": payload.get("context_freshness", {}) or {},
+        "success_criteria_summary": _bounded_items(success_criteria, 5),
+        "metrics_summary": _bounded_items(metrics, 5),
+        "latest_findings": _bounded_items(findings, 3, latest=True),
+        "key_artifacts": _bounded_items(key_artifacts, 10),
+        "assignment_cursor": _assignment_cursor(root, str(node.get("id") or "")),
+        "_interaction_warnings": list(payload.get("_interaction_warnings", []) or []),
     }
+    _bounded_list_fields(out, "parent_path", parent_path, 8)
+    _bounded_list_fields(out, "blockers", payload.get("blockers", []), 10)
+    _bounded_list_fields(out, "next_actions", payload.get("next_actions", []), 5)
+    _bounded_list_fields(out, "recommended_next_steps", recommended_next_steps, 3)
     type_context = payload.get("type_context", {})
     if isinstance(type_context, dict) and type_context.get("kind") == "experiment":
         runs = type_context.get("runs")
         if isinstance(runs, dict):
-            out["run_summary"] = runs.get("summary", {})
+            out["run_summary"] = _bound_nested_lists(runs.get("summary", {}))
         gates = type_context.get("gate_results")
         if isinstance(gates, dict):
-            out["gate_summary"] = gates.get("summary", {})
+            out["gate_summary"] = _bound_nested_lists(gates.get("summary", {}))
     return out
-
 
 def build_node_onboarding_context(
     root: Path,
@@ -672,6 +802,8 @@ def build_node_onboarding_context(
     command_style: str = "console",
     link_rows: list[dict[str, Any]] | None = None,
     suggestions: list[dict[str, Any]] | None = None,
+    run_records: list[dict[str, Any]] | None = None,
+    gate_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if command_style not in VALID_COMMAND_STYLES:
         raise ValueError(f"Invalid command style: {command_style}")
@@ -690,7 +822,14 @@ def build_node_onboarding_context(
     if node.type == "option":
         type_context = _option_onboarding_context(root, nodes, current, node, command_style=command_style)
     elif node.type == "experiment":
-        type_context = _experiment_context(root, nodes, node, command_style=command_style)
+        type_context = _experiment_context(
+            root,
+            nodes,
+            node,
+            command_style=command_style,
+            run_records=run_records,
+            gate_records=gate_records,
+        )
     elif node.type == "decision":
         type_context = _decision_context(root, nodes, node, command_style=command_style)
     else:
@@ -699,6 +838,7 @@ def build_node_onboarding_context(
     command_drafts = _node_command_drafts(root, node, type_context, command_style=command_style)
     worker_verify_commands = _node_worker_verify_commands(root, node, command_style=command_style)
     final_handoff_commands = _node_final_handoff_commands(root, command_style=command_style)
+    recent_interaction_rows, interaction_warnings = _node_recent_interactions(root, node.id)
     payload = {
         "node": node_context(node),
         "parent_chain": ordered_node_contexts(nodes, path_ids),
@@ -718,7 +858,8 @@ def build_node_onboarding_context(
         ),
         "relevant_suggestions": _node_relevant_suggestions(suggestions, node.id, related_ids),
         "resources": [row for row in link_rows if row.get("node_id") in related_ids],
-        "recent_interactions": _node_recent_interactions(root, node.id),
+        "recent_interactions": recent_interaction_rows,
+        "_interaction_warnings": interaction_warnings,
         "context_freshness": _node_context_freshness(root),
         "type_context": type_context,
         "command_drafts": command_drafts,
@@ -727,5 +868,5 @@ def build_node_onboarding_context(
         "recommended_next_steps": _recommended_next_steps(node, type_context, command_drafts),
     }
     if compact:
-        return _compact_node_onboarding_context(payload)
+        return _compact_node_onboarding_context(payload, root=root)
     return payload

@@ -124,7 +124,7 @@ Use `research-cockpit set-focus` for coordinator/UI selection:
 research-cockpit set-focus --root research_cockpit --focus-node problem_id
 ```
 
-Coordinator focus changes write `coordinator_state.yaml`, mirror legacy `current_state.yaml` focus fields for compatibility, append `interaction_log.yaml`, and rebuild dashboard/context unless `--no-build` is passed.
+Coordinator focus changes write `coordinator_state.yaml`, mirror legacy `current_state.yaml` focus fields for compatibility, append through the active interaction backend via `interaction_log.py`, and rebuild dashboard/context unless `--no-build` is passed.
 
 Passing `--next-action` replaces coordinator/global `next_actions` with the repeated values supplied in this command and mirrors them to legacy `current_state.next_actions`. It does not append.
 

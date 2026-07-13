@@ -13,10 +13,12 @@ DEV_SCRIPTS = ROOT_DIR / "dev" / "scripts"
 sys.path.insert(0, str(DEV_SCRIPTS))
 
 from run_skill_release_check import (
+    _run_command,
     package_shape_track,
     public_scan_track,
     release_check_payload,
     runtime_dependency_track,
+    workflow_contract_track,
 )
 from run_subagent_forward_check import subagent_forward_check_payload
 from run_agent_usability_check import agent_usability_check_payload
@@ -39,6 +41,16 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertTrue(shape["passed"], shape)
         self.assertTrue(public["passed"], public)
 
+    def test_workflow_contract_track_checks_compact_and_closeout_contracts(self) -> None:
+        track = workflow_contract_track(SKILL_ROOT, sys.executable)
+
+        self.assertTrue(track["passed"], track)
+        self.assertEqual(track["summary"]["context_schema_version"], "context_compact_v2")
+        self.assertLessEqual(track["summary"]["context_stdout_bytes"], 64 * 1024)
+        self.assertLessEqual(track["summary"]["command_summary_stdout_bytes"], 20 * 1024)
+        self.assertEqual(track["summary"]["artifact_default_mode"], "record")
+        self.assertTrue(track["summary"]["structured_closeout_documented"])
+
     def test_public_scan_reports_private_path_like_content(self) -> None:
         package = self.tmp_root / "research-cockpit"
         package.mkdir()
@@ -60,6 +72,31 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertNotIn("Traceback", track["stdout"])
         self.assertNotIn("Traceback", track["stderr"])
 
+    def test_run_command_decodes_utf8_output_independently_of_platform_locale(self) -> None:
+        check = _run_command(
+            [
+                sys.executable,
+                "-c",
+                'import sys; sys.stdout.buffer.write("跨平台输出".encode("utf-8"))',
+            ]
+        )
+
+        self.assertTrue(check["passed"], check)
+        self.assertEqual(check["stdout"], "跨平台输出")
+        self.assertEqual(check["stderr"], "")
+    def test_run_command_reports_untruncated_output_byte_counts(self) -> None:
+        expected = "x" * 4096 + "跨平台"
+        check = _run_command(
+            [
+                sys.executable,
+                "-c",
+                f"import sys; sys.stdout.buffer.write({expected!r}.encode('utf-8'))",
+            ]
+        )
+
+        self.assertTrue(check["passed"], check)
+        self.assertLess(len(check["stdout"]), len(expected))
+        self.assertEqual(check["stdout_bytes"], len(expected.encode("utf-8")))
     def test_release_check_skip_mutating_runs_read_only_tracks(self) -> None:
         payload = release_check_payload(
             SKILL_ROOT,
@@ -73,6 +110,7 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertTrue(payload["ok"], payload)
         self.assertTrue(by_name["read_only_startup"]["passed"], by_name["read_only_startup"])
         self.assertTrue(by_name["portable_copy"]["passed"], by_name["portable_copy"])
+        self.assertTrue(by_name["workflow_contract"]["passed"], by_name["workflow_contract"])
         self.assertEqual(by_name["isolated_mutation"]["skipped"], True)
 
     def test_release_check_missing_package_path_fails_without_traceback(self) -> None:
@@ -160,6 +198,7 @@ class SkillReleaseCheckTests(unittest.TestCase):
                 "agent_c_safe_option_workstream",
                 "agent_d_decision_suggestion_dry_run",
                 "agent_e_ui_collaboration_docs",
+                "agent_f_worker_closeout",
             ],
         )
         for case in by_case.values():
@@ -170,6 +209,8 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertTrue(by_case["agent_c_safe_option_workstream"]["agent_observations"]["dry_run_preserved_files"])
         self.assertIn("claim_option", by_case["agent_c_safe_option_workstream"]["agent_observations"]["interaction_kinds"])
         self.assertGreater(by_case["agent_c_safe_option_workstream"]["metrics"]["dry_run_count"], 0)
+        self.assertTrue(by_case["agent_f_worker_closeout"]["agent_observations"]["default_ingest_created_record"])
+        self.assertTrue(by_case["agent_f_worker_closeout"]["agent_observations"]["structured_closeout_linked_record"])
 
 
 if __name__ == "__main__":

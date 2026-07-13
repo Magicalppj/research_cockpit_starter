@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import yaml
 from pathlib import Path
 from typing import Any
 
@@ -9,9 +10,24 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.agent_state import load_assignments
+from research_cockpit.agent_state import AssignmentRecord, load_agents, load_assignments
+from research_cockpit.cli_progress import progress_traced
+from research_cockpit.commands._runtime import emit_json
 from research_cockpit.lifecycle_guards import terminal_parent_guard_failures
-from research_cockpit.model import ResearchNode, load_explicit_edges, load_nodes, load_runs, load_yaml, validate_cockpit, validate_nodes
+from research_cockpit.model import (
+    ResearchNode,
+    RunRecord,
+    load_explicit_edges,
+    load_nodes,
+    load_runs,
+    load_yaml,
+    validate_artifact_records,
+    validate_assignments,
+    validate_cockpit,
+    validate_nodes,
+    validate_runs,
+)
+from research_cockpit.gate_result_records import validate_gate_result_records
 from research_cockpit.validation_index import is_index_schema_compatible, load_validation_index, node_reference_ids, signature_matches
 
 
@@ -284,19 +300,32 @@ def _index_assignment_context_from_file(index: dict[str, Any], normalized: str) 
 
 
 def _index_artifact_record_context_from_file(index: dict[str, Any], normalized: str) -> tuple[list[str], list[str], list[str]]:
-    record_ids: list[str] = []
-    node_ids: list[str] = []
-    run_ids: list[str] = []
-    for record_id, record in (index.get("artifact_records", {}) or {}).items():
-        if record.get("file") != normalized:
-            continue
-        record_ids.append(str(record_id))
-        if record.get("experiment_id"):
-            node_ids.append(str(record["experiment_id"]))
-        if record.get("run_id"):
-            run_ids.append(str(record["run_id"]))
-    return _unique_strings(record_ids), _unique_strings(node_ids), _unique_strings(run_ids)
+    row = (index.get("artifact_record_files", {}) or {}).get(normalized)
+    if not isinstance(row, dict):
+        return [], [], []
+    experiment_id = str(row.get("experiment_id") or "")
+    return (
+        _unique_strings([str(record_id) for record_id in row.get("record_ids", []) or []]),
+        _unique_strings([experiment_id] if experiment_id else []),
+        _unique_strings([str(run_id) for run_id in row.get("run_ids", []) or []]),
+    )
 
+
+def _index_gate_context_from_file(index: dict[str, Any], normalized: str) -> tuple[list[str], list[str], list[str]]:
+    files = index.get("files", {}) or {}
+    gate_id = (files.get("gate_results", {}) or {}).get(normalized)
+    if not gate_id:
+        gate_id = (files.get("gate_payloads", {}) or {}).get(normalized)
+    if not gate_id:
+        return [], [], []
+    row = (index.get("gate_results", {}) or {}).get(str(gate_id), {})
+    experiment_id = str(row.get("experiment_id") or "")
+    run_id = str(row.get("run_id") or "")
+    return (
+        [str(gate_id)],
+        _unique_strings([experiment_id] if experiment_id else []),
+        _unique_strings([run_id] if run_id else []),
+    )
 
 def _index_changed_records(
     index: dict[str, Any],
@@ -388,12 +417,29 @@ def _index_affected_assignments(
     return _unique_strings(out)
 
 
+def _index_affected_gates(
+    index: dict[str, Any],
+    affected_nodes: list[str],
+    affected_runs: list[str],
+    changed_gate_ids: list[str],
+) -> list[str]:
+    by_experiment = index.get("gate_results_by_experiment", {}) or {}
+    by_run = index.get("gate_results_by_run", {}) or {}
+    out = list(changed_gate_ids)
+    for node_id in affected_nodes:
+        out.extend(str(gate_id) for gate_id in by_experiment.get(node_id, []) or [])
+    for run_id in affected_runs:
+        out.extend(str(gate_id) for gate_id in by_run.get(run_id, []) or [])
+    return _unique_strings(out)
+
+
 def _index_required_files(
     index: dict[str, Any],
     affected_nodes: list[str],
     affected_runs: list[str],
     affected_assignments: list[str],
     artifact_record_ids: list[str],
+    gate_ids: list[str],
 ) -> list[tuple[str, dict[str, Any] | None]]:
     required: list[tuple[str, dict[str, Any] | None]] = []
     for node_id in affected_nodes:
@@ -412,6 +458,12 @@ def _index_required_files(
         row = (index.get("artifact_records", {}) or {}).get(record_id, {})
         if row.get("file"):
             required.append((str(row["file"]), row.get("file_signature")))
+    for gate_id in gate_ids:
+        row = (index.get("gate_results", {}) or {}).get(gate_id, {})
+        if row.get("record_file"):
+            required.append((str(row["record_file"]), row.get("record_file_signature")))
+        if row.get("payload_file"):
+            required.append((str(row["payload_file"]), row.get("payload_file_signature")))
     out: list[tuple[str, dict[str, Any] | None]] = []
     seen: set[str] = set()
     for rel_path, signature in required:
@@ -419,7 +471,6 @@ def _index_required_files(
             out.append((rel_path, signature))
             seen.add(rel_path)
     return out
-
 
 def _index_stub_node(node_id: str, row: dict[str, Any]) -> ResearchNode:
     raw = {
@@ -439,7 +490,11 @@ def _index_local_errors(
     root: Path,
     index: dict[str, Any],
     affected_nodes: list[str],
+    *,
+    affected_runs: list[str] | None = None,
+    affected_assignments: list[str] | None = None,
     artifact_record_ids: list[str] | None = None,
+    gate_ids: list[str] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     indexed_nodes = index.get("nodes", {}) or {}
@@ -456,7 +511,11 @@ def _index_local_errors(
         if not row.get("file"):
             errors.append(f"changed affected node does not exist in validation index: {node_id!r}")
             continue
-        data = load_yaml(root / str(row["file"]))
+        try:
+            data = load_yaml(root / str(row["file"]))
+        except (OSError, yaml.YAMLError) as exc:
+            errors.append(f"{node_id}: YAML parse error: {exc}")
+            continue
         if not isinstance(data, dict):
             errors.append(f"{node_id}: node file must be a mapping")
             continue
@@ -473,6 +532,7 @@ def _index_local_errors(
     for node_id in affected_nodes:
         if node_id not in nodes and node_id not in indexed_nodes:
             errors.append(f"changed affected node does not exist in validation index: {node_id!r}")
+
     def validate_record_refs(owner_id: str, field_name: str, value: Any) -> None:
         if value is None:
             return
@@ -497,8 +557,128 @@ def _index_local_errors(
                 f"findings[{finding_index}].linked_artifact_records",
                 finding.get("linked_artifact_records"),
             )
-    return errors
 
+    indexed_runs = index.get("runs", {}) or {}
+    runs: dict[str, RunRecord] = {}
+    for run_id, row in indexed_runs.items():
+        if not isinstance(row, dict):
+            continue
+        runs[str(run_id)] = RunRecord.from_dict(
+            {
+                "run_id": str(run_id),
+                "status": str(row.get("status") or "running"),
+                "experiment_id": str(row.get("experiment_id") or ""),
+            }
+        )
+    parsed_runs: dict[str, RunRecord] = {}
+    for run_id in affected_runs or []:
+        row = indexed_runs.get(run_id, {})
+        rel_path = str(row.get("file") or "")
+        if not rel_path:
+            continue
+        try:
+            data = load_yaml(root / rel_path)
+        except (OSError, yaml.YAMLError) as exc:
+            errors.append(f"{rel_path}: YAML parse error: {exc}")
+            continue
+        if not isinstance(data, dict):
+            errors.append(f"{rel_path}: run record must be a mapping")
+            continue
+        if data.get("run_id") in (None, ""):
+            errors.append(f"{rel_path}: missing required field 'run_id'")
+            continue
+        run = RunRecord.from_dict(data)
+        if run.run_id != run_id:
+            errors.append(f"{run_id}: run file id mismatch {run.run_id!r}")
+            continue
+        runs[run_id] = run
+        parsed_runs[run_id] = run
+    errors.extend(validate_runs(parsed_runs, nodes))
+
+    parsed_assignments: dict[str, AssignmentRecord] = {}
+    indexed_assignments = index.get("assignments", {}) or {}
+    for assignment_id in affected_assignments or []:
+        row = indexed_assignments.get(assignment_id, {})
+        rel_path = str(row.get("file") or "")
+        if not rel_path:
+            errors.append(f"changed affected assignment does not exist in validation index: {assignment_id!r}")
+            continue
+        try:
+            data = load_yaml(root / rel_path)
+        except (OSError, yaml.YAMLError) as exc:
+            errors.append(f"{rel_path}: YAML parse error: {exc}")
+            continue
+        if not isinstance(data, dict):
+            errors.append(f"{rel_path}: assignment record must be a mapping")
+            continue
+        if data.get("assignment_id") in (None, ""):
+            errors.append(f"{rel_path}: missing required field 'assignment_id'")
+            continue
+        assignment = AssignmentRecord.from_dict(data)
+        if assignment.assignment_id != assignment_id:
+            errors.append(f"{assignment_id}: assignment file id mismatch {assignment.assignment_id!r}")
+            continue
+        parsed_assignments[assignment_id] = assignment
+    if parsed_assignments:
+        try:
+            agents = load_agents(root)
+        except Exception as exc:
+            errors.append(str(exc))
+            agents = {}
+        errors.extend(validate_assignments(parsed_assignments, agents, nodes))
+
+    if artifact_record_ids:
+        indexed_records = index.get("artifact_records", {}) or {}
+        records: dict[str, dict[str, Any]] = {
+            str(record_id): {
+                "record_id": str(record_id),
+                "experiment_id": str(row.get("experiment_id") or ""),
+                **({"run_id": str(row["run_id"])} if row.get("run_id") else {}),
+            }
+            for record_id, row in indexed_records.items()
+            if isinstance(row, dict)
+        }
+        record_files = {
+            str(indexed_records[record_id].get("file") or "")
+            for record_id in artifact_record_ids
+            if isinstance(indexed_records.get(record_id), dict)
+        }
+        for rel_path in sorted(path for path in record_files if path):
+            try:
+                data = load_yaml(root / rel_path)
+            except (OSError, yaml.YAMLError) as exc:
+                errors.append(f"{rel_path}: YAML parse error: {exc}")
+                continue
+            if not isinstance(data, dict):
+                errors.append(f"{rel_path}: artifact record file must be a mapping")
+                continue
+            raw_records = data.get("records")
+            if not isinstance(raw_records, dict):
+                errors.append(f"{rel_path}: records must be a mapping")
+                continue
+            for record_id, row in list(indexed_records.items()):
+                if isinstance(row, dict) and row.get("file") == rel_path:
+                    records.pop(str(record_id), None)
+            experiment_id = str(data.get("experiment_id") or Path(rel_path).stem)
+            for record_id, record in raw_records.items():
+                if not isinstance(record, dict):
+                    errors.append(f"artifact record {str(record_id)!r}: record must be a mapping")
+                    continue
+                payload = dict(record)
+                payload.setdefault("record_id", str(record_id))
+                payload.setdefault("experiment_id", experiment_id)
+                records[str(record_id)] = payload
+        errors.extend(validate_artifact_records(root, nodes, list(records.values())))
+
+    if gate_ids:
+        gate_rows = index.get("gate_results", {}) or {}
+        record_paths = [
+            root / str(gate_rows[gate_id]["record_file"])
+            for gate_id in gate_ids
+            if isinstance(gate_rows.get(gate_id), dict) and gate_rows[gate_id].get("record_file")
+        ]
+        errors.extend(validate_gate_result_records(root, nodes, runs, record_paths=record_paths))
+    return errors
 
 def _index_current_changed_node_refs(root: Path, index: dict[str, Any], changed_node_ids: list[str]) -> list[str]:
     nodes = index.get("nodes", {}) or {}
@@ -606,6 +786,7 @@ def _indexed_validation_payload_or_reason(
     changed_assignment_ids: list[str] = []
     file_context_node_ids: list[str] = []
     file_record_ids: list[str] = []
+    changed_gate_ids: list[str] = []
     for normalized_file in normalized_files:
         run_ids, run_node_ids = _index_run_context_from_file(index, normalized_file)
         changed_run_ids.extend(run_ids)
@@ -617,19 +798,18 @@ def _indexed_validation_payload_or_reason(
         file_record_ids.extend(record_ids)
         file_context_node_ids.extend(record_node_ids)
         changed_run_ids.extend(record_run_ids)
-    known_index_files = set((index.get("files", {}).get("nodes", {}) or {}).keys())
-    known_index_files.update((index.get("files", {}).get("runs", {}) or {}).keys())
-    known_index_files.update((index.get("files", {}).get("assignments", {}) or {}).keys())
-    known_index_files.update(
-        str(record.get("file"))
-        for record in (index.get("artifact_records", {}) or {}).values()
-        if isinstance(record, dict) and record.get("file")
-    )
+        gate_ids, gate_node_ids, gate_run_ids = _index_gate_context_from_file(index, normalized_file)
+        changed_gate_ids.extend(gate_ids)
+        file_context_node_ids.extend(gate_node_ids)
+        changed_run_ids.extend(gate_run_ids)
+    known_index_files: set[str] = set()
+    for file_map in (index.get("files", {}) or {}).values():
+        if isinstance(file_map, dict):
+            known_index_files.update(str(path) for path in file_map)
     unknown_changed_files = [path for path in normalized_files if path not in known_index_files]
     if unknown_changed_files:
         return None, "validation_index_unknown_changed_file"
-    if changed_run_ids or changed_assignment_ids or file_record_ids:
-        return None, "validation_index_non_node_changed_file"
+
     changed_record_values = _unique_strings([*changed_records, *[f"artifact:{record_id}" for record_id in file_record_ids]])
     changed_artifact_records, record_errors, record_node_ids, record_run_ids = _index_changed_records(index, changed_record_values)
     if record_errors:
@@ -655,6 +835,30 @@ def _indexed_validation_payload_or_reason(
     affected_nodes = _index_affected_nodes(index, affected_seed_node_ids)
     affected_runs = _index_affected_runs(index, affected_nodes, _unique_strings([*changed_run_ids, *record_run_ids]))
     affected_assignments = _index_affected_assignments(index, affected_nodes, _unique_strings(changed_assignment_ids))
+    affected_gates = _index_affected_gates(index, affected_nodes, affected_runs, _unique_strings(changed_gate_ids))
+    gate_rows = index.get("gate_results", {}) or {}
+    gate_artifact_ids = _unique_strings([
+        str(gate_rows[gate_id].get("artifact_id") or "")
+        for gate_id in affected_gates
+        if isinstance(gate_rows.get(gate_id), dict)
+        and gate_rows[gate_id].get("artifact_id")
+    ])
+    if gate_artifact_ids:
+        affected_nodes = _index_affected_nodes(
+            index,
+            [*affected_seed_node_ids, *gate_artifact_ids],
+        )
+        affected_runs = _index_affected_runs(
+            index,
+            affected_nodes,
+            _unique_strings([*changed_run_ids, *record_run_ids]),
+        )
+        affected_gates = _index_affected_gates(
+            index,
+            affected_nodes,
+            affected_runs,
+            _unique_strings(changed_gate_ids),
+        )
     changed_node_artifact_records = _index_artifact_records_for_nodes(index, changed_node_ids)
     if changed_node_type_changed and (affected_runs or affected_assignments or changed_node_artifact_records):
         return None, "validation_index_affected_records_require_full_validation"
@@ -664,6 +868,7 @@ def _indexed_validation_payload_or_reason(
         affected_runs,
         affected_assignments,
         changed_artifact_records,
+        affected_gates,
     )
     declared_changed_files = _index_declared_changed_files(
         index,
@@ -678,7 +883,15 @@ def _indexed_validation_payload_or_reason(
     ]
     if stale_files:
         return None, "validation_index_file_hash_mismatch"
-    local_errors = _index_local_errors(root, index, affected_nodes, artifact_record_ids=changed_artifact_records)
+    local_errors = _index_local_errors(
+        root,
+        index,
+        affected_nodes,
+        affected_runs=affected_runs,
+        affected_assignments=affected_assignments,
+        artifact_record_ids=changed_artifact_records,
+        gate_ids=affected_gates,
+    )
     all_errors = [*target_errors, *record_errors, *local_errors]
     ok = not all_errors
     return {
@@ -694,6 +907,7 @@ def _indexed_validation_payload_or_reason(
             "runs": affected_runs,
             "assignments": affected_assignments,
             "artifact_records": changed_artifact_records,
+            "gate_results": affected_gates,
         },
         "checks": [
             {"name": "changed_targets", "passed": not target_errors and not record_errors},
@@ -769,7 +983,13 @@ def _incremental_validation_payload(
 
     nodes = load_nodes(root)
     explicit_edges = load_explicit_edges(root)
-    errors = validate_cockpit(root, nodes, explicit_edges=explicit_edges, include_interaction_log=True)
+    errors = validate_cockpit(
+        root,
+        nodes,
+        explicit_edges=explicit_edges,
+        include_interaction_log=True,
+        include_gate_results=True,
+    )
     lifecycle_errors = terminal_parent_guard_failures(nodes) if strict_lifecycle else []
     if lifecycle_errors:
         errors = [*errors, *[_lifecycle_error_message(error) for error in lifecycle_errors]]
@@ -867,6 +1087,7 @@ def _incremental_validation_payload(
     return payload
 
 
+@progress_traced("validate")
 def validation_payload(
     root: Path,
     *,
@@ -888,7 +1109,12 @@ def validation_payload(
         )
 
     nodes = load_nodes(root)
-    errors = validate_cockpit(root, nodes, include_interaction_log=True)
+    errors = validate_cockpit(
+        root,
+        nodes,
+        include_interaction_log=True,
+        include_gate_results=True,
+    )
     lifecycle_errors = terminal_parent_guard_failures(nodes) if strict_lifecycle else []
     if lifecycle_errors:
         errors = [*errors, *[_lifecycle_error_message(error) for error in lifecycle_errors]]
@@ -906,10 +1132,43 @@ def validation_payload(
     return payload
 
 
+def compact_validation_payload(payload: dict[str, Any], *, include_affected_ids: bool = False) -> dict[str, Any]:
+    changed = payload.get("changed") if isinstance(payload.get("changed"), dict) else {}
+    affected = payload.get("affected") if isinstance(payload.get("affected"), dict) else {}
+    result = {
+        "schema_version": "validation_compact_v1",
+        "root": payload.get("root", ""),
+        "valid": bool(payload.get("valid", payload.get("ok", False))),
+        "ok": bool(payload.get("ok", payload.get("valid", False))),
+        "mode": payload.get("mode", "full"),
+        "strict_lifecycle": bool(payload.get("strict_lifecycle", False)),
+        "node_count": int(payload.get("node_count", 0)),
+        "changed_counts": {key: len(value) for key, value in changed.items() if isinstance(value, list)},
+        "affected_counts": {key: len(value) for key, value in affected.items() if isinstance(value, list)},
+        "checks": payload.get("checks", {}),
+        "fallback": payload.get("fallback", {"used_full_validation": False, "reason": ""}),
+        "index": payload.get("index", {}),
+        "errors": list(payload.get("errors", [])),
+        "warnings": list(payload.get("warnings", [])),
+    }
+    if include_affected_ids:
+        result["changed"] = changed
+        result["affected"] = affected
+    if "lifecycle_errors" in payload:
+        result["lifecycle_errors"] = payload["lifecycle_errors"]
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--json", action="store_true", help="Print machine-readable validation output")
+    parser.add_argument("--compact", action="store_true", help="Emit a bounded JSON summary without changed or affected ids.")
+    parser.add_argument(
+        "--include-affected-ids",
+        action="store_true",
+        help="Include changed and affected ids in compact JSON output.",
+    )
     parser.add_argument(
         "--strict-lifecycle",
         action="store_true",
@@ -930,6 +1189,7 @@ def main() -> None:
         default=[],
         help="Validate the affected scope for a changed record such as artifact:<record_id>.",
     )
+    parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
 
     changed_files = _flatten_changed_files(args.changed_file, args.changed_files)
@@ -941,7 +1201,8 @@ def main() -> None:
         changed_records=args.changed_record,
     )
     if args.json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        output = compact_validation_payload(payload, include_affected_ids=args.include_affected_ids) if args.compact else payload
+        emit_json(output, compact=args.compact)
     elif payload.get("mode") == "incremental":
         changed_count = len(payload.get("changed", {}).get("nodes", []))
         affected_count = len(payload.get("affected", {}).get("nodes", []))

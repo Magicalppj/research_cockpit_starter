@@ -20,7 +20,14 @@ from research_cockpit.commands._evidence import (
     validate_node_refs,
 )
 from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
-from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import (
+    compact_mutation_result,
+    dry_run_preflight_result,
+    emit_json,
+    finish_mutation,
+    load_validated_state,
+    yaml_change_diff,
+)
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import ResearchNode, ValidationError, load_yaml, script_command, validate_cockpit
 
@@ -144,6 +151,7 @@ def main() -> None:
     parser.add_argument("--link", action="append", dest="links", help="Artifact resource link in key=value form; repeatable.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     add_assignment_scope_args(parser)
@@ -170,7 +178,18 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        payload = (
+            compact_mutation_result(
+                result,
+                command="link-artifact",
+                target={"artifact_id": result["artifact_id"]},
+                root=args.root,
+                updated=[result["artifact_id"], *result.get("linked_to", [])],
+            )
+            if args.compact
+            else result
+        )
+        emit_json(payload, compact=args.compact)
         return
     verb = "Would link" if args.dry_run else "Linked"
     print(f"{verb} artifact {args.artifact_id}")

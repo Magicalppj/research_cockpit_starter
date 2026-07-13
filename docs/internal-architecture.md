@@ -61,7 +61,7 @@ Dependency direction should generally flow downward. For example, `commands/*` m
 - `commands/_assignment_scope_cli.py`: shared `--assignment` / `--coordinator` CLI flags and structured assignment-scope error output.
 - `ui/`: researcher-facing Streamlit app, graph rendering wrappers, text labels, and view formatting helpers.
 
-Commands are the public write boundary. A mutating command should validate, prepare candidate data, write YAML, append `interaction_log.yaml`, and optionally rebuild dashboard/context output. Dry-run paths must not write YAML, logs, or generated dashboards.
+Commands are the public write boundary. A mutating command should validate, prepare candidate data, write truth-source files, append through the active interaction backend via `interaction_log.py`, and optionally rebuild dashboard/context output. Dry-run paths must not write truth sources, interaction history, or generated dashboards.
 
 ### Workflow And Domain Layer
 
@@ -122,13 +122,22 @@ Truth-source data lives in:
 - `<data-root>/current_state.yaml` for legacy/coordinator compatibility focus, baseline, and global next-action state
 - `<data-root>/graph/nodes/*.yaml`
 - `<data-root>/graph/edges.yaml` when present
-- sidecar files such as `<data-root>/graph/graph_views.yaml` and `<data-root>/graph/interaction_log.yaml`
+- sidecar files such as <data-root>/graph/graph_views.yaml and the legacy <data-root>/graph/interaction_log.yaml prefix
+- <data-root>/graph/interaction_events/** for the active append-only JSONL audit backend
 - `<data-root>/runs/*.yaml` for concrete experiment executions
 - `<data-root>/gate_results/*.yaml` for gate metadata records
 - `<data-root>/gate_results/*.json` for gate payloads written by `record-gate-result`
 - `<data-root>/artifact_records/*.yaml` for lightweight evidence metadata created by record-only artifact ingest
 - `<data-root>/artifact_migrations/*.yaml` for artifact demotion audit reports
 - `<data-root>/artifacts/**` for long-lived evidence payloads and ingest manifests
+
+Runtime access rules:
+
+- `root_snapshot.py` owns compact indexed reads for known-node and assignment-scoped context.
+- `mutation_runtime.py` owns targeted preflight, optimistic file checks, atomic multi-file transactions, rollback, and validation-index patching.
+- `validation_index.py` is a derived acceleration index; missing, incompatible, or stale indexes must fall back to full validation and return explicit refresh commands.
+- `interaction_log.py` owns both legacy YAML compatibility and the JSONL event backend. Commands must append through this module and must not rewrite interaction history.
+- `run_closeout.py` owns the `run_closeout_v1` transaction across run, gate metadata, artifact-record link, finding, and next actions.
 
 Generated output lives in `<data-root>/dashboards/` and can be rebuilt with:
 

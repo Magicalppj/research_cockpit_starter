@@ -2,14 +2,15 @@
 
 ## Source Of Truth
 
-- Treat the project data root `research_cockpit/agents/*.yaml`, `research_cockpit/assignments/*.yaml`, `research_cockpit/coordinator_state.yaml`, `research_cockpit/current_state.yaml`, `research_cockpit/graph/nodes/*.yaml`, `research_cockpit/runs/*.yaml`, `research_cockpit/gate_results/*.yaml`, `research_cockpit/gate_results/*.json`, and `research_cockpit/artifact_records/*.yaml` as the truth source for structured state.
+- Treat the project data root `research_cockpit/agents/*.yaml`, `research_cockpit/assignments/*.yaml`, `research_cockpit/coordinator_state.yaml`, `research_cockpit/current_state.yaml`, `research_cockpit/graph/nodes/*.yaml`, `research_cockpit/graph/interaction_events/**`, `research_cockpit/runs/*.yaml`, `research_cockpit/gate_results/*.yaml`, `research_cockpit/gate_results/*.json`, and `research_cockpit/artifact_records/*.yaml` as the truth source for structured state and append-only interaction history.
 - Treat `research_cockpit/assignments/*.yaml` as the worker-local cursor and next-action source in multi-agent sessions.
 - Treat `research_cockpit/coordinator_state.yaml` as coordinator/UI selection state.
 - Treat `research_cockpit/current_state.yaml` as legacy/coordinator compatibility state, not the default worker cursor.
 - Treat `research_cockpit/artifacts/*` as long-lived evidence payloads, not generated dashboard context.
 - Treat `research_cockpit/artifact_records/*.yaml` as lightweight structured evidence metadata, not generated dashboard context.
 - Treat `research_cockpit/artifact_migrations/*.yaml` as artifact demotion audit reports written by `compact-artifacts`.
-- Treat `research_cockpit/dashboards/*` as generated context. Regenerate it with `research-cockpit build --root <data-root>` after YAML changes.
+- Treat `graph/interaction_log.yaml` as the immutable legacy interaction prefix after `graph/interaction_events/manifest.json` exists. New events append under `graph/interaction_events/`; use `migrate-interaction-log` instead of editing either backend.
+- Treat `research_cockpit/dashboards/*` as generated context. Regenerate it only when a consumer needs fresh dashboard context or before coordinator/release/final handoff; ordinary worker verification does not require `build`.
 - Do not infer current state from Markdown notes. Notes are long-form supporting records.
 
 ## Plugin Boundary
@@ -44,7 +45,8 @@ Do not run both `bootstrap` and `context --with-bootstrap` for normal known-node
 - Use `effective_baseline` from `context`/`node-context` as the default inherited option, decision, and artifact bundle; do not scan all accepted history unless asked.
 - Do not directly set a decision to `accepted`; use `research-cockpit accept-decision --root <data-root> --id <decision_id>`.
 - Do not execute a suggested command just because it appears in Action Guidance. Queue, dismiss, or complete suggestions only when asked.
-- For ordinary run output, prefer ingest-artifact --record-only --json --compact --no-build; promote records to graph artifacts only when they become durable evidence for navigation, decisions, or baselines.
+- For ordinary experiment run output, use `ingest-artifact --json --compact --no-build`; record mode is the default and `--record-only` remains an explicit compatibility flag. Create a graph artifact only with `--promote --promotion-reason "..."`, or promote an existing record with `promote-artifact-record --promotion-reason "..."`.
+- Close a run, gate records, finding, artifact-record link, and next actions with one `complete-run --file <closeout.yaml> --json --compact --no-build` transaction. Use `complete-run --id` only for a status-only closeout. After `ingest-artifact`, set `artifact_record.existing_record_id` in the closeout file instead of creating a duplicate record.
 - Use compact-artifacts --dry-run before artifact demotion. Execute only a single can_demote artifact with --execute --id <artifact_id>; this writes an artifact record and migration report but must not delete payload files.
 
 ## Verification
@@ -66,7 +68,7 @@ research-cockpit build --root <data-root>
 research-cockpit smoke --root <data-root> --json --progress
 ```
 
-Default root `smoke` is compact for large roots. Use `smoke --scope changed --id <node_id> --json --progress` for one-node worker checks, and use `--full` only when explicitly diagnosing the older full subprocess workflow.
+Default root `smoke` is compact for large roots. Use `smoke --scope changed --id <node_id> --json --progress` for one-node worker checks, and use `--full` only when explicitly diagnosing the older full subprocess workflow. `--progress` emits JSON lines to stderr; stdout remains a single machine-readable JSON payload.
 ## Environment
 
 - Set `RESEARCH_COCKPIT_ROOT` when commands should default to a specific data root.

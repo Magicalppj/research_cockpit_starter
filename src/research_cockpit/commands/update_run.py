@@ -14,7 +14,9 @@ from research_cockpit.commands._runtime import (
     dry_run_preflight_result,
     emit_json,
     finish_mutation,
+    load_targeted_state,
     load_validated_state,
+    validate_mutation_candidate,
     safe_print,
     yaml_change_diff,
 )
@@ -61,8 +63,8 @@ def update_run(
     assignment_id: str | None = None,
     coordinator: bool = False,
 ) -> dict[str, Any]:
-    state = load_validated_state(root)
-    runs = load_runs(root)
+    state = load_targeted_state(root, run_ids=[run_id])
+    runs = dict(state.runs) if state.targeted and state.runs is not None else load_runs(root)
     path = run_path(root, run_id)
     normalized_id = path.stem
     if normalized_id not in runs:
@@ -103,7 +105,7 @@ def update_run(
 
     candidate = dict(runs)
     candidate[normalized_id] = RunRecord.from_dict(after_data)
-    validate_cockpit(root, state.nodes, state.current, state.explicit_edges, runs=candidate, raise_on_error=True)
+    validate_mutation_candidate(root, state, runs=candidate)
 
     changed = before_data != after_data
     changes = [(path, before_data, after_data)] if changed else []
@@ -170,6 +172,7 @@ def main() -> None:
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     add_assignment_scope_args(parser)
+    parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
 
     try:

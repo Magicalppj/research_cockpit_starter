@@ -6,6 +6,7 @@ from pathlib import Path
 import time
 from typing import Any
 
+from research_cockpit.cli_progress import progress_traced
 from research_cockpit.paths import default_data_root
 import json
 
@@ -511,6 +512,7 @@ def _resolve_profile_output(root: Path, profile_output: Path) -> Path:
     return candidate
 
 
+@progress_traced("build_dashboard")
 def build_dashboard_once(
     root: Path,
     *,
@@ -684,6 +686,7 @@ def main() -> None:
         action="store_true",
         help="Skip reading local linked resource text while keeping node and note search entries.",
     )
+    parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
     profile_enabled = args.profile or args.profile_output is not None
 

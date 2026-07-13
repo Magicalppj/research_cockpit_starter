@@ -12,7 +12,7 @@ ROOT = default_data_root()
 
 from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
-from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, finish_mutation, load_targeted_state, validate_mutation_candidate, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.model import ResearchNode, ValidationError, load_yaml, script_command, validate_cockpit
 from research_cockpit.retention import validate_retention
@@ -322,14 +322,14 @@ def update_node_fields(
     if replace_next_actions is not None and list_appends.get("next_actions"):
         raise ValueError("--next-action cannot be used together with --replace-next-actions")
 
-    state = load_validated_state(root)
-    nodes = state.nodes
-    if node_id not in nodes:
-        raise ValueError(f"Node does not exist: {node_id}")
     referenced_node_ids = referenced_node_ids_from_field_updates(
         current_best_option=current_best_option,
         list_appends=list_appends,
     )
+    state = load_targeted_state(root, node_ids=[node_id, *referenced_node_ids])
+    nodes = state.nodes
+    if node_id not in nodes:
+        raise ValueError(f"Node does not exist: {node_id}")
     ensure_assignment_scope(
         root,
         nodes,
@@ -363,7 +363,7 @@ def update_node_fields(
         coordinator=coordinator,
         target_node_ids=[node_id],
     )
-    validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
+    validate_mutation_candidate(root, state, nodes=candidate)
 
     before = _field_snapshot(before_data, touched_fields)
     after = _field_snapshot(data, touched_fields)
@@ -448,6 +448,7 @@ def main() -> None:
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     add_assignment_scope_args(parser)
+    parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
     scalar_updates = {
         key: value

@@ -8,7 +8,15 @@ from typing import Any
 import yaml
 
 from research_cockpit.mutation_lock import MutationError
-from research_cockpit.mutation_runtime import CommandState, finish_mutation, load_validated_state, preflight_mutation
+from research_cockpit.mutation_runtime import (
+    CommandState,
+    finish_mutation,
+    indexed_artifact_record_stubs,
+    load_targeted_state,
+    load_validated_state,
+    preflight_mutation,
+    validate_mutation_candidate,
+)
 
 
 def yaml_preview(data: dict[str, Any] | None) -> str:

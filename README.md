@@ -113,8 +113,12 @@ Research Cockpit 提供三层能力：
 
 关键原则：
 
-- `research_cockpit/current_state.yaml`、`research_cockpit/graph/nodes/*.yaml`、`research_cockpit/runs/*.yaml` 和 `research_cockpit/gate_results/*.{yaml,json}` 是结构化状态的 truth source。
-- `research_cockpit/dashboards/*` 是生成文件，用 `research-cockpit build --root <root>` 生成。
+- `research_cockpit/assignments/*.yaml` 是 assignment-scoped worker 的 cursor、next action 和状态 truth source；`research_cockpit/agents/*.yaml` 保存 agent identity 和 active assignment。
+- `research_cockpit/coordinator_state.yaml` 是 coordinator/UI selection truth source。
+- `research_cockpit/current_state.yaml` 是 legacy/coordinator compatibility state，不是普通 worker 的默认 cursor。
+- `research_cockpit/graph/nodes/*.yaml`、`research_cockpit/runs/*.yaml`、`research_cockpit/gate_results/*.{yaml,json}` 和 `research_cockpit/artifact_records/*.yaml` 保存当前结构化事实。
+- `research_cockpit/graph/interaction_events/**` 与 legacy `graph/interaction_log.yaml` 保存 append-only 操作历史，不替代当前事实。
+- `research_cockpit/dashboards/*` 是生成文件；只在需要刷新生成上下文或 coordinator/final handoff 时运行 `research-cockpit build --root <root>`。
 - 日常修改优先用 CLI 命令，避免直接手改 YAML 后破坏图谱关系。
 - 同一个 data root 的写操作要顺序执行，不要并发写。
 
@@ -192,13 +196,15 @@ research-cockpit complete-experiment \
   --json --compact
 ```
 
-如果要关闭当前实验并立刻推进 global/agent focus，优先用组合命令：
+只有 coordinator/legacy global-focus 工作流需要在关闭实验时同步推进全局 focus；此时可用组合命令：
 
 ```sh
 research-cockpit close-current-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --next-focus option_x --sync-agent all --json --compact
 ```
 
-如果 mixed/incomplete 结论需要派生下一轮实验：
+Assignment-scoped worker 不使用 `--sync-agent` 或 `--set-focus` 推进自己的进度；应在 mutation 中传入 `--assignment <assignment_id>`，然后用 `set-cursor --assignment <assignment_id>` 移动 worker-local cursor。
+
+coordinator/legacy focus 工作流需要从 mixed/incomplete 结论派生一个小型后续实验时：
 
 ```sh
 research-cockpit create-followup-experiment --root research_cockpit --from experiment_x --id experiment_x_followup --title "Follow-up gate" --priority high --next-action "Run follow-up gate" --set-focus --json --compact
@@ -214,7 +220,7 @@ research-cockpit complete-experiments --root research_cockpit --file findings.ya
 research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build --json --compact
 ```
 
-inline evidence 只负责用 `path` 和 `links` 快速创建并关联 evidence artifact；它不会复制文件。批量写入后按 compact 输出里的 `verify_commands` 做 changed-scope 验证。来自临时 git worktree 的输出先按下一节 ingest，再用 `--artifact-id` 关联。
+inline evidence 只负责用 `path` 和 `links` 快速创建并关联 evidence artifact；它不会复制文件。批量写入后按 compact 输出里的 `verify_commands` 做 changed-scope 验证。来自临时 git worktree 的普通输出先按下一节 ingest，再在 structured closeout 中用 `artifact_record.existing_record_id` 关联；只有显式 promotion 后才使用 graph `artifact_id`。
 
 ### 3. 从 worktree ingest run output
 
@@ -228,13 +234,15 @@ research-cockpit ingest-artifact \
   --run-id run_x \
   --agent agent_x \
   --link metrics=metrics.json \
-  --record-only --dry-run --json --show-diff
-research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from ../worktrees/agent_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --record-only --json --compact --no-build
+  --dry-run --json --show-diff
+research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from ../worktrees/agent_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --json --compact --no-build
 research-cockpit artifact-records --root research_cockpit --experiment experiment_x --json --compact
+# 只有 durable graph evidence 才 promotion：
+research-cockpit promote-artifact-record --root research_cockpit --id artifact_experiment_x_run_x --artifact-id artifact_experiment_x_run_x_promoted --link-to experiment_x --promotion-reason "用于 decision 或 baseline 的长期证据" --json --compact
 # 按 compact 输出里的 verify_commands 做 changed-scope 验证；final handoff 前再跑全量 gate。
 ```
 
-默认复制到 `research_cockpit/artifacts/<node_id>/<run_id>/`，并在 `research_cockpit/artifact_records/<experiment_id>.yaml` 中记录 `artifact_<node_id>_<run_id>`。这不会创建 `graph/nodes/artifact_*.yaml`。只有当该证据需要长期导航、支撑 decision/baseline 或作为强 finding 的 durable evidence 时，再用 `promote-artifact-record` 提升为 artifact graph node，然后用 `--artifact-id` 关联。worker 最后一次 truth-source 写入后先运行 compact 输出里的 changed-scope `verify_commands`；coordinator/final handoff 前再运行全量 `validate`、`build` 和 `smoke`。更完整的多 agent 规则见文末“并行 Agent 和 Worktree”。
+`ingest-artifact` 对 experiment 默认复制到 `research_cockpit/artifacts/<node_id>/<run_id>/` 并创建轻量 artifact record，不创建 `graph/nodes/artifact_*.yaml`；`--record-only` 仅作为显式兼容写法保留。立即创建 graph node 必须使用 `--promote --promotion-reason "..."`，已有 record 的提升使用 `promote-artifact-record --promotion-reason "..."`。worker 最后一次写入后只运行 compact 输出里的 changed-scope `verify_commands`；全量 `validate`、`build` 和 `smoke` 留给 coordinator/final handoff。
 `smoke` 默认使用 compact 检查路径，避免在大图仓库里生成完整 `bootstrap`、`suggest-next-actions` 和 `node-context` JSON。大 root 下建议加 `--progress` 把阶段进度输出到 stderr；需要旧的完整子命令工作流时使用 `research-cockpit smoke --root research_cockpit --json --progress --full`。
 
 ### 4. 跟踪长任务 run / gate
@@ -242,14 +250,15 @@ research-cockpit artifact-records --root research_cockpit --experiment experimen
 长实验先记录具体 run，再用 `progress.json` 和 `gate_result.json` 给 agent 一个统一的状态入口。run 只表示一次执行；实验结论仍然用 finding / artifact 记录：
 
 ```sh
-research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher tmux --command "python train.py" --progress-file artifacts/experiment_x/run_x/progress.json --no-build
+research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher tmux --command "python train.py" --progress-file artifacts/experiment_x/run_x/progress.json --assignment <assignment_id> --no-build
 research-cockpit run-context --root research_cockpit --id run_x --compact --json
-research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link gate_result=gate_result.json --record-only --json --compact --no-build
-research-cockpit ingest-gate-result --root research_cockpit --id gate_x --file artifacts/experiment_x/run_x/gate_result.json --run run_x --no-build --json --compact
-research-cockpit complete-run --root research_cockpit --id run_x --status completed --no-build
+research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link gate_result=gate_result.json --json --compact --no-build
+research-cockpit complete-run --print-schema
+# closeout.yaml 使用 artifact_record.existing_record_id 引用上一步 record_id，并可同时声明 gates、finding、next_actions。
+research-cockpit complete-run --root research_cockpit --file closeout.yaml --assignment <assignment_id> --json --compact --no-build
 ```
 
-`gate_result.json` 用于 dataset/cache/smoke/training/evaluation/preflight 等 gate。资源检查使用 `gate_type: "preflight"`；失败的 preflight 会在 context 中阻止 `full_run` 建议。launcher 输出约定和模板见 `docs/launcher-output-conventions.md` 与 `templates/launcher/`。
+`complete-run --file` 会在一个事务中更新 terminal run、gate metadata、finding、artifact-record link 和 next actions；任一 preflight 失败都不写 truth source。`gate_result.json` 必须已存在并符合 schema。仅更新 run 状态时才使用 `complete-run --id`。launcher 输出约定和模板见 `docs/launcher-output-conventions.md` 与 `templates/launcher/`。
 
 ### 5. 显式创建或关联 artifact
 
@@ -332,11 +341,15 @@ research-cockpit artifact create --help
 
 ```text
 research_cockpit/
-  current_state.yaml
+  agents/                   # agent identity and active assignment
+  assignments/              # worker-local cursor, next actions, and status
+  coordinator_state.yaml    # coordinator/UI selection
+  current_state.yaml        # legacy/coordinator compatibility
   graph/nodes/
   graph/edges.yaml
   graph/graph_views.yaml
-  graph/interaction_log.yaml
+  graph/interaction_log.yaml  # immutable legacy prefix after migration
+  graph/interaction_events/   # manifest and generation-sharded JSONL events
   runs/                     # run/job execution records
   gate_results/             # standard gate metadata records and recorded gate JSON
   artifact_records/         # lightweight evidence metadata for ordinary run output
@@ -362,7 +375,7 @@ research_cockpit/
 - `promising` 只用于已有正向信号但还没完成比较、实验或 decision gate 的 `option`。
 - 不要直接手改 YAML 把 decision 设置为 `accepted`，请用 `research-cockpit accept-decision`。
 - `baseline` 不是节点类型；它是写在 stage/problem/option/experiment 上的默认引用，用 `set-baseline` 维护。
-- 如果 dry-run 或 validate 报告 `interaction_log.yaml` 损坏，先用 `repair-interaction-log` 预览和修复。
+- 如果 legacy `interaction_log.yaml` 损坏，先用 `repair-interaction-log` 预览和修复；有效但过大的 legacy log 使用 `migrate-interaction-log --dry-run` 后再 `--execute`，不要手改已激活的 event backend。
 
 ## 仓库结构
 
@@ -384,6 +397,7 @@ SKILL.md
 - `docs/decisions/0001-layered-plugin-architecture.md`: layered plugin architecture rationale。
 - `docs/decisions/0002-canonical-artifact-store-for-worktrees.md`: 为什么 worktree 输出要 ingest 到 canonical artifact store。
 - `docs/decisions/0003-run-and-gate-sidecar-records.md`: 为什么 run/job 与 gate 记录作为实验旁路状态而不是图节点。
+- `docs/migrations/0.2.0-record-first-artifact-ingest.md`: record-first 默认值、显式 promotion 和升级边界。
 - `docs/launcher-output-conventions.md`: `run_record.txt`、`progress.json`、`gate_result.json` 和 `artifact_manifest.json` 约定。
 - `docs/plans/2026-05-28-dashboard-build-performance.md`: 大图 dashboard build/profile 优化结果和后续增量构建计划。
 - `capabilities/ui-dashboard.md`: Streamlit UI、React Flow 图谱和刷新行为。
@@ -398,14 +412,14 @@ SKILL.md
 规则：
 
 - Worktree 里做代码改动、运行实验、保存本地输出。
-- 用 `ingest-artifact --record-only --json --compact --no-build` 把普通 `.agent_runs/<run_id>/` 复制到 `research_cockpit/artifacts/<node_id>/<run_id>/` 并写入 artifact record；只有 durable evidence 需要图节点时再 `promote-artifact-record` 后用 `--artifact-id` 记录 finding。
+- 用默认 `ingest-artifact --json --compact --no-build` 把普通 `.agent_runs/<run_id>/` 复制到 canonical store 并写入 artifact record；只有 durable evidence 需要图节点时才使用带 `--promotion-reason` 的 promotion。
 - 不在 worktree 里 `research-cockpit init`，也不把 worktree-local path 当作长期 `--evidence-path`。
 - 下游 agent 用 `set-cursor --assignment <assignment_id>` 更新 assignment-local 进展；全局 `set-focus`、`validate`、`build` 由 coordinator 串行处理。`set-agent-focus` 只保留给旧 per-agent focus 兼容场景。
 
 删除 worktree 前检查：
 
 1. 有价值的 run directory 已 ingest，并能在 Resources/context 里看到。
-2. 结论已用 `complete-experiment --artifact-id <artifact_id>` 或 `update-finding --artifact-id <artifact_id>` 写入。
+2. 普通 output 的 `record_id` 已通过 `complete-run --file` 中的 `artifact_record.existing_record_id` 关联到 finding；需要 durable graph evidence 时已显式 promotion 并记录 reason。
 3. 有用代码已 merge/cherry-pick 或保存 patch。
 4. 需要继承的正向结果已记录 decision 或 `set-baseline`。
 5. canonical root 已通过 `validate`、`build` 和 `smoke`。

@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation plan and current-state guide. 当前工作区已按本计划落地主要 Phase 0-5 能力；后续维护应以本文的 worker/coordinator 边界和 safety rules 为准。
+Implemented historical plan. Incremental validation, record-first artifact ingest, promotion, compaction, and worker/coordinator verification boundaries are implemented. Current operational guidance: `AGENTS.md`, `SKILL.md`, `capabilities/experiment-tracking.md`, `capabilities/maintenance.md`, and `docs/migrations/0.2.0-record-first-artifact-ingest.md`; the remaining sections preserve design history.
 
 ## Date
 
@@ -476,9 +476,11 @@ research-cockpit compact-artifacts --root <root> --id <artifact_id> --execute --
 
 Compatibility rule：
 
-- `ingest-artifact` 现有默认行为先保持不变。
-- 新增 `--record-only`，文档把它设为 worker 默认建议。
-- 是否未来把 `ingest-artifact` 默认改为 record-only，需要单独兼容阶段和明确 migration note。
+Implemented outcome in 0.2.0:
+
+- Experiment-targeted `ingest-artifact` now defaults to artifact-record creation.
+- `--record-only` remains accepted as an explicit compatibility spelling.
+- Immediate graph-node creation requires `--promote --promotion-reason`; existing records use `promote-artifact-record`.
 
 Future optional commands, not part of the landed MVP, can add `create-artifact-record` and `update-artifact-record` if manual sidecar-only metadata editing becomes necessary. For now, use `ingest-artifact --record-only`, `artifact-records`, `promote-artifact-record`, and `compact-artifacts`.
 
@@ -805,7 +807,7 @@ Always:
 
 Ask first:
 
-- 改变 `ingest-artifact` 默认行为。
+- 再次改变 `ingest-artifact` 的 record-first 默认行为或 promotion contract。
 - 对真实 root 自动 demote artifact nodes。
 - 引入 sharded artifact record layout。
 - 把 index 放到 `dashboards/` 之外。
@@ -833,7 +835,7 @@ Never:
 
 ## Open Questions
 
-- `ingest-artifact` 是否最终改成默认 record-only，还是长期保持 graph node 默认？
+- Resolved in 0.2.0: experiment-targeted `ingest-artifact` defaults to artifact records; graph artifacts require explicit promotion.
 - Artifact records 是一实验一文件，还是一记录一文件更适合多 agent merge？
 - `validate --changed-node` 是否应默认 patch `validation_index.json`，还是只由 `build` 写 index？
 - Record-only ingest 缺省 retention class 应该是 `reproducible_output` 还是要求用户显式提供？

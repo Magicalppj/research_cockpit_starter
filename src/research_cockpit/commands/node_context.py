@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from research_cockpit.cli_progress import progress_traced
+from research_cockpit.commands._runtime import emit_json
 from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
@@ -20,6 +22,7 @@ from research_cockpit.node_onboarding import build_node_onboarding_context
 from research_cockpit.interaction_log import interaction_log_warnings
 
 
+@progress_traced("node_context_load")
 def node_context_payload(
     root: Path,
     *,
@@ -31,6 +34,9 @@ def node_context_payload(
     explicit_edges: dict[str, Any] | None = None,
     link_rows: list[dict[str, Any]] | None = None,
     run_validation: bool = True,
+    suggestions: list[dict[str, Any]] | None = None,
+    run_records: list[dict[str, Any]] | None = None,
+    gate_records: list[dict[str, Any]] | None = None,
 ) -> dict:
     nodes = nodes if nodes is not None else load_nodes(root)
     current = current if current is not None else load_yaml(root / "current_state.yaml")
@@ -45,8 +51,16 @@ def node_context_payload(
         compact=compact,
         command_style=command_style,
         link_rows=link_rows,
+        suggestions=suggestions,
+        run_records=run_records,
+        gate_records=gate_records,
     )
-    payload["warnings"] = interaction_log_warnings(root)
+    captured_warnings = payload.pop("_interaction_warnings", None)
+    warnings = list(captured_warnings) if isinstance(captured_warnings, list) else interaction_log_warnings(root)
+    payload["warnings"] = warnings[:10] if compact else warnings
+    if compact:
+        payload["warnings_count"] = len(warnings)
+        payload["warnings_omitted_count"] = max(0, len(warnings) - 10)
     return payload
 
 
@@ -74,6 +88,7 @@ def main() -> None:
         default="console",
         help="Command draft style to emit",
     )
+    parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
 
     try:
@@ -88,7 +103,7 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     if args.as_json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        emit_json(payload, compact=args.compact)
         return
     _print_human(payload)
 

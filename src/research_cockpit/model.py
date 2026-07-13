@@ -1141,6 +1141,7 @@ def validate_cockpit(
     coordinator_state: CoordinatorState | None = None,
     artifact_records: list[dict[str, Any]] | None = None,
     include_interaction_log: bool = False,
+    include_gate_results: bool = False,
     raise_on_error: bool = False,
 ) -> list[str]:
     nodes = nodes if nodes is not None else load_nodes(root)
@@ -1180,6 +1181,9 @@ def validate_cockpit(
     errors.extend(validate_current_state(current, nodes, explicit_edges))
     errors.extend(run_load_errors)
     errors.extend(validate_runs(runs, nodes))
+    if include_gate_results:
+        from research_cockpit.gate_result_records import validate_gate_result_records
+        errors.extend(validate_gate_result_records(root, nodes, runs))
     errors.extend(agent_load_errors)
     errors.extend(assignment_load_errors)
     errors.extend(coordinator_load_errors)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -10,13 +11,27 @@ ROOT = default_data_root()
 
 from research_cockpit.commands._runtime import compact_mutation_result, emit_json, safe_print
 from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
+from research_cockpit.commands.file_schemas import RUN_CLOSEOUT_EXAMPLE
 from research_cockpit.commands.update_run import update_run
 from research_cockpit.assignment_scope import AssignmentScopeError
 from research_cockpit.model import ValidationError, script_command
+from research_cockpit.mutation_lock import MutationError
+from research_cockpit.run_closeout import complete_run_closeout, load_run_closeout
 from research_cockpit.retention import load_mapping_argument
 
 
 TERMINAL_RUN_STATUSES = ("completed", "failed", "cancelled")
+
+
+class _JsonArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        if "--json" in sys.argv[1:]:
+            emit_json(
+                {"ok": False, "error": message},
+                compact="--compact" in sys.argv[1:],
+            )
+            raise SystemExit(2)
+        super().error(message)
 
 
 def complete_run(
@@ -64,9 +79,15 @@ def complete_run(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(allow_abbrev=False)
+    parser = _JsonArgumentParser(
+        allow_abbrev=False,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=RUN_CLOSEOUT_EXAMPLE,
+    )
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument("--id", required=True, dest="run_id")
+    parser.add_argument("--id", dest="run_id")
+    parser.add_argument("--file", type=Path, dest="closeout_file")
+    parser.add_argument("--print-schema", action="store_true")
     parser.add_argument("--status", choices=TERMINAL_RUN_STATUSES, default="completed")
     parser.add_argument("--finished-at")
     parser.add_argument("--progress-file")
@@ -84,41 +105,78 @@ def main() -> None:
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     add_assignment_scope_args(parser)
+    parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
 
+    if args.print_schema:
+        safe_print(RUN_CLOSEOUT_EXAMPLE)
+        return
+    if args.closeout_file and args.run_id:
+        message = "--id cannot be used together with --file"
+        if args.json:
+            emit_json({"ok": False, "error": message}, compact=args.compact)
+            raise SystemExit(2)
+        parser.error(message)
+    if not args.closeout_file and not args.run_id:
+        message = "--id is required unless --file or --print-schema is used"
+        if args.json:
+            emit_json({"ok": False, "error": message}, compact=args.compact)
+            raise SystemExit(2)
+        parser.error(message)
+
     try:
-        result = complete_run(
-            args.root,
-            run_id=args.run_id,
-            status=args.status,
-            finished_at=args.finished_at,
-            progress_file=args.progress_file,
-            log_root=args.log_root,
-            output_root=args.output_root,
-            monitor_command=args.monitor_command,
-            stop_command=args.stop_command,
-            resources=load_mapping_argument(
-                json_text=args.resources_json,
-                file_path=args.resources_file,
-                field_name="resources",
-            ),
-            output_retention=load_mapping_argument(
-                json_text=args.output_retention_json,
-                file_path=args.output_retention_file,
-                field_name="output_retention",
-                validate_retention_class=True,
-            ),
-            rebuild_dashboard=not args.no_build,
-            dry_run=args.dry_run,
-            show_diff=args.show_diff,
-            assignment_id=args.assignment,
-            coordinator=args.coordinator,
-        )
+        if args.closeout_file:
+            result = complete_run_closeout(
+                args.root,
+                plan=load_run_closeout(args.closeout_file),
+                rebuild_dashboard=not args.no_build,
+                dry_run=args.dry_run,
+                show_diff=args.show_diff,
+                assignment_id=args.assignment,
+                coordinator=args.coordinator,
+            )
+        else:
+            result = complete_run(
+                args.root,
+                run_id=args.run_id,
+                status=args.status,
+                finished_at=args.finished_at,
+                progress_file=args.progress_file,
+                log_root=args.log_root,
+                output_root=args.output_root,
+                monitor_command=args.monitor_command,
+                stop_command=args.stop_command,
+                resources=load_mapping_argument(
+                    json_text=args.resources_json,
+                    file_path=args.resources_file,
+                    field_name="resources",
+                ),
+                output_retention=load_mapping_argument(
+                    json_text=args.output_retention_json,
+                    file_path=args.output_retention_file,
+                    field_name="output_retention",
+                    validate_retention_class=True,
+                ),
+                rebuild_dashboard=not args.no_build,
+                dry_run=args.dry_run,
+                show_diff=args.show_diff,
+                assignment_id=args.assignment,
+                coordinator=args.coordinator,
+            )
+    except MutationError as exc:
+        if args.json and exc.payload:
+            emit_json(exc.payload, compact=args.compact)
+        else:
+            safe_print(str(exc))
+        raise SystemExit(1) from exc
     except AssignmentScopeError as exc:
         emit_assignment_scope_error(args, exc)
         raise SystemExit(1) from exc
     except (ValidationError, ValueError, FileNotFoundError) as exc:
-        safe_print(str(exc))
+        if args.json:
+            emit_json({"ok": False, "error": str(exc)}, compact=args.compact)
+        else:
+            safe_print(str(exc))
         raise SystemExit(1) from exc
 
     if args.json:
@@ -128,11 +186,13 @@ def main() -> None:
                 command="complete-run",
                 target=result["run_id"],
                 root=args.root,
-                created=[],
-                updated=[result["run_id"]] if result["would_change"] else [],
+                created=result.get("gate_ids", []),
+                updated=[result["run_id"], *([result["experiment_id"]] if result.get("experiment_id") else [])],
+                records=[f"artifact:{result['record_id']}"] if result.get("record_id") else [],
             )
             if args.compact
-            else result
+            else result,
+            compact=args.compact,
         )
         return
     verb = "Would complete" if args.dry_run else "Completed"

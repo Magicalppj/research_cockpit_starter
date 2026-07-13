@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed. This is a specification and implementation plan only. No runtime code or skill behavior has been changed by this document.
+Implemented historical plan. Maintenance audits, resource declarations, worktree closeout planning, retention metadata, and artifact cleanup controls are now implemented. Current operational guidance: `capabilities/maintenance.md`, `capabilities/experiment-tracking.md`, and `docs/artifact-retention-policy.md`; the remaining sections preserve the original proposal.
 
 ## Date
 

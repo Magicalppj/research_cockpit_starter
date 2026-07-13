@@ -9,6 +9,7 @@ import sys
 import time
 from typing import Any
 
+from research_cockpit.cli_progress import emit_progress_event
 from research_cockpit.paths import default_data_root, plugin_root
 
 PLUGIN_ROOT = plugin_root()
@@ -34,9 +35,21 @@ def _same_python(left: str, right: str) -> bool:
         return left == right
 
 
-def _emit_progress(enabled: bool, message: str) -> None:
+def _emit_progress(
+    enabled: bool,
+    phase: str,
+    *,
+    event: str,
+    duration_ms: float | None = None,
+    status: str | None = None,
+) -> None:
     if enabled:
-        print(message, file=sys.stderr, flush=True)
+        emit_progress_event(
+            f"smoke.{phase}",
+            event=event,
+            duration_ms=duration_ms,
+            status=status,
+        )
 
 
 def _summarize_json(name: str, stdout: str) -> dict[str, Any]:
@@ -97,11 +110,17 @@ def _check_payload(
 
 
 def _run_check(name: str, args: list[str], *, progress: bool = False) -> dict[str, Any]:
-    _emit_progress(progress, f"smoke: starting {name}")
+    _emit_progress(progress, name, event="phase_start")
     started_at = time.perf_counter()
     result = subprocess.run(args, capture_output=True, text=True, check=False)
     elapsed_ms = _duration_ms(started_at)
-    _emit_progress(progress, f"smoke: finished {name} in {elapsed_ms} ms")
+    _emit_progress(
+        progress,
+        name,
+        event="phase_end",
+        duration_ms=elapsed_ms,
+        status="completed" if result.returncode == 0 else "failed",
+    )
     stdout = result.stdout.strip()
     stderr = result.stderr.strip()
     return _check_payload(
@@ -117,13 +136,13 @@ def _run_check(name: str, args: list[str], *, progress: bool = False) -> dict[st
 
 
 def _run_direct_check(name: str, command: list[str], callback: Any, *, progress: bool = False) -> dict[str, Any]:
-    _emit_progress(progress, f"smoke: starting {name}")
+    _emit_progress(progress, name, event="phase_start")
     started_at = time.perf_counter()
     try:
         summary = callback()
     except Exception as exc:
         elapsed_ms = _duration_ms(started_at)
-        _emit_progress(progress, f"smoke: failed {name} in {elapsed_ms} ms")
+        _emit_progress(progress, name, event="phase_end", duration_ms=elapsed_ms, status="failed")
         return _check_payload(
             name,
             passed=False,
@@ -134,7 +153,7 @@ def _run_direct_check(name: str, command: list[str], callback: Any, *, progress:
             elapsed_ms=elapsed_ms,
         )
     elapsed_ms = _duration_ms(started_at)
-    _emit_progress(progress, f"smoke: finished {name} in {elapsed_ms} ms")
+    _emit_progress(progress, name, event="phase_end", duration_ms=elapsed_ms, status="completed")
     return _check_payload(
         name,
         passed=True,
@@ -508,9 +527,9 @@ def skill_smoke_test_payload(
             checks = _full_smoke_checks(python, root, query=query, progress=progress)
     failed = next((check for check in checks if not check["passed"]), None)
     if failed:
-        _emit_progress(progress, f"smoke: failed at {failed['name']}")
+        _emit_progress(progress, "summary", event="phase_end", status="failed")
     else:
-        _emit_progress(progress, "smoke: all checks passed")
+        _emit_progress(progress, "summary", event="phase_end", status="completed")
 
     return {
         "ok": all(check["passed"] for check in checks),

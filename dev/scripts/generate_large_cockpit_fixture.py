@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import shutil
@@ -160,6 +161,22 @@ def _write_support_files(root: Path, *, note_count: int, resource_count: int) ->
         )
 
 
+def _write_interaction_events(root: Path, node_ids: list[str], *, event_count: int) -> None:
+    started_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    events = []
+    for index in range(event_count):
+        created_at = (started_at + timedelta(seconds=index)).isoformat().replace("+00:00", "Z")
+        events.append({
+            "id": f"interaction_perf_{index:06d}",
+            "kind": "synthetic_activity",
+            "actor": f"agent_perf_{index % 4}",
+            "created_at": created_at,
+            "node_id": node_ids[index % len(node_ids)],
+            "command": "research-cockpit synthetic-fixture-event",
+        })
+    save_yaml(root / "graph" / "interaction_log.yaml", {"events": events})
+
+
 def _link_notes_to_nodes(nodes: dict[str, dict[str, Any]], host_ids: list[str], *, note_count: int) -> None:
     if note_count > len(host_ids):
         raise ValueError("--note-count cannot exceed generated node count because each note is linked from one node")
@@ -229,6 +246,7 @@ def _write_marker(root: Path, payload: dict[str, Any]) -> None:
         "linked_resource_count": payload["linked_resource_count"],
         "artifact_record_count": payload.get("artifact_record_count", 0),
         "artifact_record_file_count": payload.get("artifact_record_file_count", 0),
+        "interaction_event_count": payload.get("interaction_event_count", 0),
     }
     (root / MARKER_FILE).write_text(json.dumps(marker_payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
@@ -241,6 +259,7 @@ def generate_fixture(
     note_count: int,
     resource_count: int,
     artifact_record_count: int = 0,
+    interaction_event_count: int = 0,
     force: bool = False,
 ) -> dict[str, Any]:
     if node_count < 5:
@@ -253,6 +272,8 @@ def generate_fixture(
         raise ValueError("--resource-count must be at least 1")
     if artifact_record_count < 0:
         raise ValueError("--artifacts must be non-negative")
+    if interaction_event_count < 0:
+        raise ValueError("--interaction-events must be non-negative")
 
     level_count, artifact_count, experiment_count = _layout_counts(node_count, resource_count)
     if note_count > node_count:
@@ -369,6 +390,8 @@ def generate_fixture(
     for node in nodes.values():
         save_yaml(root / "graph" / "nodes" / f"{node['id']}.yaml", node)
 
+    _write_interaction_events(root, sorted(nodes), event_count=interaction_event_count)
+
     focus_experiment = "experiment_perf_0000"
     save_yaml(
         root / "current_state.yaml",
@@ -398,6 +421,7 @@ def generate_fixture(
         "links_per_node": links_per_node,
         "artifact_record_count": artifact_record_count,
         "artifact_record_file_count": artifact_record_file_count,
+        "interaction_event_count": interaction_event_count,
         "linked_resource_count": len(build_link_rows(root, loaded_nodes)),
     }
     _write_marker(root, payload)
@@ -419,6 +443,12 @@ def main() -> None:
         default=0,
         help="Artifact-like sidecar records to create outside graph/nodes.",
     )
+    parser.add_argument(
+        "--interaction-events",
+        type=int,
+        default=0,
+        help="Deterministic legacy interaction events to generate for runtime profiling.",
+    )
     parser.add_argument("--force", action="store_true", help="Replace an existing synthetic fixture root with a valid marker.")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable summary.")
     args = parser.parse_args()
@@ -431,6 +461,7 @@ def main() -> None:
             note_count=args.note_count,
             resource_count=args.resource_count,
             artifact_record_count=args.artifact_record_count,
+            interaction_event_count=args.interaction_events,
             force=args.force,
         )
     except (ValueError, FileExistsError) as exc:
@@ -446,6 +477,7 @@ def main() -> None:
     print(f"Generated {payload['node_count']} nodes at {payload['root']}")
     print(f"Resources: {payload['resource_count']} files, notes: {payload['note_count']}")
     print(f"Artifact records: {payload['artifact_record_count']} records in {payload['artifact_record_file_count']} files")
+    print(f"Interaction events: {payload['interaction_event_count']}")
 
 
 if __name__ == "__main__":

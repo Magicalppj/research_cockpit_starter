@@ -1,5 +1,8 @@
 # Research Cockpit UI Interaction Spec v2
 
+> **Historical record:** this file preserves design or implementation context and is not current operational guidance. Current operational guidance: repository-root `README.md`, `SKILL.md`, `AGENTS.md`, `capabilities/`, and `docs/internal-architecture.md`.
+
+
 This document defines the interactive UI behavior for the graph-centered Research Cockpit.
 
 The goal is to make the graph useful for daily research navigation, not just decorative visualization.

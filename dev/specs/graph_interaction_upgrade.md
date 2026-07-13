@@ -1,5 +1,8 @@
 # Spec: Graph Interaction Upgrade
 
+> **Historical record:** this file preserves design or implementation context and is not current operational guidance. Current operational guidance: repository-root `README.md`, `SKILL.md`, `AGENTS.md`, `capabilities/`, and `docs/internal-architecture.md`.
+
+
 ## Assumptions
 
 1. 主要用户是研究者本人，agent 是后续读取前端操作结果和研究状态的消费者。

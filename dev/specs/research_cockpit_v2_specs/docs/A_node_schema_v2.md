@@ -1,5 +1,8 @@
 # Research Cockpit Node Schema v2
 
+> **Historical record:** this file preserves design or implementation context and is not current operational guidance. Current operational guidance: repository-root `README.md`, `SKILL.md`, `AGENTS.md`, `capabilities/`, and `docs/internal-architecture.md`.
+
+
 This schema upgrades the cockpit from a generic project graph into a research-oriented decision graph.
 
 Core goals:

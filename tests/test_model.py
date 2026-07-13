@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+import json
 import shutil
 import unittest
 import uuid
@@ -14,6 +16,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT_DIR
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
+from research_cockpit.interaction_log import (
+    InteractionLogError,
+    recent_interactions,
+    validate_interaction_append_target,
+    validate_interaction_log,
+)
 from research_cockpit.model import (
     ValidationError,
     build_action_suggestions,
@@ -1157,6 +1165,93 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(log["events"][0]["node_id"], "problem_text")
         self.assertEqual(log["events"][0]["before"]["current_focus_node"], "option_t5")
 
+    def test_interaction_segment_backend_appends_without_rewriting_legacy_yaml(self) -> None:
+        first = append_interaction_log(self.root, kind="first", node_id="problem_text")
+        second = append_interaction_log(self.root, kind="second", node_id="option_t5")
+
+        event_dir = self.root / "graph" / "interaction_events"
+        manifest = json.loads((event_dir / "manifest.json").read_text(encoding="utf-8"))
+        segments = sorted(event_dir.glob("events-*.jsonl"))
+
+        self.assertFalse((self.root / "graph" / "interaction_log.yaml").exists())
+        self.assertEqual(manifest["active_format"], "jsonl_v1")
+        self.assertEqual(manifest["legacy_mode"], "prefix")
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(len(segments[0].read_text(encoding="utf-8").splitlines()), 2)
+        self.assertEqual([event["id"] for event in recent_interactions(self.root, limit=2)], [second["id"], first["id"]])
+        self.assertEqual(validate_interaction_log(self.root), [])
+
+    def test_interaction_segment_validation_rejects_truncated_json_line(self) -> None:
+        append_interaction_log(self.root, kind="first", node_id="problem_text")
+        segment = next((self.root / "graph" / "interaction_events").glob("events-*.jsonl"))
+        with segment.open("ab") as stream:
+            stream.write(b'{"id":"truncated"')
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        errors = validate_interaction_log(self.root)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("JSON parse error", errors[0])
+        self.assertIn(segment.name, errors[0])
+
+    def test_concurrent_public_interaction_appends_do_not_lose_events(self) -> None:
+        def append(index: int) -> str:
+            return append_interaction_log(self.root, kind="parallel", extra={"index": index})["id"]
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            event_ids = list(executor.map(append, range(32)))
+
+        events = load_interaction_log(self.root, strict=True)["events"]
+        self.assertEqual(len(events), 32)
+        self.assertEqual(len(set(event_ids)), 32)
+        self.assertEqual({event["index"] for event in events}, set(range(32)))
+
+    def test_prefix_backend_detects_same_size_legacy_rewrite_with_preserved_mtime(self) -> None:
+        legacy_path = self.root / "graph" / "interaction_log.yaml"
+        save_yaml(legacy_path, {"events": [{"id": "legacy_a", "kind": "a"}]})
+        append_interaction_log(self.root, kind="activate")
+        original_stat = legacy_path.stat()
+        original = legacy_path.read_text(encoding="utf-8")
+        changed = original.replace("legacy_a", "legacy_b")
+        self.assertEqual(len(changed), len(original))
+        legacy_path.write_text(changed, encoding="utf-8")
+        os.utime(legacy_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+
+        errors = validate_interaction_append_target(self.root)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("changed after", errors[0])
+
+    def test_invalid_active_manifest_fails_closed_instead_of_falling_back_to_legacy(self) -> None:
+        legacy_path = self.root / "graph" / "interaction_log.yaml"
+        save_yaml(legacy_path, {"events": [{"id": "legacy", "kind": "legacy"}]})
+        append_interaction_log(self.root, kind="jsonl")
+        manifest_path = self.root / "graph" / "interaction_events" / "manifest.json"
+        manifest_path.write_text("{", encoding="utf-8")
+
+        payload = load_interaction_log(self.root)
+
+        self.assertEqual(payload["events"], [])
+        self.assertEqual(payload["backend"], "invalid")
+        self.assertTrue(any("manifest.json" in warning for warning in payload["warnings"]))
+        with self.assertRaises(InteractionLogError):
+            load_interaction_log(self.root, strict=True)
+
+    def test_mutation_preflight_rejects_modified_sealed_segment(self) -> None:
+        from research_cockpit import interaction_log
+
+        with patch.object(interaction_log, "SEGMENT_MAX_BYTES", 1):
+            append_interaction_log(self.root, kind="first")
+            append_interaction_log(self.root, kind="second")
+        event_dir = self.root / "graph" / "interaction_events"
+        first_segment = sorted(event_dir.glob("events-*.jsonl"))[0]
+        first_segment.write_bytes(first_segment.read_bytes() + b" ")
+
+        errors = validate_interaction_append_target(self.root)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("sealed segment changed", errors[0])
     def test_load_graph_views_handles_missing_and_invalid_data(self) -> None:
         self.assertEqual(load_graph_views(self.root), [])
 

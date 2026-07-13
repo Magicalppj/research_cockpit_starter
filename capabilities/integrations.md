@@ -23,7 +23,7 @@ For multi-agent development, git worktrees are execution sandboxes. They may con
 - Stable artifact store: `<main_repo>/research_cockpit/artifacts/<node_id>/<run_id>/`.
 - Disposable worktree: `../worktrees/<agent_or_node>/`.
 
-Agents should use `start-agent-session` to receive a handoff with `RESEARCH_COCKPIT_ROOT`, `stable_artifact_root`, and an `ingest-artifact` command template. Before a worktree can be deleted, any useful output must be copied with `ingest-artifact`, then referenced by `complete-experiment --artifact-id` or `update-finding --artifact-id`.
+Agents should use `start-agent-session` to receive a handoff with `RESEARCH_COCKPIT_ROOT`, `stable_artifact_root`, and an `ingest-artifact` command template. Before a worktree can be deleted, copy useful ordinary output with `ingest-artifact`, then reference the returned record through `artifact_record.existing_record_id` in a structured `complete-run --file` closeout. Use graph `artifact_id` links only after an explicit promotion with a reason.
 
 `import-worktree-findings` is a recovery tool for accidental worktree-local cockpit writes. It is not the normal path for preserving outputs.
 

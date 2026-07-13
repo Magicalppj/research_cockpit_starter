@@ -28,7 +28,13 @@ from research_cockpit.model import ResearchNode, ValidationError, load_yaml, scr
 from research_cockpit.retention import validate_retention
 
 
-def _promoted_artifact_data(record: dict[str, Any], *, artifact_id: str, today: str) -> dict[str, Any]:
+def _promoted_artifact_data(
+    record: dict[str, Any],
+    *,
+    artifact_id: str,
+    today: str,
+    promotion_reason: str,
+) -> dict[str, Any]:
     artifact: dict[str, Any] = {
         "id": artifact_id,
         "type": "artifact",
@@ -42,6 +48,10 @@ def _promoted_artifact_data(record: dict[str, Any], *, artifact_id: str, today: 
         "created_at": today,
         "updated_at": today,
         "source_artifact_record": record.get("record_id"),
+        "promotion": {
+            "reason": promotion_reason,
+            "source": "promote_artifact_record",
+        },
     }
     if record.get("agent"):
         artifact["agent"] = record.get("agent")
@@ -59,7 +69,11 @@ def promote_artifact_record(
     show_diff: bool = False,
     assignment_id: str | None = None,
     coordinator: bool = False,
+    promotion_reason: str | None = None,
 ) -> dict[str, Any]:
+    reason = str(promotion_reason or "").strip()
+    if not reason:
+        raise ValueError("Artifact record promotion requires a non-empty promotion reason")
     state = load_validated_state(root)
     nodes = state.nodes
     link_to = link_to or []
@@ -74,8 +88,14 @@ def promote_artifact_record(
         record_id=record_id,
         artifact_id=artifact_id,
         updated_at=today,
+        promotion_reason=reason,
     )
-    artifact_data = _promoted_artifact_data(promoted_record, artifact_id=artifact_id, today=today)
+    artifact_data = _promoted_artifact_data(
+        promoted_record,
+        artifact_id=artifact_id,
+        today=today,
+        promotion_reason=reason,
+    )
     artifact_path = root / "graph" / "nodes" / f"{artifact_id}.yaml"
 
     candidate = dict(nodes)
@@ -111,6 +131,7 @@ def promote_artifact_record(
         "ok": True,
         "record_id": record_id,
         "artifact_id": artifact_id,
+        "promotion_reason": reason,
         "dry_run": dry_run,
         "changed": False if dry_run else changed,
         "would_change": changed,
@@ -138,6 +159,7 @@ def promote_artifact_record(
             "after": {
                 "record_id": record_id,
                 "artifact_id": artifact_id,
+                "promotion_reason": reason,
                 "linked_to": linked_to,
             },
         },
@@ -151,6 +173,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--id", required=True, dest="record_id")
     parser.add_argument("--artifact-id")
+    parser.add_argument("--promotion-reason", required=True, help="Why this record requires durable graph navigation.")
     parser.add_argument("--link-to", action="append", dest="link_to")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -171,6 +194,7 @@ def main() -> None:
             show_diff=args.show_diff,
             assignment_id=args.assignment,
             coordinator=args.coordinator,
+            promotion_reason=args.promotion_reason,
         )
     except AssignmentScopeError as exc:
         emit_assignment_scope_error(args, exc)

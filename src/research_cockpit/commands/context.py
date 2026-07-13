@@ -4,13 +4,14 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from research_cockpit.cli_progress import progress_traced
 from research_cockpit.commands._runtime import emit_json
 from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
 from research_cockpit.commands.agent_bootstrap import agent_bootstrap_payload
-from research_cockpit.commands.lint_semantic import semantic_lint
+from research_cockpit.commands.lint_semantic import TERMINAL_STATUSES, semantic_lint
 from research_cockpit.commands.node_context import node_context_payload
 from research_cockpit.baselines import baseline_artifact_ids, resolve_effective_baseline
 from research_cockpit.context_packs import build_next_action_scopes
@@ -32,6 +33,7 @@ from research_cockpit.model import (
 from research_cockpit.option_workstreams import experiment_ids_for_option, upstream_problem_id
 from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.resources import build_link_rows, node_artifact_ids, node_artifact_record_ids
+from research_cockpit.root_snapshot import load_root_snapshot
 
 
 def _related_option_id(nodes: dict[str, Any], node_id: str) -> str | None:
@@ -101,13 +103,15 @@ def _artifact_records_for(
     artifact_record_ids: list[str],
     *,
     record_cache: dict[str, list[dict[str, Any]]] | None = None,
+    allow_global_fallback: bool = True,
 ) -> dict[str, dict[str, Any]]:
     wanted = set(artifact_record_ids)
     if not wanted:
         return {}
     records: dict[str, dict[str, Any]] = {}
     cache = record_cache if record_cache is not None else {}
-    for experiment_id in _artifact_record_experiment_ids_for(nodes, node_ids):
+    experiment_ids = _artifact_record_experiment_ids_for(nodes, node_ids)
+    for experiment_id in experiment_ids:
         if experiment_id not in cache:
             cache[experiment_id] = list_artifact_records(root, experiment_id=experiment_id)
         for record in cache[experiment_id]:
@@ -115,7 +119,7 @@ def _artifact_records_for(
             if record_id in wanted and record_id not in records:
                 records[record_id] = record
     missing = wanted - set(records)
-    if missing:
+    if missing and (allow_global_fallback or not experiment_ids):
         all_key = "__all__"
         if all_key not in cache:
             cache[all_key] = list_artifact_records(root)
@@ -140,24 +144,72 @@ def _node_context_resource_node_ids(nodes: dict[str, Any], node_id: str) -> list
     return unique_strings([*path_ids, *child_ids_for_node, *sibling_ids])
 
 
-def _compact_focus_payload(nodes: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+def _bounded_values(values: Any, limit: int) -> tuple[list[Any], int, int]:
+    items = list(values) if isinstance(values, list) else []
+    selected = items[:limit]
+    return selected, len(items), max(0, len(items) - len(selected))
+
+
+def _compact_action_scopes(scopes: Any) -> dict[str, Any]:
+    if not isinstance(scopes, dict):
+        return {}
+    out: dict[str, Any] = {}
+    omitted_counts: dict[str, int] = {}
+    for key, value in scopes.items():
+        if isinstance(value, list):
+            limit = 8 if key == "focus_path_ids" else 3
+            selected, _, omitted = _bounded_values(value, limit)
+            out[key] = selected
+            omitted_counts[key] = omitted
+        elif key != "counts":
+            out[key] = value
+    out["counts"] = dict(scopes.get("counts", {})) if isinstance(scopes.get("counts"), dict) else {}
+    out["omitted_counts"] = omitted_counts
+    return out
+
+
+def _compact_focus_payload(
+    nodes: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    compact: bool = False,
+) -> dict[str, Any]:
     focus_node_id = current.get("current_focus_node") or current.get("current_problem")
-    focus_path_ids = current.get("current_focus_path", []) or []
-    return {
+    raw_focus_path = current.get("current_focus_path", []) or []
+    raw_next_actions = current.get("next_actions", []) or []
+    focus_path, focus_path_count, focus_path_omitted = _bounded_values(raw_focus_path, 8) if compact else (
+        list(raw_focus_path),
+        len(raw_focus_path),
+        0,
+    )
+    next_actions, next_actions_count, next_actions_omitted = _bounded_values(raw_next_actions, 5) if compact else (
+        list(raw_next_actions),
+        len(raw_next_actions),
+        0,
+    )
+    scopes = build_next_action_scopes(
+        nodes,
+        current,
+        focus_node_id=focus_node_id,
+        focus_path_ids=raw_focus_path,
+    )
+    payload = {
         "current_stage": current.get("current_stage"),
         "current_problem": current.get("current_problem"),
         "current_option": current.get("current_option"),
         "current_focus_node": focus_node_id,
-        "current_focus_path": focus_path_ids,
-        "next_actions": current.get("next_actions", []) or [],
-        "next_action_scopes": build_next_action_scopes(
-            nodes,
-            current,
-            focus_node_id=focus_node_id,
-            focus_path_ids=focus_path_ids,
-        ),
+        "current_focus_path": focus_path,
+        "next_actions": next_actions,
+        "next_action_scopes": _compact_action_scopes(scopes) if compact else scopes,
     }
-
+    if compact:
+        payload.update({
+            "current_focus_path_count": focus_path_count,
+            "current_focus_path_omitted_count": focus_path_omitted,
+            "next_actions_count": next_actions_count,
+            "next_actions_omitted_count": next_actions_omitted,
+        })
+    return payload
 
 def _target_context_payload(nodes: dict[str, Any], node_id: str, global_focus: dict[str, Any]) -> dict[str, Any]:
     node = nodes[node_id]
@@ -170,31 +222,26 @@ def _target_context_payload(nodes: dict[str, Any], node_id: str, global_focus: d
 
 
 def _compact_nested_node_context(node_payload: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "node", "parent_path", "parent_path_count", "parent_path_omitted_count",
+        "core_problem", "effective_baseline", "blockers", "blockers_count",
+        "blockers_omitted_count", "next_actions", "next_actions_count",
+        "next_actions_omitted_count", "next_action_scopes", "evidence_summary",
+        "recommended_next_step", "worker_verify_commands", "final_handoff_commands",
+        "verification_note", "command_drafts", "context_freshness",
+        "success_criteria_summary", "metrics_summary", "latest_findings",
+        "key_artifacts", "assignment_cursor", "warnings", "warnings_count",
+        "warnings_omitted_count", "run_summary", "gate_summary",
+    )
     out = {
-        "schema_version": "node_context_nested_compact_v1",
+        "schema_version": "node_context_nested_compact_v2",
         "compact": True,
-        "node": node_payload.get("node", {}) or {},
-        "parent_path": node_payload.get("parent_path", []) or [],
-        "core_problem": node_payload.get("core_problem", {}) or {},
-        "effective_baseline": node_payload.get("effective_baseline", {}) or {},
-        "blockers": node_payload.get("blockers", []) or [],
-        "next_actions": node_payload.get("next_actions", []) or [],
-        "next_action_scopes": node_payload.get("next_action_scopes", {}) or {},
-        "evidence_summary": node_payload.get("evidence_summary", {}) or {},
-        "recommended_next_step": node_payload.get("recommended_next_step"),
-        "worker_verify_commands": node_payload.get("worker_verify_commands", []) or [],
-        "final_handoff_commands": node_payload.get("final_handoff_commands", []) or [],
-        "verification_note": node_payload.get("verification_note", ""),
-        "command_drafts": node_payload.get("command_drafts", {}) or {},
-        "context_freshness": node_payload.get("context_freshness", {}) or {},
-        "warnings": node_payload.get("warnings", []) or [],
         "omitted_fields": ["recommended_next_steps"],
     }
-    for key in ("run_summary", "gate_summary"):
+    for key in keys:
         if key in node_payload:
             out[key] = node_payload[key]
     return out
-
 
 def _limited_items(values: list[dict[str, Any]], limit: int) -> tuple[list[dict[str, Any]], int]:
     return values[:limit], max(0, len(values) - limit)
@@ -228,6 +275,70 @@ def _compact_mapping(row: dict[str, Any], keys: set[str]) -> dict[str, Any]:
     return {key: row[key] for key in keys if key in row}
 
 
+_COMPACT_NODE_REF_KEYS = {"id", "type", "title", "status", "summary", "result_summary", "outcome"}
+
+
+def _compact_node_ref(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(row, dict):
+        return None
+    return {key: row[key] for key in _COMPACT_NODE_REF_KEYS if row.get(key) not in (None, "", [])}
+
+
+def _compact_bootstrap_payload(bootstrap: dict[str, Any], focus: dict[str, Any]) -> dict[str, Any]:
+    guidance = bootstrap.get("mutation_guidance") if isinstance(bootstrap.get("mutation_guidance"), dict) else {}
+    batch_mode = guidance.get("multi_agent_batch_mode") if isinstance(guidance.get("multi_agent_batch_mode"), dict) else {}
+    top_suggestions = list(bootstrap.get("top_suggestions", []) or [])
+    semantic_warnings = list(bootstrap.get("semantic_warnings", []) or [])
+    compact_suggestions = [
+        {
+            key: suggestion[key]
+            for key in ("id", "suggestion_id", "kind", "priority", "action", "reason", "source_node_id", "suggested_command")
+            if suggestion.get(key) not in (None, "", [])
+        }
+        for suggestion in top_suggestions[:3]
+        if isinstance(suggestion, dict)
+    ]
+    return {
+        "validation": bootstrap.get("validation"),
+        "focus": focus,
+        "mutation_guidance": {
+            "current_focus_node": guidance.get("current_focus_node"),
+            "current_best_option": guidance.get("current_best_option"),
+            "batching": guidance.get("batching"),
+            "multi_agent_batch_mode": {
+                "rules": list(batch_mode.get("rules", []) or [])[:4],
+                "worker_verify_commands": list(batch_mode.get("worker_verify_commands", []) or [])[:3],
+                "final_handoff_commands": list(batch_mode.get("final_handoff_commands", []) or [])[:3],
+            },
+        },
+        "top_suggestions": compact_suggestions,
+        "top_suggestions_count": len(top_suggestions),
+        "top_suggestions_omitted_count": max(0, len(top_suggestions) - len(compact_suggestions)),
+        "semantic_warnings": semantic_warnings[:10],
+        "semantic_warnings_count": len(semantic_warnings),
+        "semantic_warnings_omitted_count": max(0, len(semantic_warnings) - 10),
+    }
+
+def _compact_semantic_warnings(
+    root: Path,
+    nodes: dict[str, Any],
+    current: dict[str, Any],
+) -> list[dict[str, Any]]:
+    focus_node_id = str(current.get("current_focus_node") or "")
+    focus = nodes.get(focus_node_id)
+    if focus is None or focus.status not in TERMINAL_STATUSES:
+        return []
+    return [{
+        "id": "current_focus_terminal",
+        "severity": "warning",
+        "message": (
+            f"current_focus_node {focus.id!r} has terminal status {focus.status!r}."
+        ),
+        "node_id": focus.id,
+        "command": f"research-cockpit set-focus --root {root} --focus-node <next_node>",
+    }]
+
+@progress_traced("context_snapshot")
 def context_payload(
     root: Path,
     *,
@@ -237,10 +348,11 @@ def context_payload(
     compact: bool = False,
     command_style: str = "console",
 ) -> dict[str, Any]:
-    nodes = load_nodes(root)
-    current = load_yaml(root / "current_state.yaml")
-    explicit_edges = load_explicit_edges(root)
-    validation_errors = validate_cockpit(root, nodes, current, explicit_edges)
+    snapshot = load_root_snapshot(root, node_id=node_id, compact=compact)
+    nodes = snapshot.nodes
+    current = snapshot.current
+    explicit_edges = snapshot.explicit_edges
+    validation_errors = snapshot.validation_errors
     if validation_errors:
         raise ValidationError(validation_errors)
     if node_id not in nodes:
@@ -248,21 +360,32 @@ def context_payload(
 
     option_id = _related_option_id(nodes, node_id)
     problem_id = upstream_problem_id(nodes, option_id) if option_id else None
-    related_experiment_ids = _related_experiment_ids(nodes, node_id)
+    all_related_experiment_ids = _related_experiment_ids(nodes, node_id)
+    related_experiment_count = len(all_related_experiment_ids)
+    related_experiment_ids = all_related_experiment_ids[:10] if compact else all_related_experiment_ids
     related_ids = [node_id, *related_experiment_ids]
     effective_baseline = resolve_effective_baseline(nodes, node_id, current)
     artifact_ids = _artifact_ids_for(nodes, related_ids)
     artifact_ids = unique_strings([*artifact_ids, *baseline_artifact_ids(effective_baseline)])
+    if compact:
+        artifact_ids = artifact_ids[:20]
     artifact_record_ids = _artifact_record_ids_for(nodes, related_ids)
+    if compact:
+        artifact_record_ids = artifact_record_ids[:20]
     artifact_record_cache: dict[str, list[dict[str, Any]]] = {}
     node_context_resource_ids = _node_context_resource_node_ids(nodes, node_id)
+    if compact:
+        node_context_resource_ids = node_context_resource_ids[:30]
     node_context_record_ids = _artifact_record_ids_for(nodes, node_context_resource_ids)
+    if compact:
+        node_context_record_ids = node_context_record_ids[:20]
     node_context_record_map = _artifact_records_for(
         root,
         nodes,
         node_context_resource_ids,
         node_context_record_ids,
         record_cache=artifact_record_cache,
+    allow_global_fallback=not compact,
     )
     node_context_nodes = {
         current_id: nodes[current_id]
@@ -284,11 +407,28 @@ def context_payload(
         explicit_edges=explicit_edges,
         link_rows=node_context_link_rows,
         run_validation=False,
+        suggestions=[] if compact else None,
+        run_records=snapshot.run_records,
+        gate_records=snapshot.gate_records,
     )
-    global_focus = _compact_focus_payload(nodes, current)
+    global_focus = _compact_focus_payload(nodes, current, compact=compact)
     target_context = _target_context_payload(nodes, node_id, global_focus)
     target_differs_from_global_focus = not target_context["is_current_global_focus"]
-    semantic = semantic_lint(root)
+    semantic = {
+        "warnings": _compact_semantic_warnings(root, nodes, current)
+    } if compact else semantic_lint(root)
+    related_experiments = ordered_node_contexts(nodes, related_experiment_ids)
+    if compact:
+        related_experiments = [
+            item
+            for item in (_compact_node_ref(row) for row in related_experiments)
+            if item is not None
+        ]
+    if compact:
+        related_experiments, _, related_experiments_omitted = _bounded_values(related_experiments, 10)
+        related_experiments_omitted = max(0, related_experiment_count - len(related_experiments))
+    else:
+        related_experiments_omitted = 0
 
     semantic_warnings = semantic["warnings"]
     if compact:
@@ -297,53 +437,67 @@ def context_payload(
         semantic_omitted_count = 0
     payload: dict[str, Any] = {
         "root": str(root),
-        "warnings": list(node_payload.get("warnings", [])),
+        "warnings": list(node_payload.get("warnings", []))[:10] if compact else list(node_payload.get("warnings", [])),
         "semantic_warnings": semantic_warnings,
         "node": node_payload["node"],
         "node_context": _compact_nested_node_context(node_payload) if compact else node_payload,
         "validation": {
             "ok": True,
             "errors": [],
-            "node_count": len(nodes),
+            "node_count": snapshot.node_count,
         },
+        "snapshot": snapshot.status_payload(),
         "focus": global_focus,
-        "current_global_focus": global_focus,
+
         "target_context": target_context,
-        "effective_baseline": effective_baseline,
+        "effective_baseline": node_payload.get("effective_baseline", effective_baseline) if compact else effective_baseline,
         "context_boundary": {
             "target_node_id": node_id,
             "global_focus_node_id": global_focus.get("current_focus_node"),
             "target_differs_from_global_focus": target_differs_from_global_focus,
             "warning": (
-                "This payload is for the target node, while current_global_focus points elsewhere."
+                "This payload is for the target node, while global focus points elsewhere."
                 if target_differs_from_global_focus
                 else ""
             ),
         },
         "related": {
-            "problem": node_context(nodes[problem_id]) if problem_id else None,
-            "option": node_context(nodes[option_id]) if option_id else None,
-            "experiments": ordered_node_contexts(nodes, related_experiment_ids),
+            "problem": _compact_node_ref(node_context(nodes[problem_id])) if compact and problem_id else (node_context(nodes[problem_id]) if problem_id else None),
+            "option": _compact_node_ref(node_context(nodes[option_id])) if compact and option_id else (node_context(nodes[option_id]) if option_id else None),
+            "experiments": related_experiments,
+            "experiments_count": related_experiment_count,
+            "experiments_omitted_count": related_experiments_omitted,
         },
         "recommended_commands": {
-            "ingest_artifact": "research-cockpit ingest-artifact --root <root> --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --record-only --json --compact --no-build",
-            "complete_experiment": "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --artifact-id <artifact_id> --dry-run --json --show-diff",
+            "ingest_artifact": "research-cockpit ingest-artifact --root <root> --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --json --compact --no-build",
+            "complete_run": "research-cockpit complete-run --root <root> --file closeout.yaml --assignment <assignment_id> --json --compact --no-build",
+            "complete_experiment": "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --dry-run --json --show-diff",
             "complete_experiments": "research-cockpit complete-experiments --root <root> --file findings.yaml --dry-run --json --show-diff",
             "create_artifact": "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path artifacts/<node_id>/<run_id> --link-to <node_id> --no-build",
             "finalize_workstream": "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
         },
     }
+    if compact:
+        payload["schema_version"] = "context_compact_v2"
+        payload["compact"] = True
+        payload["warnings_count"] = len(node_payload.get("warnings", []))
+        payload["warnings_omitted_count"] = max(0, len(node_payload.get("warnings", [])) - 10)
+        payload["deprecated_fields"] = ["current_global_focus"]
+    payload["current_global_focus"] = global_focus
     if semantic_omitted_count:
         payload["semantic_warnings_omitted_count"] = semantic_omitted_count
     if with_bootstrap:
-        bootstrap = agent_bootstrap_payload(root, build=False)
-        payload["bootstrap"] = {
-            "validation": bootstrap.get("validation"),
-            "focus": bootstrap.get("focus"),
-            "mutation_guidance": bootstrap.get("mutation_guidance"),
-            "top_suggestions": bootstrap.get("top_suggestions", [])[:3],
-            "semantic_warnings": bootstrap.get("semantic_warnings", [])[:10],
-        } if compact else bootstrap
+        bootstrap = agent_bootstrap_payload(
+            root,
+            build=False,
+            nodes=nodes,
+            current=current,
+            validation_errors=validation_errors,
+            link_rows=node_context_link_rows,
+            semantic_warnings=list(semantic["warnings"]),
+            compact_runtime=compact,
+        )
+        payload["bootstrap"] = _compact_bootstrap_payload(bootstrap, global_focus) if compact else bootstrap
     if with_artifacts:
         artifact_record_map = _artifact_records_for(
             root,
@@ -351,6 +505,7 @@ def context_payload(
             related_ids,
             artifact_record_ids,
             record_cache=artifact_record_cache,
+        allow_global_fallback=not compact,
         )
         artifact_record_id_set = set(artifact_record_ids)
         resource_node_ids = unique_strings([node_id, *related_experiment_ids, *artifact_ids])
@@ -382,16 +537,33 @@ def context_payload(
         else:
             artifact_records_omitted = 0
             resource_rows_omitted = 0
+        output_artifact_ids = artifact_ids[:20] if compact else artifact_ids
+        output_record_ids = artifact_record_ids[:20] if compact else artifact_record_ids
+        artifact_nodes = ordered_node_contexts(nodes, output_artifact_ids)
+        if compact:
+            artifact_nodes = [
+                item
+                for item in (_compact_node_ref(row) for row in artifact_nodes)
+                if item is not None
+            ]
         payload["artifacts"] = {
-            "artifact_ids": artifact_ids,
-            "artifact_record_ids": artifact_record_ids,
-            "nodes": ordered_node_contexts(nodes, artifact_ids),
+            "artifact_ids": output_artifact_ids,
+            "artifact_record_ids": output_record_ids,
+            "nodes": artifact_nodes,
             "artifact_records": artifact_records,
             "resource_rows": scoped_resource_rows,
         }
         if compact:
-            payload["artifacts"]["artifact_records_omitted_count"] = artifact_records_omitted
-            payload["artifacts"]["resource_rows_omitted_count"] = resource_rows_omitted
+            payload["artifacts"].update({
+                "artifact_ids_count": len(artifact_ids),
+                "artifact_ids_omitted_count": max(0, len(artifact_ids) - len(output_artifact_ids)),
+                "artifact_record_ids_count": len(artifact_record_ids),
+                "artifact_record_ids_omitted_count": max(0, len(artifact_record_ids) - len(output_record_ids)),
+                "artifact_records_count": len(artifact_records) + artifact_records_omitted,
+                "artifact_records_omitted_count": artifact_records_omitted,
+                "resource_rows_count": len(scoped_resource_rows) + resource_rows_omitted,
+                "resource_rows_omitted_count": resource_rows_omitted,
+            })
     return payload
 
 
@@ -422,6 +594,7 @@ def main() -> None:
         default="console",
         help="Command draft style to emit in nested node context.",
     )
+    parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
 
     try:
@@ -438,7 +611,7 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     if args.json:
-        emit_json(payload)
+        emit_json(payload, compact=args.compact)
         return
     _print_human(payload)
 

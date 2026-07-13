@@ -10,7 +10,7 @@ These templates are optional starting points for long experiment runs. They writ
 | `smoke-gate` | Run the smallest useful execution before a full run. | `smoke_check` | `full_run` |
 | `full-run` | Start or monitor the real long-running experiment. | `full_run` | `artifact_capture` |
 | `artifact-capture` | Preserve useful files after a run finishes. | `artifact_capture` | `validate_build` |
-| `validate-build` | Run `validate`, `build`, `smoke`, or project checks before handoff. | `validation_check` | `next_action_update` |
+| `validate-build` | Run changed-scope worker checks, project checks, or the coordinator/final full gate. | `validation_check` | `next_action_update` |
 | `next-action-update` | Record findings, gates, artifacts, and the next focus/action. | `handoff_check` | `done` |
 
 ## Python Template
@@ -43,10 +43,12 @@ Use `manual_run_checklist.md` when no script owns the run. Fill the same fields 
 
 ## Handoff Order
 
-Use `--no-build` for mutating Research Cockpit commands during the handoff, then run one final validation/build/smoke pass.
+Use `--no-build` for handoff mutations. Default `ingest-artifact` creates an artifact record, and the structured closeout references that returned record through `artifact_record.existing_record_id`.
 
-1. Create or update the run with `create-run` or `update-run`.
-2. Preserve the output directory with `ingest-artifact`.
-3. Attach `gate_result.json` with `ingest-gate-result`.
-4. Record conclusions with `record-finding`, `complete-experiment`, or a next-action update.
-5. Run final `validate`, `build`, and `smoke` once after batched state updates.
+1. Create or update the running record with `create-run` or `update-run`.
+2. Preserve the output directory with `ingest-artifact` and keep its returned `record_id`.
+3. Run `complete-run --print-schema`, set `artifact_record.existing_record_id` in `closeout.yaml`, and close the run with `complete-run --file closeout.yaml`. Include gate payloads, the finding, and next actions in that transaction.
+4. Run only the changed-scope `verify_commands` returned by the write commands.
+5. Run full `validate`, `build`, and root `smoke` once at coordinator merge, release, or final handoff.
+
+Use a separate `ingest-gate-result` only for recovery or an intentionally partial update. Pass `--artifact <artifact_id>` only when that id is an explicitly promoted graph artifact.

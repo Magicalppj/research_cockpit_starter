@@ -1,5 +1,8 @@
 # Research Cockpit Design Document
 
+> **Historical record:** this file preserves design or implementation context and is not current operational guidance. Current operational guidance: repository-root `README.md`, `SKILL.md`, `AGENTS.md`, `capabilities/`, and `docs/internal-architecture.md`.
+
+
 ## Goal
 
 Create a repo-native, graph-based research cockpit that helps both the human researcher and AI agents understand:

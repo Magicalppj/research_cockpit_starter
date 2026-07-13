@@ -21,7 +21,15 @@ from research_cockpit.model import (
 )
 from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
-from research_cockpit.commands._runtime import dry_run_preflight_result, finish_mutation, load_validated_state, yaml_change_diff
+from research_cockpit.commands._runtime import (
+    compact_mutation_result,
+    dry_run_preflight_result,
+    emit_json,
+    finish_mutation,
+    load_targeted_state,
+    validate_mutation_candidate,
+    yaml_change_diff,
+)
 from research_cockpit.commands._evidence import (
     append_unique,
     evidence_warnings,
@@ -32,12 +40,18 @@ from research_cockpit.commands._evidence import (
 
 
 def find_node_file(root: Path, node_id: str) -> Path:
+    direct_path = root / "graph" / "nodes" / f"{node_id}.yaml"
+    if direct_path.exists():
+        data = load_yaml(direct_path)
+        if str(data.get("id") or "") == node_id:
+            return direct_path
     for path in sorted((root / "graph" / "nodes").glob("*.yaml")):
+        if path == direct_path:
+            continue
         data = load_yaml(path)
         if str(data.get("id")) == node_id:
             return path
     raise FileNotFoundError(f"Node does not exist: {node_id}")
-
 
 def _next_finding_id(experiment_id: str, findings: list[dict[str, Any]]) -> str:
     used = {str(finding.get("id")) for finding in findings if isinstance(finding, dict)}
@@ -103,7 +117,9 @@ def record_finding_result(
     assignment_id: str | None = None,
     coordinator: bool = False,
 ) -> dict[str, Any]:
-    state = load_validated_state(root)
+    artifacts = artifacts or []
+    evidence_links = evidence_links or {}
+    state = load_targeted_state(root, node_ids=[experiment_id, *artifacts])
     nodes = state.nodes
     if experiment_id not in nodes:
         raise FileNotFoundError(f"Experiment node does not exist: {experiment_id}")
@@ -116,8 +132,6 @@ def record_finding_result(
     if outcome is not None and outcome not in VALID_FINDING_OUTCOMES:
         allowed = ", ".join(sorted(VALID_FINDING_OUTCOMES))
         raise ValueError(f"Invalid outcome {outcome!r}; allowed: {allowed}")
-    artifacts = artifacts or []
-    evidence_links = evidence_links or {}
     validate_artifact_ids(nodes, artifacts)
     ensure_assignment_scope(
         root,
@@ -173,7 +187,7 @@ def record_finding_result(
         artifact_path = root / "graph" / "nodes" / f"{evidence_artifact['id']}.yaml"
         candidate[str(evidence_artifact["id"])] = ResearchNode.from_dict(evidence_artifact)
         changes.append((artifact_path, None, evidence_artifact))
-    validate_cockpit(root, candidate, state.current, state.explicit_edges, raise_on_error=True)
+    validate_mutation_candidate(root, state, nodes=candidate)
 
     after_summary = {
         "finding_count": len(findings),
@@ -239,9 +253,11 @@ def main() -> None:
     parser.add_argument("--summary")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--compact", action="store_true")
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     add_assignment_scope_args(parser)
+    parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
 
     try:
@@ -270,7 +286,19 @@ def main() -> None:
         raise SystemExit(1) from exc
 
     if args.json:
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        payload = (
+            compact_mutation_result(
+                result,
+                command="record-finding",
+                target={"experiment_id": result["experiment_id"], "finding_id": result["finding_id"]},
+                root=args.root,
+                created=result.get("created_artifacts", []),
+                updated=[result["experiment_id"]],
+            )
+            if args.compact
+            else result
+        )
+        emit_json(payload, compact=args.compact)
         return
     verb = "Would update" if args.dry_run else "Updated"
     print(f"{verb} {result['path']}")

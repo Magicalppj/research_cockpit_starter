@@ -33,8 +33,10 @@ Use this checklist when a run is started by hand and no script owns the lifecycl
 ```sh
 research-cockpit create-run --root research_cockpit --id <run_id> --experiment <experiment_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build
 research-cockpit ingest-artifact --root research_cockpit --node <experiment_id> --from <launcher_output_dir> --run-id <run_id> --agent <agent_id> --link gate_result=gate_result.json --no-build --json --compact
-research-cockpit ingest-gate-result --root research_cockpit --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --artifact artifact_<experiment_id>_<run_id> --no-build
-research-cockpit complete-run --root research_cockpit --id <run_id> --status completed --no-build
+research-cockpit complete-run --print-schema
+research-cockpit complete-run --root research_cockpit --file <closeout.yaml> --assignment <assignment_id> --no-build --json --compact
 ```
 
-If you pass a custom artifact id to the ingest step, use that returned id instead.
+Use `complete-run --file` for the closeout. Keep the `record_id` returned by `ingest-artifact` and set it as `artifact_record.existing_record_id` in `closeout.yaml`. Put terminal run status, gate payloads, the finding, and next actions in the same transaction. Run only the returned changed-scope `verify_commands` as a worker.
+
+Do not pass the artifact record id to `ingest-gate-result --artifact`; that flag accepts only an explicitly promoted graph artifact id. Use separate gate/finding/status commands only for recovery or a deliberately partial update. Full `validate`, `build`, and root `smoke` belong to coordinator merge, release, or final handoff.

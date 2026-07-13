@@ -88,7 +88,7 @@ research-cockpit create-artifact --root research_cockpit --id artifact_x --title
 research-cockpit link-artifact --root research_cockpit --artifact artifact_x --to option_x --no-build
 ```
 
-Run/job status updates:
+Status-only run/job updates (no gate, finding, artifact, or next-action change):
 
 ```sh
 research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
@@ -164,18 +164,18 @@ The importer only accepts artifact nodes, experiment findings, result summaries,
 Worktree output is temporary. Before deleting a worktree or using its files as evidence, copy the run directory into the canonical artifact store:
 
 ```sh
-research-cockpit ingest-artifact --root D:/main_repo/research_cockpit --node experiment_x --from ../worktrees/agent_option_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --record-only --json --compact --no-build
-research-cockpit validate --root D:/main_repo/research_cockpit --changed-node experiment_x --changed-record artifact:artifact_experiment_x_run_x --json
-research-cockpit context --root D:/main_repo/research_cockpit --id experiment_x --with-bootstrap --with-artifacts --compact --json
-research-cockpit artifact-records --root D:/main_repo/research_cockpit --experiment experiment_x --json --compact
+research-cockpit ingest-artifact --root <data-root> --node experiment_x --from <worktree-run-dir> --run-id run_x --agent agent_x --link metrics=metrics.json --json --compact --no-build
+research-cockpit validate --root <data-root> --changed-node experiment_x --changed-record artifact:artifact_experiment_x_run_x --json
+research-cockpit context --root <data-root> --id experiment_x --with-bootstrap --with-artifacts --compact --json
+research-cockpit artifact-records --root <data-root> --experiment experiment_x --json --compact
 ```
 
-`ingest-artifact --record-only` copies `--from` to `research_cockpit/artifacts/<node_id>/<run_id>/`, writes `_research_cockpit_ingest.json`, records an artifact sidecar under `artifact_records/<experiment_id>.yaml`, and links the record to the experiment through `linked_artifact_records`. It does not create a graph artifact node. Repeated `--link key=relative/path` values must point inside the source directory; they are rewritten to stable artifact-store paths. The ingest manifest records the source path relative to the canonical root parent when possible; external source directories are recorded only as a short hint, not as a machine-local path. Source directories containing symlinks are rejected in v1. The command does not record findings, accept decisions, or set baselines.
+For experiment targets, `ingest-artifact` defaults to record mode: it copies `--from` to `artifacts/<node_id>/<run_id>/`, writes `_research_cockpit_ingest.json`, records metadata under `artifact_records/<experiment_id>.yaml`, and links the record through `linked_artifact_records`. `--record-only` remains an explicit compatibility flag. Repeated `--link key=relative/path` values must stay inside the source directory and are rewritten to canonical paths. The command does not record findings, accept decisions, or set baselines.
 
-Use record-only ingest as the normal path for multi-agent worktrees. Promote the record only when it becomes long-lived evidence for navigation, decisions, or baselines:
+Do not promote ordinary run output. Immediate graph creation requires `ingest-artifact --promote --promotion-reason "..."`; for an existing record, promotion also requires a durable reason:
 
 ```sh
-research-cockpit promote-artifact-record --root D:/main_repo/research_cockpit --id artifact_experiment_x_run_x --artifact-id artifact_experiment_x_run_x_promoted --link-to experiment_x --json --compact
+research-cockpit promote-artifact-record --root <data-root> --id artifact_experiment_x_run_x --artifact-id artifact_experiment_x_run_x_promoted --link-to experiment_x --promotion-reason "Durable evidence for decision or baseline" --json --compact
 ```
 
 Use inline `--evidence-path` only for files that already live at a stable path outside the disposable worktree.
@@ -187,16 +187,27 @@ Use run/job records for concrete executions of an experiment: launcher command, 
 Launcher-produced output directories should follow `docs/launcher-output-conventions.md`: `run_record.txt` for the human handoff, `progress.json` for heartbeat state, `gate_result.json` for machine-readable gates, and `artifact_manifest.json` for evidence links. Starter templates live in `templates/launcher/`. The convention works for shell, Python, tmux, scheduler, and manual flows because all stable records are still created through `research-cockpit` commands.
 
 ```sh
-research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher tmux --command "python train.py" --tmux-session train_x --progress-file artifacts/experiment_x/run_x/progress.json --monitor-command "tail -f artifacts/experiment_x/run_x/logs/run.log" --stop-command "tmux kill-session -t train_x" --no-build
+research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher tmux --command "python train.py" --tmux-session train_x --progress-file artifacts/experiment_x/run_x/progress.json --monitor-command "tail -f artifacts/experiment_x/run_x/logs/run.log" --stop-command "tmux kill-session -t train_x" --assignment <assignment_id> --no-build
 research-cockpit run-context --root research_cockpit --id run_x --compact --json
 research-cockpit update-run --root research_cockpit --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
-research-cockpit complete-run --root research_cockpit --id run_x --status completed --finished-at 2026-05-27T02:00:00Z --no-build
+research-cockpit complete-run --print-schema
+research-cockpit complete-run --root research_cockpit --file closeout.yaml --assignment <assignment_id> --json --compact --no-build
 research-cockpit list-runs --root research_cockpit --experiment experiment_x --json --compact
 ```
 
-Prefer `--no-build` for frequent status updates in multi-agent workflows, then run `research-cockpit validate --root research_cockpit --changed-file runs/<run_id>.yaml --json` and `run-context` for the changed run. Use `run-context` before monitoring or stopping a known run. A completed run is not a finding; record conclusions with `complete-experiment` and preserve output directories with `ingest-artifact`.
+Prefer `--no-build` for frequent status updates and use `run-context` before monitoring or stopping a known run. At closeout, use one `run_closeout_v1` file for terminal run status, gates, finding, artifact record, and next actions. If `ingest-artifact` already created the record, set `artifact_record.existing_record_id` to its `record_id`; do not repeat the record fields. `complete-run --file` validates the whole transaction before writing, while `complete-run --id` remains the status-only compatibility path.
 
 `bootstrap`, `node-context` for experiment nodes, and `option-workstream-context --compact --json` include short run summaries so agents can see active, failed, stale, and recently completed executions without reading every run file. Use `run-context` for full operational details.
+
+Generate the file contract before the first closeout:
+
+```sh
+research-cockpit complete-run --print-schema
+research-cockpit complete-run --root research_cockpit --file closeout.yaml --assignment <assignment_id> --dry-run --json --show-diff
+research-cockpit complete-run --root research_cockpit --file closeout.yaml --assignment <assignment_id> --json --compact --no-build
+```
+
+Run only the compact result's changed-scope `verify_commands`. Full `validate`, `build`, and root `smoke` are coordinator/final-handoff gates.
 
 Standard `progress.json` heartbeat files should be JSON objects with this shape:
 
@@ -426,7 +437,7 @@ research-cockpit update-finding --root research_cockpit --experiment experiment_
 
 `update-finding` preserves `created_at`, writes `updated_at`, and can append or replace metrics/artifacts with `--replace-metrics` / `--replace-artifacts`.
 
-Successful finding and completion writes append compact events to `graph/interaction_log.yaml`.
+Successful finding and completion writes append compact JSONL events to the active `graph/interaction_events/` backend; migrated roots retain `graph/interaction_log.yaml` only as the legacy prefix.
 
 Treat structured `findings` as truth. Use Markdown notes only for human-readable details that do not need to drive dashboards or decisions.
 
@@ -436,7 +447,7 @@ After findings change, rebuild decision evidence when a decision depends on them
 research-cockpit update-decision-evidence --root research_cockpit --id decision_x
 ```
 
-When recording several related updates, run mutating commands sequentially. Do not parallelize writes against the same data root; mutating commands share `graph/interaction_log.yaml`, use a mutation lock, and fail without writing if target truth-source files changed after command planning. On conflict, reread context and retry the stale command. Use `--no-build` on each supported worker command and verify the changed node locally:
+When recording several related updates, run mutating commands sequentially. Do not parallelize writes against the same data root; mutating commands share the active interaction backend, use a mutation lock, and fail without writing if target truth-source files changed after command planning. On conflict, reread context and retry the stale command. Use `--no-build` on each supported worker command and verify the changed node locally:
 
 ```sh
 research-cockpit validate --root research_cockpit --changed-node experiment_x --json

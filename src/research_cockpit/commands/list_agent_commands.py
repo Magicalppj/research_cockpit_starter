@@ -88,6 +88,7 @@ WORKFLOW_TAGS_BY_COMMAND = {
     "validate": ["read", "maintenance", "graph"],
     "lint": ["read", "maintenance", "graph"],
     "repair-interaction-log": ["maintenance"],
+    "migrate-interaction-log": ["maintenance"],
     "build": ["maintenance", "graph"],
     "smoke": ["read", "maintenance"],
     "search": ["read", "focus"],
@@ -202,6 +203,7 @@ CAPABILITY_BY_COMMAND = {
     "validate_cockpit.py": "capabilities/troubleshooting.md",
     "lint_semantic.py": "capabilities/troubleshooting.md",
     "repair_interaction_log.py": "capabilities/troubleshooting.md",
+    "migrate_interaction_log.py": "capabilities/troubleshooting.md",
     "build_dashboard.py": "capabilities/graph-state.md",
     "skill_smoke_test.py": "capabilities/integrations.md",
     "search_knowledge.py": "capabilities/focus-context.md",
@@ -306,9 +308,10 @@ COMMANDS: list[dict[str, object]] = [
         "purpose": "Validate YAML nodes, focus state, edges, and lifecycle structure.",
         "mutating": False,
         "supports_json": True,
+        "supports_compact": True,
         "supports_dry_run": False,
         "supports_no_build": False,
-        "extra_supported_flags": ["--strict-lifecycle", "--changed-node", "--changed-file", "--changed-files", "--changed-record"],
+        "extra_supported_flags": ["--strict-lifecycle", "--changed-node", "--changed-file", "--changed-files", "--changed-record", "--include-affected-ids"],
         "recommended_when": "Use changed flags after small worker edits; use full validation for coordinator or final gates.",
     },
     {
@@ -334,6 +337,19 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": True,
         "supports_no_build": False,
         "recommended_when": "Recover from non-mapping interaction log events without hand-editing YAML.",
+    },
+    {
+        "name": "migrate_interaction_log.py",
+        "purpose": "Plan or activate the append-only JSONL interaction event backend while preserving legacy YAML.",
+        "mutating": True,
+        "writes_truth_source": False,
+        "writes_generated_files": False,
+        "rebuild_default": False,
+        "supports_json": True,
+        "supports_dry_run": True,
+        "supports_no_build": False,
+        "extra_supported_flags": ["--execute"],
+        "recommended_when": "Run dry-run first for large legacy interaction logs, then execute once after reviewing counts and checksums.",
     },
     {
         "name": "build_dashboard.py",
@@ -612,7 +628,21 @@ COMMANDS: list[dict[str, object]] = [
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
-        "extra_supported_flags": ["--agent", "--assignment", "--assignment-id", "--label", "--base", "--create-worktree", "--force", "--sparse", "--sparse-profile"],
+        "extra_supported_flags": [
+            "--option",
+            "--agent",
+            "--assignment",
+            "--assignment-id",
+            "--label",
+            "--objective",
+            "--branch",
+            "--worktree",
+            "--base",
+            "--create-worktree",
+            "--force",
+            "--sparse",
+            "--sparse-profile",
+        ],
         "fields_supported": [
             "agent_id",
             "assignment_id",
@@ -636,6 +666,10 @@ COMMANDS: list[dict[str, object]] = [
         "supports_no_build": True,
         "supports_compact": True,
         "extra_supported_flags": [
+            "--id",
+            "--experiment",
+            "--experiment-id",
+            "--status",
             *ASSIGNMENT_SCOPE_FLAGS,
             "--resources-json",
             "--resources-file",
@@ -672,6 +706,10 @@ COMMANDS: list[dict[str, object]] = [
         "supports_no_build": True,
         "supports_compact": True,
         "extra_supported_flags": [
+            "--id",
+            "--experiment",
+            "--experiment-id",
+            "--status",
             *ASSIGNMENT_SCOPE_FLAGS,
             "--resources-json",
             "--resources-file",
@@ -700,13 +738,15 @@ COMMANDS: list[dict[str, object]] = [
     },
     {
         "name": "complete_run.py",
-        "purpose": "Mark an existing run/job completed, failed, or cancelled.",
+        "purpose": "Close a run directly or apply a structured transactional run closeout.",
         "mutating": True,
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
         "supports_compact": True,
         "extra_supported_flags": [
+            "--file",
+            "--print-schema",
             *ASSIGNMENT_SCOPE_FLAGS,
             "--resources-json",
             "--resources-file",
@@ -724,7 +764,8 @@ COMMANDS: list[dict[str, object]] = [
             "resources",
             "output_retention",
         ],
-        "recommended_when": "Close a concrete execution before recording findings or ingesting artifacts.",
+        **file_schema_for_script("complete_run.py"),
+        "recommended_when": "Use --file to close a run, gates, artifact record, finding, and next actions in one transaction.",
     },
     {
         "name": "list_runs.py",
@@ -979,15 +1020,38 @@ COMMANDS: list[dict[str, object]] = [
     },
     {
         "name": "ingest_artifact.py",
-        "purpose": "Copy a worktree result directory into the canonical artifact store and create a linked artifact.",
+        "purpose": "Copy run output into the canonical store; experiment targets create an artifact record by default.",
         "mutating": True,
         "supports_json": True,
         "supports_dry_run": True,
         "supports_no_build": True,
         "supports_compact": True,
-        "extra_supported_flags": [*ASSIGNMENT_SCOPE_FLAGS, "--record-only"],
-        "fields_supported": ["node", "from", "run_id", "artifact_id", "record_only", "path", "links", "agent"],
-        "recommended_when": "Preserve experiment outputs before deleting an agent worktree or recording a finding.",
+        "extra_supported_flags": [
+            "--node",
+            "--from",
+            "--run-id",
+            "--id",
+            "--title",
+            "--summary",
+            "--agent",
+            "--link",
+            *ASSIGNMENT_SCOPE_FLAGS,
+            "--record-only",
+            "--promote",
+            "--promotion-reason",
+        ],
+        "fields_supported": [
+            "node",
+            "from",
+            "run_id",
+            "artifact_id",
+            "mode",
+            "promotion_reason",
+            "path",
+            "links",
+            "agent",
+        ],
+        "recommended_when": "Preserve ordinary experiment output as a lightweight record; use --promote with a reason only for durable graph evidence.",
     },
     {
         "name": "list_artifact_records.py",
@@ -1007,8 +1071,20 @@ COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": True,
         "supports_no_build": True,
         "supports_compact": True,
-        "extra_supported_flags": ["--id", "--artifact-id", "--link-to", *ASSIGNMENT_SCOPE_FLAGS],
-        "fields_supported": ["artifact_records", "artifact_id", "linked_artifacts", "promoted_artifact_id"],
+        "extra_supported_flags": [
+            "--id",
+            "--artifact-id",
+            "--link-to",
+            "--promotion-reason",
+            *ASSIGNMENT_SCOPE_FLAGS,
+        ],
+        "fields_supported": [
+            "artifact_records",
+            "artifact_id",
+            "linked_artifacts",
+            "promoted_artifact_id",
+            "promotion_reason",
+        ],
         "recommended_when": "Promote record-only evidence only when it must become long-lived graph evidence for navigation, decisions, or baselines.",
     },
     {
@@ -1312,6 +1388,19 @@ COMMANDS: list[dict[str, object]] = [
 ]
 
 
+PROGRESS_COMMAND_SCRIPTS = {
+    "build_dashboard.py",
+    "complete_run.py",
+    "context.py",
+    "ingest_artifact.py",
+    "ingest_gate_result.py",
+    "node_context.py",
+    "record_finding.py",
+    "update_node_fields.py",
+    "update_run.py",
+    "validate_cockpit.py",
+}
+
 DISCOVERY_FLAGS = {
     "--compact": "supports_compact",
     "--dry-run": "supports_dry_run",
@@ -1324,6 +1413,11 @@ DISCOVERY_FLAGS = {
 def _flag_support(row: dict[str, object]) -> tuple[list[str], list[str]]:
     supported: list[str] = [str(flag) for flag in row.get("extra_supported_flags", [])]
     unsupported: list[str] = []
+    command_name = str(row.get("name") or "")
+    if command_name in PROGRESS_COMMAND_SCRIPTS or (
+        bool(row.get("mutating")) and command_name.endswith(".py")
+    ):
+        supported.append("--progress")
     if bool(row.get("supports_root", True)):
         supported.append("--root")
     else:
@@ -1432,7 +1526,7 @@ def agent_command_manifest(
             "supports_show_diff": subcommand in SHOW_DIFF_COMMANDS,
             "supports_root": bool(command.get("supports_root", True)),
         }
-        supported_flags, unsupported_flags = _flag_support(row)
+        supported_flags, unsupported_flags = _flag_support({**row, "name": command_name})
         row.pop("extra_supported_flags", None)
         row["supported_flags"] = supported_flags
         row["unsupported_flags"] = unsupported_flags

@@ -98,6 +98,7 @@ def promoted_artifact_record_update(
     record_id: str,
     artifact_id: str,
     updated_at: str,
+    promotion_reason: str,
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     path, before, record = find_artifact_record(root, record_id)
     if record.get("promoted_artifact_id"):
@@ -110,6 +111,7 @@ def promoted_artifact_record_update(
     }
     promoted_record = dict(record)
     promoted_record["promoted_artifact_id"] = artifact_id
+    promoted_record["promotion_reason"] = promotion_reason
     promoted_record["updated_at"] = updated_at
     after["records"][record_id] = promoted_record
     return path, before, after, promoted_record

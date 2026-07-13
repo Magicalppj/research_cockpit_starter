@@ -5,6 +5,8 @@ from pathlib import Path
 import time
 from typing import Any
 
+from research_cockpit.cli_progress import emit_progress_event
+
 
 class MutationError(RuntimeError):
     def __init__(self, message: str, payload: dict[str, Any] | None = None) -> None:
@@ -13,10 +15,18 @@ class MutationError(RuntimeError):
 
 
 class mutation_lock:
-    def __init__(self, root: Path, *, timeout_seconds: float = 30.0) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        timeout_seconds: float = 30.0,
+        lock_name: str = ".mutation.lock",
+    ) -> None:
+        if Path(lock_name).name != lock_name:
+            raise ValueError("lock_name must be a file name")
         self.root = root
         self.timeout_seconds = timeout_seconds
-        self.path = root / "graph" / ".mutation.lock"
+        self.path = root / "graph" / lock_name
         self.fd: int | None = None
 
     def _metadata(self) -> dict[str, Any]:
@@ -35,11 +45,18 @@ class mutation_lock:
     def __enter__(self) -> "mutation_lock":
         self.path.parent.mkdir(parents=True, exist_ok=True)
         start = time.monotonic()
+        emit_progress_event("lock_wait", event="phase_start")
         deadline = time.monotonic() + self.timeout_seconds
         while True:
             try:
                 self.fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.write(self.fd, f"pid: {os.getpid()}\ncreated_at: {time.time()}\n".encode("utf-8"))
+                emit_progress_event(
+                    "lock_wait",
+                    event="phase_end",
+                    duration_ms=(time.monotonic() - start) * 1000,
+                    status="completed",
+                )
                 return self
             except FileExistsError as exc:
                 if time.monotonic() >= deadline:

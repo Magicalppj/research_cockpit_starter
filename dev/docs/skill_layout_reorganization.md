@@ -1,5 +1,8 @@
 # Skill Layout Reorganization v2
 
+> **Historical record:** this file preserves design or implementation context and is not current operational guidance. Current operational guidance: repository-root `README.md`, `SKILL.md`, `AGENTS.md`, `capabilities/`, and `docs/internal-architecture.md`.
+
+
 Date: 2026-04-28
 
 This batch makes `skills/research-cockpit/` the complete package boundary. Copying that single directory is enough to publish or install the skill elsewhere.

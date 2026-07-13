@@ -46,6 +46,22 @@ research-cockpit validate --root research_cockpit --json
 
 The repair command only handles YAML that can be parsed. If the file has a scanner error, fix the YAML structure manually or restore from backup before running `validate` again.
 
+### Interaction Backend Migration
+
+Legacy `graph/interaction_log.yaml` remains readable. The first new mutation activates `graph/interaction_events/manifest.json` in `prefix` mode and appends new events to JSONL segments; from that point, the legacy YAML is an immutable prefix. For a large valid legacy log, migrate it explicitly:
+
+```sh
+research-cockpit migrate-interaction-log --root research_cockpit --dry-run --json
+research-cockpit migrate-interaction-log --root research_cockpit --execute --json
+research-cockpit validate --root research_cockpit --json
+```
+
+Execution verifies event count and checksum, atomically activates a new generation, and preserves the legacy YAML. If a manifest or segment is missing, malformed, or changed after sealing, stop mutations and restore the backend; do not fall back by deleting the manifest or editing JSONL.
+
+### Long Command Progress
+
+Use `--progress` on context, validation, mutation, build, and smoke commands when phase visibility is needed. Progress is emitted as JSON lines on stderr and never changes the stdout JSON contract. In non-interactive automation, pass `--progress` explicitly.
+
 ## Semantic Lint
 
 Run semantic lint when generated context looks stale even though `validate` passes:

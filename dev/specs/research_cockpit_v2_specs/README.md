@@ -1,5 +1,8 @@
 # Research Cockpit v2 Schema + UI Spec
 
+> **Historical record:** this file preserves design or implementation context and is not current operational guidance. Current operational guidance: repository-root `README.md`, `SKILL.md`, `AGENTS.md`, `capabilities/`, and `docs/internal-architecture.md`.
+
+
 This package contains two implementation-ready specifications:
 
 1. `docs/A_node_schema_v2.md`

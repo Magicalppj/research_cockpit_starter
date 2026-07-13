@@ -9,20 +9,44 @@ import subprocess
 import sys
 
 from research_cockpit.command_registry import COMMAND_MODULES, GROUPED_COMMAND_ALIASES
+from research_cockpit.cli_progress import progress_session
 from research_cockpit.commands._runtime import configure_utf8_stdio, emit_json, safe_print
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.paths import default_data_root, plugin_root
 
 COMMAND_CHOICES = [*COMMAND_MODULES.keys(), "init", "ui", *GROUPED_COMMAND_ALIASES.keys()]
+LOCAL_PROGRESS_MODULES = {
+    "build_dashboard",
+    "complete_run",
+    "context",
+    "ingest_artifact",
+    "ingest_gate_result",
+    "node_context",
+    "record_finding",
+    "skill_smoke_test",
+    "update_node_fields",
+    "update_run",
+    "validate_cockpit",
+}
 
 
 def _run_module(command_name: str, argv: list[str], *, display_command_name: str | None = None) -> None:
     module_name = COMMAND_MODULES[command_name]
     module = import_module(f"research_cockpit.commands.{module_name}")
+    progress_requested = "--progress" in argv
+    module_argv = (
+        argv
+        if module_name in LOCAL_PROGRESS_MODULES
+        else [item for item in argv if item != "--progress"]
+    )
     old_argv = sys.argv
-    sys.argv = [f"research-cockpit {display_command_name or command_name}", *argv]
+    sys.argv = [f"research-cockpit {display_command_name or command_name}", *module_argv]
     try:
-        module.main()
+        with progress_session(
+            display_command_name or command_name,
+            explicit=progress_requested,
+        ):
+            module.main()
     except MutationError as exc:
         if "--json" in argv:
             emit_json(exc.payload or {"ok": False, "error": str(exc)})
@@ -30,7 +54,10 @@ def _run_module(command_name: str, argv: list[str], *, display_command_name: str
             safe_print(str(exc))
         raise SystemExit(1) from None
     except (ValueError, FileNotFoundError, FileExistsError) as exc:
-        safe_print(str(exc))
+        if "--json" in argv:
+            emit_json({"ok": False, "error": str(exc)}, compact="--compact" in argv)
+        else:
+            safe_print(str(exc))
         raise SystemExit(1) from None
     finally:
         sys.argv = old_argv

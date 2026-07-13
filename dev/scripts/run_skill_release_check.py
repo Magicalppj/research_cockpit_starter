@@ -22,6 +22,8 @@ REQUIRED_MODULES = {
 }
 REQUIRED_PACKAGE_PATHS = (
     "SKILL.md",
+    "templates/launcher/README.md",
+    "templates/launcher/manual_run_checklist.md",
     "AGENTS.md",
     "README.md",
     "pyproject.toml",
@@ -41,6 +43,7 @@ REQUIRED_PACKAGE_PATHS = (
     "templates/minimal_research_cockpit/current_state.yaml",
     "capabilities/graph-state.md",
     "capabilities/focus-context.md",
+    "capabilities/maintenance.md",
     "capabilities/node-management.md",
     "capabilities/experiment-tracking.md",
     "capabilities/decision-adr.md",
@@ -93,11 +96,13 @@ def _track(
         "checks": checks or [],
         "stdout": stdout,
         "stderr": stderr,
+        "stdout_bytes": len(stdout.encode("utf-8")),
+        "stderr_bytes": len(stderr.encode("utf-8")),
     }
 
 
-def _short_text(value: str, limit: int = 1200) -> str:
-    value = value.strip()
+def _short_text(value: str | None, limit: int = 1200) -> str:
+    value = (value or "").strip()
     if len(value) <= limit:
         return value
     return value[:limit] + "...<truncated>"
@@ -139,7 +144,18 @@ def _run_command(
 ) -> dict[str, Any]:
     allowed = allowed_returncodes or {0}
     try:
-        result = subprocess.run(args, cwd=cwd, env=env, capture_output=True, text=True, check=False)
+        command_env = (env or os.environ).copy()
+        command_env["PYTHONIOENCODING"] = "utf-8"
+        result = subprocess.run(
+            args,
+            cwd=cwd,
+            env=command_env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
     except OSError as exc:
         return {
             "command": args,
@@ -147,25 +163,34 @@ def _run_command(
             "returncode": 1,
             "stdout": "",
             "stderr": str(exc),
+            "stdout_bytes": 0,
+            "stderr_bytes": len(str(exc).encode("utf-8")),
             "json": None,
         }
 
-    stdout = _short_text(result.stdout)
-    stderr = _short_text(result.stderr)
+    stdout_raw = result.stdout or ""
+    stderr_raw = result.stderr or ""
+    stdout = _short_text(stdout_raw)
+    stderr = _short_text(stderr_raw)
     return {
         "command": args,
-        "passed": result.returncode in allowed and "Traceback" not in stdout and "Traceback" not in stderr,
+        "passed": (
+            result.returncode in allowed
+            and "Traceback" not in stdout_raw
+            and "Traceback" not in stderr_raw
+        ),
         "returncode": result.returncode,
         "stdout": stdout,
         "stderr": stderr,
-        "json": _try_json(result.stdout),
+        "stdout_bytes": len(stdout_raw.encode("utf-8")),
+        "stderr_bytes": len(stderr_raw.encode("utf-8")),
+        "json": _try_json(stdout_raw),
     }
 
-
-def _try_json(text: str) -> Any:
+def _try_json(text: str | None) -> Any:
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         return None
 
 
@@ -173,7 +198,14 @@ def _missing_modules_for_python(python: str, required: dict[str, str] = REQUIRED
     missing: list[str] = []
     for module in required:
         try:
-            result = subprocess.run([python, "-c", f"import {module}"], capture_output=True, text=True, check=False)
+            result = subprocess.run(
+                [python, "-c", f"import {module}"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
         except OSError:
             return list(required)
         if result.returncode != 0:
@@ -335,6 +367,127 @@ def read_only_startup_track(skill_path: Path, python: str) -> dict[str, Any]:
     )
 
 
+def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
+    dependency = runtime_dependency_track(python)
+    if not dependency["passed"]:
+        return _track(
+            "workflow_contract",
+            False,
+            checks=[dependency],
+            summary=dependency["summary"],
+            stdout=dependency["stdout"],
+        )
+
+    root = _data_root(skill_path)
+    node_id = _current_option_id(skill_path) or "option_demo_prompt_refinement"
+    env = _package_env(skill_path)
+    checks = [
+        _run_command(
+            _cli(python, "commands", "--json", "--compact", "--name", "ingest-artifact"),
+            cwd=skill_path,
+            env=env,
+        ),
+        _run_command(
+            _cli(python, "commands", "--json", "--compact", "--name", "promote-artifact-record"),
+            cwd=skill_path,
+            env=env,
+        ),
+        _run_command(
+            _cli(
+                python,
+                "context",
+                "--root",
+                root,
+                "--id",
+                node_id,
+                "--with-bootstrap",
+                "--with-artifacts",
+                "--compact",
+                "--json",
+            ),
+            cwd=skill_path,
+            env=env,
+        ),
+        _run_command(_cli(python, "complete-run", "--print-schema"), cwd=skill_path, env=env),
+        _run_command(_cli(python, "ingest-artifact", "--help"), cwd=skill_path, env=env),
+        _run_command(_cli(python, "promote-artifact-record", "--help"), cwd=skill_path, env=env),
+    ]
+
+    ingest_payload = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
+    promote_payload = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
+    context_payload = checks[2].get("json") if isinstance(checks[2].get("json"), dict) else {}
+    ingest_rows = ingest_payload.get("commands", []) if isinstance(ingest_payload, dict) else []
+    promote_rows = promote_payload.get("commands", []) if isinstance(promote_payload, dict) else []
+    ingest_row = ingest_rows[0] if ingest_rows and isinstance(ingest_rows[0], dict) else {}
+    promote_row = promote_rows[0] if promote_rows and isinstance(promote_rows[0], dict) else {}
+
+    ingest_flags = set(ingest_row.get("supported_flags", []) or [])
+    promote_flags = set(promote_row.get("supported_flags", []) or [])
+    required_ingest_flags = {"--record-only", "--promote", "--promotion-reason"}
+    required_promote_flags = {"--promotion-reason"}
+    missing_flags = sorted(
+        {f"ingest-artifact:{flag}" for flag in required_ingest_flags - ingest_flags}
+        | {f"promote-artifact-record:{flag}" for flag in required_promote_flags - promote_flags}
+    )
+
+    public_paths = [
+        skill_path / "AGENTS.md",
+        skill_path / "SKILL.md",
+        skill_path / "README.md",
+        skill_path / "capabilities" / "experiment-tracking.md",
+    ]
+    public_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in public_paths)
+    structured_closeout_documented = (
+        "complete-run --root" in public_text
+        and "--file closeout.yaml" in public_text
+        and "existing_record_id" in public_text
+    )
+    promotion_examples_missing_reason: list[str] = []
+    for path in public_paths:
+        for line_number, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+            if line.lstrip().startswith("research-cockpit promote-artifact-record") and "--promotion-reason" not in line:
+                promotion_examples_missing_reason.append(f"{path.name}:{line_number}")
+
+    context_stdout_bytes = int(checks[2].get("stdout_bytes", 0))
+    command_stdout_bytes = int(checks[0].get("stdout_bytes", 0))
+    context_schema_version = context_payload.get("schema_version")
+    artifact_default_mode = (
+        "record"
+        if "by default" in str(ingest_row.get("purpose") or "").lower()
+        else None
+    )
+    schema_text = checks[3].get("stdout", "")
+    schema_ok = "run_closeout_v1" in schema_text and "existing_record_id" in schema_text
+    budgets_ok = context_stdout_bytes <= 64 * 1024 and command_stdout_bytes <= 20 * 1024
+    passed = (
+        all(check["passed"] for check in checks)
+        and not missing_flags
+        and not promotion_examples_missing_reason
+        and structured_closeout_documented
+        and context_schema_version == "context_compact_v2"
+        and artifact_default_mode == "record"
+        and schema_ok
+        and budgets_ok
+    )
+    return _track(
+        "workflow_contract",
+        passed,
+        checks=checks,
+        summary={
+            "context_schema_version": context_schema_version,
+            "context_stdout_bytes": context_stdout_bytes,
+            "context_stdout_budget": 64 * 1024,
+            "command_summary_stdout_bytes": command_stdout_bytes,
+            "command_summary_stdout_budget": 20 * 1024,
+            "artifact_default_mode": artifact_default_mode,
+            "missing_flags": missing_flags,
+            "structured_closeout_documented": structured_closeout_documented,
+            "closeout_schema_ok": schema_ok,
+            "promotion_examples_missing_reason": promotion_examples_missing_reason,
+        },
+    )
+
+
 def portable_copy_track(skill_path: Path, python: str, destination: Path) -> dict[str, Any]:
     dependency = runtime_dependency_track(python)
     if not dependency["passed"]:
@@ -456,6 +609,7 @@ def release_check_payload(
         if not shape["passed"]:
             reason = "package_shape failed"
             tracks.append(_skipped_track("read_only_startup", reason))
+            tracks.append(_skipped_track("workflow_contract", reason))
             tracks.append(_skipped_track("portable_copy", reason))
             tracks.append(_skipped_track("isolated_mutation", reason))
             tracks.append(_skipped_track("decision_gate", reason))
@@ -468,6 +622,7 @@ def release_check_payload(
                 "tracks": tracks,
             }
         tracks.append(read_only_startup_track(skill_path, python))
+        tracks.append(workflow_contract_track(skill_path, python))
         tracks.append(portable_copy_track(skill_path, python, temp_run / "portable"))
         if skip_mutating:
             tracks.append(_skipped_track("isolated_mutation", "--skip-mutating was provided"))

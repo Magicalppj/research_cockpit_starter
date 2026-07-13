@@ -15,7 +15,7 @@ from research_cockpit.commands._runtime import (
     dry_run_preflight_result,
     emit_json,
     finish_mutation,
-    load_validated_state,
+    load_targeted_state,
     safe_print,
     yaml_change_diff,
 )
@@ -40,9 +40,8 @@ def _resolve_attachment(
     gate_result_file: str,
     experiment_id: str | None,
     run_id: str | None,
-) -> tuple[str, str | None, dict[str, Any]]:
-    state = load_validated_state(root)
-    runs = load_runs(root)
+    artifact_id: str | None = None,
+) -> tuple[Any, str, str | None, dict[str, Any]]:
     gate_path = validate_gate_result_relative_path(root, gate_result_file)
     if not gate_path.exists():
         raise FileNotFoundError(gate_path)
@@ -51,6 +50,13 @@ def _resolve_attachment(
         raise ValueError("gate_result_file is required")
 
     linked_run_id = str(run_id or probe.get("run_id") or "").strip() or None
+    probe_experiment_id = str(experiment_id or probe.get("experiment_id") or "").strip()
+    state = load_targeted_state(
+        root,
+        node_ids=[node_id for node_id in [probe_experiment_id, artifact_id] if node_id],
+        run_ids=[linked_run_id] if linked_run_id else [],
+    )
+    runs = dict(state.runs) if state.targeted and state.runs is not None else load_runs(root)
     if linked_run_id:
         if linked_run_id not in runs:
             raise ValueError(f"Run does not exist: {linked_run_id}")
@@ -74,8 +80,7 @@ def _resolve_attachment(
         run_id=linked_run_id,
     )
     assert gate is not None
-    return linked_experiment_id, linked_run_id, gate
-
+    return state, linked_experiment_id, linked_run_id, gate
 
 def ingest_gate_result(
     root: Path,
@@ -92,12 +97,12 @@ def ingest_gate_result(
     assignment_id: str | None = None,
     coordinator: bool = False,
 ) -> dict[str, Any]:
-    state = load_validated_state(root)
-    linked_experiment_id, linked_run_id, gate = _resolve_attachment(
+    state, linked_experiment_id, linked_run_id, gate = _resolve_attachment(
         root,
         gate_result_file=gate_result_file,
         experiment_id=experiment_id,
         run_id=run_id,
+        artifact_id=artifact_id,
     )
     if artifact_id:
         validate_attached_gate_artifact(
@@ -189,6 +194,7 @@ def main() -> None:
     parser.add_argument("--show-diff", action="store_true")
     parser.add_argument("--no-build", action="store_true")
     add_assignment_scope_args(parser)
+    parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
 
     try:

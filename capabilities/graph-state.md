@@ -13,7 +13,7 @@ Use this capability when reading or changing the research graph shape, saved gra
 - `research_cockpit/graph/nodes/*.yaml`: graph nodes and their parent/children links.
 - `research_cockpit/graph/edges.yaml`: optional semantic edges beyond parent/children.
 - `research_cockpit/graph/graph_views.yaml`: saved dynamic view presets, not frozen snapshots.
-- `research_cockpit/graph/interaction_log.yaml`: append-only operation summaries, not an immutable audit log.
+- `research_cockpit/graph/interaction_log.yaml`: legacy operation-history prefix. Commands may append here only before event-backend migration; after `graph/interaction_events/manifest.json` exists, this file is immutable and new events append under `graph/interaction_events/**`.
 
 The main research graph should stay focused on `stage -> problem -> option -> experiment -> decision`, with recursive child branches modeled as `option -> problem -> option -> experiment/decision`. `artifact` is still a valid node type, but it is supporting material by default and is hidden from the Streamlit graph unless the researcher explicitly enables it.
 
@@ -40,8 +40,8 @@ The Streamlit UI writes saved views through model helpers. Agents should treat `
 
 ## Interaction Log
 
-Key mutating commands append compact events to `interaction_log.yaml`, including focus changes, experiment findings, option claims/reports, suggestion application, decision acceptance, and saved graph views. Do not treat the log as the source of truth; use graph nodes and current state for current facts.
+Key mutating commands append compact JSONL events to the active `graph/interaction_events/` backend, including focus changes, experiment findings, option claims/reports, suggestion application, decision acceptance, and saved graph views. `graph/interaction_log.yaml` is the immutable legacy prefix after migration. Neither backend is the source of current facts; use graph nodes plus the assignment, coordinator, or compatibility state appropriate to the caller.
 
-Read-only context commands tolerate malformed log events by skipping them and returning warnings. `research-cockpit validate` treats malformed `interaction_log.yaml` as a data health error. Mutating commands, including dry-runs, strict-parse the log before returning success. Mutations must run sequentially for one data root; they use `graph/.mutation.lock`, refuse to write when the interaction log cannot be parsed safely, and fail without writing if a target truth-source file changed after command planning. Lock timeout JSON includes the lock path, owner pid, creation timestamp, wait time, and error text.
+Read-only context commands tolerate malformed events by skipping them and returning warnings. `research-cockpit validate` treats malformed active JSONL segments or a malformed legacy prefix as data health errors. Mutating commands, including dry-runs, strict-parse the active backend before returning success. Mutations run sequentially under `graph/.mutation.lock`, refuse unsafe log state, and fail without writing if a target truth-source file changed after planning. Lock timeout JSON includes only lock metadata, wait time, and error text; it does not expose another agent command.
 
-Use `repair-interaction-log` only after validation or a mutating dry-run reports interaction log schema damage. It preserves valid mapping events, drops invalid non-mapping event items, writes a backup on execution, and refuses YAML scanner errors instead of guessing a repair.
+Use `repair-interaction-log` only for schema damage in the legacy YAML prefix. For a valid but large legacy prefix, run `migrate-interaction-log --dry-run` before `--execute`; do not edit activated JSONL segments by hand.

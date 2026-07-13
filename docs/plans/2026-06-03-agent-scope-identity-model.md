@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft for review. This plan describes a breaking redesign for multi-agent Research Cockpit workflows. It is not an implementation patch.
+Implemented historical plan. Assignment-scoped identity, worker-local cursors, and coordinator state are now implemented. Current operational guidance: `AGENTS.md`, `SKILL.md`, `capabilities/graph-state.md`, and `docs/internal-architecture.md`; the remaining sections preserve the original design rationale.
 
 ## Date
 

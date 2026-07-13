@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from research_cockpit.artifact_records import upsert_artifact_record
-from research_cockpit.interaction_log import append_interaction_log
+from research_cockpit.interaction_log import _append_interaction_log_unlocked
 from research_cockpit.maintenance import _artifact_reference_index, _retention_class
 from research_cockpit.model import ResearchNode, load_explicit_edges, load_nodes, load_yaml, script_command, validate_cockpit
 from research_cockpit.mutation_lock import MutationError, mutation_lock
@@ -267,7 +267,7 @@ def _apply_demotion(
                 path.unlink()
                 written_files.append(str(path))
             validate_cockpit(root, raise_on_error=True)
-            append_interaction_log(root, **interaction)
+            _append_interaction_log_unlocked(root, prevalidated=True, **interaction)
         except Exception as exc:
             rollback_errors = _restore_files(backups)
             payload = {

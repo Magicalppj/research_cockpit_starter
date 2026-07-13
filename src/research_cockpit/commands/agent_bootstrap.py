@@ -44,7 +44,7 @@ MUTATION_COMMAND_SKELETON_TEMPLATES = [
     "research-cockpit apply-graph-plan --root <root>{scope} --file graph_update.yaml --dry-run --json --show-diff",
     "research-cockpit create-workstream --root <root>{scope} --file workstream.yaml --dry-run --json --show-diff",
     'research-cockpit create-artifact --root <root>{scope} --id <artifact_id> --title "..." --path artifacts/<node_id>/<run_id> --link-to <node_id> --no-build',
-    "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --record-only --dry-run --json --show-diff",
+    "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --dry-run --json --show-diff",
     'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type smoke_check --passed false --fatal-json "{{}}" --json --compact --no-build',
     'research-cockpit record-gate-result --root <root>{scope} --id <preflight_gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --json --compact --no-build',
     "research-cockpit ingest-gate-result --root <root>{scope} --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --json --compact --no-build",
@@ -67,13 +67,13 @@ BATCH_EXAMPLE_TEMPLATES = {
         'research-cockpit complete-experiment --root <root>{scope} --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --json --compact --no-build',
     ],
     "artifacts": [
-        "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --record-only --json --compact --no-build",
+        "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --json --compact --no-build",
         "research-cockpit link-artifact --root <root>{scope} --artifact <artifact_id> --to <node_id> --no-build",
     ],
     "runs": [
         "research-cockpit create-run --root <root>{scope} --id <run_id> --experiment <experiment_id> --status running --no-build",
         "research-cockpit update-run --root <root>{scope} --id <run_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build",
-        "research-cockpit complete-run --root <root>{scope} --id <run_id> --status completed --no-build",
+        "research-cockpit complete-run --root <root>{scope} --file closeout.yaml --json --compact --no-build",
     ],
     "gates": [
         'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --json --compact --no-build',
@@ -368,6 +368,12 @@ def agent_bootstrap_payload(
     assignment_id: str | None = None,
     option_id: str | None = None,
     coordinator: bool = False,
+    nodes: dict[str, Any] | None = None,
+    current: dict[str, Any] | None = None,
+    validation_errors: list[str] | None = None,
+    link_rows: list[dict[str, Any]] | None = None,
+    semantic_warnings: list[dict[str, Any]] | None = None,
+    compact_runtime: bool = False,
 ) -> dict[str, Any]:
     if _MISSING_DEPENDENCIES:
         raise RuntimeError(format_dependency_error(_MISSING_DEPENDENCIES))
@@ -375,16 +381,20 @@ def agent_bootstrap_payload(
     if build:
         build_dashboard(root)
 
-    nodes = load_nodes(root)
-    current = load_yaml(root / "current_state.yaml")
-    errors = validate_cockpit(root, nodes, current)
-    link_rows = build_link_rows(root, nodes)
-    suggestions = build_action_suggestions(root, nodes, current, link_rows)
-    search_index = build_search_index(root, nodes, current)
+    nodes = nodes if nodes is not None else load_nodes(root)
+    current = current if current is not None else load_yaml(root / "current_state.yaml")
+    errors = list(validation_errors) if validation_errors is not None else validate_cockpit(root, nodes, current)
+    link_rows = link_rows if link_rows is not None else build_link_rows(root, nodes)
+    suggestions = [] if compact_runtime else build_action_suggestions(root, nodes, current, link_rows)
+    search_index = [] if compact_runtime else build_search_index(root, nodes, current)
     focus_node_id = focus_node_id_from_current(current, nodes)
     effective_baseline = resolve_current_effective_baseline(nodes, current)
     metadata = build_context_metadata(root, current)
-    semantic = semantic_lint(root)
+    semantic = {
+        "warnings": list(semantic_warnings)
+        if semantic_warnings is not None
+        else ([] if compact_runtime else semantic_lint(root)["warnings"])
+    }
     try:
         coordinator_state = load_coordinator_state(root)
     except ValidationError:
@@ -502,8 +512,8 @@ def agent_bootstrap_payload(
             scope_option_id=scope_option_id,
             assignment_id=assignment_id,
         ),
-        "run_overview": build_run_overview(root, nodes),
-        "gate_overview": build_gate_overview(root),
+        "run_overview": {} if compact_runtime else build_run_overview(root, nodes),
+        "gate_overview": {} if compact_runtime else build_gate_overview(root),
         "search_summary": build_search_index_summary(search_index),
         "git": {
             "source_git_commit": metadata["source_git_commit"],
