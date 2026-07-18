@@ -130,6 +130,7 @@ from research_cockpit.progress import load_progress_heartbeat
 from research_cockpit.resources import build_link_rows
 from research_cockpit.run_closeout import complete_run_closeout
 from research_cockpit.run_summaries import build_run_summaries
+from research_cockpit.validation_index import load_validation_index
 from workflow_metrics import workflow_metrics
 
 
@@ -406,6 +407,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(compact_payload["changed_scope"]["nodes"], ["exp_compact"])
         self.assertIn("--changed-node exp_compact", compact_payload["verify_commands"][0])
         self.assertIn("final_handoff_commands", compact_payload)
+        self.assertFalse(compact_payload["verified"])
+        self.assertEqual(compact_payload["verification_scope"], compact_payload["changed_scope"])
+        self.assertTrue(compact_payload["additional_verification_required"])
+        self.assertEqual(compact_payload["verification_stage"], "worker_verify")
+        self.assertFalse(compact_payload["milestone_handoff_required"])
+        self.assertIn("--view execution", compact_payload["verify_commands"][1])
 
         stale_index_validate = subprocess.run(
             [*cli_command("validate"), "--root", str(self.root), "--changed-node", "exp_compact", "--json"],
@@ -879,6 +886,19 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue((self.root / "dashboards" / "validation_index.json").exists())
         self.assertFalse((self.root / "dashboards" / "graph_view.json").exists())
 
+    def test_build_normalizes_yaml_timestamps_in_json_outputs(self) -> None:
+        node_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
+        node = load_yaml(node_path)
+        node["result_summary"] = datetime(2026, 7, 17, 8, 30, tzinfo=timezone.utc)
+        save_yaml(node_path, node)
+
+        outputs = build_dashboard(self.root)
+        json_outputs = [path for path in outputs if path.suffix == ".json"]
+
+        for path in json_outputs:
+            json.loads(path.read_text(encoding="utf-8"))
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in json_outputs)
+        self.assertIn("2026-07-17T08:30:00+00:00", combined)
     def test_validate_changed_node_uses_fresh_validation_index_after_edit(self) -> None:
         build_dashboard(self.root)
         node_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
@@ -1903,6 +1923,10 @@ class ScriptBehaviorTests(unittest.TestCase):
             "--operation",
             "context_compact",
             "--operation",
+            "context_execution",
+            "--operation",
+            "context_execution_unchanged",
+            "--operation",
             "run_closeout",
             "--changed-node",
             "experiment_perf_0000",
@@ -1915,7 +1939,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], "benchmark_runtime_v1")
         self.assertEqual(payload["cold_runs"], 1)
         self.assertEqual(payload["warm_runs"], 2)
-        self.assertEqual(set(payload["operations"]), {"validate_changed", "context_compact", "run_closeout"})
+        self.assertEqual(set(payload["operations"]), {"validate_changed", "context_compact", "context_execution", "context_execution_unchanged", "run_closeout"})
         for operation in payload["results"]:
             self.assertEqual(len(operation["cold_samples"]), 1)
             self.assertEqual(len(operation["warm_samples"]), 2)
@@ -1935,6 +1959,19 @@ class ScriptBehaviorTests(unittest.TestCase):
             if result["operation"] == "run_closeout"
         )
         self.assertLess(closeout_result["warm_summary"]["wall_time_ms"]["p95"], 8000)
+        execution_result = next(
+            result for result in payload["results"]
+            if result["operation"] == "context_execution"
+        )
+        unchanged_result = next(
+            result for result in payload["results"]
+            if result["operation"] == "context_execution_unchanged"
+        )
+        execution_bytes = execution_result["warm_summary"]["stdout_bytes"]["median"]
+        unchanged_bytes = unchanged_result["warm_summary"]["stdout_bytes"]["median"]
+        self.assertLessEqual(execution_bytes, 4096)
+        self.assertLessEqual(unchanged_bytes, 512)
+        self.assertLessEqual(unchanged_bytes, execution_bytes * 0.2)
 
 
     def test_benchmark_build_cli_rejects_zero_runs(self) -> None:
@@ -3054,8 +3091,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         guidance_text = json.dumps(bootstrap_payload["mutation_guidance"])
         self.assertIn(f"--assignment {assignment_id}", guidance_text)
-        self.assertIn(f"create-followup-experiment --root <root> --assignment {assignment_id}", guidance_text)
-        self.assertIn(f"migrate-terminal-next-actions --root <root> --assignment {assignment_id}", guidance_text)
+        self.assertIn(f"complete-run --root <root> --assignment {assignment_id} --file closeout.yaml", guidance_text)
+        guidance_commands = " ".join(bootstrap_payload["mutation_guidance"]["command_skeletons"])
+        self.assertNotIn("create-followup-experiment", guidance_commands)
+        self.assertNotIn("migrate-terminal-next-actions", guidance_text)
         self.assertIn("set-cursor", guidance_text)
         self.assertNotIn("research-cockpit init", guidance_text)
         self.assertNotIn("set-baseline", guidance_text)
@@ -4471,6 +4510,166 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertLessEqual(len(payload["focus"]["next_actions"]), 5)
         self.assertEqual(payload["current_global_focus"], payload["focus"])
         self.assertLess(len(json.dumps(payload, ensure_ascii=False).encode("utf-8")), 20000)
+
+    def test_context_execution_view_is_bounded_and_keeps_execution_invariants(self) -> None:
+        experiment_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
+        experiment = load_yaml(experiment_path)
+        experiment.update({
+            "status": "running",
+            "next_actions": ["Run the bounded evaluation."],
+            "baseline": {"option": "option_t5", "reason": "Current comparison point."},
+        })
+        save_yaml(experiment_path, experiment)
+        save_yaml(
+            self.root / "agents" / "agent_t5.yaml",
+            {
+                "agent_id": "agent_t5",
+                "status": "active",
+                "active_assignment_ids": ["assignment_t5"],
+            },
+        )
+        save_yaml(
+            self.root / "assignments" / "assignment_t5.yaml",
+            {
+                "assignment_id": "assignment_t5",
+                "agent_id": "agent_t5",
+                "status": "active",
+                "root_node": "option_t5",
+                "current_node": "exp_t5",
+                "allowed_subtree": {"root": "option_t5", "policy": "descendants_only"},
+                "objective": "Run T5 branch",
+                "next_actions": ["Run the bounded evaluation."],
+            },
+        )
+        save_yaml(
+            self.root / "runs" / "run_t5.yaml",
+            {
+                "run_id": "run_t5",
+                "experiment_id": "exp_t5",
+                "status": "running",
+                "started_at": "2026-07-17T00:00:00Z",
+            },
+        )
+        gate_dir = self.root / "gate_results"
+        gate_dir.mkdir(parents=True, exist_ok=True)
+        gate_payload_path = gate_dir / "gate_t5.json"
+        gate_payload_path.write_text(
+            json.dumps({
+                "gate_type": "micro",
+                "passed": False,
+                "blocks_next_action": True,
+                "next_allowed_action": "Fix the failed check.",
+                "experiment_id": "exp_t5",
+                "run_id": "run_t5",
+            }),
+            encoding="utf-8",
+        )
+        save_yaml(
+            gate_dir / "gate_t5.yaml",
+            {
+                "schema_version": "gate_result_record_v1",
+                "gate_id": "gate_t5",
+                "experiment_id": "exp_t5",
+                "run_id": "run_t5",
+                "gate_result_file": "gate_results/gate_t5.json",
+                "recorded_at": "2026-07-17T00:01:00Z",
+            },
+        )
+        build_dashboard(self.root)
+
+        payload = context_payload(
+            self.root,
+            node_id="exp_t5",
+            compact=True,
+            view="execution",
+        )
+
+        self.assertEqual(payload["schema_version"], "execution_context_v1")
+        self.assertTrue(payload["changed"])
+        self.assertEqual(payload["node"]["id"], "exp_t5")
+        self.assertEqual(payload["node"]["next_action"], "Run the bounded evaluation.")
+        self.assertEqual(payload["assignment_boundary"]["assignment_id"], "assignment_t5")
+        self.assertEqual(payload["active_run"]["run_id"], "run_t5")
+        self.assertEqual(payload["blocking_gate"]["gate_id"], "gate_t5")
+        self.assertEqual(payload["effective_baseline"]["option"]["id"], "option_t5")
+        self.assertEqual(payload["required_action"]["kind"], "resolve_blocking_gate")
+        self.assertTrue(payload["scope"]["index_fast_path"])
+        for omitted in (
+            "artifacts",
+            "bootstrap",
+            "current_global_focus",
+            "focus",
+            "node_context",
+            "recommended_commands",
+            "worker_verify_commands",
+        ):
+            self.assertNotIn(omitted, payload)
+        self.assertLessEqual(len(json.dumps(payload, ensure_ascii=False).encode("utf-8")), 4096)
+
+        unchanged = context_payload(
+            self.root,
+            node_id="exp_t5",
+            compact=True,
+            view="execution",
+            since_revision=payload["revision"],
+        )
+        self.assertEqual(
+            unchanged,
+            {
+                "schema_version": "execution_context_v1",
+                "changed": False,
+                "revision": payload["revision"],
+            },
+        )
+
+    def test_validation_index_loader_uses_json_parser(self) -> None:
+        build_dashboard(self.root)
+
+        with patch(
+            "research_cockpit.validation_index.load_yaml",
+            side_effect=AssertionError("JSON index parsed as YAML"),
+        ):
+            index = load_validation_index(self.root)
+
+        self.assertEqual(index["schema_version"], "validation_index_v2")
+    def test_context_execution_view_reuses_loaded_validation_index(self) -> None:
+        build_dashboard(self.root)
+
+        with patch(
+            "research_cockpit.commands.validate_cockpit.load_validation_index",
+            side_effect=AssertionError("validation index reloaded"),
+        ):
+            payload = context_payload(
+                self.root,
+                node_id="exp_t5",
+                compact=True,
+                view="execution",
+            )
+
+        self.assertTrue(payload["scope"]["index_fast_path"])
+
+    def test_context_cli_since_requires_execution_view(self) -> None:
+        out = subprocess.run(
+            [
+                *cli_command("context"),
+                "--root",
+                str(self.root),
+                "--id",
+                "exp_t5",
+                "--since",
+                "old-revision",
+                "--compact",
+                "--json",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("--since requires --view execution", out.stderr)
+
+
     def test_context_compact_with_bootstrap_uses_index_snapshot_without_full_node_scan(self) -> None:
         build_dashboard(self.root)
 
@@ -4832,13 +5031,21 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("apply-graph-plan", " ".join(payload["mutation_guidance"]["command_skeletons"]))
         batch_mode = payload["mutation_guidance"]["multi_agent_batch_mode"]
         self.assertIn("coordinator", batch_mode["default"])
-        self.assertIn("does not replace final validate/smoke", batch_mode["default"])
-        self.assertIn("commands --json --compact", " ".join(batch_mode["rules"]))
+        self.assertIn("internally verified", batch_mode["default"])
+        self.assertIn("milestone handoff", batch_mode["default"])
+        self.assertNotIn("final handoff", batch_mode["default"])
+        self.assertIn("commands --json --compact --name", " ".join(batch_mode["rules"]))
         self.assertEqual(batch_mode["finish_commands"], [])
         self.assertIn("--changed-node <node_id>", " ".join(batch_mode["worker_verify_commands"]))
         self.assertIn("smoke --root <root> --json", " ".join(batch_mode["final_handoff_commands"]))
-        self.assertNotIn("--record-only", " ".join(payload["mutation_guidance"]["command_skeletons"]))
-        self.assertIn("record-finding", " ".join(batch_mode["examples"]["findings"]))
+        skeletons = " ".join(payload["mutation_guidance"]["command_skeletons"])
+        self.assertLessEqual(len(payload["mutation_guidance"]["command_skeletons"]), 8)
+        self.assertIn("--start-experiment", skeletons)
+        self.assertIn("complete-run --root <root> --file closeout.yaml", skeletons)
+        self.assertNotIn("complete-experiment", skeletons)
+        self.assertNotIn("create-followup-experiment", skeletons)
+        self.assertNotIn("--record-only", skeletons)
+        self.assertIn("complete-run --root <root> --file closeout.yaml", " ".join(batch_mode["examples"]["findings"]))
         self.assertNotIn("--record-only", " ".join(batch_mode["examples"]["artifacts"]))
         self.assertIn("update-run", " ".join(batch_mode["examples"]["runs"]))
         self.assertIn("complete-run --root <root> --file closeout.yaml", " ".join(batch_mode["examples"]["runs"]))
@@ -6078,6 +6285,58 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("stale_reasons", by_id["run_progress_done"])
         self.assertFalse(by_id["run_progress_done"]["progress"]["possibly_stale"])
 
+    def test_create_run_can_start_experiment_in_same_verified_mutation(self) -> None:
+        result = create_run(
+            self.root,
+            run_id="run_begin_experiment",
+            experiment_id="exp_t5",
+            status="running",
+            start_experiment=True,
+            rebuild_dashboard=False,
+        )
+
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        self.assertEqual(experiment["status"], "running")
+        self.assertTrue((self.root / "runs" / "run_begin_experiment.yaml").exists())
+        self.assertTrue(result["started_experiment"])
+        self.assertTrue(result["verified"])
+        self.assertFalse(result["additional_verification_required"])
+        self.assertEqual(len(result["changed_files"]), 2)
+
+    def test_create_run_start_experiment_uses_targeted_index_preflight(self) -> None:
+        build_dashboard(self.root)
+
+        with (
+            patch(
+                "research_cockpit.commands.create_run.load_validated_state",
+                side_effect=AssertionError("create-run used full state"),
+                create=True,
+            ),
+            patch(
+                "research_cockpit.commands.create_run.validate_cockpit",
+                side_effect=AssertionError("create-run used full candidate validation"),
+                create=True,
+            ),
+            patch(
+                "research_cockpit.commands.validate_cockpit.load_validation_index",
+                side_effect=AssertionError("validation index reloaded"),
+            ),
+        ):
+            result = create_run(
+                self.root,
+                run_id="run_targeted_start",
+                experiment_id="exp_t5",
+                status="running",
+                start_experiment=True,
+                rebuild_dashboard=False,
+            )
+
+        self.assertTrue(result["verified"])
+        self.assertTrue((self.root / "runs" / "run_targeted_start.yaml").exists())
+        index = load_validation_index(self.root)
+        self.assertNotIn("stale", index)
+        self.assertEqual(index["runs"]["run_targeted_start"]["status"], "running")
+
     def test_create_run_rejects_invalid_experiment_id(self) -> None:
         with self.assertRaises(ValidationError) as ctx:
             create_run(
@@ -6204,6 +6463,174 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(experiment["findings"][-1]["statement"], "Structured closeout passed.")
         self.assertEqual(experiment["next_actions"], ["Review closeout evidence."])
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "complete_run_closeout")
+
+    def test_complete_run_structured_closeout_cli_compact_is_internally_verified(self) -> None:
+        run_id = "run_closeout_compact"
+        save_yaml(
+            self.root / "runs" / f"{run_id}.yaml",
+            {"run_id": run_id, "status": "running", "experiment_id": "exp_t5"},
+        )
+        closeout_path = self.tmp_root / "closeout_compact.yaml"
+        save_yaml(
+            closeout_path,
+            {
+                "schema_version": "run_closeout_v1",
+                "run": {"id": run_id, "status": "completed"},
+            },
+        )
+
+        out = subprocess.run(
+            [
+                *cli_command("complete-run"),
+                "--root",
+                str(self.root),
+                "--file",
+                str(closeout_path),
+                "--coordinator",
+                "--no-build",
+                "--json",
+                "--compact",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        payload = json.loads(out.stdout)
+
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertTrue(payload["verified"])
+        self.assertFalse(payload["additional_verification_required"])
+        self.assertEqual(payload["verification_stage"], "internal_verify")
+        self.assertEqual(payload["verify_commands"], [])
+        self.assertEqual(payload["post_apply_verify_commands"], [])
+        self.assertEqual(payload["final_handoff_commands"], [])
+        self.assertEqual(load_yaml(self.root / "runs" / f"{run_id}.yaml")["status"], "completed")
+    def test_complete_run_closeout_can_finish_experiment_and_queue_followup_atomically(self) -> None:
+        session = self.start_t5_assignment(label="micro_gate")
+        assignment_id = session["assignment_id"]
+        set_cursor(
+            self.root,
+            assignment_id=assignment_id,
+            node_id="exp_t5",
+            next_actions=["Run the bounded gate."],
+            rebuild_dashboard=False,
+        )
+        create_run(
+            self.root,
+            run_id="run_micro_gate",
+            experiment_id="exp_t5",
+            status="running",
+            start_experiment=True,
+            assignment_id=assignment_id,
+            rebuild_dashboard=False,
+        )
+
+        result = complete_run_closeout(
+            self.root,
+            plan={
+                "schema_version": "run_closeout_v1",
+                "run": {"id": "run_micro_gate", "status": "completed"},
+                "experiment": {
+                    "status": "done",
+                    "result_summary": "The bounded gate passed.",
+                },
+                "finding": {
+                    "statement": "The bounded configuration is safe to continue.",
+                    "confidence": "strong",
+                    "outcome": "positive",
+                },
+                "next_experiment": {
+                    "id": "exp_t5_followup",
+                    "title": "Run the full T5 experiment",
+                    "summary": "Scale the verified bounded configuration.",
+                    "success_criteria": ["Complete the full evaluation."],
+                    "next_action": "Start the full run.",
+                },
+            },
+            assignment_id=assignment_id,
+            rebuild_dashboard=False,
+        )
+
+        run = load_yaml(self.root / "runs" / "run_micro_gate.yaml")
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        followup = load_yaml(self.root / "graph" / "nodes" / "exp_t5_followup.yaml")
+        assignment = load_yaml(self.root / "assignments" / f"{assignment_id}.yaml")
+        self.assertEqual(run["status"], "completed")
+        self.assertEqual(experiment["status"], "done")
+        self.assertEqual(experiment["result_summary"], "The bounded gate passed.")
+        self.assertNotIn("next_actions", experiment)
+        self.assertEqual(followup["status"], "queued")
+        self.assertEqual(followup["parent"], "option_t5")
+        self.assertEqual(followup["derived_from"], ["exp_t5"])
+        self.assertEqual(assignment["current_node"], "exp_t5_followup")
+        self.assertEqual(assignment["next_actions"], ["Start the full run."])
+        self.assertEqual(result["next_experiment_id"], "exp_t5_followup")
+        self.assertTrue(result["verified"])
+        self.assertFalse(result["additional_verification_required"])
+
+    def test_complete_run_closeout_clears_stale_assignment_actions_for_followup_without_action(self) -> None:
+        session = self.start_t5_assignment(label="clear_stale_action")
+        assignment_id = session["assignment_id"]
+        set_cursor(
+            self.root,
+            assignment_id=assignment_id,
+            node_id="exp_t5",
+            next_actions=["This action belongs to the completed experiment."],
+            rebuild_dashboard=False,
+        )
+        create_run(
+            self.root,
+            run_id="run_clear_stale_action",
+            experiment_id="exp_t5",
+            status="running",
+            start_experiment=True,
+            assignment_id=assignment_id,
+            rebuild_dashboard=False,
+        )
+
+        complete_run_closeout(
+            self.root,
+            plan={
+                "schema_version": "run_closeout_v1",
+                "run": {"id": "run_clear_stale_action", "status": "completed"},
+                "experiment": {"status": "done"},
+                "finding": {"statement": "The bounded run passed.", "confidence": "strong"},
+                "next_experiment": {
+                    "id": "exp_t5_followup_without_action",
+                    "title": "Follow up without a prescribed action",
+                },
+            },
+            assignment_id=assignment_id,
+            rebuild_dashboard=False,
+        )
+
+        assignment = load_yaml(self.root / "assignments" / f"{assignment_id}.yaml")
+        self.assertEqual(assignment["current_node"], "exp_t5_followup_without_action")
+        self.assertEqual(assignment["next_actions"], [])
+    def test_complete_run_closeout_rejects_duplicate_followup_without_partial_write(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_duplicate_followup.yaml",
+            {"run_id": "run_duplicate_followup", "status": "running", "experiment_id": "exp_t5"},
+        )
+        before_experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+
+        with self.assertRaises(FileExistsError):
+            complete_run_closeout(
+                self.root,
+                plan={
+                    "schema_version": "run_closeout_v1",
+                    "run": {"id": "run_duplicate_followup", "status": "completed"},
+                    "experiment": {"status": "done"},
+                    "finding": {"statement": "Must not be written.", "confidence": "medium"},
+                    "next_experiment": {"id": "exp_t5", "title": "Duplicate"},
+                },
+                rebuild_dashboard=False,
+                coordinator=True,
+            )
+
+        run = load_yaml(self.root / "runs" / "run_duplicate_followup.yaml")
+        self.assertEqual(run["status"], "running")
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml"), before_experiment)
 
     def test_complete_run_structured_closeout_links_existing_artifact_record(self) -> None:
         run_id = "run_closeout_existing_record"
@@ -6644,6 +7071,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "exp_t5",
                 "--status",
                 "running",
+                "--start-experiment",
                 "--launcher",
                 "shell",
                 "--command",
@@ -6667,6 +7095,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(create_payload["target"], "run_cli")
         self.assertTrue(create_payload["changed"])
         self.assertEqual(create_payload["created"], ["run_cli"])
+        self.assertTrue(create_payload["verified"])
+        self.assertFalse(create_payload["additional_verification_required"])
+        self.assertEqual(create_payload["verify_commands"], [])
+        self.assertEqual(create_payload["verification_stage"], "internal_verify")
+        self.assertEqual(create_payload["final_handoff_commands"], [])
+        self.assertEqual(load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")["status"], "running")
         self.assertFalse((self.root / "dashboards").exists())
 
         context_out = subprocess.run(
@@ -8058,6 +8492,16 @@ class ScriptBehaviorTests(unittest.TestCase):
             with self.subTest(command_name=command_name):
                 self.assertIn("--assignment", by_name[command_name]["supported_flags"])
                 self.assertIn("--coordinator", by_name[command_name]["supported_flags"])
+        self.assertEqual(by_name["create-run"]["verification_mode"], "internal_non_dry_run")
+        self.assertEqual(by_name["ingest-artifact"]["verification_mode"], "internal_non_dry_run")
+        self.assertEqual(by_name["complete-run"]["verification_mode"], "structured_file_non_dry_run")
+        for command_name in ("create-run", "ingest-artifact", "complete-run"):
+            self.assertEqual(by_name[command_name]["batch_policy"]["worker_verify_commands"], [])
+            self.assertEqual(by_name[command_name]["batch_policy"]["final_handoff_commands"], [])
+        self.assertIn(
+            "artifact_record.existing_record_id",
+            by_name["complete-run"]["fields_supported"],
+        )
         self.assertTrue(by_name["node-context"]["supports_compact"])
         self.assertIn("read", by_name["node-context"]["workflow_tags"])
         self.assertTrue(by_name["add-node"]["supports_json"])
@@ -8318,11 +8762,8 @@ class ScriptBehaviorTests(unittest.TestCase):
                 self.assertEqual(bad_smoke, [])
 
         skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn('research-cockpit search --root research_cockpit --query "..." --json --limit 5 --source node', skill_text)
-        self.assertIn(
-            "research-cockpit suggest-next-actions --root research_cockpit --json --limit 10 --focus-only",
-            skill_text,
-        )
+        self.assertIn("--view execution", skill_text)
+        self.assertIn("--since <revision>", skill_text)
         self.assertIn("Default `smoke` is compact", skill_text)
 
         readme_text = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
@@ -8339,6 +8780,68 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIsNotNone(
             re.search(r"research-cockpit create-run[^\n]*--assignment <assignment_id>", experiment_text)
         )
+
+    def test_public_agent_docs_use_transactional_experiment_cycle(self) -> None:
+        paths = (
+            ROOT_DIR / "README.md",
+            ROOT_DIR / "AGENTS.md",
+            ROOT_DIR / "capabilities" / "experiment-tracking.md",
+        )
+        required = (
+            "--start-experiment",
+            "complete-run",
+            "existing_record_id",
+            "next_experiment",
+            "additional_verification_required",
+        )
+        incomplete = {
+            "-",
+            "Use",
+            "For CLI mutations, accept",
+            "In multi-agent workflows, each agent should mutate the canonical",
+            "Prefer",
+            "When compact output returns",
+            "For agent-readable success summaries, add",
+        }
+
+        for path in paths:
+            with self.subTest(path=path.name):
+                text = path.read_text(encoding="utf-8")
+                for token in required:
+                    self.assertIn(token, text)
+                self.assertLess(text.index("--start-experiment"), text.index("complete-experiment"))
+                self.assertFalse(incomplete & {line.strip() for line in text.splitlines()})
+
+        experiment = paths[2].read_text(encoding="utf-8")
+        self.assertNotIn(
+            "First run `ingest-artifact`, then pass the created artifact id with `--artifact-id`.",
+            experiment,
+        )
+
+    def test_skill_routes_normal_experiment_cycle_to_bounded_capability(self) -> None:
+        skill = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
+        path = ROOT_DIR / "capabilities" / "experiment-cycle.md"
+
+        self.assertTrue(path.exists())
+        cycle = path.read_text(encoding="utf-8")
+        self.assertIn("capabilities/experiment-cycle.md", skill)
+        self.assertLess(skill.index("experiment-cycle.md"), skill.index("experiment-tracking.md"))
+        self.assertLessEqual(len(cycle.encode("utf-8")), 10 * 1024)
+        for token in (
+            "--start-experiment",
+            "ingest-artifact",
+            "complete-run",
+            "existing_record_id",
+            "next_experiment",
+            "additional_verification_required",
+        ):
+            self.assertIn(token, cycle)
+        for advanced_command in (
+            "complete-experiments",
+            "create-workstream",
+            "create-followup-experiment",
+        ):
+            self.assertNotIn(advanced_command, cycle)
 
     def test_list_agent_commands_cli_outputs_json(self) -> None:
         command = "commands"
@@ -8526,6 +9029,27 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertFalse(metrics["manual_yaml_patch_detected"])
         self.assertEqual(metrics["explained_truth_source_changes"], ["research_cockpit/graph/nodes/problem_x.yaml"])
+
+    def test_workflow_metrics_recognizes_transactional_run_commands(self) -> None:
+        metrics = workflow_metrics(
+            [
+                {"command": cli_command("create-run"), "passed": True},
+                {"command": cli_command("ingest-artifact"), "passed": True},
+                {"command": cli_command("complete-run"), "passed": True},
+            ],
+            files_changed=[
+                "research_cockpit/runs/run_x.yaml",
+                "research_cockpit/artifact_records/experiment_x.yaml",
+                "research_cockpit/graph/nodes/experiment_x.yaml",
+            ],
+        )
+
+        self.assertFalse(metrics["manual_yaml_patch_detected"])
+        self.assertEqual(metrics["mutating_count"], 3)
+        self.assertEqual(
+            metrics["high_level_commands_used"],
+            ["complete-run", "create-run", "ingest-artifact"],
+        )
 
     def test_documented_flags_match_help_and_manifest(self) -> None:
         flag_fields = {
@@ -8716,18 +9240,37 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("append `interaction_log.yaml`", focus_context)
         self.assertNotIn("dev\\scripts", dev_readme)
 
-    def test_skill_prioritizes_golden_paths_over_command_catalog(self) -> None:
+    def test_skill_is_a_bounded_router_instead_of_a_command_catalog(self) -> None:
         skill = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertLess(skill.index("## Golden Paths"), skill.index("## Command Reference"))
+        self.assertLessEqual(len(skill.splitlines()), 120)
+        self.assertLessEqual(len(skill.encode("utf-8")), 16 * 1024)
+        self.assertLessEqual(skill.count("research-cockpit "), 15)
+        self.assertIn("## Read Route", skill)
         self.assertIn("not a sequence to execute", skill)
-        self.assertEqual(
-            skill.count(
-                "research-cockpit set-cursor --root research_cockpit "
-                "--assignment <assignment_id> --node <followup_id> --no-build"
-            ),
-            1,
+        self.assertIn("--view execution", skill)
+        self.assertIn("--since <revision>", skill)
+        self.assertIn("--start-experiment", skill)
+        self.assertIn("existing_record_id", skill)
+        self.assertIn("next_experiment", skill)
+        self.assertIn("milestone_handoff", skill)
+        self.assertFalse(
+            {"-", "Use", "3. Read compact mutation fields"}
+            & {line.strip() for line in skill.splitlines()}
         )
+        self.assertNotIn("## Command Reference", skill)
+        for capability in (
+            "graph-state.md",
+            "focus-context.md",
+            "node-management.md",
+            "experiment-tracking.md",
+            "decision-adr.md",
+            "ui-dashboard.md",
+            "integrations.md",
+            "maintenance.md",
+            "troubleshooting.md",
+        ):
+            self.assertIn(capability, skill)
 
     def test_current_docs_cover_runtime_boundaries_and_scoped_maintenance(self) -> None:
         module_map = (ROOT_DIR / "docs" / "repo-layout.md").read_text(encoding="utf-8")
@@ -10666,7 +11209,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("create-artifact", str(ctx.exception))
         self.assertFalse((self.root / "artifact_records" / "option_t5.yaml").exists())
 
-    def test_ingest_artifact_default_cli_compact_verifies_record_scope(self) -> None:
+    def test_ingest_artifact_default_cli_compact_is_internally_verified(self) -> None:
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_cli_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.94}', encoding="utf-8")
@@ -10697,8 +11240,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["target"]["mode"], "record")
         self.assertEqual(payload["changed_scope"]["nodes"], ["exp_t5"])
         self.assertEqual(payload["changed_scope"]["records"], [f"artifact:{record_id}"])
-        self.assertIn("--changed-node exp_t5", payload["verify_commands"][0])
-        self.assertIn(f"--changed-record artifact:{record_id}", payload["verify_commands"][0])
+        self.assertTrue(payload["verified"])
+        self.assertFalse(payload["additional_verification_required"])
+        self.assertEqual(payload["verify_commands"], [])
+        self.assertEqual(payload["post_apply_verify_commands"], [])
+        self.assertEqual(payload["verification_stage"], "internal_verify")
+        self.assertEqual(payload["final_handoff_commands"], [])
+        self.assertLessEqual(len(out.stdout.encode("utf-8")), 2500)
 
     def test_artifact_records_cli_lists_record_only_evidence(self) -> None:
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_list_record"

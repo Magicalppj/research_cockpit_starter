@@ -67,7 +67,7 @@ research-cockpit worktree-closeout --root research_cockpit --repo . --worktree .
 8. Record findings and any follow-up work.
 9. Close or move the assignment cursor when the current node is terminal.
 10. Only then remove the worktree and clean up the temporary branch.
-11. As a worker, run the changed-scope `verify_commands` returned by the structured-state mutations. Run full `validate`, `build`, and root `smoke` once during coordinator merge, release, or final handoff.
+11. Read the compact verification result. Skip repeated validate/context when `verified: true` and `additional_verification_required: false`; otherwise use `changed-scope` verification only. Full validate/build/root smoke runs only at coordinator merge, release, or research-stage milestone handoff.
 
 `worktree-closeout` is always a planner. It reports blockers, Research Cockpit updates still needed, and shell command drafts for human review. It does not delete worktrees, delete branches, merge branches, or edit YAML.
 
@@ -105,9 +105,10 @@ Full schema examples live in `docs/artifact-retention-policy.md`.
 
 Use `create-artifact --file` or `update-node-fields --metadata-file` to persist retention metadata on promoted graph artifact nodes. Ordinary run output should usually be captured as a lightweight artifact record instead:
 
+The successful compact ingest result returns the record id and is internally verified; list records only for an explicit inventory.
+
 ```sh
 research-cockpit ingest-artifact --root research_cockpit --node <experiment_id> --from <run_dir> --run-id <run_id> --json --compact --no-build
-research-cockpit artifact-records --root research_cockpit --experiment <experiment_id> --json --compact
 ```
 
 Promote a record only when it becomes long-lived evidence for navigation, decisions, or baselines:
@@ -118,7 +119,7 @@ research-cockpit promote-artifact-record --root research_cockpit --id <record_id
 
 ## Run Closeout
 
-When closeout also records gates, a finding, evidence, or next actions, use `complete-run --file closeout.yaml` so the truth-source updates commit as one transaction. Set `artifact_record.existing_record_id` when `ingest-artifact` already created the record. Use `complete-run --id` only for status-only completion.
+When closeout records gates, evidence, a finding, experiment terminal state, or one simple follow-up, use `complete-run --file closeout.yaml` so all truth-source updates commit as one transaction. With an assignment, the follow-up becomes its cursor. Set `artifact_record.existing_record_id` when ingest already created the record. Use `complete-run --id` only for status-only recovery.
 
 A completed run should answer what can be cleaned:
 

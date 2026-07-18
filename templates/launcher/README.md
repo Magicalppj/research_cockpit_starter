@@ -45,10 +45,4 @@ Use `manual_run_checklist.md` when no script owns the run. Fill the same fields 
 
 Use `--no-build` for handoff mutations. Default `ingest-artifact` creates an artifact record, and the structured closeout references that returned record through `artifact_record.existing_record_id`.
 
-1. Create or update the running record with `create-run` or `update-run`.
-2. Preserve the output directory with `ingest-artifact` and keep its returned `record_id`.
-3. Run `complete-run --print-schema`, set `artifact_record.existing_record_id` in `closeout.yaml`, and close the run with `complete-run --file closeout.yaml`. Include gate payloads, the finding, and next actions in that transaction.
-4. Run only the changed-scope `verify_commands` returned by the write commands.
-5. Run full `validate`, `build`, and root `smoke` once at coordinator merge, release, or final handoff.
-
-Use a separate `ingest-gate-result` only for recovery or an intentionally partial update. Pass `--artifact <artifact_id>` only when that id is an explicitly promoted graph artifact.
+1. Start the run and experiment together with `create-run --status running --start-experiment`. 2. Preserve output once with `ingest-artifact` when canonical evidence is needed. 3. Use one `complete-run --file closeout.yaml` transaction for run, gates, record link, finding, experiment terminal state, and one optional follow-up. 4. Skip repeated validate/context when compact output is internally verified; otherwise verify changed scope only. 5. Run full gates only at coordinator merge, release, or research-stage milestone handoff.  Use a separate `ingest-gate-result` only for recovery or an intentionally partial update. Pass `--artifact <artifact_id>` only when that id is an explicitly promoted graph artifact.

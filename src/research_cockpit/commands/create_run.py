@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -13,21 +15,24 @@ from research_cockpit.commands._runtime import (
     dry_run_preflight_result,
     emit_json,
     finish_mutation,
-    load_validated_state,
+    load_targeted_state,
     safe_print,
+    validate_mutation_candidate,
     yaml_change_diff,
 )
 from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runs import RUN_OPTIONAL_FIELDS, build_run_data, run_path
+from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.retention import load_mapping_argument
 from research_cockpit.model import (
+    ResearchNode,
     RunRecord,
     VALID_RUN_STATUSES,
     ValidationError,
     load_runs,
+    load_yaml,
     script_command,
-    validate_cockpit,
 )
 
 
@@ -37,6 +42,7 @@ def create_run(
     run_id: str,
     experiment_id: str,
     status: str = "queued",
+    start_experiment: bool = False,
     started_at: str | None = None,
     finished_at: str | None = None,
     launcher: str | None = None,
@@ -57,7 +63,7 @@ def create_run(
     assignment_id: str | None = None,
     coordinator: bool = False,
 ) -> dict[str, Any]:
-    state = load_validated_state(root)
+    state = load_targeted_state(root, node_ids=[experiment_id])
     ensure_assignment_scope(
         root,
         state.nodes,
@@ -65,10 +71,15 @@ def create_run(
         coordinator=coordinator,
         target_node_ids=[experiment_id],
     )
-    runs = load_runs(root)
     path = run_path(root, run_id)
     normalized_id = path.stem
-    if normalized_id in runs:
+    runs = {} if state.targeted else load_runs(root)
+    indexed_runs = (
+        (state.validation_index.get("runs", {}) or {})
+        if state.targeted and isinstance(state.validation_index, dict)
+        else {}
+    )
+    if path.exists() or normalized_id in runs or normalized_id in indexed_runs:
         raise FileExistsError(path)
 
     data = build_run_data(
@@ -90,11 +101,37 @@ def create_run(
         resources=resources,
         output_retention=output_retention,
     )
-    candidate = dict(runs)
-    candidate[normalized_id] = RunRecord.from_dict(data)
-    validate_cockpit(root, state.nodes, state.current, state.explicit_edges, runs=candidate, raise_on_error=True)
-
+    candidate_runs = dict(runs)
+    candidate_runs[normalized_id] = RunRecord.from_dict(data)
+    candidate_nodes = dict(state.nodes)
     changes = [(path, None, data)]
+    experiment_status_changed = False
+    if start_experiment:
+        if status != "running":
+            raise ValueError("--start-experiment requires --status running")
+        experiment = state.nodes.get(experiment_id)
+        if experiment is None or experiment.type != "experiment":
+            raise ValueError(f"Node {experiment_id!r} must be an experiment")
+        if experiment.status not in {"planned", "queued", "running"}:
+            raise ValueError(
+                f"Cannot start experiment {experiment_id} from status {experiment.status!r}"
+            )
+        if experiment.status != "running":
+            experiment_path = find_node_file(root, experiment_id)
+            experiment_before = load_yaml(experiment_path)
+            experiment_after = copy.deepcopy(experiment_before)
+            experiment_after["status"] = "running"
+            experiment_after["updated_at"] = str(date.today())
+            candidate_nodes[experiment_id] = ResearchNode.from_dict(experiment_after)
+            changes.append((experiment_path, experiment_before, experiment_after))
+            experiment_status_changed = True
+
+    validate_mutation_candidate(
+        root,
+        state,
+        nodes=candidate_nodes,
+        runs=candidate_runs,
+    )
     result: dict[str, Any] = {
         "run_id": normalized_id,
         "experiment_id": data["experiment_id"],
@@ -103,9 +140,13 @@ def create_run(
         "changed": False if dry_run else True,
         "would_change": True,
         "path": str(path),
-        "changed_files": [str(path)],
+        "changed_files": [str(change_path) for change_path, _, _ in changes],
         "before": None,
         "after": data,
+        "started_experiment": start_experiment,
+        "experiment_status_changed": experiment_status_changed,
+        "verified": not dry_run,
+        "additional_verification_required": dry_run,
     }
     if show_diff:
         result["diff"] = yaml_change_diff(changes)
@@ -121,6 +162,10 @@ def create_run(
             "node_id": data["experiment_id"],
             "command": f"{script_command('create_run.py')} --id {normalized_id} --experiment {data['experiment_id']}",
             "after": {key: data.get(key) for key in ("run_id", "status", "experiment_id", *RUN_OPTIONAL_FIELDS)},
+            "extra": {
+                "started_experiment": start_experiment,
+                "experiment_status_changed": experiment_status_changed,
+            },
         },
         rebuild_dashboard=rebuild_dashboard,
     )
@@ -133,6 +178,11 @@ def main() -> None:
     parser.add_argument("--id", required=True, dest="run_id")
     parser.add_argument("--experiment", "--experiment-id", required=True, dest="experiment_id")
     parser.add_argument("--status", choices=sorted(VALID_RUN_STATUSES), default="queued")
+    parser.add_argument(
+        "--start-experiment",
+        action="store_true",
+        help="Atomically set a planned or queued experiment to running with this run.",
+    )
     parser.add_argument("--started-at")
     parser.add_argument("--finished-at")
     parser.add_argument("--launcher")
@@ -163,6 +213,7 @@ def main() -> None:
             run_id=args.run_id,
             experiment_id=args.experiment_id,
             status=args.status,
+            start_experiment=args.start_experiment,
             started_at=args.started_at,
             finished_at=args.finished_at,
             launcher=args.launcher,
@@ -207,7 +258,7 @@ def main() -> None:
                 target=result["run_id"],
                 root=args.root,
                 created=[result["run_id"]],
-                updated=[],
+                updated=[result["experiment_id"]] if result.get("experiment_status_changed") else [],
             )
             if args.compact
             else result

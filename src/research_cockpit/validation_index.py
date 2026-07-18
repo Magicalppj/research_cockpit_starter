@@ -327,8 +327,8 @@ def load_validation_index(root: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
     try:
-        data = load_yaml(path)
-    except (OSError, yaml.YAMLError) as exc:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return {
             "schema_version": "",
             "load_error": str(exc),

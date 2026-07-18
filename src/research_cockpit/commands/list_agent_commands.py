@@ -32,6 +32,7 @@ COMPACT_COMMAND_KEYS = {
     "input_modes",
     "workflow_tags",
     "mutating",
+    "verification_mode",
     "supports_json",
     "supports_dry_run",
     "supports_no_build",
@@ -47,6 +48,7 @@ COMPACT_COMMAND_KEYS = {
     "batch_policy",
     "requires_serial_mutation",
     "conflict_policy",
+    "verification_mode",
     "schema_command",
     "primary_target",
     "target_aliases",
@@ -61,6 +63,7 @@ SUMMARY_COMMAND_KEYS = {
     "input_modes",
     "workflow_tags",
     "mutating",
+    "verification_mode",
     "supports_json",
     "supports_dry_run",
     "supports_no_build",
@@ -72,7 +75,7 @@ SUMMARY_COMMAND_KEYS = {
 }
 BATCH_WORKER_VERIFY_COMMANDS = [
     "research-cockpit validate --root <root> --changed-node <node_id> --json",
-    "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",
+    "research-cockpit context --root <root> --id <node_id> --view execution --compact --json",
 ]
 BATCH_FINAL_HANDOFF_COMMANDS = [
     "research-cockpit validate --root <root> --json",
@@ -422,14 +425,22 @@ COMMANDS: list[dict[str, object]] = [
     },
     {
         "name": "context.py",
-        "purpose": "Read compact combined context for one known node, optionally including bootstrap and artifacts.",
+        "purpose": "Read bounded execution state for one known node, or explicitly request wider combined context.",
         "mutating": False,
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
         "supports_compact": True,
         "safe_in_plan_mode": True,
-        "recommended_when": "Continue work from a known option or experiment without reading several context packs.",
+        "extra_supported_flags": [
+            "--with-bootstrap",
+            "--with-artifacts",
+            "--view",
+            "--since",
+            "--command-style",
+            "--progress",
+        ],
+        "recommended_when": "Use --view execution for known-node work and --since for unchanged polling.",
     },
     {
         "name": "assignment_view.py",
@@ -659,7 +670,8 @@ COMMANDS: list[dict[str, object]] = [
     },
     {
         "name": "create_run.py",
-        "purpose": "Create a run/job record for one concrete experiment execution.",
+        "purpose": "Create a run/job record and optionally start its experiment in the same transaction.",
+        "verification_mode": "internal_non_dry_run",
         "mutating": True,
         "supports_json": True,
         "supports_dry_run": True,
@@ -670,6 +682,7 @@ COMMANDS: list[dict[str, object]] = [
             "--experiment",
             "--experiment-id",
             "--status",
+            "--start-experiment",
             *ASSIGNMENT_SCOPE_FLAGS,
             "--resources-json",
             "--resources-file",
@@ -680,6 +693,7 @@ COMMANDS: list[dict[str, object]] = [
             "run_id",
             "status",
             "experiment_id",
+            "start_experiment",
             "started_at",
             "finished_at",
             "launcher",
@@ -695,7 +709,7 @@ COMMANDS: list[dict[str, object]] = [
             "resources",
             "output_retention",
         ],
-        "recommended_when": "Register a long-running run before launching or immediately after launch.",
+        "recommended_when": "Use --start-experiment with --status running to avoid a separate experiment status mutation.",
     },
     {
         "name": "update_run.py",
@@ -739,6 +753,7 @@ COMMANDS: list[dict[str, object]] = [
     {
         "name": "complete_run.py",
         "purpose": "Close a run directly or apply a structured transactional run closeout.",
+        "verification_mode": "structured_file_non_dry_run",
         "mutating": True,
         "supports_json": True,
         "supports_dry_run": True,
@@ -763,9 +778,17 @@ COMMANDS: list[dict[str, object]] = [
             "stop_command",
             "resources",
             "output_retention",
+            "experiment.status",
+            "experiment.result_summary",
+            "gates",
+            "artifact_record",
+            "artifact_record.existing_record_id",
+            "finding",
+            "next_experiment",
+            "assignment.current_node",
         ],
         **file_schema_for_script("complete_run.py"),
-        "recommended_when": "Use --file to close a run, gates, artifact record, finding, and next actions in one transaction.",
+        "recommended_when": "Use --file to close run, evidence, experiment, one follow-up, and assignment cursor atomically; do not repeat their standalone mutations.",
     },
     {
         "name": "list_runs.py",
@@ -1021,6 +1044,7 @@ COMMANDS: list[dict[str, object]] = [
     {
         "name": "ingest_artifact.py",
         "purpose": "Copy run output into the canonical store; experiment targets create an artifact record by default.",
+        "verification_mode": "internal_non_dry_run",
         "mutating": True,
         "supports_json": True,
         "supports_dry_run": True,
@@ -1051,7 +1075,7 @@ COMMANDS: list[dict[str, object]] = [
             "links",
             "agent",
         ],
-        "recommended_when": "Preserve ordinary experiment output as a lightweight record; use --promote with a reason only for durable graph evidence.",
+        "recommended_when": "Preserve ordinary output once as a lightweight record; successful non-dry-run ingest is internally verified, and promotion requires durable graph evidence.",
     },
     {
         "name": "list_artifact_records.py",
@@ -1449,6 +1473,7 @@ def _batch_policy(
     supports_no_build: bool,
     writes_truth_source: bool,
     writes_generated_files: bool,
+    verification_mode: str,
 ) -> dict[str, object]:
     if not mutating:
         mode = "read_only"
@@ -1459,13 +1484,22 @@ def _batch_policy(
     else:
         mode = "single_mutation"
     serial_no_build = mode == "serial_no_build"
+    internally_verified = verification_mode in {
+        "internal_non_dry_run",
+        "structured_file_non_dry_run",
+    }
+    worker_verify_default = serial_no_build and not internally_verified
     return {
         "mode": mode,
         "use_no_build": bool(supports_no_build and writes_truth_source),
         "serial_required": bool(mutating),
         "finish_commands": [],
-        "worker_verify_commands": BATCH_WORKER_VERIFY_COMMANDS if serial_no_build else [],
-        "final_handoff_commands": BATCH_FINAL_HANDOFF_COMMANDS if serial_no_build else [],
+        "worker_verify_commands": BATCH_WORKER_VERIFY_COMMANDS if worker_verify_default else [],
+        "final_handoff_commands": (
+            BATCH_FINAL_HANDOFF_COMMANDS
+            if serial_no_build and not internally_verified
+            else []
+        ),
     }
 
 
@@ -1486,6 +1520,10 @@ def agent_command_manifest(
         if name and subcommand != name:
             continue
         mutating = bool(command["mutating"])
+        verification_mode = str(
+            command.get("verification_mode")
+            or ("read_only" if not mutating else "changed_scope_after_write")
+        )
         supports_no_build = bool(command.get("supports_no_build"))
         required_flags = [str(flag) for flag in command.get("required_flags", [])]
         rebuild_default = bool(command.get("rebuild_default", mutating and supports_no_build))
@@ -1497,6 +1535,7 @@ def agent_command_manifest(
             **command,
             "name": subcommand,
             "canonical_name": str(command.get("canonical_name", subcommand)),
+            "verification_mode": verification_mode,
             "group": command_group_for_command(subcommand),
             "status": str(command.get("status", "active")),
             "aliases": [*list(command.get("aliases", [])), *grouped_aliases_for_command(subcommand)],
@@ -1515,6 +1554,7 @@ def agent_command_manifest(
                 supports_no_build=supports_no_build,
                 writes_truth_source=writes_truth_source,
                 writes_generated_files=writes_generated_files,
+                verification_mode=verification_mode,
             ),
             "requires_serial_mutation": mutating,
             "conflict_policy": CONFLICT_POLICY if mutating else "",

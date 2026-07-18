@@ -217,6 +217,7 @@ def load_targeted_state(
         root,
         changed_nodes=node_ids,
         changed_files=changed_files,
+        validation_index=index,
     )
     if validation.get("fallback", {}).get("used_full_validation"):
         return load_validated_state(root)

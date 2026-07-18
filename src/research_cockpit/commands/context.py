@@ -34,6 +34,7 @@ from research_cockpit.option_workstreams import experiment_ids_for_option, upstr
 from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.resources import build_link_rows, node_artifact_ids, node_artifact_record_ids
 from research_cockpit.root_snapshot import load_root_snapshot
+from research_cockpit.execution_context import execution_context_payload
 
 
 def _related_option_id(nodes: dict[str, Any], node_id: str) -> str | None:
@@ -347,7 +348,23 @@ def context_payload(
     with_artifacts: bool = False,
     compact: bool = False,
     command_style: str = "console",
+    view: str = "default",
+    since_revision: str | None = None,
 ) -> dict[str, Any]:
+    if view == "execution":
+        if with_bootstrap or with_artifacts:
+            raise ValueError(
+                "--view execution cannot be combined with --with-bootstrap or --with-artifacts"
+            )
+        return execution_context_payload(
+            root,
+            node_id=node_id,
+            since_revision=since_revision,
+        )
+    if view != "default":
+        raise ValueError(f"Unsupported context view: {view}")
+    if since_revision:
+        raise ValueError("--since requires --view execution")
     snapshot = load_root_snapshot(root, node_id=node_id, compact=compact)
     nodes = snapshot.nodes
     current = snapshot.current
@@ -587,6 +604,8 @@ def main() -> None:
     parser.add_argument("--with-bootstrap", action="store_true")
     parser.add_argument("--with-artifacts", action="store_true")
     parser.add_argument("--compact", action="store_true")
+    parser.add_argument("--view", choices=["default", "execution"], default="default")
+    parser.add_argument("--since", dest="since_revision")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--command-style",
@@ -596,6 +615,12 @@ def main() -> None:
     )
     parser.add_argument("--progress", action="store_true", help="Print phase progress to stderr.")
     args = parser.parse_args()
+    if args.since_revision and args.view != "execution":
+        parser.error("--since requires --view execution")
+    if args.view == "execution" and (args.with_bootstrap or args.with_artifacts):
+        parser.error(
+            "--view execution cannot be combined with --with-bootstrap or --with-artifacts"
+        )
 
     try:
         payload = context_payload(
@@ -605,6 +630,8 @@ def main() -> None:
             with_artifacts=args.with_artifacts,
             compact=args.compact,
             command_style=args.command_style,
+            view=args.view,
+            since_revision=args.since_revision,
         )
     except (ValidationError, ValueError, FileNotFoundError) as exc:
         print(str(exc))

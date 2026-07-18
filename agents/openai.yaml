@@ -1,11 +1,16 @@
 display_name: Research Cockpit
-short_description: Inspect and update a YAML-backed research cockpit with generated agent context packs.
+short_description: Read and update bounded project-local research state.
 default_prompt: >
-  Use this plugin from a project-local .agent/skills or .codex/skills directory.
-  The research repo should keep state in research_cockpit/.
-  Start with research-cockpit bootstrap --root research_cockpit --build --json
-  from the research repo root, or research-cockpit bootstrap --root <path> --build --json
-  from the plugin root.
-  If cwd is unreliable, pass an absolute --root path.
-  Read the generated context packs before editing. Use research-cockpit commands for
-  supported YAML writes, then run validation and rebuild dashboard context.
+  Resolve one canonical research_cockpit root. For an assigned worker, start with
+  research-cockpit agent-session-context --root <root> --assignment <assignment_id> --compact --json.
+  For a known node, use research-cockpit context --root <root> --id <node_id> --view execution --compact --json.
+  Use coordinator bootstrap only when the target is unknown or global triage is required.
+  Mutate structured state through research-cockpit commands, keep same-root mutations sequential,
+  and normally use --no-build. Start a run with create-run --status running --start-experiment.
+  Ingest output once only when a payload exists, then put artifact_record.existing_record_id in
+  the closeout. Use complete-run --file to close run, evidence, experiment, one optional follow-up,
+  and the assignment cursor atomically.
+  When compact output says verified true and additional_verification_required false, do not repeat
+  validation or context; otherwise verify changed scope only. Build dashboards and run root smoke
+  only for coordinator merge, release, or research-stage closeout; an ordinary agent turn is not
+  a milestone handoff.

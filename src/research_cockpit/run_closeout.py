@@ -70,6 +70,70 @@ def _string_list(value: Any, field_name: str) -> list[str]:
     return [str(item) for item in value if str(item).strip()]
 
 
+def _next_experiment_change(
+    root: Path,
+    state: Any,
+    spec: dict[str, Any],
+    *,
+    source_experiment_id: str,
+    source_experiment: dict[str, Any],
+) -> tuple[tuple[Path, dict[str, Any] | None, dict[str, Any]], dict[str, Any]]:
+    allowed_fields = {
+        "id",
+        "title",
+        "parent",
+        "status",
+        "summary",
+        "priority",
+        "success_criteria",
+        "next_action",
+    }
+    unexpected = sorted(set(spec) - allowed_fields)
+    if unexpected:
+        raise ValueError("next_experiment does not support: " + ", ".join(unexpected))
+
+    node_id = str(spec.get("id") or "").strip()
+    title = str(spec.get("title") or "").strip()
+    if not node_id or not title:
+        raise ValueError("next_experiment.id and .title are required")
+    path = root / "graph" / "nodes" / f"{node_id}.yaml"
+    if node_id in state.nodes or path.exists():
+        raise FileExistsError(path)
+
+    parent = str(spec.get("parent") or source_experiment.get("parent") or "").strip()
+    if not parent or parent not in state.nodes:
+        raise ValueError(f"next_experiment parent does not exist: {parent!r}")
+    if state.nodes[parent].type != "option":
+        raise ValueError(f"next_experiment parent must be option, got {state.nodes[parent].type!r}")
+    status = str(spec.get("status") or "queued").strip()
+    if status not in {"planned", "queued"}:
+        raise ValueError("next_experiment.status must be planned or queued")
+
+    criteria = _string_list(spec.get("success_criteria"), "next_experiment.success_criteria")
+    default_criterion = f"Validate follow-up against {source_experiment_id}."
+    if default_criterion not in criteria:
+        criteria.insert(0, default_criterion)
+    today = str(date.today())
+    data: dict[str, Any] = {
+        "id": node_id,
+        "type": "experiment",
+        "title": title,
+        "status": status,
+        "parent": parent,
+        "summary": str(spec.get("summary") or ""),
+        "derived_from": [source_experiment_id],
+        "success_criteria": criteria,
+        "created_at": today,
+        "updated_at": today,
+    }
+    if spec.get("priority") is not None:
+        data["priority"] = str(spec["priority"])
+    next_action = str(spec.get("next_action") or "").strip()
+    if next_action:
+        data["next_actions"] = [next_action]
+    return (path, None, data), data
+
+
 def _artifact_record_plan(
     root: Path,
     state: Any,
@@ -208,11 +272,11 @@ def complete_run_closeout(
     if experiment_id not in state.nodes or state.nodes[experiment_id].type != "experiment":
         raise ValueError(f"Run {run_id} does not reference an experiment node")
 
-    resolved_assignment_id = str(plan.get("assignment_id") or assignment_id or "").strip() or None
-    ensure_assignment_scope(
+    requested_assignment_id = str(plan.get("assignment_id") or assignment_id or "").strip() or None
+    resolved_assignment_id = ensure_assignment_scope(
         root,
         state.nodes,
-        assignment_id=resolved_assignment_id,
+        assignment_id=requested_assignment_id,
         coordinator=coordinator,
         target_node_ids=[experiment_id],
     )
@@ -357,16 +421,55 @@ def complete_run_closeout(
         findings.append(finding)
         experiment_after["findings"] = findings
 
-    next_actions = _mapping(plan.get("next_actions"), "next_actions")
-    if "experiment" in next_actions:
-        experiment_after["next_actions"] = _string_list(
-            next_actions.get("experiment"),
-            "next_actions.experiment",
+    experiment_spec = _mapping(plan.get("experiment"), "experiment")
+    experiment_status: str | None = None
+    if experiment_spec:
+        unexpected = sorted(set(experiment_spec) - {"status", "result_summary"})
+        if unexpected:
+            raise ValueError("experiment does not support: " + ", ".join(unexpected))
+        default_status = {
+            "completed": "done",
+            "failed": "failed",
+            "cancelled": "cancelled",
+        }[status]
+        experiment_status = str(experiment_spec.get("status") or default_status).strip()
+        if experiment_status not in {"done", "failed", "cancelled"}:
+            raise ValueError("experiment.status must be done, failed, or cancelled")
+        if experiment_status == "done" and not finding_spec:
+            raise ValueError("A done experiment closeout requires finding")
+        experiment_after["status"] = experiment_status
+        if "result_summary" in experiment_spec:
+            experiment_after["result_summary"] = str(experiment_spec.get("result_summary") or "")
+        experiment_after.pop("next_actions", None)
+
+    next_experiment_spec = _mapping(plan.get("next_experiment"), "next_experiment")
+    next_experiment_data: dict[str, Any] | None = None
+    if next_experiment_spec:
+        if not experiment_spec:
+            raise ValueError("next_experiment requires an experiment terminal closeout")
+        next_change, next_experiment_data = _next_experiment_change(
+            root,
+            state,
+            next_experiment_spec,
+            source_experiment_id=experiment_id,
+            source_experiment=experiment_after,
         )
+        yaml_changes.append(next_change)
+
+    next_actions = _mapping(plan.get("next_actions"), "next_actions")
+    experiment_actions = _string_list(next_actions.get("experiment"), "next_actions.experiment")
+    if experiment_actions:
+        if experiment_status:
+            raise ValueError(
+                "next_actions.experiment cannot be written to a terminal experiment; use next_experiment.next_action"
+            )
+        experiment_after["next_actions"] = experiment_actions
     assignment_actions = _string_list(next_actions.get("assignment"), "next_actions.assignment")
-    if assignment_actions:
-        if not resolved_assignment_id:
-            raise ValueError("next_actions.assignment requires assignment_id")
+    if assignment_actions and not resolved_assignment_id:
+        raise ValueError("next_actions.assignment requires assignment_id")
+
+    updated_assignment_id: str | None = None
+    if resolved_assignment_id and (assignment_actions or next_experiment_data):
         assignment_path = root / "assignments" / f"{resolved_assignment_id}.yaml"
         assignment_before = load_yaml(assignment_path)
         if not assignment_before:
@@ -375,14 +478,24 @@ def complete_run_closeout(
         if assignment.assignment_id != resolved_assignment_id:
             raise ValueError("assignment_id does not match assignment file")
         assignment_after = copy.deepcopy(assignment_before)
-        assignment_after["next_actions"] = assignment_actions
+        if next_experiment_data:
+            assignment_after["current_node"] = next_experiment_data["id"]
+            if not assignment_actions:
+                assignment_actions = list(next_experiment_data.get("next_actions", []) or [])
+            assignment_after["next_actions"] = assignment_actions
+        elif assignment_actions:
+            assignment_after["next_actions"] = assignment_actions
+        assignment_after["updated_at"] = str(date.today())
         yaml_changes.append((assignment_path, assignment_before, assignment_after))
+        updated_assignment_id = resolved_assignment_id
 
     experiment_after["updated_at"] = str(date.today())
     if experiment_after != experiment_before:
         yaml_changes.append((experiment_path, experiment_before, experiment_after))
     candidate_nodes = dict(state.nodes)
     candidate_nodes[experiment_id] = ResearchNode.from_dict(experiment_after)
+    if next_experiment_data:
+        candidate_nodes[next_experiment_data["id"]] = ResearchNode.from_dict(next_experiment_data)
     artifact_records = (
         indexed_artifact_record_stubs(state)
         if state.targeted
@@ -412,6 +525,11 @@ def complete_run_closeout(
         "gate_ids": gate_ids,
         "record_id": linked_record.get("record_id") if linked_record else None,
         "finding_id": finding_id,
+        "experiment_status": experiment_status,
+        "next_experiment_id": next_experiment_data.get("id") if next_experiment_data else None,
+        "assignment_id": updated_assignment_id,
+        "verified": not dry_run,
+        "additional_verification_required": dry_run,
         "dry_run": dry_run,
         "changed": not dry_run,
         "would_change": True,
@@ -445,6 +563,9 @@ def complete_run_closeout(
                     "gate_ids": gate_ids,
                     "record_id": result["record_id"],
                     "finding_id": finding_id,
+                    "experiment_status": experiment_status,
+                    "next_experiment_id": result["next_experiment_id"],
+                    "assignment_id": updated_assignment_id,
                 },
             }
         ],

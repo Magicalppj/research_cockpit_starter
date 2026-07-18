@@ -4,7 +4,7 @@ Use this capability at the start of an agent session and before making local res
 
 ## Startup Read Order
 
-Choose one startup path. Do not run both bootstrap and `context --with-bootstrap` for normal known-node work.
+Choose one startup path. Do not run both bootstrap and a wider context view for normal known-node work.
 
 1. Assigned downstream agent with an `assignment_id`:
 
@@ -19,13 +19,17 @@ Use `agent-session-context` assignment data as the primary task context; in scop
 2. Known node id:
 
 ```sh
-research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
+research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json
+# Repeated poll after the first response:
+research-cockpit context --root research_cockpit --id <node_id> --view execution --since <revision> --compact --json
 ```
+
+The execution view contains only the node status/next action, assignment boundary, active run, blocking gate, effective baseline, warnings, required action, and revision. An unchanged `--since` poll returns only `changed: false` and the revision. It intentionally omits global focus, bootstrap, artifact history, historical findings, and command catalogs.
 
 3. Unknown target or global triage:
 
 ```sh
-research-cockpit bootstrap --root research_cockpit --json
+research-cockpit bootstrap --root research_cockpit --coordinator --json
 ```
 
 4. Older minimal known-node handoff:
@@ -34,7 +38,7 @@ research-cockpit bootstrap --root research_cockpit --json
 research-cockpit node-context --root research_cockpit --id <node_id> --compact --json
 ```
 
-For known-node continuation, compact `context` is the preferred one-command handoff when artifact and validation context matter. Bootstrap plus compact `node-context` remains fine for the older minimal flow. Do not also read both context packs unless you need global state or generated dashboard context.
+For known-node continuation, the execution view is the preferred one-command handoff. Request the wider default view with `--with-bootstrap --with-artifacts` only when validation aggregation, related history, or artifact/resource rows are required. Do not also read both context packs unless you need global state or generated dashboard context.
 
 5. If dashboard files are missing or stale and generated-file writes are allowed:
 
@@ -74,12 +78,12 @@ The payload includes `required_root`, `do_not_mutate_worktree_root: true`, the a
 When a human assigns a specific node id, use the read-only onboarding command before opening raw YAML:
 
 ```sh
-research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
+research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json
 ```
 
-The payload is computed from truth-source YAML, not from stale generated dashboards. It includes the current node, compact bootstrap data, validation summary, focus actions, related problem/option/experiments, artifact/resource rows, and command skeletons.
+The execution payload is computed from truth-source files, not generated dashboards. It stays bounded as the root grows and reports `scope.index_fast_path`, `scope.nodes_loaded`, and `scope.nodes_total` for diagnostics.
 
-Known-node payloads include `effective_baseline`. This is the default option/decision/artifact bundle the target node should inherit. Use it instead of scanning every accepted decision unless the task is explicitly reviewing accepted history. When `--with-artifacts` is present, baseline artifacts are included in artifact/resource rows.
+Known-node payloads include `effective_baseline`. This is the default option/decision/artifact bundle the target node should inherit. Use it instead of scanning every accepted decision unless the task is explicitly reviewing accepted history. In the wider default view, `--with-artifacts` adds baseline artifacts and resource rows.
 
 ## Set Baseline
 
@@ -96,7 +100,7 @@ research-cockpit set-baseline --root research_cockpit --node problem_x --clear -
 Use `node-context --compact --json` only when you need the narrow node onboarding payload without bootstrap/artifact aggregation. Use full `node-context --json` without `--compact` when you need complete relations, resources, recent interactions, or type-specific traces.
 Avoid the old chain `bootstrap` + generated context packs + `node-context` for known-node work unless you are explicitly auditing global dashboard state.
 
-The combined `context` payload names the work target and coordinator/global focus separately:
+The wider default `context` payload names the work target and coordinator/global focus separately:
 
 - `target_context`: the node this command was asked to inspect.
 - `current_global_focus`: coordinator/global focus from coordinator state and legacy compatibility fields.

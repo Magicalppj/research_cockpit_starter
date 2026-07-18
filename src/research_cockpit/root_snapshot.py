@@ -134,7 +134,7 @@ def _indexed_snapshot(root: Path, node_id: str, index: dict[str, Any]) -> RootSn
     if node_id not in rows:
         raise ValueError(f"Node does not exist: {node_id}")
 
-    validation = validation_payload(root, changed_nodes=[node_id])
+    validation = validation_payload(root, changed_nodes=[node_id], validation_index=index)
     if validation.get("fallback", {}).get("used_full_validation"):
         raise RuntimeError(str(validation.get("fallback", {}).get("reason") or "validation_index_fallback"))
 

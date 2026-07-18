@@ -190,13 +190,18 @@ run:
   id: run_x
   status: completed
   finished_at: 2026-07-13T10:00:00Z
+experiment:
+  status: done
+  result_summary: The bounded run passed and can be scaled.
+next_experiment:
+  id: experiment_x_followup
+  title: Scale the verified configuration
+  summary: Continue from the bounded result.
+  success_criteria:
+    - Complete the full evaluation.
+  next_action: Start the full run.
 artifact_record:
-  record_id: artifact_experiment_x_run_x
-  title: Run output record
-  stable_path: artifacts/experiment_x/run_x
-  manifest_path: artifacts/experiment_x/run_x/_research_cockpit_ingest.json
-  links:
-    metrics: artifacts/experiment_x/run_x/metrics.json
+  existing_record_id: artifact_experiment_x_run_x
 gates:
   - id: gate_run_x_smoke
     file: artifacts/experiment_x/run_x/gate_result.json
@@ -213,10 +218,13 @@ next_actions:
     - Continue with the next assigned experiment.
 
 Notes:
+- experiment is optional; status defaults from the terminal run status, and done requires finding.
+- next_experiment is limited to one planned/queued sibling and requires experiment closeout.
+- With assignment_id, next_experiment also moves the assignment cursor and inherits its next_action.
 - assignment_id is required when next_actions.assignment is present.
 - Gate payload files must already exist and pass gate_result_v1 validation.
-- After ingest-artifact, replace the artifact_record mapping above with only existing_record_id: <record_id>.
-- Creating artifact_record metadata does not copy payload files; stable_path must already be canonical.
+- artifact_record.existing_record_id is the normal link after ingest-artifact.
+- Without ingest, artifact_record may instead define record_id, title, stable_path, manifest_path, and links; metadata creation does not copy payload files.
 - Dry-run validates the complete transaction and writes no truth files or interaction events.
 """
 

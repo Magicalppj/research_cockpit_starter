@@ -13,7 +13,23 @@ from typing import Any
 
 SCHEMA_VERSION = "benchmark_runtime_v1"
 BENCHMARK_SESSION_ID = f"{os.getpid()}_{time.time_ns()}"
-DEFAULT_OPERATIONS = ("validate_changed", "context_compact", "mutation", "run_closeout")
+SUPPORTED_OPERATIONS = (
+    "validate_changed",
+    "context_compact",
+    "context_execution",
+    "context_execution_unchanged",
+    "node_context_compact",
+    "mutation",
+    "interaction_append",
+    "run_closeout",
+)
+DEFAULT_OPERATIONS = (
+    "validate_changed",
+    "context_execution",
+    "context_execution_unchanged",
+    "mutation",
+    "run_closeout",
+)
 
 
 def _cli(command: str, *parts: str) -> list[str]:
@@ -117,6 +133,44 @@ def _prepare_run_closeout(root: Path, changed_node: str, sample_index: int) -> P
     )
     return plan_path
 
+def _execution_context_command(
+    root: Path,
+    changed_node: str,
+    *,
+    since_revision: str | None = None,
+) -> list[str]:
+    parts = [
+        "--root",
+        str(root),
+        "--id",
+        changed_node,
+        "--view",
+        "execution",
+        "--compact",
+        "--json",
+    ]
+    if since_revision:
+        parts.extend(["--since", since_revision])
+    return _cli("context", *parts)
+
+
+def _current_execution_revision(root: Path, changed_node: str) -> str:
+    result = subprocess.run(
+        _execution_context_command(root, changed_node),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"Could not prepare execution revision benchmark: {detail}")
+    payload = json.loads(result.stdout)
+    revision = str(payload.get("revision") or "")
+    if not revision:
+        raise RuntimeError("Execution context did not return a revision")
+    return revision
+
+
 def _command_for(
     operation: str,
     *,
@@ -138,6 +192,14 @@ def _command_for(
             "--with-artifacts",
             "--compact",
             "--json",
+        )
+    if operation == "context_execution":
+        return _execution_context_command(root, changed_node)
+    if operation == "context_execution_unchanged":
+        return _execution_context_command(
+            root,
+            changed_node,
+            since_revision=_current_execution_revision(root, changed_node),
         )
     if operation == "node_context_compact":
         return _cli("node-context", "--root", root, "--id", changed_node, "--compact", "--json")
@@ -259,9 +321,7 @@ def benchmark_runtime(
         raise ValueError("--cold-runs must be at least 1")
     if warm_runs < 1:
         raise ValueError("--warm-runs must be at least 1")
-    unsupported = [operation for operation in operations if operation not in {
-        "validate_changed", "context_compact", "node_context_compact", "mutation", "interaction_append", "run_closeout"
-    }]
+    unsupported = [operation for operation in operations if operation not in SUPPORTED_OPERATIONS]
     if unsupported:
         raise ValueError(f"Unsupported operation: {unsupported[0]}")
 
@@ -313,9 +373,12 @@ def main() -> None:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--cold-runs", type=int, default=3)
     parser.add_argument("--warm-runs", type=int, default=10)
-    parser.add_argument("--operation", action="append", dest="operations", choices=[
-        "validate_changed", "context_compact", "node_context_compact", "mutation", "interaction_append", "run_closeout"
-    ])
+    parser.add_argument(
+        "--operation",
+        action="append",
+        dest="operations",
+        choices=SUPPORTED_OPERATIONS,
+    )
     parser.add_argument("--changed-node", default="experiment_perf_0000")
     parser.add_argument("--progress", action="store_true", help="Pass phase progress through to the measured command stderr.")
     parser.add_argument("--json", action="store_true")

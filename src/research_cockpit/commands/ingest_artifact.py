@@ -421,6 +421,8 @@ def ingest_artifact(
         "dry_run": dry_run,
         "changed": not dry_run,
         "would_change": True,
+        "verified": not dry_run,
+        "additional_verification_required": dry_run,
         "path": str(artifact_path),
         "changed_files": [str(path) for path, _, _ in changes],
         "linked_to": [node_id],

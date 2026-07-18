@@ -18,7 +18,7 @@ REQUIRED_MODULES = {
 }
 BATCH_WORKER_VERIFY_COMMANDS = [
     "research-cockpit validate --root <root> --changed-node <node_id> --json",
-    "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",
+    "research-cockpit context --root <root> --id <node_id> --view execution --compact --json",
 ]
 BATCH_FINAL_HANDOFF_COMMANDS = [
     "research-cockpit validate --root <root> --json",
@@ -29,7 +29,6 @@ ASSIGNMENT_CURSOR_EXAMPLE_TEMPLATES = [
     'research-cockpit set-cursor --root <root>{scope} --node <node_id> --next-action "..." --no-build',
 ]
 NEXT_ACTION_EXAMPLE_TEMPLATES = [
-    'research-cockpit migrate-terminal-next-actions --root <root>{scope} --id <done_experiment_id> --followup-id <followup_id> --title "..." --dry-run --json --show-diff',
     'research-cockpit update-node-fields --root <root>{scope} --id <node_id> --clear-next-actions --next-action "..." --no-build',
 ]
 GLOBAL_NEXT_ACTION_EXAMPLE_TEMPLATES = [
@@ -37,41 +36,25 @@ GLOBAL_NEXT_ACTION_EXAMPLE_TEMPLATES = [
     'research-cockpit update-suggestion-state --root <root> --id <suggestion_id> --state completed --reason "..." --no-build',
 ]
 MUTATION_COMMAND_SKELETON_TEMPLATES = [
-    "research-cockpit context --root <root> --id <node_id> --with-bootstrap --with-artifacts --compact --json",
-    "research-cockpit assignment-view --root <root> --json",
-    'research-cockpit add-node --root <root>{scope} --id <node_id> --type <type> --title "..." --parent <parent_id> --no-build',
+    "research-cockpit context --root <root> --id <node_id> --view execution --compact --json",
     'research-cockpit update-node-fields --root <root>{scope} --id <node_id> --question "..." --tag <tag> --no-build',
     "research-cockpit apply-graph-plan --root <root>{scope} --file graph_update.yaml --dry-run --json --show-diff",
     "research-cockpit create-workstream --root <root>{scope} --file workstream.yaml --dry-run --json --show-diff",
-    'research-cockpit create-artifact --root <root>{scope} --id <artifact_id> --title "..." --path artifacts/<node_id>/<run_id> --link-to <node_id> --no-build',
-    "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --dry-run --json --show-diff",
-    'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type smoke_check --passed false --fatal-json "{{}}" --json --compact --no-build',
-    'research-cockpit record-gate-result --root <root>{scope} --id <preflight_gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --json --compact --no-build',
-    "research-cockpit ingest-gate-result --root <root>{scope} --id <gate_id> --file artifacts/<experiment_id>/<run_id>/gate_result.json --run <run_id> --json --compact --no-build",
-    'research-cockpit complete-experiment --root <root>{scope} --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --json --compact --no-build',
-    "research-cockpit complete-experiments --root <root>{scope} --file findings.yaml --json --compact --no-build",
-    'research-cockpit create-followup-experiment --root <root>{scope} --from <done_or_running_experiment_id> --id <followup_id> --title "..." --priority high --next-action "..." --no-build',
-    'research-cockpit migrate-terminal-next-actions --root <root>{scope} --id <done_experiment_id> --followup-id <followup_id> --title "..." --dry-run --json --show-diff',
+    "research-cockpit create-run --root <root>{scope} --id <run_id> --experiment <experiment_id> --status running --start-experiment --json --compact --no-build",
+    "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --json --compact --no-build",
+    "research-cockpit complete-run --root <root>{scope} --file closeout.yaml --json --compact --no-build",
 ]
-GLOBAL_COMMAND_SKELETON_PREFIX = [
-    "research-cockpit init --root <root> --build --json",
-]
-GLOBAL_COMMAND_SKELETON_SUFFIX = [
-    "research-cockpit set-baseline --root <root> --node <node_id> --option <option_id> --decision <decision_id> --no-build",
-    "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
-    "research-cockpit finalize-workstream --root <root> --option <option_id> --status accepted --problem-status resolved --report --no-build",
-]
+GLOBAL_COMMAND_SKELETON_PREFIX: list[str] = []
+GLOBAL_COMMAND_SKELETON_SUFFIX: list[str] = []
 BATCH_EXAMPLE_TEMPLATES = {
     "findings": [
-        'research-cockpit record-finding --root <root>{scope} --experiment <experiment_id> --statement "..." --confidence medium --artifact-id <artifact_id> --json --compact --no-build',
-        'research-cockpit complete-experiment --root <root>{scope} --id <experiment_id> --finding "..." --confidence medium --artifact-id <artifact_id> --json --compact --no-build',
+        "research-cockpit complete-run --root <root>{scope} --file closeout.yaml --json --compact --no-build",
     ],
     "artifacts": [
         "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --json --compact --no-build",
-        "research-cockpit link-artifact --root <root>{scope} --artifact <artifact_id> --to <node_id> --no-build",
     ],
     "runs": [
-        "research-cockpit create-run --root <root>{scope} --id <run_id> --experiment <experiment_id> --status running --no-build",
+        "research-cockpit create-run --root <root>{scope} --id <run_id> --experiment <experiment_id> --status running --start-experiment --json --compact --no-build",
         "research-cockpit update-run --root <root>{scope} --id <run_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build",
         "research-cockpit complete-run --root <root>{scope} --file closeout.yaml --json --compact --no-build",
     ],
@@ -79,7 +62,6 @@ BATCH_EXAMPLE_TEMPLATES = {
         'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --json --compact --no-build',
     ],
 }
-
 
 def missing_runtime_dependencies(required: dict[str, str] = REQUIRED_MODULES) -> list[str]:
     return [module for module in required if importlib.util.find_spec(module) is None]
@@ -294,13 +276,14 @@ def _mutation_guidance(
         "current_focus_node": focus_node_id,
         "current_best_option": current_best_option,
         "pause_candidate_options": sorted(pause_candidates),
-        "batching": "Use --dry-run --json --show-diff first, run mutating commands sequentially with --no-build, then run changed-scope worker verification for the changed node. Let the coordinator or final handoff run full validate, build, and smoke once. A build watcher only refreshes generated dashboards.",
+        "batching": "Run known low-risk mutations directly and sequentially with --no-build. Use dry-run for high-risk or file-based batch changes. Accept compact results with verified=true and additional_verification_required=false; otherwise verify only changed scope. Full validate/build/smoke belongs to the coordinator or milestone handoff.",
         "multi_agent_batch_mode": {
-            "default": "Agents mutate only the canonical root, use --no-build on supported writes, run changed-scope worker verification, and leave full validate/build/smoke to a coordinator or final handoff. An optional build watcher only refreshes generated dashboards and does not replace final validate/smoke.",
+            "default": "Agents mutate only the canonical root sequentially. Compact writes with verified=true and additional_verification_required=false are internally verified; only other writes need changed-scope verification. Full validate/build/smoke belongs to a coordinator or milestone handoff.",
             "rules": [
                 "Do not parallelize mutating commands against the same data root.",
-                "Use commands --json --compact to check supports_no_build and batch_policy before choosing a command.",
-                "Run changed-scope verify commands after local batches; do not run full build/root smoke after every worker edit.",
+                "Use commands --json --compact --name <command> only when a command or flag is unknown; do not rediscover the catalog every turn.",
+                "Use dry-run only for risky batch input or when a preview is needed.",
+                "Read verified and additional_verification_required before running any changed-scope check.",
                 "On mutation conflict, reread compact context and retry the stale command.",
             ],
             "finish_commands": [],

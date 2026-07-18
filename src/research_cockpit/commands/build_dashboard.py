@@ -7,11 +7,16 @@ import time
 from typing import Any
 
 from research_cockpit.cli_progress import progress_traced
+from research_cockpit.commands._runtime import json_safe
 from research_cockpit.paths import default_data_root
 import json
 
 ROOT = default_data_root()
 PROFILE_SCHEMA_VERSION = "build_profile_v1"
+
+
+def _json_text(value: Any, **kwargs: Any) -> str:
+    return json.dumps(json_safe(value), **kwargs)
 
 from research_cockpit.context_packs import (
     DashboardReadModels,
@@ -174,7 +179,7 @@ def _output_file_metrics(root: Path, outputs: list[Path]) -> list[dict[str, obje
 
 
 def _json_size_bytes(value: Any) -> int:
-    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    return len(_json_text(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
 def _graph_view_payload_size_metrics(graph_json: dict[str, Any], nodes: dict[str, Any]) -> dict[str, int]:
@@ -275,19 +280,19 @@ def _write_dashboard_outputs(
     assignment_view: dict[str, Any],
     validation_index: dict[str, Any],
 ) -> None:
-    save_text(outputs[0], json.dumps(graph_json, indent=2, ensure_ascii=False))
-    save_text(outputs[1], json.dumps(context, indent=2, ensure_ascii=False))
-    save_text(outputs[2], json.dumps(focus_context, indent=2, ensure_ascii=False))
+    save_text(outputs[0], _json_text(graph_json, indent=2, ensure_ascii=False))
+    save_text(outputs[1], _json_text(context, indent=2, ensure_ascii=False))
+    save_text(outputs[2], _json_text(focus_context, indent=2, ensure_ascii=False))
     write_dashboard_markdown(root, context)
-    save_text(outputs[4], json.dumps(current_payload, indent=2, ensure_ascii=False))
-    save_text(outputs[5], json.dumps(experiment_matrix, indent=2, ensure_ascii=False))
-    save_text(outputs[6], json.dumps(linked_resources, indent=2, ensure_ascii=False))
-    save_text(outputs[7], json.dumps(action_suggestions, indent=2, ensure_ascii=False))
-    save_text(outputs[8], json.dumps(search_index, indent=2, ensure_ascii=False))
-    save_text(outputs[9], json.dumps(decision_checklists, indent=2, ensure_ascii=False))
-    save_text(outputs[10], json.dumps(option_workstreams, indent=2, ensure_ascii=False))
-    save_text(outputs[11], json.dumps(assignment_view, indent=2, ensure_ascii=False))
-    save_text(outputs[12], json.dumps(validation_index, indent=2, ensure_ascii=False))
+    save_text(outputs[4], _json_text(current_payload, indent=2, ensure_ascii=False))
+    save_text(outputs[5], _json_text(experiment_matrix, indent=2, ensure_ascii=False))
+    save_text(outputs[6], _json_text(linked_resources, indent=2, ensure_ascii=False))
+    save_text(outputs[7], _json_text(action_suggestions, indent=2, ensure_ascii=False))
+    save_text(outputs[8], _json_text(search_index, indent=2, ensure_ascii=False))
+    save_text(outputs[9], _json_text(decision_checklists, indent=2, ensure_ascii=False))
+    save_text(outputs[10], _json_text(option_workstreams, indent=2, ensure_ascii=False))
+    save_text(outputs[11], _json_text(assignment_view, indent=2, ensure_ascii=False))
+    save_text(outputs[12], _json_text(validation_index, indent=2, ensure_ascii=False))
 
 
 def _dashboard_counts(
@@ -467,7 +472,7 @@ def build_affected_dashboard(root: Path, *, node_id: str, json_output: bool = Fa
         validation_index = build_validation_index(root, nodes, explicit_edges, runs, assignments)
         output = root / "dashboards" / "validation_index.json"
         output.parent.mkdir(parents=True, exist_ok=True)
-        save_text(output, json.dumps(validation_index, indent=2, ensure_ascii=False))
+        save_text(output, _json_text(validation_index, indent=2, ensure_ascii=False))
 
     return {
         "ok": True,
@@ -544,7 +549,7 @@ def build_dashboard_once(
             else None
         )
         if resolved_profile_output and profile_payload:
-            save_text(resolved_profile_output, json.dumps(profile_payload, indent=2, ensure_ascii=False))
+            save_text(resolved_profile_output, _json_text(profile_payload, indent=2, ensure_ascii=False))
 
     payload = {
         "ok": True,
@@ -653,7 +658,7 @@ def watch_dashboard(
             "last_build_error": last_build_error,
         })
         if json_output:
-            print(json.dumps(payload, ensure_ascii=False), flush=True)
+            print(_json_text(payload, ensure_ascii=False), flush=True)
         else:
             if not payload.get("ok", True):
                 print(f"[{iteration}] Build failed: {payload.get('error')}", flush=True)
@@ -699,7 +704,7 @@ def main() -> None:
             parser.error("--affected requires --id <node_id>")
         payload = build_affected_dashboard(args.root, node_id=args.affected_node_id, json_output=args.json)
         if args.json:
-            print(json.dumps(payload, indent=2, ensure_ascii=False))
+            print(_json_text(payload, indent=2, ensure_ascii=False))
             return
         print(f"Refreshed affected generated outputs for {payload['target_node']}.")
         print("Full dashboard was not refreshed.")
@@ -727,7 +732,7 @@ def main() -> None:
         include_resource_search=not args.skip_resource_search,
     )
     if args.json:
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        print(_json_text(payload, indent=2, ensure_ascii=False))
         return
     print(f"Built dashboard for {payload['node_count']} nodes.")
     for output in payload["written_files"]:

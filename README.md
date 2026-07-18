@@ -72,27 +72,27 @@ python -m research_cockpit.cli ui --root examples/demo_research_cockpit --server
 在你的项目仓库根目录运行：
 
 ```sh
-research-cockpit init --root research_cockpit --build --json
-research-cockpit validate --root research_cockpit --json
+research-cockpit init --root research_cockpit --json
 research-cockpit ui --root research_cockpit --server.port 8501
 ```
 
 如果你想从更完整的示例状态开始：
 
 ```sh
-research-cockpit init --template demo --root research_cockpit --build --json
+research-cockpit init --template demo --root research_cockpit --json
 ```
 
-推荐循环分两类。下游 worker 新增或编辑少量节点后，先使用 changed-scope 验证，不要每次都跑全量 `build` 或 root `smoke`：
+已知节点的 worker 启动时只读取一次 bounded execution context。CLI mutation 返回 `verified: true` 且 `additional_verification_required: false` 时直接继续；只有 compact 结果要求额外验证或发生手工 YAML 编辑时，才运行 changed-scope validate/context。不要每轮重新发现命令、全量 build 或 root smoke。
 
 ```sh
-research-cockpit commands --json --compact --summary-only
+# Worker startup
+research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json
+# Conditional fallback only when additional verification is required
 research-cockpit validate --root research_cockpit --changed-node <node_id> --json
-research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
-research-cockpit smoke --root research_cockpit --scope changed --id <node_id> --json --progress
+research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json
 ```
 
-coordinator merge、release 或最终 handoff 前再跑全量 gate：
+`milestone handoff`（coordinator merge、release 或 research-stage closeout）前再跑全量 gate；普通 agent turn 不属于 milestone handoff：
 
 ```sh
 research-cockpit validate --root research_cockpit --json
@@ -118,7 +118,7 @@ Research Cockpit 提供三层能力：
 - `research_cockpit/current_state.yaml` 是 legacy/coordinator compatibility state，不是普通 worker 的默认 cursor。
 - `research_cockpit/graph/nodes/*.yaml`、`research_cockpit/runs/*.yaml`、`research_cockpit/gate_results/*.{yaml,json}` 和 `research_cockpit/artifact_records/*.yaml` 保存当前结构化事实。
 - `research_cockpit/graph/interaction_events/**` 与 legacy `graph/interaction_log.yaml` 保存 append-only 操作历史，不替代当前事实。
-- `research_cockpit/dashboards/*` 是生成文件；只在需要刷新生成上下文或 coordinator/final handoff 时运行 `research-cockpit build --root <root>`。
+- `research_cockpit/dashboards/*` 是生成文件；只在需要刷新生成上下文或 coordinator/milestone handoff 时运行 `research-cockpit build --root <root>`。
 - 日常修改优先用 CLI 命令，避免直接手改 YAML 后破坏图谱关系。
 - 同一个 data root 的写操作要顺序执行，不要并发写。
 
@@ -146,23 +146,23 @@ npm run build
 
 | 目标 | 命令 |
 | --- | --- |
-| 初始化最小状态 | `research-cockpit init --root research_cockpit --build --json` |
-| 初始化 demo 状态 | `research-cockpit init --template demo --root research_cockpit --build --json` |
+| 初始化最小状态 | `research-cockpit init --root research_cockpit --json` |
+| 初始化 demo 状态 | `research-cockpit init --template demo --root research_cockpit --json` |
 | 全量校验数据 | `research-cockpit validate --root research_cockpit --json` |
 | 检查语义陈旧状态 | `research-cockpit lint --root research_cockpit --semantic --json` |
-| 生成 dashboard/context（coordinator/final handoff） | `research-cockpit build --root research_cockpit` |
+| 生成 dashboard/context（coordinator/milestone handoff） | `research-cockpit build --root research_cockpit` |
 | 诊断大图 build 性能 | `research-cockpit build --root research_cockpit --json --profile` |
 | 综合维护审计 | `research-cockpit maintenance-audit --root research_cockpit --repo . --json` |
 | 生成 worktree closeout 计划 | `research-cockpit worktree-closeout --root research_cockpit --repo . --worktree ../worktrees/<label> --classification discard_after_recording --dry-run --json` |
 | 生成 sparse worktree 命令计划 | `research-cockpit start-agent-session --root research_cockpit --option <option_id> --label <label> --objective "..." --branch agent/<branch> --worktree ../worktrees/<label> --base main --dry-run --json --sparse --sparse-profile ml-experiment` |
 | 启动 UI | `research-cockpit ui --root research_cockpit --server.port 8501` |
 | 查看可用命令 | `research-cockpit commands --json --compact --summary-only` |
-| 全局启动上下文 | `research-cockpit bootstrap --root research_cockpit --json` |
-| 单节点上下文 | `research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json` |
+| 全局启动上下文 | `research-cockpit bootstrap --root research_cockpit --coordinator --json` |
+| 单节点 execution context | `research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json` |
 | 单节点变更校验 | `research-cockpit validate --root research_cockpit --changed-node <node_id> --json` |
 | 搜索知识 | `research-cockpit search --root research_cockpit --query "keyword" --json --limit 5 --source node` |
 | 单节点 smoke | `research-cockpit smoke --root research_cockpit --scope changed --id <node_id> --json --progress` |
-| 全量 smoke（final handoff） | `research-cockpit smoke --root research_cockpit --json --progress` |
+| 全量 smoke（milestone handoff） | `research-cockpit smoke --root research_cockpit --json --progress` |
 
 ## 常见工作流
 
@@ -174,92 +174,73 @@ npm run build
 research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build --json --compact
-# 按 compact 输出里的 verify_commands 做 changed-scope 验证；final handoff 前再跑全量 gate。
+# 仅当 additional_verification_required 为 true 时验证 reported changed scope；全量 gate 只在 milestone handoff 运行。
 ```
 
 `create-workstream` 不会自动改变全局 focus、暂停旧方案或删除旧分支。follow-up option 应使用 `open` 状态；文件输入里的 option `planned` 会被规范化为 `open`。
 
 如果后续实验继承某个 worktree/option 的结论并会展开成多步探索，优先用 child workstream：在 `workstream.yaml` 里把 `problem.parent` 设为父 option id，并用 `problem.derived_from` 记录来源实验或方案。这样节点图会形成 `option -> problem -> option -> experiment` 的子树，而不是把所有后续实验平铺在同一层。
 
-### 2. 记录实验结论和证据
+### 2. 执行并事务化收尾一个实验
 
-单个实验：
-
-```sh
-research-cockpit complete-experiment \
-  --root research_cockpit \
-  --id experiment_x \
-  --finding "..." \
-  --confidence medium \
-  --evidence-path artifacts/experiment_x/run_x \
-  --evidence-link metrics=artifacts/experiment_x/run_x/metrics.json \
-  --json --compact
-```
-
-只有 coordinator/legacy global-focus 工作流需要在关闭实验时同步推进全局 focus；此时可用组合命令：
+Assignment-scoped worker 的默认路径是“创建并启动、可选 ingest、一次收尾”，不需要分别更新实验状态、记录 finding、创建 follow-up 和移动 cursor：
 
 ```sh
-research-cockpit close-current-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --next-focus option_x --sync-agent all --json --compact
+research-cockpit create-run --root research_cockpit --assignment <assignment_id> --id run_x --experiment experiment_x --status running --start-experiment --json --compact --no-build
+research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from <output_dir> --run-id run_x --link metrics=metrics.json --json --compact --no-build
+research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
 ```
 
-Assignment-scoped worker 不使用 `--sync-agent` 或 `--set-focus` 推进自己的进度；应在 mutation 中传入 `--assignment <assignment_id>`，然后用 `set-cursor --assignment <assignment_id>` 移动 worker-local cursor。
+没有需要保留的 payload 时跳过 `ingest-artifact`。常用最小 `closeout.yaml` 如下；没有后续实验或 artifact record 时分别省略对应块：
 
-coordinator/legacy focus 工作流需要从 mixed/incomplete 结论派生一个小型后续实验时：
-
-```sh
-research-cockpit create-followup-experiment --root research_cockpit --from experiment_x --id experiment_x_followup --title "Follow-up gate" --priority high --next-action "Run follow-up gate" --set-focus --json --compact
+```yaml
+schema_version: run_closeout_v1
+run:
+  id: run_x
+  status: completed
+experiment:
+  status: done
+  result_summary: "..."
+artifact_record:
+  existing_record_id: artifact_experiment_x_run_x
+finding:
+  statement: "..."
+  confidence: medium
+next_experiment:
+  id: experiment_x_followup
+  title: "..."
+  next_action: "..."
 ```
 
-`create-followup-experiment` 只适合单个小的 follow-up gate。如果该结论会派生多个实验、需要继承 artifact bundle，或需要保留清晰的分支层次，请改用上面的 `create-workstream` 创建 child workstream。
+`complete-run --file` 会在一个事务中写入 run 终态、gate、finding、artifact-record link、experiment 结果、最多一个 sibling follow-up，并在传入 assignment 时自动移动 worker cursor。普通成功写入返回 `verified: true` 与 `additional_verification_required: false`，此时不要在三步之间重复运行 validate/context。只有不熟悉 schema 时才运行 `research-cockpit complete-run --print-schema`。
 
-批量实验：
-
-```sh
-research-cockpit complete-experiments --print-schema
-research-cockpit complete-experiments --root research_cockpit --file findings.yaml --dry-run --json --show-diff
-research-cockpit complete-experiments --root research_cockpit --file findings.yaml --no-build --json --compact
-```
-
-inline evidence 只负责用 `path` 和 `links` 快速创建并关联 evidence artifact；它不会复制文件。批量写入后按 compact 输出里的 `verify_commands` 做 changed-scope 验证。来自临时 git worktree 的普通输出先按下一节 ingest，再在 structured closeout 中用 `artifact_record.existing_record_id` 关联；只有显式 promotion 后才使用 graph `artifact_id`。
-
+兼容命令仍保留，但不是默认链路：没有 run record 的单实验可用 `complete-experiment`；真正的多实验批处理可用 `complete-experiments`；closeout 之外的独立 follow-up 可用 `create-followup-experiment`；仅移动 cursor 时才单独使用 `set-cursor`。`close-current-experiment` 只用于 coordinator/legacy global-focus 工作流。
 ### 3. 从 worktree ingest run output
 
-如果实验输出来自临时 git worktree，普通 run output 先复制到 canonical data root，并记录为轻量 artifact record：
+临时 worktree 的普通 run output 只复制一次到 canonical data root，并默认记录为轻量 artifact record：
 
 ```sh
-research-cockpit ingest-artifact \
-  --root research_cockpit \
-  --node experiment_x \
-  --from ../worktrees/agent_x/.agent_runs/run_x \
-  --run-id run_x \
-  --agent agent_x \
-  --link metrics=metrics.json \
-  --dry-run --json --show-diff
-research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from ../worktrees/agent_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --json --compact --no-build
-research-cockpit artifact-records --root research_cockpit --experiment experiment_x --json --compact
+research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from ../worktrees/agent_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --json --compact --no-build
 # 只有 durable graph evidence 才 promotion：
 research-cockpit promote-artifact-record --root research_cockpit --id artifact_experiment_x_run_x --artifact-id artifact_experiment_x_run_x_promoted --link-to experiment_x --promotion-reason "用于 decision 或 baseline 的长期证据" --json --compact
-# 按 compact 输出里的 verify_commands 做 changed-scope 验证；final handoff 前再跑全量 gate。
 ```
 
-`ingest-artifact` 对 experiment 默认复制到 `research_cockpit/artifacts/<node_id>/<run_id>/` 并创建轻量 artifact record，不创建 `graph/nodes/artifact_*.yaml`；`--record-only` 仅作为显式兼容写法保留。立即创建 graph node 必须使用 `--promote --promotion-reason "..."`，已有 record 的提升使用 `promote-artifact-record --promotion-reason "..."`。worker 最后一次写入后只运行 compact 输出里的 changed-scope `verify_commands`；全量 `validate`、`build` 和 `smoke` 留给 coordinator/final handoff。
-`smoke` 默认使用 compact 检查路径，避免在大图仓库里生成完整 `bootstrap`、`suggest-next-actions` 和 `node-context` JSON。大 root 下建议加 `--progress` 把阶段进度输出到 stderr；需要旧的完整子命令工作流时使用 `research-cockpit smoke --root research_cockpit --json --progress --full`。
+`ingest-artifact` 会复制 payload、写 `_research_cockpit_ingest.json`、创建 artifact record，并关联 experiment；它不创建 `graph/nodes/artifact_*.yaml`。成功的非 dry-run ingest 已内部验证，不需要 changed-scope validate/context。仅在 source path、link 或 promotion 输入需要预览时使用 `--dry-run`。已有 record 的提升必须提供 `--promotion-reason`。
+
+`smoke` 默认使用 compact 检查路径，避免在大图仓库里生成完整 `bootstrap`、`suggest-next-actions` 和 `node-context` JSON。大 root 下使用 `--progress` 把阶段进度输出到 stderr；仅在诊断旧完整子进程流程时加 `--full`。
 
 ### 4. 跟踪长任务 run / gate
 
-长实验先记录具体 run，再用 `progress.json` 和 `gate_result.json` 给 agent 一个统一的状态入口。run 只表示一次执行；实验结论仍然用 finding / artifact 记录：
+长实验仍使用同一三步主流程；只有状态或 progress metadata 变化时才增加 `update-run`，不要为了轮询重复写入：
 
 ```sh
-research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher tmux --command "python train.py" --progress-file artifacts/experiment_x/run_x/progress.json --assignment <assignment_id> --no-build
-research-cockpit run-context --root research_cockpit --id run_x --compact --json
-research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link gate_result=gate_result.json --json --compact --no-build
-research-cockpit complete-run --print-schema
-# closeout.yaml 使用 artifact_record.existing_record_id 引用上一步 record_id，并可同时声明 gates、finding、next_actions。
-research-cockpit complete-run --root research_cockpit --file closeout.yaml --assignment <assignment_id> --json --compact --no-build
+research-cockpit create-run --root research_cockpit --assignment <assignment_id> --id run_x --experiment experiment_x --status running --start-experiment --launcher tmux --command "python train.py" --progress-file artifacts/experiment_x/run_x/progress.json --json --compact --no-build
+research-cockpit update-run --root research_cockpit --assignment <assignment_id> --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
+research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link gate_result=gate_result.json --json --compact --no-build
+research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
 ```
 
-`complete-run --file` 会在一个事务中更新 terminal run、gate metadata、finding、artifact-record link 和 next actions；任一 preflight 失败都不写 truth source。`gate_result.json` 必须已存在并符合 schema。仅更新 run 状态时才使用 `complete-run --id`。launcher 输出约定和模板见 `docs/launcher-output-conventions.md` 与 `templates/launcher/`。
-
+`complete-run --file` 负责 terminal run、gate metadata、finding、artifact-record link、experiment 终态、一个可选 follow-up 和 assignment cursor。阻塞性 preflight 必须在昂贵任务前独立记录；其他 gate 可直接放入 closeout。仅状态恢复才使用 `complete-run --id`，仅确需读取运行状态时才调用 `run-context`。
 ### 5. 显式创建或关联 artifact
 
 ```sh
@@ -305,16 +286,17 @@ research-cockpit set-baseline --root research_cockpit --node problem_x --clear -
 research-cockpit agent-session-context --root research_cockpit --assignment <assignment_id> --compact --json
 ```
 
-已知节点 id 时，优先用一个命令完成 handoff：
+已知节点 id 时，优先用一个命令读取 bounded execution context。首次响应会返回 `revision`；重复轮询传入 `--since`，无变化时只返回最小 revision 响应：
 
 ```sh
-research-cockpit context --root research_cockpit --id <node_id> --with-bootstrap --with-artifacts --compact --json
+research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json
+research-cockpit context --root research_cockpit --id <node_id> --view execution --since <revision> --compact --json
 ```
 
 不知道节点 id、需要全局 triage 时：
 
 ```sh
-research-cockpit bootstrap --root research_cockpit --json
+research-cockpit bootstrap --root research_cockpit --coordinator --json
 ```
 
 需要完整方案子树、实验摘要和证据计数时：
@@ -402,7 +384,8 @@ SKILL.md
 - `docs/plans/2026-05-28-dashboard-build-performance.md`: 大图 dashboard build/profile 优化结果和后续增量构建计划。
 - `capabilities/ui-dashboard.md`: Streamlit UI、React Flow 图谱和刷新行为。
 - `capabilities/graph-state.md`: 图谱状态、saved views 和 interaction log。
-- `capabilities/experiment-tracking.md`: experiment、finding、artifact 和 workstream 流程。
+- `capabilities/experiment-cycle.md`: 普通实验的启动、可选 ingest 和事务化 closeout。
+- `capabilities/experiment-tracking.md`: 高级 gate、finding、artifact、retention 和 workstream 流程。
 - `capabilities/node-management.md`: 节点创建、批量图谱计划和 lifecycle cleanup。
 
 ## 并行 Agent 和 Worktree
@@ -414,7 +397,7 @@ SKILL.md
 - Worktree 里做代码改动、运行实验、保存本地输出。
 - 用默认 `ingest-artifact --json --compact --no-build` 把普通 `.agent_runs/<run_id>/` 复制到 canonical store 并写入 artifact record；只有 durable evidence 需要图节点时才使用带 `--promotion-reason` 的 promotion。
 - 不在 worktree 里 `research-cockpit init`，也不把 worktree-local path 当作长期 `--evidence-path`。
-- 下游 agent 用 `set-cursor --assignment <assignment_id>` 更新 assignment-local 进展；全局 `set-focus`、`validate`、`build` 由 coordinator 串行处理。`set-agent-focus` 只保留给旧 per-agent focus 兼容场景。
+- Structured `complete-run --file` closeout 会自动推进 assignment cursor；只有独立的 cursor-only 变更才使用 `set-cursor --assignment <assignment_id>`。全局 `set-focus` 和 lifecycle cleanup 由 coordinator 处理，`set-agent-focus` 只保留旧兼容场景。
 
 删除 worktree 前检查：
 
@@ -422,7 +405,7 @@ SKILL.md
 2. 普通 output 的 `record_id` 已通过 `complete-run --file` 中的 `artifact_record.existing_record_id` 关联到 finding；需要 durable graph evidence 时已显式 promotion 并记录 reason。
 3. 有用代码已 merge/cherry-pick 或保存 patch。
 4. 需要继承的正向结果已记录 decision 或 `set-baseline`。
-5. canonical root 已通过 `validate`、`build` 和 `smoke`。
+5. closeout 的 compact 结果已内部验证，或已按要求完成 changed-scope 检查；只有同时发生 coordinator merge、release 或 research-stage milestone handoff 时才运行 full validate/build/smoke。
 
 更多细节见 `capabilities/experiment-tracking.md`、`capabilities/integrations.md` 和 ADR-0002。
 

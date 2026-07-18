@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import difflib
+from datetime import date, datetime
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -85,7 +87,31 @@ def safe_print(text: object = "", *, end: str = "\n") -> None:
         _write_stdout_utf8(payload)
 
 
+def json_safe(value: Any) -> Any:
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_safe(item) for item in value]
+    return value
+
+
+def stable_payload_revision(payload: Any, *, prefix: str) -> str:
+    canonical = json.dumps(
+        json_safe(payload),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return f"{prefix}:{hashlib.sha256(canonical).hexdigest()}"
+
+
 def emit_json(payload: Any, *, compact: bool = False) -> None:
+    payload = json_safe(payload)
     if compact:
         text = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     else:
@@ -163,7 +189,7 @@ def _verify_commands(
         validate_flags = " ".join(flag for flag in [node_flags, record_flags] if flag)
         commands = [f"research-cockpit validate --root {root} {validate_flags} --json"]
         commands.extend(
-            f"research-cockpit context --root {root} --id {node_id} --with-bootstrap --with-artifacts --compact --json"
+            f"research-cockpit context --root {root} --id {node_id} --view execution --compact --json"
             for node_id in changed_nodes
         )
         return commands
@@ -194,6 +220,20 @@ def compact_mutation_result(
     changed_records = _unique_nonempty(records if records is not None else result.get("changed_records", []))
     post_apply_verify_commands = _verify_commands(root, changed_file_list, changed_nodes, changed_records)
     is_dry_run = bool(result.get("dry_run"))
+    verified = bool(result.get("verified")) and not is_dry_run
+    additional_verification_required = bool(
+        result.get(
+            "additional_verification_required",
+            result.get("changed") or result.get("would_change"),
+        )
+    )
+    if verified and not additional_verification_required:
+        post_apply_verify_commands = []
+    changed_scope = {
+        "nodes": changed_nodes,
+        "files": _unique_nonempty([_command_relative_path(root, path) for path in changed_file_list]),
+        "records": changed_records,
+    }
     payload: dict[str, Any] = {
         "ok": True,
         "command": f"research-cockpit {command}",
@@ -204,14 +244,15 @@ def compact_mutation_result(
         "created": created_ids,
         "updated": updated_ids,
         "changed_files_count": len(changed_file_list),
-        "changed_scope": {
-            "nodes": changed_nodes,
-            "files": _unique_nonempty([_command_relative_path(root, path) for path in changed_file_list]),
-            "records": changed_records,
-        },
+        "changed_scope": changed_scope,
+        "verified": verified,
+        "verification_scope": result.get("verification_scope") or changed_scope,
+        "additional_verification_required": additional_verification_required,
+        "verification_stage": "internal_verify" if verified and not additional_verification_required else "worker_verify",
+        "milestone_handoff_required": False,
         "verify_commands": [] if is_dry_run else post_apply_verify_commands,
         "post_apply_verify_commands": post_apply_verify_commands,
-        "final_handoff_commands": _final_handoff_commands(root),
+        "final_handoff_commands": [] if verified and not additional_verification_required else _final_handoff_commands(root),
     }
     if is_dry_run:
         payload["verification_note"] = "Dry-run did not write; run post_apply_verify_commands after applying without --dry-run."
@@ -230,6 +271,9 @@ def compact_mutation_result(
         payload["warnings"] = result["warnings"]
     if "recommended_commands" in result:
         payload["recommended_commands"] = result["recommended_commands"]
+    for field_name in ("started_experiment", "experiment_status", "next_experiment_id"):
+        if result.get(field_name) is not None:
+            payload[field_name] = result[field_name]
     return payload
 
 

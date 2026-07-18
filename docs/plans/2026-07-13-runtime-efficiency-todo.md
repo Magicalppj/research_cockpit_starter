@@ -6,7 +6,7 @@
 
 ## 状态
 
-Implemented。T0-T11 已完成；本文保留初始证据、任务拆分、验收标准和最终验证记录。
+Implemented。T0-T14 已完成；本文保留初始证据、任务拆分、验收标准和最终验证记录。
 
 ## 初始输入与证据边界
 
@@ -497,6 +497,42 @@ git diff --check
 **可能涉及：** `AGENTS.md`、`SKILL.md`、`README.md`、`capabilities/experiment-tracking.md`、`capabilities/graph-state.md`、`capabilities/troubleshooting.md`、`docs/internal-architecture.md`、release/usability scripts。
 
 **规模：** M。
+
+### 2026-07-18 增量优化
+
+#### [x] T12 发布 bounded execution context 与 revision polling
+
+**目的：** 已知节点的普通执行不再读取宽 context 或重复传输未变化 payload。
+
+**验收结果：**
+
+- `context --view execution --compact --json` 只返回 assignment boundary、active run、blocking gate、effective baseline 和 required action。
+- `--since <revision>` 在语义未变化时只返回 schema、`changed: false` 和 revision。
+- fresh validation index 下只加载目标、祖先和有界关联实体；index 缺失、损坏或 stale 时保守回退。
+- 5,000-node/4,000-record 本地 fixture 的 warm median 为 0.518 秒；unchanged polling 为 0.498 秒，payload 分别约 880 bytes 和 144 bytes。该数据是本地证据，不是 CI 的硬时限。
+
+#### [x] T13 合并普通实验启动与收尾生命周期
+
+**目的：** 将“启动实验、创建 run”和“关闭 run、写结论、建一个后续实验、移动 assignment cursor”分别压缩为单事务。
+
+**验收结果：**
+
+- `create-run --status running --start-experiment` 在一次 preflight/lock/commit 中创建 run 并将 planned/queued experiment 置为 running。
+- `complete-run --file <closeout.yaml>` 的 `experiment` 与 `next_experiment` blocks 可原子写入 terminal outcome、finding、existing artifact record link、一个 sibling follow-up 和 assignment cursor。
+- preflight、stale dependency 或同目标并发冲突不会留下部分 truth write 或 interaction event。
+- 普通无 payload 流程只需 start 与 closeout 两次 mutation；有持久输出时中间增加一次 record-first `ingest-artifact`。
+- 同一大型本地 fixture 中，warm median 为 create-run 0.773 秒、closeout 0.899 秒；changed validation 为 0.511 秒。
+
+#### [x] T14 内部验证契约与轻量 skill 路由
+
+**目的：** 成功 mutation 不再由下游 agent 机械重复 validate/context/build/smoke，普通实验也不再默认加载高级 capability 文档。
+
+**验收结果：**
+
+- 成功的 non-dry-run `create-run`、record-first `ingest-artifact` 和 structured `complete-run` 返回 `verified: true`、`additional_verification_required: false` 和空 verification command lists。
+- command manifest 暴露 `verification_mode`；内部已验证命令不再建议 worker 重复执行 full handoff gate。
+- `capabilities/experiment-cycle.md` 成为普通实验入口；高级 gate、retention、promotion、workstream 和 legacy recovery 仍路由到 `experiment-tracking.md`。
+- `SKILL.md` 为 8,089 bytes/120 lines，普通实验 capability 为 4,773 bytes/117 lines；release guard 固定路径、大小和事务化流程 contract。
 
 ## Checkpoints
 

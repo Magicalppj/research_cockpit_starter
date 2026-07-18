@@ -36,6 +36,7 @@ SURFACE_DOCS = (
 )
 CAPABILITY_FILES = (
     "decision-adr.md",
+    "experiment-cycle.md",
     "experiment-tracking.md",
     "focus-context.md",
     "graph-state.md",
@@ -192,8 +193,12 @@ def _readability_findings(skill_path: Path) -> list[str]:
             findings.append(f"capabilities/{capability} is missing")
 
     decision_text = (skill_path / "capabilities" / "decision-adr.md").read_text(encoding="utf-8", errors="ignore")
-    if "YAML" in decision_text and ("research-cockpit validate" not in decision_text or "research-cockpit build" not in decision_text):
-        findings.append("decision-adr.md mentions YAML repair without validate/build follow-up")
+    if "YAML" in decision_text and (
+        "research-cockpit validate" not in decision_text
+        or "changed-scope" not in decision_text
+        or "only when generated dashboards are needed" not in decision_text
+    ):
+        findings.append("decision-adr.md YAML repair lacks changed-scope validation or conditional build guidance")
     if any(flag in decision_text for flag in ("--alternatives-considered", "--consequences", "--next-required-actions")):
         findings.append("decision-adr.md uses outdated update_decision_checklist flags")
     if "promote-decision --root research_cockpit --option" in decision_text:
@@ -258,7 +263,6 @@ def agent_a_cold_start_install(skill_path: Path, python: str, parent: Path) -> d
         "assert 'research-cockpit = \"research_cockpit.cli:main\"' in text"
     )
     checks = [_run_command([python, "-c", metadata_check], cwd=research_repo)]
-    command_python = python
     command_env = _package_env(plugin_path)
     install_mode = "metadata_check_with_pythonpath"
     install_ok = checks[-1]["passed"]
@@ -267,29 +271,38 @@ def agent_a_cold_start_install(skill_path: Path, python: str, parent: Path) -> d
     repo_before = _file_manifest(research_repo)
     if install_ok:
         checks.extend([
-            _run_command(_cli(command_python, "init", "--root", "research_cockpit"), cwd=research_repo, env=command_env),
-            _run_command(_cli(command_python, "bootstrap", "--root", "research_cockpit", "--build", "--json"), cwd=research_repo, env=command_env),
-            _run_command(_cli(command_python, "validate", "--root", "research_cockpit", "--json"), cwd=research_repo, env=command_env),
+            _run_command(_cli(python, "init", "--root", "research_cockpit"), cwd=research_repo, env=command_env),
+            _run_command(
+                _cli(python, "bootstrap", "--root", "research_cockpit", "--coordinator", "--json"),
+                cwd=research_repo,
+                env=command_env,
+            ),
         ])
 
-    repo_after = _file_manifest(research_repo)
-    files_changed = _changed_files(repo_before, repo_after)
+    files_changed = _changed_files(repo_before, _file_manifest(research_repo))
     unexpected = _unexpected_writes(files_changed)
     plugin_changed_after_install = _changed_files(plugin_after_install, _file_manifest(plugin_path))
-    bootstrap = checks[-2].get("json") if len(checks) >= 4 and isinstance(checks[-2].get("json"), dict) else {}
-    context_paths = bootstrap.get("context_paths", {}) if isinstance(bootstrap, dict) else {}
+    bootstrap = checks[-1].get("json") if len(checks) >= 3 and isinstance(checks[-1].get("json"), dict) else {}
     observations = {
         "data_root": "research_cockpit",
         "plugin_root": ".agent/skills/research-cockpit",
         "init_command": "research-cockpit init --root research_cockpit",
-        "bootstrap_read_order": ["research-cockpit bootstrap", "agent_context_pack", "focus_context_pack"],
-        "context_paths_exist": all(item.get("exists") for item in context_paths.values()) if context_paths else False,
+        "bootstrap_read_order": ["research-cockpit bootstrap --coordinator"],
+        "bootstrap_without_build": bool(bootstrap) and not any(
+            path.startswith("research_cockpit/dashboards/") for path in files_changed
+        ),
         "plugin_changed_after_install": plugin_changed_after_install,
         "install_mode": install_mode,
     }
     findings = _readability_findings(plugin_path)
-    command_checks = checks
-    passed = install_ok and all(check["passed"] for check in command_checks) and not unexpected and not plugin_changed_after_install and not findings
+    passed = (
+        install_ok
+        and all(check["passed"] for check in checks)
+        and not unexpected
+        and not plugin_changed_after_install
+        and not findings
+        and observations["bootstrap_without_build"]
+    )
     return _case(
         "agent_a_cold_start_install",
         passed,
@@ -307,32 +320,52 @@ def agent_b_read_only_context(skill_path: Path, python: str, parent: Path) -> di
     repo_before = _file_manifest(research_repo)
     env = _package_env(plugin_path)
     checks = [
-        _run_command(_cli(python, "commands", "--json"), cwd=research_repo, env=env),
-        _run_command(_cli(python, "bootstrap", "--root", str(root), "--json"), cwd=research_repo, env=env),
-        _run_command(_cli(python, "search", "--root", str(root), "--query", "demo", "--json"), cwd=research_repo, env=env),
-        _run_command(_cli(python, "suggest-next-actions", "--root", str(root), "--json"), cwd=research_repo, env=env),
+        _run_command(
+            _cli(python, "commands", "--json", "--compact", "--summary-only"),
+            cwd=research_repo,
+            env=env,
+        ),
+        _run_command(
+            _cli(
+                python,
+                "context",
+                "--root",
+                str(root),
+                "--id",
+                DEMO_OPTION_ID,
+                "--view",
+                "execution",
+                "--compact",
+                "--json",
+            ),
+            cwd=research_repo,
+            env=env,
+        ),
     ]
     files_changed = _changed_files(repo_before, _file_manifest(research_repo))
-    agent_context = _read_json(root / "dashboards" / "agent_context_pack.json")
-    focus_context = _read_json(root / "dashboards" / "focus_context_pack.json")
-    suggestions = checks[-1].get("json") if isinstance(checks[-1].get("json"), list) else []
     manifest = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
-    findings = [*_readability_findings(plugin_path), *_manifest_findings(manifest, plugin_path)]
+    context = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
+    findings = _readability_findings(plugin_path)
     observations = {
-        "focus_node": (focus_context.get("focus_node") or {}).get("id"),
-        "suggestion_count": len(suggestions),
-        "saved_graph_views_present": "saved_graph_views" in agent_context and "saved_graph_views" in focus_context,
-        "recent_interactions_present": "recent_interactions" in agent_context and "recent_interactions" in focus_context,
-        "read_capabilities": ["capabilities/focus-context.md", "capabilities/graph-state.md"],
+        "schema_version": context.get("schema_version"),
+        "command_summary_present": bool(manifest.get("commands")),
+        "node_id": (context.get("node") or {}).get("id"),
+        "output_within_budget": checks[1].get("stdout_bytes", 0) <= 4 * 1024,
+        "has_execution_invariants": all(
+            field in context
+            for field in ("assignment_boundary", "active_run", "blocking_gate", "effective_baseline", "revision")
+        ),
+        "read_capabilities": ["capabilities/focus-context.md"],
     }
     passed = (
         all(check["passed"] for check in checks)
         and not files_changed
         and not findings
-        and observations["focus_node"]
-        and observations["suggestion_count"] > 0
-        and observations["saved_graph_views_present"]
-        and observations["recent_interactions_present"]
+        and observations["schema_version"] == "execution_context_v1"
+        and observations["command_summary_present"]
+        and observations["node_id"] == DEMO_OPTION_ID
+        and observations["output_within_budget"]
+        and observations["has_execution_invariants"]
     )
     return _case(
         "agent_b_read_only_context",
@@ -538,6 +571,7 @@ def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict
     root = _copy_demo_state(plugin_path, research_repo)
     run_id = "run_usability_closeout"
     experiment_id = "experiment_demo_prompt_refinement"
+    next_experiment_id = "experiment_demo_prompt_refinement_followup"
     record_id = f"artifact_{experiment_id}_{run_id}"
     source = research_repo / ".agent_runs" / run_id
     source.mkdir(parents=True)
@@ -548,13 +582,21 @@ def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict
         {
             "schema_version": "run_closeout_v1",
             "run": {"id": run_id, "status": "completed"},
+            "experiment": {
+                "status": "done",
+                "result_summary": "The bounded usability gate passed.",
+            },
             "artifact_record": {"existing_record_id": record_id},
             "finding": {
                 "statement": "Usability closeout preserved and linked the run evidence.",
                 "confidence": "strong",
                 "outcome": "positive",
             },
-            "next_actions": {"experiment": ["Review the structured closeout."]},
+            "next_experiment": {
+                "id": next_experiment_id,
+                "title": "Scale the verified prompt refinement",
+                "next_action": "Start the follow-up run.",
+            },
         },
     )
     repo_before = _file_manifest(research_repo)
@@ -572,6 +614,7 @@ def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict
                 experiment_id,
                 "--status",
                 "running",
+                "--start-experiment",
                 "--no-build",
                 "--json",
                 "--compact",
@@ -615,42 +658,13 @@ def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict
             cwd=research_repo,
             env=env,
         ),
-        _run_command(
-            _cli(
-                python,
-                "validate",
-                "--root",
-                str(root),
-                "--changed-node",
-                experiment_id,
-                "--changed-record",
-                f"artifact:{record_id}",
-                "--json",
-            ),
-            cwd=research_repo,
-            env=env,
-        ),
-        _run_command(
-            _cli(
-                python,
-                "context",
-                "--root",
-                str(root),
-                "--id",
-                experiment_id,
-                "--with-bootstrap",
-                "--with-artifacts",
-                "--compact",
-                "--json",
-            ),
-            cwd=research_repo,
-            env=env,
-        ),
     ]
 
+    create_payload = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
     ingest_payload = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
     closeout_payload = checks[2].get("json") if isinstance(checks[2].get("json"), dict) else {}
     experiment = _read_yaml(root / "graph" / "nodes" / f"{experiment_id}.yaml")
+    followup = _read_yaml(root / "graph" / "nodes" / f"{next_experiment_id}.yaml")
     run = _read_yaml(root / "runs" / f"{run_id}.yaml")
     records = _read_yaml(root / "artifact_records" / f"{experiment_id}.yaml").get("records", {})
     findings = experiment.get("findings", []) if isinstance(experiment.get("findings"), list) else []
@@ -668,7 +682,27 @@ def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict
             and latest_finding.get("linked_artifact_records") == [record_id]
             and f"artifact:{record_id}" in closeout_payload.get("changed_scope", {}).get("records", [])
         ),
-        "changed_scope_validation_passed": checks[3].get("json", {}).get("ok") is True,
+        "experiment_advanced_atomically": (
+            experiment.get("status") == "done"
+            and followup.get("status") == "queued"
+            and followup.get("derived_from") == [experiment_id]
+            and closeout_payload.get("next_experiment_id") == next_experiment_id
+        ),
+        "internal_validation_skipped_recheck": (
+            len(checks) == 3
+            and all(
+                payload.get("verified") is True
+                and payload.get("additional_verification_required") is False
+                and payload.get("verification_stage") == "internal_verify"
+                and payload.get("verify_commands") == []
+                and payload.get("post_apply_verify_commands") == []
+                for payload in (create_payload, ingest_payload, closeout_payload)
+            )
+        ),
+        "compact_outputs_bounded": all(
+            int(check.get("stdout_bytes", 0)) <= 4 * 1024
+            for check in checks
+        ),
     }
     findings_doc = _readability_findings(plugin_path)
     passed = (

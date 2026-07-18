@@ -768,10 +768,11 @@ def _indexed_validation_payload_or_reason(
     changed_nodes: list[str],
     normalized_files: list[str],
     changed_records: list[str],
+    validation_index: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     if strict_lifecycle:
         return None, "strict_lifecycle_requires_full_validation"
-    index = load_validation_index(root)
+    index = validation_index if validation_index is not None else load_validation_index(root)
     if isinstance(index, dict) and index.get("load_error"):
         return None, "validation_index_unreadable"
     if not is_index_schema_compatible(index):
@@ -969,6 +970,7 @@ def _incremental_validation_payload(
     changed_nodes: list[str],
     changed_files: list[str],
     changed_records: list[str],
+    validation_index: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     normalized_files = _unique_strings([_normalize_changed_file(root, item) for item in changed_files])
     indexed_payload, index_fallback_reason = _indexed_validation_payload_or_reason(
@@ -977,6 +979,7 @@ def _incremental_validation_payload(
         changed_nodes=changed_nodes,
         normalized_files=normalized_files,
         changed_records=changed_records,
+        validation_index=validation_index,
     )
     if indexed_payload is not None:
         return indexed_payload
@@ -1095,6 +1098,7 @@ def validation_payload(
     changed_nodes: list[str] | None = None,
     changed_files: list[str] | None = None,
     changed_records: list[str] | None = None,
+    validation_index: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     changed_nodes = [str(item) for item in changed_nodes or []]
     changed_files = [str(item) for item in changed_files or []]
@@ -1106,6 +1110,7 @@ def validation_payload(
             changed_nodes=changed_nodes,
             changed_files=changed_files,
             changed_records=changed_records,
+            validation_index=validation_index,
         )
 
     nodes = load_nodes(root)

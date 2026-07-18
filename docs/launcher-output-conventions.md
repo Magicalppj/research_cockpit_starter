@@ -50,7 +50,7 @@ Only `run_id`, `experiment_id`, `status`, and `command` are expected for every l
 Typical run ingestion:
 
 ```sh
-research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --launcher shell --command "python train.py --config config.yaml" --progress-file artifacts/experiment_x/run_x/progress.json --monitor-command "tail -f artifacts/experiment_x/run_x/logs/run.log" --no-build
+research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --start-experiment --launcher shell --command "python train.py --config config.yaml" --progress-file artifacts/experiment_x/run_x/progress.json --monitor-command "tail -f artifacts/experiment_x/run_x/logs/run.log" --no-build
 research-cockpit update-run --root research_cockpit --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
 research-cockpit complete-run --print-schema
 research-cockpit complete-run --root research_cockpit --file closeout.yaml --assignment <assignment_id> --json --compact --no-build
@@ -167,6 +167,6 @@ Shell, Python, and manual launch flows should follow the same sequence:
 3. Update `progress.json` during long-running work.
 4. Write `gate_result.json` for each gate that should drive the next action.
 5. Write `artifact_manifest.json` before handoff so an agent can preserve only useful outputs.
-6. Ingest the artifact bundle once, then use one `complete-run --file <closeout.yaml>` transaction to close the run, reference the returned `artifact_record.existing_record_id`, attach gate payloads, record the finding, and update next actions. Use separate mutation commands only for recovery or a deliberately partial update.
+6. Ingest the artifact bundle once, then use one `complete-run --file <closeout.yaml>` transaction to close the run, reference `artifact_record.existing_record_id`, attach gates, record the finding, finish the experiment, and optionally create one follow-up. With an assignment, the follow-up becomes its cursor. An internally verified result needs no repeated validate/context.
 
 Do not store machine-local absolute paths in canonical Research Cockpit records. Keep those details in local launcher logs unless they are needed as short human hints in `run_record.txt`.

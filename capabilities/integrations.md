@@ -68,7 +68,7 @@ Installed CLI:
 ```sh
 research-cockpit init --root research_cockpit
 research-cockpit init --root research_cockpit --build --json
-research-cockpit bootstrap --root research_cockpit --json
+research-cockpit bootstrap --root research_cockpit --coordinator --json
 research-cockpit validate --root research_cockpit
 research-cockpit build --root research_cockpit
 research-cockpit ui --root research_cockpit
@@ -81,7 +81,7 @@ Use `init --build --json` for a new data root when the next step needs generated
 If the console script is not on `PATH`, use the same installed Python interpreter as a deterministic fallback:
 
 ```sh
-python -m research_cockpit.cli bootstrap --root /absolute/path/to/research_cockpit --json
+python -m research_cockpit.cli bootstrap --root /absolute/path/to/research_cockpit --coordinator --json
 ```
 
 When running from a constrained agent shell, prefer an explicit absolute `--root`. Relative roots depend on the shell's current directory and can fail if directory switching is restricted.

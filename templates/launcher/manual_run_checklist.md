@@ -31,12 +31,11 @@ Use this checklist when a run is started by hand and no script owns the lifecycl
 ## Research Cockpit Update
 
 ```sh
-research-cockpit create-run --root research_cockpit --id <run_id> --experiment <experiment_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build
-research-cockpit ingest-artifact --root research_cockpit --node <experiment_id> --from <launcher_output_dir> --run-id <run_id> --agent <agent_id> --link gate_result=gate_result.json --no-build --json --compact
-research-cockpit complete-run --print-schema
+research-cockpit create-run --root research_cockpit --assignment <assignment_id> --id <run_id> --experiment <experiment_id> --status running --start-experiment --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build
+research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node <experiment_id> --from <launcher_output_dir> --run-id <run_id> --agent <agent_id> --link gate_result=gate_result.json --no-build --json --compact
 research-cockpit complete-run --root research_cockpit --file <closeout.yaml> --assignment <assignment_id> --no-build --json --compact
 ```
 
-Use `complete-run --file` for the closeout. Keep the `record_id` returned by `ingest-artifact` and set it as `artifact_record.existing_record_id` in `closeout.yaml`. Put terminal run status, gate payloads, the finding, and next actions in the same transaction. Run only the returned changed-scope `verify_commands` as a worker.
+Use `complete-run --file` for closeout. Set `artifact_record.existing_record_id` when ingest created a record, and include terminal run status, gates, finding, experiment terminal state, and at most one `next_experiment`. If compact output is internally verified with no additional verification required, do not repeat validate/context.
 
-Do not pass the artifact record id to `ingest-gate-result --artifact`; that flag accepts only an explicitly promoted graph artifact id. Use separate gate/finding/status commands only for recovery or a deliberately partial update. Full `validate`, `build`, and root `smoke` belong to coordinator merge, release, or final handoff.
+Do not pass the artifact record id to `ingest-gate-result --artifact`; that flag accepts only an explicitly promoted graph artifact id. Use separate gate/finding/status commands only for recovery or a deliberately partial update. Full `validate`, `build`, and root `smoke` belong to coordinator merge, release, or research-stage milestone handoff.

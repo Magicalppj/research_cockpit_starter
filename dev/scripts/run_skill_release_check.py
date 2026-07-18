@@ -29,6 +29,7 @@ REQUIRED_PACKAGE_PATHS = (
     "pyproject.toml",
     "requirements.txt",
     "src/research_cockpit/model.py",
+    "src/research_cockpit/execution_context.py",
     "src/research_cockpit/paths.py",
     "src/research_cockpit/command_registry.py",
     "src/research_cockpit/ui/app.py",
@@ -45,6 +46,7 @@ REQUIRED_PACKAGE_PATHS = (
     "capabilities/focus-context.md",
     "capabilities/maintenance.md",
     "capabilities/node-management.md",
+    "capabilities/experiment-cycle.md",
     "capabilities/experiment-tracking.md",
     "capabilities/decision-adr.md",
     "capabilities/ui-dashboard.md",
@@ -289,6 +291,76 @@ def public_scan_track(skill_path: Path) -> dict[str, Any]:
     )
 
 
+def instruction_surface_track(skill_path: Path) -> dict[str, Any]:
+    skill_file = skill_path / "SKILL.md"
+    if not skill_file.is_file():
+        return _track(
+            "instruction_surface",
+            False,
+            summary={"missing": "SKILL.md"},
+        )
+
+    text = skill_file.read_text(encoding="utf-8", errors="replace")
+    required_routes = (
+        "graph-state.md",
+        "focus-context.md",
+        "node-management.md",
+        "experiment-cycle.md",
+        "experiment-tracking.md",
+        "decision-adr.md",
+        "ui-dashboard.md",
+        "integrations.md",
+        "maintenance.md",
+        "troubleshooting.md",
+    )
+    required_terms = (
+        "--view execution",
+        "--since <revision>",
+        "--start-experiment",
+        "internal_verify",
+        "worker_verify",
+        "run_closeout",
+        "existing_record_id",
+        "next_experiment",
+        "milestone_handoff",
+        "assignments/*.yaml",
+        "sequential",
+    )
+    line_count = len(text.splitlines())
+    byte_count = len(text.encode("utf-8"))
+    command_mentions = text.count("research-cockpit ")
+    missing_routes = [item for item in required_routes if item not in text]
+    missing_terms = [item for item in required_terms if item not in text]
+    incomplete_lines = [
+        {"line": index, "text": line}
+        for index, line in enumerate(text.splitlines(), start=1)
+        if line.strip() in {"-", "Use", "3. Read compact mutation fields"}
+    ]
+    passed = (
+        line_count <= 120
+        and byte_count <= 16 * 1024
+        and command_mentions <= 15
+        and not missing_routes
+        and not missing_terms
+        and not incomplete_lines
+    )
+    return _track(
+        "instruction_surface",
+        passed,
+        summary={
+            "line_count": line_count,
+            "line_budget": 120,
+            "byte_count": byte_count,
+            "byte_budget": 16 * 1024,
+            "command_mentions": command_mentions,
+            "command_mention_budget": 15,
+            "missing_routes": missing_routes,
+            "missing_terms": missing_terms,
+            "incomplete_lines": incomplete_lines,
+        },
+    )
+
+
 def _copy_skill_package(source: Path, destination: Path) -> None:
     ignore = shutil.ignore_patterns(
         "__pycache__",
@@ -347,16 +419,11 @@ def read_only_startup_track(skill_path: Path, python: str) -> dict[str, Any]:
         return _track("read_only_startup", False, checks=[dependency], summary=dependency["summary"], stdout=dependency["stdout"])
 
     root = _data_root(skill_path)
-    option_id = _current_option_id(skill_path)
+    node_id = _current_option_id(skill_path) or "option_demo_prompt_refinement"
     commands = [
-        _cli(python, "bootstrap", "--root", root, "--json"),
-        _cli(python, "smoke", "--root", root, "--json"),
-        _cli(python, "commands", "--json"),
-        _cli(python, "search", "--root", root, "--query", "demo", "--json", "--limit", "5"),
-        _cli(python, "suggest-next-actions", "--root", root, "--json"),
+        _cli(python, "context", "--root", root, "--id", node_id, "--view", "execution", "--compact", "--json"),
+        _cli(python, "commands", "--json", "--compact", "--summary-only"),
     ]
-    if option_id:
-        commands.append(_cli(python, "option-workstream-context", "--root", root, "--option", option_id, "--json"))
     env = _package_env(skill_path)
     checks = [_run_command(command, cwd=skill_path, env=env) for command in commands]
     return _track(
@@ -400,8 +467,8 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
                 root,
                 "--id",
                 node_id,
-                "--with-bootstrap",
-                "--with-artifacts",
+                "--view",
+                "execution",
                 "--compact",
                 "--json",
             ),
@@ -434,6 +501,7 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
         skill_path / "AGENTS.md",
         skill_path / "SKILL.md",
         skill_path / "README.md",
+        skill_path / "capabilities" / "experiment-cycle.md",
         skill_path / "capabilities" / "experiment-tracking.md",
     ]
     public_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in public_paths)
@@ -441,6 +509,8 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
         "complete-run --root" in public_text
         and "--file closeout.yaml" in public_text
         and "existing_record_id" in public_text
+        and "next_experiment" in public_text
+        and "--start-experiment" in public_text
     )
     promotion_examples_missing_reason: list[str] = []
     for path in public_paths:
@@ -456,16 +526,27 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
         if "by default" in str(ingest_row.get("purpose") or "").lower()
         else None
     )
+    ingest_verification_mode = ingest_row.get("verification_mode")
+    ingest_worker_verify_commands = (
+        ingest_row.get("batch_policy", {}).get("worker_verify_commands", [])
+        if isinstance(ingest_row.get("batch_policy"), dict)
+        else []
+    )
     schema_text = checks[3].get("stdout", "")
-    schema_ok = "run_closeout_v1" in schema_text and "existing_record_id" in schema_text
-    budgets_ok = context_stdout_bytes <= 64 * 1024 and command_stdout_bytes <= 20 * 1024
+    schema_ok = all(
+        token in schema_text
+        for token in ("run_closeout_v1", "existing_record_id", "experiment:", "next_experiment:")
+    )
+    budgets_ok = context_stdout_bytes <= 4 * 1024 and command_stdout_bytes <= 20 * 1024
     passed = (
         all(check["passed"] for check in checks)
         and not missing_flags
         and not promotion_examples_missing_reason
         and structured_closeout_documented
-        and context_schema_version == "context_compact_v2"
+        and context_schema_version == "execution_context_v1"
         and artifact_default_mode == "record"
+        and ingest_verification_mode == "internal_non_dry_run"
+        and ingest_worker_verify_commands == []
         and schema_ok
         and budgets_ok
     )
@@ -476,10 +557,12 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
         summary={
             "context_schema_version": context_schema_version,
             "context_stdout_bytes": context_stdout_bytes,
-            "context_stdout_budget": 64 * 1024,
+            "context_stdout_budget": 4 * 1024,
             "command_summary_stdout_bytes": command_stdout_bytes,
             "command_summary_stdout_budget": 20 * 1024,
             "artifact_default_mode": artifact_default_mode,
+            "ingest_verification_mode": ingest_verification_mode,
+            "ingest_worker_verify_commands": ingest_worker_verify_commands,
             "missing_flags": missing_flags,
             "structured_closeout_documented": structured_closeout_documented,
             "closeout_schema_ok": schema_ok,
@@ -606,6 +689,7 @@ def release_check_payload(
         shape = package_shape_track(skill_path)
         tracks.append(shape)
         tracks.append(public_scan_track(skill_path))
+        tracks.append(instruction_surface_track(skill_path))
         if not shape["passed"]:
             reason = "package_shape failed"
             tracks.append(_skipped_track("read_only_startup", reason))

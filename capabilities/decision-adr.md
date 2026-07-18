@@ -21,7 +21,7 @@ Use `--dry-run --json --show-diff` before evidence/checklist repair when you nee
 
 ## Repair Hints
 
-The UI maps blocking checklist failures to CLI or YAML-field hints. Structural failures such as invalid parents should be repaired in YAML only after validating the intended graph relationship. After any structural YAML repair, run `research-cockpit validate` and `research-cockpit build`.
+The UI maps blocking checklist failures to CLI or YAML-field hints. Structural failures such as invalid parents should be repaired in YAML only after validating the intended graph relationship. After a structural YAML repair, run changed-scope `research-cockpit validate`; run `build` only when generated dashboards are needed or at milestone handoff.
 
 ## Promotion
 
@@ -32,7 +32,7 @@ research-cockpit promote-decision --root research_cockpit --id decision_x --opti
 research-cockpit promote-decision --root research_cockpit --id decision_x --option option_x --title "..." --summary "..."
 ```
 
-Decision acceptance writes compact events to `interaction_log.yaml`.
+Decision acceptance writes a compact event through the active interaction backend; migrated roots keep `interaction_log.yaml` as an immutable legacy prefix.
 
 Accepted decisions are historical adoption records. They do not automatically become the default context for every downstream agent. After acceptance, set the default baseline on the relevant problem, option, experiment, or stage when future work should inherit it:
 

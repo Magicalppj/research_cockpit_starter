@@ -14,8 +14,10 @@ sys.path.insert(0, str(DEV_SCRIPTS))
 
 from run_skill_release_check import (
     _run_command,
+    instruction_surface_track,
     package_shape_track,
     public_scan_track,
+    read_only_startup_track,
     release_check_payload,
     runtime_dependency_track,
     workflow_contract_track,
@@ -45,11 +47,45 @@ class SkillReleaseCheckTests(unittest.TestCase):
         track = workflow_contract_track(SKILL_ROOT, sys.executable)
 
         self.assertTrue(track["passed"], track)
-        self.assertEqual(track["summary"]["context_schema_version"], "context_compact_v2")
-        self.assertLessEqual(track["summary"]["context_stdout_bytes"], 64 * 1024)
+        self.assertEqual(track["summary"]["context_schema_version"], "execution_context_v1")
+        self.assertLessEqual(track["summary"]["context_stdout_bytes"], 4 * 1024)
         self.assertLessEqual(track["summary"]["command_summary_stdout_bytes"], 20 * 1024)
         self.assertEqual(track["summary"]["artifact_default_mode"], "record")
+        self.assertEqual(track["summary"]["ingest_verification_mode"], "internal_non_dry_run")
+        self.assertEqual(track["summary"]["ingest_worker_verify_commands"], [])
         self.assertTrue(track["summary"]["structured_closeout_documented"])
+
+    def test_instruction_surface_track_enforces_router_budget(self) -> None:
+        track = instruction_surface_track(SKILL_ROOT)
+
+        self.assertTrue(track["passed"], track)
+        self.assertLessEqual(track["summary"]["line_count"], 120)
+        self.assertLessEqual(track["summary"]["byte_count"], 16 * 1024)
+        self.assertLessEqual(track["summary"]["command_mentions"], 15)
+        self.assertEqual(track["summary"]["incomplete_lines"], [])
+
+    def test_instruction_surface_track_rejects_truncated_instruction_lines(self) -> None:
+        package = self.tmp_root / "truncated-skill"
+        package.mkdir()
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        skill = skill.replace(
+            "- Generated `dashboards/*` files are rebuilt, never hand-authored.",
+            "-",
+        )
+        (package / "SKILL.md").write_text(skill, encoding="utf-8")
+
+        track = instruction_surface_track(package)
+
+        self.assertFalse(track["passed"], track)
+        self.assertTrue(track["summary"]["incomplete_lines"])
+    def test_read_only_startup_uses_only_bounded_discovery(self) -> None:
+        track = read_only_startup_track(SKILL_ROOT, sys.executable)
+
+        self.assertTrue(track["passed"], track)
+        self.assertEqual(track["summary"]["command_count"], 2)
+        commands = [" ".join(check["command"]) for check in track["checks"]]
+        self.assertTrue(any("--view execution" in command for command in commands), commands)
+        self.assertTrue(any("--summary-only" in command for command in commands), commands)
 
     def test_public_scan_reports_private_path_like_content(self) -> None:
         package = self.tmp_root / "research-cockpit"

@@ -186,7 +186,7 @@ def main() -> None:
                 command="complete-run",
                 target=result["run_id"],
                 root=args.root,
-                created=result.get("gate_ids", []),
+                created=[*result.get("gate_ids", []), *([result["next_experiment_id"]] if result.get("next_experiment_id") else [])],
                 updated=[result["run_id"], *([result["experiment_id"]] if result.get("experiment_id") else [])],
                 records=[f"artifact:{result['record_id']}"] if result.get("record_id") else [],
             )
