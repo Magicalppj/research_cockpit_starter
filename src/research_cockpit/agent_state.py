@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -73,6 +74,31 @@ class AssignmentRecord:
             updated_at=None if data.get("updated_at") is None else str(data.get("updated_at")),
             raw=data,
         )
+
+    def to_dict(self, **updates: Any) -> dict[str, Any]:
+        data = deepcopy(self.raw)
+        data.update(
+            {
+                "assignment_id": self.assignment_id,
+                "agent_id": self.agent_id,
+                "status": self.status,
+                "root_node": self.root_node,
+                "current_node": self.current_node,
+                "allowed_subtree": deepcopy(self.allowed_subtree),
+            }
+        )
+        optional_fields = {
+            "objective": self.objective,
+            "next_actions": list(self.next_actions),
+            "worktree": deepcopy(self.worktree),
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        for key, value in optional_fields.items():
+            if key in data or value not in (None, [], {}):
+                data[key] = value
+        data.update(deepcopy(updates))
+        return data
 
 
 @dataclass

@@ -4922,7 +4922,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         json.loads(progress_mutation.stdout)
         mutation_phases = {event["phase"] for event in events(progress_mutation.stderr)}
         self.assertTrue(
-            {"targeted_preflight", "apply_transaction", "lock_wait", "index_update"}
+            {
+                "targeted_preflight",
+                "apply_transaction",
+                "lock_wait",
+                "lock_hold",
+                "commit",
+                "index_update",
+            }
             <= mutation_phases
         )
         self.assertNotIn(secret_summary, progress_mutation.stderr)

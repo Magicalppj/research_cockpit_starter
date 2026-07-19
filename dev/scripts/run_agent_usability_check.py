@@ -66,6 +66,7 @@ def _case(
     checks: list[dict[str, Any]] | None = None,
     files_changed: list[str] | None = None,
     agent_observations: dict[str, Any] | None = None,
+    documentation_bytes: int | None = None,
     readability_findings: list[str] | None = None,
     unexpected_writes: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -75,7 +76,11 @@ def _case(
         "passed": passed,
         "commands_run": _commands_run(checks),
         "files_changed": files_changed or [],
-        "metrics": workflow_metrics(checks, files_changed=files_changed or []),
+        "metrics": workflow_metrics(
+            checks,
+            files_changed=files_changed or [],
+            documentation_bytes=documentation_bytes,
+        ),
         "agent_observations": agent_observations or {},
         "readability_findings": readability_findings or [],
         "unexpected_writes": unexpected_writes or [],
@@ -719,6 +724,14 @@ def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict
         agent_observations=observations,
         readability_findings=findings_doc,
         unexpected_writes=_unexpected_writes(files_changed),
+        documentation_bytes=sum(
+            (plugin_path / relative).stat().st_size
+            for relative in (
+                "SKILL.md",
+                "capabilities/experiment-cycle.md",
+                "capabilities/experiment-tracking.md",
+            )
+        ),
     )
 
 

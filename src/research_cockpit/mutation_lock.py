@@ -28,6 +28,7 @@ class mutation_lock:
         self.timeout_seconds = timeout_seconds
         self.path = root / "graph" / lock_name
         self.fd: int | None = None
+        self.acquired_at: float | None = None
 
     def _metadata(self) -> dict[str, Any]:
         try:
@@ -42,6 +43,22 @@ class mutation_lock:
             metadata[key.strip()] = value.strip()
         return metadata
 
+    def _release_file(self) -> None:
+        close_error: OSError | None = None
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            except OSError as exc:
+                close_error = exc
+            finally:
+                self.fd = None
+        try:
+            self.path.unlink()
+        except FileNotFoundError:
+            pass
+        if close_error is not None:
+            raise close_error
+
     def __enter__(self) -> "mutation_lock":
         self.path.parent.mkdir(parents=True, exist_ok=True)
         start = time.monotonic()
@@ -50,14 +67,23 @@ class mutation_lock:
         while True:
             try:
                 self.fd = os.open(str(self.path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(self.fd, f"pid: {os.getpid()}\ncreated_at: {time.time()}\n".encode("utf-8"))
-                emit_progress_event(
-                    "lock_wait",
-                    event="phase_end",
-                    duration_ms=(time.monotonic() - start) * 1000,
-                    status="completed",
-                )
-                return self
+                try:
+                    os.write(self.fd, f"pid: {os.getpid()}\ncreated_at: {time.time()}\n".encode("utf-8"))
+                    emit_progress_event(
+                        "lock_wait",
+                        event="phase_end",
+                        duration_ms=(time.monotonic() - start) * 1000,
+                        status="completed",
+                    )
+                    self.acquired_at = time.monotonic()
+                    emit_progress_event("lock_hold", event="phase_start")
+                    return self
+                except BaseException:
+                    try:
+                        self._release_file()
+                    except OSError:
+                        pass
+                    raise
             except FileExistsError as exc:
                 if time.monotonic() >= deadline:
                     metadata = self._metadata()
@@ -78,10 +104,12 @@ class mutation_lock:
                 time.sleep(0.1)
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
-        if self.fd is not None:
-            os.close(self.fd)
-            self.fd = None
-        try:
-            self.path.unlink()
-        except FileNotFoundError:
-            pass
+        self._release_file()
+        if self.acquired_at is not None:
+            emit_progress_event(
+                "lock_hold",
+                event="phase_end",
+                duration_ms=(time.monotonic() - self.acquired_at) * 1000,
+                status="failed" if exc_type is not None else "completed",
+            )
+            self.acquired_at = None

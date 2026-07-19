@@ -311,19 +311,33 @@ def _build_assignment_data(
     today_text: str,
 ) -> dict[str, Any]:
     assignment_data = dict(before_assignment or {})
+    allowed_subtree = (
+        dict(assignment_data["allowed_subtree"])
+        if isinstance(assignment_data.get("allowed_subtree"), dict)
+        else {}
+    )
+    allowed_subtree.update({"root": option_id, "policy": "descendants_only"})
+    worktree = (
+        dict(assignment_data["worktree"])
+        if isinstance(assignment_data.get("worktree"), dict)
+        else {}
+    )
+    worktree.update(
+        {
+            "branch": branch,
+            "label": worktree_label(resolved_worktree),
+            "session_id": session_id,
+        }
+    )
     assignment_data.update({
         "assignment_id": assignment_id,
         "agent_id": agent_id,
         "status": "active",
         "root_node": option_id,
         "current_node": assignment_data.get("current_node") or option_id,
-        "allowed_subtree": {"root": option_id, "policy": "descendants_only"},
+        "allowed_subtree": allowed_subtree,
         "objective": objective,
-        "worktree": {
-            "branch": branch,
-            "label": worktree_label(resolved_worktree),
-            "session_id": session_id,
-        },
+        "worktree": worktree,
         "created_at": assignment_data.get("created_at") or today_text,
         "updated_at": today_text,
     })

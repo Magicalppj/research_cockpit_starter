@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from typing import Any
 
@@ -145,6 +146,7 @@ def _run_command(
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     allowed = allowed_returncodes or {0}
+    started_at = time.perf_counter()
     try:
         command_env = (env or os.environ).copy()
         command_env["PYTHONIOENCODING"] = "utf-8"
@@ -168,6 +170,7 @@ def _run_command(
             "stdout_bytes": 0,
             "stderr_bytes": len(str(exc).encode("utf-8")),
             "json": None,
+            "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
         }
 
     stdout_raw = result.stdout or ""
@@ -187,6 +190,7 @@ def _run_command(
         "stdout_bytes": len(stdout_raw.encode("utf-8")),
         "stderr_bytes": len(stderr_raw.encode("utf-8")),
         "json": _try_json(stdout_raw),
+        "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
     }
 
 def _try_json(text: str | None) -> Any:

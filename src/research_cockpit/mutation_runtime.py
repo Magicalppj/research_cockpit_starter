@@ -510,18 +510,19 @@ def execute_mutation_transaction(
             backups[path] = path.read_bytes() if path.exists() else None
         event_checkpoint = interaction_append_checkpoint(root)
         try:
-            for path, _, after in planned_yaml:
-                _atomic_save_yaml(path, after)
-                written_files.append(str(path))
-            for path, _, after_text in planned_text:
-                save_text(path, after_text)
-                written_files.append(str(path))
-            for source, target, _ in planned_moves:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                source.replace(target)
-                written_files.append(str(target))
-            for interaction in interactions:
-                _append_interaction_log_unlocked(root, prevalidated=True, **interaction)
+            with progress_phase("commit"):
+                for path, _, after in planned_yaml:
+                    _atomic_save_yaml(path, after)
+                    written_files.append(str(path))
+                for path, _, after_text in planned_text:
+                    save_text(path, after_text)
+                    written_files.append(str(path))
+                for source, target, _ in planned_moves:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    source.replace(target)
+                    written_files.append(str(target))
+                for interaction in interactions:
+                    _append_interaction_log_unlocked(root, prevalidated=True, **interaction)
         except Exception as exc:
             rollback_errors = restore_interaction_append_checkpoint(root, event_checkpoint)
             rollback_errors.extend(_restore_files(backups))
