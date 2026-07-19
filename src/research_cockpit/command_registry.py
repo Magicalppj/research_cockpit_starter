@@ -221,3 +221,9 @@ def command_lifecycle_for_command(command_name: str, *, mutating: bool) -> str:
     if mutating:
         return "mutate"
     return "read"
+
+ROLE_COMMAND_MODULES: dict[str, dict[str, str]] = {
+    "work": {
+        "open": "work_open",
+    },
+}

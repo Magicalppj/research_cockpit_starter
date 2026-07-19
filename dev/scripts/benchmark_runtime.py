@@ -18,6 +18,8 @@ SUPPORTED_OPERATIONS = (
     "context_compact",
     "context_execution",
     "context_execution_unchanged",
+    "work_packet",
+    "work_packet_unchanged",
     "node_context_compact",
     "mutation",
     "interaction_append",
@@ -171,12 +173,52 @@ def _current_execution_revision(root: Path, changed_node: str) -> str:
     return revision
 
 
+def _work_packet_command(
+    root: Path,
+    assignment_id: str,
+    *,
+    since_revision: str | None = None,
+) -> list[str]:
+    if not assignment_id:
+        raise ValueError("--assignment is required for work_packet operations")
+    parts = [
+        "open",
+        "--root",
+        str(root),
+        "--assignment",
+        assignment_id,
+        "--json",
+        "--compact",
+    ]
+    if since_revision:
+        parts.extend(["--since", since_revision])
+    return _cli("work", *parts)
+
+
+def _current_work_packet_revision(root: Path, assignment_id: str) -> str:
+    result = subprocess.run(
+        _work_packet_command(root, assignment_id),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"Could not prepare Work Packet revision benchmark: {detail}")
+    payload = json.loads(result.stdout)
+    revision = str(payload.get("revision") or "")
+    if not revision:
+        raise RuntimeError("Work Packet did not return a revision")
+    return revision
+
+
 def _command_for(
     operation: str,
     *,
     root: Path,
     changed_node: str,
     sample_index: int,
+    assignment_id: str = "",
     progress: bool = False,
 ) -> list[str]:
     if operation == "validate_changed":
@@ -200,6 +242,14 @@ def _command_for(
             root,
             changed_node,
             since_revision=_current_execution_revision(root, changed_node),
+        )
+    if operation == "work_packet":
+        return _work_packet_command(root, assignment_id)
+    if operation == "work_packet_unchanged":
+        return _work_packet_command(
+            root,
+            assignment_id,
+            since_revision=_current_work_packet_revision(root, assignment_id),
         )
     if operation == "node_context_compact":
         return _cli("node-context", "--root", root, "--id", changed_node, "--compact", "--json")
@@ -238,6 +288,7 @@ def _run_sample(
     root: Path,
     changed_node: str,
     sample_index: int,
+    assignment_id: str = "",
     progress: bool = False,
 ) -> dict[str, Any]:
     command = _command_for(
@@ -245,6 +296,7 @@ def _run_sample(
         root=root,
         changed_node=changed_node,
         sample_index=sample_index,
+        assignment_id=assignment_id,
         progress=progress,
     )
     if progress:
@@ -315,6 +367,7 @@ def benchmark_runtime(
     cold_runs: int,
     warm_runs: int,
     changed_node: str,
+    assignment_id: str = "",
     progress: bool = False,
 ) -> dict[str, Any]:
     if cold_runs < 1:
@@ -330,11 +383,11 @@ def benchmark_runtime(
     for operation in operations:
         cold_samples = []
         for _ in range(cold_runs):
-            cold_samples.append(_run_sample(operation, root=root, changed_node=changed_node, sample_index=sample_index, progress=progress))
+            cold_samples.append(_run_sample(operation, root=root, changed_node=changed_node, sample_index=sample_index, assignment_id=assignment_id, progress=progress))
             sample_index += 1
         warm_samples = []
         for _ in range(warm_runs):
-            warm_samples.append(_run_sample(operation, root=root, changed_node=changed_node, sample_index=sample_index, progress=progress))
+            warm_samples.append(_run_sample(operation, root=root, changed_node=changed_node, sample_index=sample_index, assignment_id=assignment_id, progress=progress))
             sample_index += 1
         samples = [*cold_samples, *warm_samples]
         results.append({
@@ -364,6 +417,7 @@ def benchmark_runtime(
         "warm_runs": warm_runs,
         "operations": operations,
         "changed_node": changed_node,
+        "assignment_id": assignment_id or None,
         "results": results,
     }
 
@@ -380,6 +434,7 @@ def main() -> None:
         choices=SUPPORTED_OPERATIONS,
     )
     parser.add_argument("--changed-node", default="experiment_perf_0000")
+    parser.add_argument("--assignment", dest="assignment_id")
     parser.add_argument("--progress", action="store_true", help="Pass phase progress through to the measured command stderr.")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -390,6 +445,7 @@ def main() -> None:
             cold_runs=args.cold_runs,
             warm_runs=args.warm_runs,
             changed_node=args.changed_node,
+            assignment_id=args.assignment_id or "",
             progress=args.progress,
         )
     except ValueError as exc:

@@ -24,6 +24,9 @@ Public entrypoints
 Workflow/domain layer
   agent_sessions.py
   assignment_scope.py
+  work_packets.py
+  root_snapshot.py
+  validation_index.py
   node_onboarding.py
   context_packs.py
   search_index.py
@@ -67,6 +70,9 @@ Commands are the public write boundary. A mutating command should validate, prep
 
 - `agent_sessions.py`: assignment-scoped handoff payloads, canonical root boundaries, and worker startup command templates.
 - `assignment_scope.py`: assignment mutation boundaries, out-of-scope write checks, and coordinator override handling.
+- `work_packets.py`: bounded assignment projections, dependency/input readiness, lease state, stable revisions, and unchanged polling.
+- `root_snapshot.py`: targeted graph snapshots. `load_indexed_root_snapshot(...)` is the no-full-fallback entry point for latency-bounded reads.
+- `validation_index.py`: generated graph/sidecar signatures and targeted lookup maps used by incremental validation and read models.
 - `node_onboarding.py`: builds read-only node handoff payloads for `node-context`.
 - `context_packs.py`: builds agent context, focus context, current-state payloads, context metadata, and dashboard Markdown.
 - `search_index.py`: indexes nodes, notes, and linked local resources.
@@ -82,7 +88,7 @@ Domain modules should work with loaded `ResearchNode` objects and plain dictiona
 
 ### Graph And Sidecar State
 
-- `agent_state.py`: `AgentRecord`, `AssignmentRecord`, `CoordinatorState`, and loaders for `agents/*.yaml`, `assignments/*.yaml`, and `coordinator_state.yaml`.
+- `agent_state.py`: `AgentRecord`, additive `AssignmentRecord` truth fields, field-level contract validation, targeted/full assignment loaders, `CoordinatorState`, and sidecar loaders.
 - `graph_core.py`: node/edge loading, focus path derivation, graph traversal, node context serialization, and graph JSON.
 - `resources.py`: extracts link rows from node `links`, `linked_artifacts`, `config_path`, `path`, and `run_id` fields.
 - `graph_views.py`: saved graph view normalization, ID generation, load, and upsert.
@@ -105,6 +111,8 @@ These modules should remain free of command, UI, and dashboard dependencies.
 - Use `graph_core.py` for graph traversal and node context.
 - Use `agent_state.py` for agent, assignment, and coordinator state records/loaders.
 - Use `assignment_scope.py` for assignment-scoped mutation boundaries.
+- Use `work_packets.py` for assignment-facing read projections and revision polling.
+- Use `root_snapshot.py` and `validation_index.py` for bounded indexed graph reads.
 - Use `resources.py` for link/resource rows.
 - Use `context_packs.py` for context payloads.
 - Use `decisions.py`, `option_workstreams.py`, `run_summaries.py`, `progress.py`, `gate_results.py`, `gate_result_records.py`, and `suggestions.py` for domain logic.

@@ -1153,6 +1153,8 @@ Parser mode is part of the contract:
 
 目标：先提供兼容、只读、bounded packet，再修改 assignment writes。
 
+状态：已于 2026-07-19 完成。`work open` 通过独立 role route 暴露，不增加 `work-open` 顶层兼容命令；mutation facade 和默认 skill 切换仍属于后续 phase。
+
 任务：
 
 - 新增 additive assignment contract parsing。
@@ -1166,6 +1168,8 @@ Parser mode is part of the contract:
 - fresh index 下不解析无关 graph files。
 - payload 和 latency 满足预算。
 - malformed dependency/scope/lease 返回结构化 validation errors。
+
+实测证据：在 Windows/Python 3.13、2600 个 graph nodes 的 fresh-index fixture 上，1 cold + 5 warm runs 的完整 Work Packet warm P95 为 `466.866 ms`、stdout 为 `1662 bytes`；pre-projection source-revision unchanged fast path warm P95 为 `383.856 ms`、stdout 为 `170 bytes`。两种读取均无 truth-source 写入，也未进入 full-graph fallback。
 
 ### Phase 2: Role-Based Discovery And Skill Split
 
@@ -1294,12 +1298,12 @@ Parser mode is part of the contract:
   - Verify: schema unit tests、`git diff --check`。
   - Files: 本文、`docs/decisions/*`、schema helpers/tests。
 
-- [ ] T1: 扩展 AssignmentRecord legacy-data parsing and round-trip writing。
+- [x] T1: 扩展 AssignmentRecord legacy-data parsing and round-trip writing。
   - Acceptance: legacy/new assignment 均可加载；未知 truth fields 按策略处理。
   - Verify: model tests。
   - Files: `agent_state.py`、`types.py` 或新 contract module、`tests/test_model.py`。
 
-- [ ] T2: 实现 Work Packet read model 和 revision polling。
+- [x] T2: 实现 Work Packet read model 和 revision polling。
   - Acceptance: bounded payload、dependency/lease/readiness/input revision 完整。
   - Verify: targeted loader tests、large fixture benchmark。
   - Files: `work_packets.py`、context command wrapper、`tests/test_scripts.py`。
