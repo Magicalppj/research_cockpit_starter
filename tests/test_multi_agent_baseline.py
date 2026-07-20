@@ -22,7 +22,11 @@ from multi_agent_baseline import (
 from run_skill_release_check import _run_command
 from research_cockpit.cli_progress import PROGRESS_PREFIX
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
-from workflow_metrics import workflow_metrics
+from workflow_metrics import (
+    command_name,
+    evaluate_workflow_contract,
+    workflow_metrics,
+)
 
 
 class MultiAgentBaselineTests(unittest.TestCase):
@@ -52,7 +56,7 @@ class MultiAgentBaselineTests(unittest.TestCase):
         self.assertIn("reviewer", by_name["option-workstream-context"]["audiences"])
         self.assertIn("reviewer", by_name["check-decision-acceptance"]["audiences"])
 
-    def test_workflow_baselines_cover_all_required_phase_zero_traces(self) -> None:
+    def test_workflow_baselines_cover_current_role_facade_traces(self) -> None:
         self.assertEqual(
             set(WORKFLOW_BASELINES),
             {
@@ -70,7 +74,7 @@ class MultiAgentBaselineTests(unittest.TestCase):
         )
         self.assertEqual(
             WORKFLOW_BASELINES["assigned_worker_final_payload"]["cli_invocations"],
-            4,
+            3,
         )
         self.assertGreater(
             WORKFLOW_BASELINES["assigned_worker_incremental_evidence"][
@@ -78,10 +82,10 @@ class MultiAgentBaselineTests(unittest.TestCase):
             ],
             WORKFLOW_BASELINES["assigned_worker_final_payload"]["cli_invocations"],
         )
-        self.assertIn("known_gap", WORKFLOW_BASELINES["reviewer"])
+        self.assertNotIn("known_gap", WORKFLOW_BASELINES["reviewer"])
         self.assertEqual(
             WORKFLOW_BASELINE_EVIDENCE["measurement_status"],
-            "declared_command_shapes",
+            "current_role_facade_contract",
         )
         self.assertEqual(
             set(WORKFLOW_BASELINE_EVIDENCE["actual_trace_sources"]),
@@ -94,6 +98,99 @@ class MultiAgentBaselineTests(unittest.TestCase):
                 self.assertIn("nested_subprocesses", trace)
                 self.assertIn("measurement_fields", trace)
 
+        self.assertEqual(
+            WORKFLOW_BASELINES["assigned_worker_no_payload"]["commands"],
+            ("work open", "work start", "work close"),
+        )
+        self.assertEqual(
+            WORKFLOW_BASELINES["reviewer"]["commands"],
+            ("review open", "review report"),
+        )
+        self.assertEqual(
+            WORKFLOW_BASELINES["milestone_handoff"]["commands"],
+            ("coord handoff",),
+        )
+
+    def test_command_name_preserves_role_subcommand(self) -> None:
+        self.assertEqual(
+            command_name(["research-cockpit", "work", "open", "--json"]),
+            "work open",
+        )
+        self.assertEqual(
+            command_name(
+                [
+                    sys.executable,
+                    "-m",
+                    "research_cockpit.cli",
+                    "review",
+                    "report",
+                    "--json",
+                ]
+            ),
+            "review report",
+        )
+        self.assertEqual(
+            command_name(
+                [
+                    r"C:\Tools\research-cockpit.exe",
+                    "work",
+                    "open",
+                ]
+            ),
+            "work open",
+        )
+
+    def test_worker_workflow_contract_rejects_discovery_and_read_after_write(self) -> None:
+        checks = [
+            {
+                "command": ["research-cockpit", "work", "open"],
+                "passed": True,
+                "stdout_bytes": 3000,
+                "stderr_bytes": 0,
+                "duration_ms": 10.0,
+                "nested_subprocess_count": 0,
+            },
+            {
+                "command": ["research-cockpit", "work", "start"],
+                "passed": True,
+                "stdout_bytes": 1000,
+                "stderr_bytes": 0,
+                "duration_ms": 10.0,
+                "nested_subprocess_count": 0,
+                "json": {
+                    "verification": {
+                        "status": "internally_verified",
+                        "additional_verification_required": False,
+                    }
+                },
+            },
+            {
+                "command": ["research-cockpit", "context"],
+                "passed": True,
+                "stdout_bytes": 1000,
+                "stderr_bytes": 0,
+                "duration_ms": 10.0,
+                "nested_subprocess_count": 0,
+            },
+            {
+                "command": ["research-cockpit", "commands", "--json"],
+                "passed": True,
+                "stdout_bytes": 1000,
+                "stderr_bytes": 0,
+                "duration_ms": 10.0,
+                "nested_subprocess_count": 0,
+            },
+        ]
+
+        metrics = workflow_metrics(checks)
+        contract = evaluate_workflow_contract(metrics, "assigned_worker")
+
+        self.assertEqual(metrics["read_after_write_count"], 2)
+        self.assertEqual(metrics["broad_discovery_count"], 1)
+        self.assertFalse(contract["ok"])
+        self.assertIn("command_count", contract["violations"])
+        self.assertIn("broad_discovery_count", contract["violations"])
+        self.assertIn("read_after_write_count", contract["violations"])
 
     def test_progress_parser_and_concurrency_summary_keep_stage_boundaries(self) -> None:
         stderr = "\n".join(

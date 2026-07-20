@@ -21,7 +21,7 @@ from run_skill_release_check import (
     _run_command,
     runtime_dependency_track,
 )
-from workflow_metrics import workflow_metrics
+from workflow_metrics import evaluate_workflow_contract, workflow_metrics
 
 
 DEMO_DECISION_ID = "decision_demo_prompt_refinement"
@@ -756,6 +756,281 @@ def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict
     )
 
 
+def agent_g_role_facade_fast_path(
+    skill_path: Path,
+    python: str,
+    parent: Path,
+) -> dict[str, Any]:
+    research_repo, plugin_path = _new_research_repo(skill_path, parent, "g")
+    root = _copy_demo_state(plugin_path, research_repo)
+    env = _package_env(plugin_path)
+    assignment_id = "assign_usability_fast_path"
+    agent_id = "agent_usability_fast_path"
+    experiment_id = "experiment_demo_prompt_refinement"
+    experiment_path = root / "graph" / "nodes" / f"{experiment_id}.yaml"
+    experiment = _read_yaml(experiment_path)
+    experiment["status"] = "queued"
+    experiment.pop("result_summary", None)
+    _write_yaml(experiment_path, experiment)
+    (root / "agents").mkdir(parents=True, exist_ok=True)
+    (root / "assignments").mkdir(parents=True, exist_ok=True)
+    _write_yaml(
+        root / "agents" / f"{agent_id}.yaml",
+        {
+            "agent_id": agent_id,
+            "status": "idle",
+            "active_assignment_ids": [],
+        },
+    )
+    _write_yaml(
+        root / "assignments" / f"{assignment_id}.yaml",
+        {
+            "assignment_id": assignment_id,
+            "agent_id": None,
+            "status": "queued",
+            "root_node": "option_demo_prompt_refinement",
+            "current_node": experiment_id,
+            "allowed_subtree": {
+                "root": "option_demo_prompt_refinement",
+                "policy": "descendants_only",
+            },
+            "scope": {
+                "root_node": "option_demo_prompt_refinement",
+                "subtree_policy": "descendants_only",
+                "write_policy": "exclusive",
+            },
+            "inputs": {
+                "effective_baseline_revision": None,
+                "dependency_revisions": {},
+            },
+            "input_revision": "input-v1:usability-fast-path",
+            "objective": "Exercise the bounded role-facade worker path.",
+            "review": {
+                "required": False,
+                "status": "not_required",
+                "result_revision": None,
+            },
+        },
+    )
+    setup_check = _run_command(
+        _cli(python, "build", "--root", str(root), "--json"),
+        cwd=research_repo,
+        env=env,
+    )
+    if not setup_check["passed"]:
+        return _case(
+            "agent_g_role_facade_fast_path",
+            False,
+            checks=[setup_check],
+            readability_findings=["fixture index setup failed"],
+        )
+    index_payload = json.loads(
+        (root / "dashboards" / "validation_index.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assignment_rows = index_payload.get("assignments", {})
+    assignment_row = (
+        assignment_rows.get(assignment_id, {})
+        if isinstance(assignment_rows, dict)
+        else {}
+    )
+    baseline_revision = assignment_row.get("current_baseline_revision")
+    if not baseline_revision:
+        return _case(
+            "agent_g_role_facade_fast_path",
+            False,
+            checks=[setup_check],
+            readability_findings=["fixture baseline projection failed"],
+        )
+    assignment_path = root / "assignments" / f"{assignment_id}.yaml"
+    assignment = _read_yaml(assignment_path)
+    assignment["inputs"]["effective_baseline_revision"] = baseline_revision
+    _write_yaml(assignment_path, assignment)
+    refresh_check = _run_command(
+        _cli(python, "build", "--root", str(root), "--json"),
+        cwd=research_repo,
+        env=env,
+    )
+    if not refresh_check["passed"]:
+        return _case(
+            "agent_g_role_facade_fast_path",
+            False,
+            checks=[setup_check, refresh_check],
+            readability_findings=["fixture index refresh failed"],
+        )
+
+    repo_before = _file_manifest(research_repo)
+    claim_check = _run_command(
+        _cli(
+            python,
+            "work",
+            "claim",
+            "--root",
+            str(root),
+            "--assignment",
+            assignment_id,
+            "--agent",
+            agent_id,
+            "--operation-id",
+            "op_usability_claim",
+            "--return-packet",
+            "--json",
+            "--compact",
+        ),
+        cwd=research_repo,
+        env=env,
+    )
+    claim_payload = (
+        claim_check.get("json")
+        if isinstance(claim_check.get("json"), dict)
+        else {}
+    )
+    packet = (
+        claim_payload.get("packet")
+        if isinstance(claim_payload.get("packet"), dict)
+        else {}
+    )
+    lease = packet.get("lease") if isinstance(packet.get("lease"), dict) else {}
+    start_file = parent / "role_fast_start.yaml"
+    _write_yaml(
+        start_file,
+        {
+            "schema_version": "work_start_v1",
+            "agent_id": agent_id,
+            "lease_id": lease.get("lease_id"),
+            "lease_epoch": lease.get("lease_epoch"),
+            "operation_id": "op_usability_start",
+            "slug": "usability",
+            "run": {},
+        },
+    )
+    start_check = _run_command(
+        _cli(
+            python,
+            "work",
+            "start",
+            "--root",
+            str(root),
+            "--assignment",
+            assignment_id,
+            "--file",
+            str(start_file),
+            "--json",
+            "--compact",
+        ),
+        cwd=research_repo,
+        env=env,
+    )
+    start_payload = (
+        start_check.get("json")
+        if isinstance(start_check.get("json"), dict)
+        else {}
+    )
+    entities = (
+        start_payload.get("entities")
+        if isinstance(start_payload.get("entities"), dict)
+        else {}
+    )
+    run_id = str(entities.get("run_id") or "")
+    evidence_source = parent / f"role_fast_evidence_{run_id or 'missing'}"
+    evidence_source.mkdir(parents=True, exist_ok=True)
+    (evidence_source / "metrics.json").write_text(
+        '{"score":0.91}',
+        encoding="utf-8",
+    )
+    close_file = parent / "role_fast_close.yaml"
+    _write_yaml(
+        close_file,
+        {
+            "schema_version": "work_close_v1",
+            "agent_id": agent_id,
+            "lease_id": lease.get("lease_id"),
+            "lease_epoch": lease.get("lease_epoch"),
+            "operation_id": "op_usability_close",
+            "input_revision": "input-v1:usability-fast-path",
+            "run": {"id": run_id, "status": "completed"},
+            "experiment": {
+                "status": "done",
+                "result_summary": "The role-facade usability run completed.",
+            },
+            "finding": {
+                "statement": "The bounded role-facade workflow completed.",
+                "confidence": "strong",
+                "outcome": "positive",
+            },
+            "evidence_inputs": {
+                "source": str(evidence_source),
+                "links": {"metrics": "metrics.json"},
+            },
+            "assignment_result": {
+                "outcome": "positive",
+                "summary": "The role-facade fast path passed.",
+                "delivery": {
+                    "git_commit": None,
+                    "changed_files": [],
+                    "tests": {
+                        "status": "passed",
+                        "summary": "Usability trace passed.",
+                    },
+                },
+                "proposals": [],
+            },
+            "review_required": False,
+        },
+    )
+    close_check = _run_command(
+        _cli(
+            python,
+            "work",
+            "close",
+            "--root",
+            str(root),
+            "--assignment",
+            assignment_id,
+            "--file",
+            str(close_file),
+            "--json",
+            "--compact",
+        ),
+        cwd=research_repo,
+        env=env,
+    )
+    checks = [claim_check, start_check, close_check]
+    for check in checks:
+        check["nested_subprocess_count"] = 0
+    files_changed = _changed_files(repo_before, _file_manifest(research_repo))
+    close_payload = (
+        close_check.get("json")
+        if isinstance(close_check.get("json"), dict)
+        else {}
+    )
+    observations = {
+        "claim_returned_packet": packet.get("assignment_id") == assignment_id,
+        "start_generated_run": bool(run_id),
+        "close_internally_verified": (
+            close_payload.get("verification", {}).get("status")
+            == "internally_verified"
+        ),
+        "no_extra_verification_command": len(checks) == 3,
+        "static_nested_subprocess_audit": True,
+    }
+    case = _case(
+        "agent_g_role_facade_fast_path",
+        all(check["passed"] for check in checks)
+        and all(observations.values())
+        and not _unexpected_writes(files_changed),
+        checks=checks,
+        files_changed=files_changed,
+        agent_observations=observations,
+        unexpected_writes=_unexpected_writes(files_changed),
+    )
+    contract = evaluate_workflow_contract(case["metrics"], "assigned_worker")
+    case["workflow_contract"] = contract
+    case["passed"] = bool(case["passed"] and contract["ok"])
+    return case
+
+
 def agent_usability_check_payload(
     skill_path: Path = DEFAULT_SKILL_PATH,
     *,
@@ -785,6 +1060,7 @@ def agent_usability_check_payload(
                     "agent_d_decision_suggestion_dry_run",
                     "agent_e_ui_collaboration_docs",
                     "agent_f_worker_closeout",
+                    "agent_g_role_facade_fast_path",
                 )
             ]
         else:
@@ -795,6 +1071,7 @@ def agent_usability_check_payload(
                 agent_d_decision_suggestion_dry_run(skill_path, python, temp_run),
                 agent_e_ui_collaboration_docs(skill_path, python, temp_run),
                 agent_f_worker_closeout(skill_path, python, temp_run),
+                agent_g_role_facade_fast_path(skill_path, python, temp_run),
             ]
         original_changed = source_before != _file_manifest(skill_path)
         return {

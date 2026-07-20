@@ -241,6 +241,7 @@ class SkillReleaseCheckTests(unittest.TestCase):
                 "agent_d_decision_suggestion_dry_run",
                 "agent_e_ui_collaboration_docs",
                 "agent_f_worker_closeout",
+                "agent_g_role_facade_fast_path",
             ],
         )
         for case in by_case.values():
@@ -253,6 +254,10 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertGreater(by_case["agent_c_safe_option_workstream"]["metrics"]["dry_run_count"], 0)
         self.assertTrue(by_case["agent_f_worker_closeout"]["agent_observations"]["default_ingest_created_record"])
         self.assertTrue(by_case["agent_f_worker_closeout"]["agent_observations"]["structured_closeout_linked_record"])
+        self.assertTrue(
+            by_case["agent_g_role_facade_fast_path"]["workflow_contract"]["ok"],
+            by_case["agent_g_role_facade_fast_path"],
+        )
 
 
 if __name__ == "__main__":

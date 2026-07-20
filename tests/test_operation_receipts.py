@@ -39,6 +39,16 @@ class OperationReceiptTests(unittest.TestCase):
         self.assertEqual(len(ids), 50)
         self.assertTrue(all(re.fullmatch(r"run_assign_x_trial_[a-f0-9]{12}", value) for value in ids))
 
+    def test_runtime_ids_bound_managed_path_components(self) -> None:
+        runtime_id = generate_runtime_id(
+            "experiment-kind-with-a-long-name",
+            scope_hint="assignment-scope-with-a-long-name",
+            slug_hint="descriptive-slug-with-a-long-name",
+        )
+
+        self.assertLessEqual(len(runtime_id), 63)
+        self.assertRegex(runtime_id, r"^[A-Za-z0-9_-]+_[a-f0-9]{12}$")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1303,7 +1303,28 @@ Measured evidence: the full suite passes 776 tests with 4 platform-conditioned s
 - interaction events 和 validation index 无丢失更新。
 - disjoint commits 最终全部成功。
 - same-target conflict 机器可恢复。
-- storage 优化有 before/after profile 和 migration plan。
+- 若实施 storage layout 变更，必须提供 before/after profile 和 migration plan；若证据不足而暂缓，则必须记录当前 profile、阻塞边界和下一次触发条件。
+
+Implementation record (2026-07-20):
+
+- `multi_agent_baseline.py` 的 opt-in benchmark 现在在每轮 mutation 前构建 validation index，并在结束后逐一核对成功 sample 的 interaction event、节点最终状态、index row 和文件签名。8/16-agent disjoint 四轮中的两轮均全部成功；same-target 两轮均严格得到 1 个成功者和其余结构化 conflict，没有丢失 event、重复 event 或 index mismatch。
+- 本机 16-agent disjoint 的 lock-wait P95 为 0.263 ms、lock-hold P95 为 18.273 ms；16-agent same-target 的 lock-wait P95 为 503.151 ms、lock-hold P95 为 14.110 ms。该数据支持继续使用 global short commit lock，不支持当前引入 lock striping；这些数字是本地诊断证据，不是跨机器 SLA。
+- mutation lock 仅在元数据可解析、锁龄超过阈值且 owner process 明确不存在时回收 stale lock。POSIX 使用 `kill(pid, 0)`，Windows 使用进程句柄查询；未知 owner 或损坏元数据不会被猜测删除。timeout receipt 明确返回可用同一 operation 重试的 recovery 信息。锁只保证 bounded progress，不声明 FIFO fairness。
+- `artifact_record_layout_profile_v1` 统计 artifact-record 文件数、记录数、字节、最大文件、活跃 append-only assignments 和 shared writer candidates。分析确认同 experiment 的 artifact-record YAML 是共享写点，但 `work start`/`work close` 仍共同修改 experiment lifecycle truth；只拆 artifact YAML 不会隔离完整 write set，反而增加文件和迁移复杂度，因此本阶段不改变 layout。下一触发条件是先隔离 lifecycle writes，再用 conflict rate 与文件数 before/after 证据重新评估。
+- `workflow_efficiency_contract_v1` 覆盖 assigned worker、unchanged poll、reviewer、coordinator overview 和 milestone handoff 的命令数、failed command、broad discovery、read-after-write、nested subprocess、packet/receipt/total output、token 与 worker warm wall-time budget。真实 vendored-repo worker trace 使用 `work claim --return-packet -> work start -> work close` 三次命令完成 final evidence closeout，无附加 validate/context/build/smoke。
+- role facade AST guard 验证核心模块不导入 `subprocess`；`work claim` 的完整 packet 使用 packet budget，不被错误套用 mutation receipt 的 2 KiB 上限。`work open --since` unchanged receipt 由独立 512-byte contract 约束。
+- 深层临时 research repo 的真实 closeout 暴露了 281-character staging manifest 路径失败。新生成 runtime ID 仅在完整值超过 63 字符时按总预算缩短 context hints，同时保留 48-bit 随机后缀和既有短 ID 形态；旧 ID、旧 artifact 路径和 payload 不改写，因而 legacy data 仍可继续读写。
+- 本阶段唯一 context-free reviewer 在超过 5 分钟、interrupt 和一次同-agent resume 后仍停留在 running，未返回可归因报告，因此关闭且未重开第二个 reviewer。主线程 fallback review 发现并修复：失败命令未使效率合同失败、`work claim` packet 被误计为 2 KiB receipt、无 shared writer 时 profile 仍声称存在 contention、stale recovery 对任意 stat error 误报成功、绝对路径 CLI 未被 metrics 识别，以及 runtime ID 过早截断破坏既有短 ID 形态。
+- 最终验证：全量 `python -m unittest` 通过 792 tests、5 个平台条件 skip，耗时 307.095 秒；assignment lifecycle/closeout/polling/release 定向回归通过 62 tests、3 skips；真实 usability trace、8/16 stress 和 `git diff --check` 均通过。
+
+Reproducible checks:
+
+```sh
+python -m unittest tests.test_workflow_efficiency tests.test_multi_agent_baseline tests.test_concurrency_hardening tests.test_storage_profile tests.test_operation_receipts
+python -m unittest tests.test_release_check.SkillReleaseCheckTests.test_agent_usability_check_exercises_vendored_research_repo
+# Set RESEARCH_COCKPIT_RUN_CONCURRENCY_STRESS=1 in the current shell first.
+python -m unittest tests.test_concurrency_hardening.MultiAgentStressTests
+```
 
 ### Phase 7: One-Version CLI Cutover
 
@@ -1380,12 +1401,12 @@ Measured evidence: the full suite passes 776 tests with 4 platform-conditioned s
   - Verify: release fixture mutation test。
   - Files: handoff domain/command、release scripts、tests。
 
-- [ ] T11: 完成 8/16-agent concurrency stress tests。
+- [x] T11: 完成 8/16-agent concurrency stress tests。
   - Acceptance: no lost writes/events/index patches；disjoint 与 same-target 结果均机器可恢复。
   - Verify: opt-in concurrency benchmark、transaction/index consistency tests。
   - Files: benchmark scripts、concurrency tests、docs。
 
-- [ ] T12: 建立 workflow efficiency guard 和 context-free forward tests。
+- [x] T12: 建立 workflow efficiency guard 和 context-free forward tests。
   - Acceptance: worker/reviewer/coordinator fast path 满足 CLI、nested subprocess、read-after-write、output/token 和 control-plane time budgets；misuse findings documented and fixed。
   - Verify: context-free subagents、usability trace、release check、workflow metrics report。
   - Files: `dev/scripts/run_agent_usability_check.py`、`dev/scripts/workflow_metrics.py`、runtime benchmark、tests、docs。

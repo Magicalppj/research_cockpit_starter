@@ -23,7 +23,12 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 from research_cockpit.cli_progress import PROGRESS_PREFIX, progress_session
+from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.commands.list_agent_commands import agent_command_manifest
+from research_cockpit.interaction_log import (
+    InteractionLogError,
+    iter_interaction_events,
+)
 from research_cockpit.model import ResearchNode, load_yaml
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.mutation_runtime import (
@@ -32,6 +37,11 @@ from research_cockpit.mutation_runtime import (
     validate_mutation_candidate,
 )
 from research_cockpit.storage import find_node_file
+from research_cockpit.validation_index import (
+    is_index_schema_compatible,
+    load_validation_index,
+    signature_matches,
+)
 
 
 SCHEMA_VERSION = "multi_agent_baseline_v1"
@@ -49,9 +59,9 @@ STAGE_FIELDS = (
 WORKFLOW_BASELINES: dict[str, dict[str, Any]] = {
     "assigned_worker_no_payload": {
         "commands": (
-            "agent-session-context",
-            "create-run",
-            "complete-run",
+            "work open",
+            "work start",
+            "work close",
         ),
         "cli_invocations": 3,
         "state_load_lower_bound": 3,
@@ -64,10 +74,25 @@ WORKFLOW_BASELINES: dict[str, dict[str, Any]] = {
     },
     "assigned_worker_final_payload": {
         "commands": (
-            "agent-session-context",
-            "create-run",
+            "work open",
+            "work start",
+            "work close",
+        ),
+        "cli_invocations": 3,
+        "state_load_lower_bound": 3,
+        "nested_subprocesses": 0,
+        "measurement_fields": (
+            "model_visible_bytes",
+            "estimated_tokens",
+            "control_plane_wall_time_ms",
+        ),
+    },
+    "assigned_worker_incremental_evidence": {
+        "commands": (
+            "work open",
+            "work start",
             "ingest-artifact",
-            "complete-run",
+            "work close",
         ),
         "cli_invocations": 4,
         "state_load_lower_bound": 4,
@@ -78,33 +103,14 @@ WORKFLOW_BASELINES: dict[str, dict[str, Any]] = {
             "control_plane_wall_time_ms",
         ),
     },
-    "assigned_worker_incremental_evidence": {
-        "commands": (
-            "agent-session-context",
-            "create-run",
-            "ingest-artifact",
-            "update-run",
-            "complete-run",
-        ),
-        "cli_invocations": 5,
-        "state_load_lower_bound": 5,
-        "nested_subprocesses": 0,
-        "measurement_fields": (
-            "model_visible_bytes",
-            "estimated_tokens",
-            "control_plane_wall_time_ms",
-        ),
-    },
     "unclaimed_worker": {
         "commands": (
-            "bootstrap",
-            "start-agent-session",
-            "agent-session-context",
-            "create-run",
-            "complete-run",
+            "work claim",
+            "work start",
+            "work close",
         ),
-        "cli_invocations": 5,
-        "state_load_lower_bound": 5,
+        "cli_invocations": 3,
+        "state_load_lower_bound": 3,
         "nested_subprocesses": 0,
         "measurement_fields": (
             "model_visible_bytes",
@@ -114,13 +120,12 @@ WORKFLOW_BASELINES: dict[str, dict[str, Any]] = {
     },
     "reviewer": {
         "commands": (
-            "option-workstream-context",
-            "check-decision-acceptance",
+            "review open",
+            "review report",
         ),
         "cli_invocations": 2,
         "state_load_lower_bound": 2,
         "nested_subprocesses": 0,
-        "known_gap": "No structured review-result mutation exists before the role facade.",
         "measurement_fields": (
             "model_visible_bytes",
             "estimated_tokens",
@@ -128,9 +133,9 @@ WORKFLOW_BASELINES: dict[str, dict[str, Any]] = {
         ),
     },
     "milestone_handoff": {
-        "commands": ("validate", "build", "smoke"),
-        "cli_invocations": 3,
-        "state_load_lower_bound": 3,
+        "commands": ("coord handoff",),
+        "cli_invocations": 1,
+        "state_load_lower_bound": 1,
         "nested_subprocesses": 0,
         "measurement_fields": (
             "model_visible_bytes",
@@ -141,7 +146,7 @@ WORKFLOW_BASELINES: dict[str, dict[str, Any]] = {
 }
 
 WORKFLOW_BASELINE_EVIDENCE = {
-    "measurement_status": "declared_command_shapes",
+    "measurement_status": "current_role_facade_contract",
     "state_load_method": "declared_lower_bound",
     "nested_subprocess_method": "static_domain_call_audit",
     "actual_trace_sources": (
@@ -477,6 +482,7 @@ def _run_mutation_sample(
     return {
         "node_id": node_id,
         "returncode": result.returncode,
+        "sample_id": sample_id,
         "success": success,
         "conflict": conflict,
         "valid_outcome": success or conflict,
@@ -494,6 +500,98 @@ def _run_mutation_sample(
         ),
     }
 
+
+
+def _round_consistency(
+    root: Path,
+    samples: list[dict[str, Any]],
+) -> dict[str, Any]:
+    all_sample_ids = {str(sample["sample_id"]) for sample in samples}
+    successful = {
+        str(sample["sample_id"]): str(sample["node_id"])
+        for sample in samples
+        if sample.get("success") is True
+    }
+    event_error: str | None = None
+    observed_events: list[dict[str, Any]] = []
+    try:
+        observed_events = [
+            event
+            for event in iter_interaction_events(root, strict=True)
+            if str(event.get("benchmark_sample_id") or "") in all_sample_ids
+        ]
+    except (InteractionLogError, OSError) as exc:
+        event_error = str(exc)
+    event_counts: dict[str, int] = {}
+    event_node_mismatches: list[str] = []
+    for event in observed_events:
+        sample_id = str(event.get("benchmark_sample_id") or "")
+        event_counts[sample_id] = event_counts.get(sample_id, 0) + 1
+        if sample_id in successful and str(event.get("node_id") or "") != successful[sample_id]:
+            event_node_mismatches.append(sample_id)
+    missing_sample_ids = sorted(set(successful) - set(event_counts))
+    unexpected_sample_ids = sorted(set(event_counts) - set(successful))
+    duplicate_sample_ids = sorted(
+        sample_id for sample_id, count in event_counts.items() if count != 1
+    )
+
+    index = load_validation_index(root)
+    index_available = is_index_schema_compatible(index)
+    mismatched_node_ids: list[str] = []
+    indexed_node_ids: list[str] = []
+    if index_available and isinstance(index, dict):
+        rows = index.get("nodes", {}) or {}
+        for node_id in sorted(set(successful.values())):
+            row = rows.get(node_id)
+            if not isinstance(row, dict):
+                mismatched_node_ids.append(node_id)
+                continue
+            indexed_node_ids.append(node_id)
+            rel_path = str(row.get("file") or "")
+            if not rel_path or not signature_matches(
+                root,
+                rel_path,
+                row.get("file_signature"),
+            ):
+                mismatched_node_ids.append(node_id)
+
+    state_mismatches: list[str] = []
+    successful_by_node: dict[str, set[str]] = {}
+    for sample_id, node_id in successful.items():
+        successful_by_node.setdefault(node_id, set()).add(sample_id)
+    for node_id, sample_ids in successful_by_node.items():
+        data = load_yaml(find_node_file(root, node_id))
+        summary = str(data.get("summary") or "") if isinstance(data, dict) else ""
+        if not any(sample_id in summary for sample_id in sample_ids):
+            state_mismatches.append(node_id)
+
+    events_ok = not (
+        event_error
+        or missing_sample_ids
+        or unexpected_sample_ids
+        or duplicate_sample_ids
+        or event_node_mismatches
+    )
+    index_ok = bool(index_available) and not mismatched_node_ids
+    state_ok = not state_mismatches
+    return {
+        "ok": events_ok and index_ok and state_ok,
+        "events": {
+            "expected_count": len(successful),
+            "observed_count": len(observed_events),
+            "missing_sample_ids": missing_sample_ids,
+            "unexpected_sample_ids": unexpected_sample_ids,
+            "duplicate_sample_ids": duplicate_sample_ids,
+            "node_mismatch_sample_ids": sorted(event_node_mismatches),
+            "error": event_error,
+        },
+        "index": {
+            "available": bool(index_available),
+            "indexed_node_ids": indexed_node_ids,
+            "mismatched_node_ids": sorted(set(mismatched_node_ids)),
+        },
+        "state": {"mismatched_node_ids": sorted(state_mismatches)},
+    }
 
 
 def _copy_fixture(source: Path, target: Path) -> None:
@@ -549,6 +647,9 @@ def benchmark_concurrency(
             for count in agent_counts:
                 round_root = temporary_root / f"{scenario}-{count}"
                 _copy_fixture(source, round_root)
+                setup_started = time.perf_counter()
+                build_dashboard(round_root)
+                setup_ms = round((time.perf_counter() - setup_started) * 1000, 3)
                 commit_barrier_dir = (
                     temporary_root / "commit-barriers" / f"{scenario}-{count}"
                 )
@@ -577,13 +678,16 @@ def benchmark_concurrency(
                     {
                         "scenario": scenario,
                         "agent_count": count,
+                        "setup_ms": setup_ms,
                         "summary": summarize_concurrency_samples(samples),
+                        "consistency": _round_consistency(round_root, samples),
                         "samples": samples,
                     }
                 )
     source_root_mutated = source_before != _truth_fingerprint(source)
     return {
         "ok": not source_root_mutated
+        and all(row["consistency"]["ok"] for row in rounds)
         and all(
             concurrency_round_passed(row["scenario"], row["summary"]) for row in rounds
         ),
@@ -602,6 +706,135 @@ def benchmark_concurrency(
     }
 
 
+def artifact_record_layout_profile(root: Path) -> dict[str, Any]:
+    started_at = time.perf_counter()
+    root_path = root.resolve(strict=True)
+    record_rows: list[dict[str, Any]] = []
+    record_count = 0
+    invalid_record_files: list[str] = []
+    record_dir = root_path / "artifact_records"
+    if record_dir.exists():
+        for path in sorted(record_dir.glob("*.yaml")):
+            relative = path.relative_to(root_path).as_posix()
+            data = load_yaml(path)
+            records = data.get("records") if isinstance(data, dict) else None
+            if not isinstance(records, dict):
+                invalid_record_files.append(relative)
+                records = {}
+            experiment_id = (
+                str(data.get("experiment_id") or path.stem)
+                if isinstance(data, dict)
+                else path.stem
+            )
+            count = len(records)
+            record_count += count
+            record_rows.append(
+                {
+                    "path": relative,
+                    "experiment_id": experiment_id,
+                    "record_count": count,
+                    "bytes": path.stat().st_size,
+                }
+            )
+
+    append_only_by_experiment: dict[str, list[str]] = {}
+    invalid_assignment_files: list[str] = []
+    assignment_dir = root_path / "assignments"
+    if assignment_dir.exists():
+        for path in sorted(assignment_dir.glob("*.yaml")):
+            relative = path.relative_to(root_path).as_posix()
+            data = load_yaml(path)
+            if not isinstance(data, dict):
+                invalid_assignment_files.append(relative)
+                continue
+            scope = data.get("scope")
+            if not isinstance(scope, dict):
+                continue
+            if scope.get("write_policy") != "append_only":
+                continue
+            if data.get("status") not in {"active", "blocked"} or not data.get("agent_id"):
+                continue
+            experiment_id = str(
+                data.get("current_node")
+                or scope.get("root_node")
+                or data.get("root_node")
+                or ""
+            )
+            assignment_id = str(data.get("assignment_id") or path.stem)
+            if experiment_id:
+                append_only_by_experiment.setdefault(experiment_id, []).append(
+                    assignment_id
+                )
+
+    files_by_experiment = {
+        str(row["experiment_id"]): str(row["path"]) for row in record_rows
+    }
+    shared_writer_candidates = [
+        {
+            "experiment_id": experiment_id,
+            "assignment_ids": sorted(assignment_ids),
+            "artifact_record_file": (
+                files_by_experiment.get(experiment_id)
+                or f"artifact_records/{experiment_id}.yaml"
+            ),
+            "shared_file_exists": experiment_id in files_by_experiment,
+        }
+        for experiment_id, assignment_ids in sorted(
+            append_only_by_experiment.items()
+        )
+        if len(assignment_ids) > 1
+    ]
+    if shared_writer_candidates:
+        storage_decision = {
+            "decision": "defer_layout_migration",
+            "migration_required": False,
+            "reason": (
+                "Artifact YAML is a shared write candidate, but sharding it alone "
+                "does not isolate the experiment lifecycle write set used by work "
+                "start and work close."
+            ),
+            "next_evidence": (
+                "Profile append-only start/close after their shared experiment "
+                "lifecycle writes are isolated; require before/after conflict and "
+                "file-count measurements before changing the truth layout."
+            ),
+        }
+    else:
+        storage_decision = {
+            "decision": "no_layout_change",
+            "migration_required": False,
+            "reason": "No active append-only assignments share an experiment record file.",
+            "next_evidence": "Re-profile when multiple active writers share one experiment.",
+        }
+    return {
+        "schema_version": "artifact_record_layout_profile_v1",
+        "root": str(root_path),
+        "layout": "per_experiment_mutable_yaml",
+        "file_count": len(record_rows),
+        "record_count": record_count,
+        "total_bytes": sum(int(row["bytes"]) for row in record_rows),
+        "max_file_bytes": max(
+            (int(row["bytes"]) for row in record_rows),
+            default=0,
+        ),
+        "max_records_per_file": max(
+            (int(row["record_count"]) for row in record_rows),
+            default=0,
+        ),
+        "append_only_active_assignment_count": sum(
+            len(values) for values in append_only_by_experiment.values()
+        ),
+        "shared_writer_candidates": shared_writer_candidates,
+        "invalid_record_files": invalid_record_files,
+        "invalid_assignment_files": invalid_assignment_files,
+        "storage_decision": storage_decision,
+        "profile_duration_ms": round(
+            (time.perf_counter() - started_at) * 1000,
+            3,
+        ),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Record command, workflow, and multi-agent concurrency baselines."
@@ -609,6 +842,7 @@ def main() -> None:
     parser.add_argument("--root", type=Path)
     parser.add_argument("--inventory", action="store_true")
     parser.add_argument("--workflow-baselines", action="store_true")
+    parser.add_argument("--storage-profile", action="store_true")
     parser.add_argument("--concurrency", action="store_true")
     parser.add_argument("--agent-count", type=int, action="append")
     parser.add_argument(
@@ -654,6 +888,7 @@ def main() -> None:
         )
 
     selected = args.inventory or args.workflow_baselines or args.concurrency
+    selected = selected or args.storage_profile
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "ok": True,
@@ -665,6 +900,12 @@ def main() -> None:
     if args.workflow_baselines or not selected:
         payload["workflow_baseline_evidence"] = WORKFLOW_BASELINE_EVIDENCE
         payload["workflow_baselines"] = WORKFLOW_BASELINES
+    if args.storage_profile:
+        if args.root is None:
+            parser.error("--storage-profile requires --root")
+        payload["artifact_record_layout_profile"] = artifact_record_layout_profile(
+            args.root
+        )
     if args.concurrency:
         if args.root is None:
             parser.error("--concurrency requires --root")
@@ -691,6 +932,8 @@ def main() -> None:
         print(f"legacy commands: {payload.get('legacy_command_count', 'not requested')}")
         if "workflow_baselines" in payload:
             print(f"workflow baselines: {len(payload['workflow_baselines'])}")
+        if "artifact_record_layout_profile" in payload:
+            print("artifact record layout: profiled")
         if "concurrency" in payload:
             print(f"concurrency rounds: {len(payload['concurrency']['rounds'])}")
     if not payload["ok"]:

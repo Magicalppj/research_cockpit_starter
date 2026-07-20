@@ -17,8 +17,14 @@ WORKFLOW_BUDGETS: dict[str, int] = {
     "handoff_cli_invocations": 1,
     "core_nested_subprocesses": 0,
     "extra_verification_after_internal_success": 0,
+    "worker_packet_bytes": 8 * 1024,
+    "unchanged_packet_bytes": 512,
     "worker_stdout_bytes": 12 * 1024,
+    "worker_estimated_output_tokens": 4_000,
     "mutation_receipt_bytes": 2 * 1024,
+    "coordination_snapshot_bytes": 32 * 1024,
+    "worker_control_plane_warm_ms": 10_000,
+    "disjoint_worker_control_plane_warm_ms": 15_000,
 }
 
 def _bounded(items: list[Any], *, limit: int = 20) -> dict[str, Any]:
