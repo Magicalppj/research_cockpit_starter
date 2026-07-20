@@ -25,7 +25,7 @@ class RoleDiscoveryTests(unittest.TestCase):
         manifest = agent_command_manifest()
         by_name = {str(row["name"]): row for row in manifest}
 
-        self.assertEqual(len(manifest), 79)
+        self.assertEqual(len(manifest), 81)
         self.assertIn("work open", by_name)
         for name, row in by_name.items():
             with self.subTest(command=name):
@@ -66,6 +66,18 @@ class RoleDiscoveryTests(unittest.TestCase):
         self.assertEqual(by_name["review report"]["idempotency"], "required")
         self.assertEqual(by_name["coord review"]["audiences"], ["coordinator"])
         self.assertEqual(by_name["coord review"]["scope_policy"], "coordinator")
+        self.assertEqual(by_name["coord overview"]["audiences"], ["coordinator"])
+        self.assertEqual(by_name["coord overview"]["surface"], "core")
+        self.assertEqual(by_name["coord overview"]["input_schema_version"], "coord_overview_v1")
+        self.assertEqual(by_name["coord overview"]["output_schema_version"], "coordination_snapshot_v1")
+        self.assertIn("--limit", by_name["coord overview"]["supported_flags"])
+        self.assertEqual(by_name["coord handoff"]["audiences"], ["coordinator"])
+        self.assertEqual(by_name["coord handoff"]["surface"], "core")
+        self.assertEqual(by_name["coord handoff"]["intent"], "handoff")
+        self.assertEqual(by_name["coord handoff"]["verification_policy"], "milestone")
+        self.assertEqual(by_name["coord handoff"]["input_schema_version"], "coord_handoff_v1")
+        self.assertEqual(by_name["coord handoff"]["output_schema_version"], "milestone_handoff_v1")
+        self.assertIn("--progress", by_name["coord handoff"]["supported_flags"])
         self.assertEqual(by_name["create-run"]["surface"], "advanced")
         self.assertEqual(by_name["complete-run"]["surface"], "advanced")
         self.assertEqual(by_name["ingest-artifact"]["surface"], "advanced")
@@ -97,6 +109,24 @@ class RoleDiscoveryTests(unittest.TestCase):
         self.assertNotIn("maintenance-audit", {str(row["name"]) for row in manifest})
         self.assertNotIn("context", {str(row["name"]) for row in manifest})
         self.assertNotIn("option-workstream-context", {str(row["name"]) for row in manifest})
+
+    def test_coordinator_core_uses_one_handoff_facade_for_milestone_gates(self) -> None:
+        manifest = agent_command_manifest(
+            role="coordinator",
+            compact=True,
+            summary_only=True,
+        )
+        names = {str(row["name"]) for row in manifest}
+
+        self.assertIn("coord overview", names)
+        self.assertIn("coord handoff", names)
+        self.assertNotIn("validate", names)
+        self.assertNotIn("build", names)
+        self.assertNotIn("smoke", names)
+        self.assertTrue(
+            all("coordinator" in row["audiences"] and row["surface"] == "core" for row in manifest)
+        )
+
 
     def test_name_lookup_can_reveal_an_advanced_role_command(self) -> None:
         rows = agent_command_manifest(

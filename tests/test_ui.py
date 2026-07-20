@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import shutil
 import tempfile
 import time
@@ -86,6 +87,40 @@ def copy_demo_research_cockpit_without_dashboards(target: Path) -> None:
 
 
 class UiRenderingTests(unittest.TestCase):
+    def test_coordination_page_uses_shared_snapshot_builder(self) -> None:
+        expected = {
+            "schema_version": "coordination_snapshot_v1",
+            "changed": True,
+            "revision": "coord-v1:test",
+        }
+        root = Path("coordination-root")
+        with patch.object(
+            ui_app,
+            "build_coordination_snapshot",
+            return_value=expected,
+        ) as builder:
+            result = ui_app._load_coordination_snapshot(
+                root,
+                statuses={"active"},
+                page="page-token",
+            )
+
+        self.assertEqual(result, expected)
+        builder.assert_called_once_with(
+            root,
+            limit=100,
+            page="page-token",
+            statuses={"active"},
+        )
+
+    def test_coordination_page_routes_before_full_graph_load(self) -> None:
+        source = inspect.getsource(ui_app.main)
+
+        self.assertLess(
+            source.index('if page_key == "coordination"'),
+            source.index("load_graph_data()"),
+        )
+
     def test_update_decision_checklist_label_is_localized(self) -> None:
         text = get_text("中文")
 

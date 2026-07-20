@@ -10,6 +10,7 @@ import time
 from typing import Any
 
 from research_cockpit.cli_progress import emit_progress_event
+from research_cockpit.commands.validate_cockpit import FullValidationState
 from research_cockpit.paths import default_data_root, plugin_root
 
 PLUGIN_ROOT = plugin_root()
@@ -208,7 +209,14 @@ def _current_option_for_root(root: Path) -> str | None:
     return str(option_id) if option_id else None
 
 
-def _compact_smoke_checks(root: Path, *, query: str, progress: bool = False) -> list[dict[str, Any]]:
+def _compact_smoke_checks(
+    root: Path,
+    *,
+    query: str,
+    progress: bool = False,
+    validation_payload: dict[str, Any] | None = None,
+    validation_state: FullValidationState | None = None,
+) -> list[dict[str, Any]]:
     from research_cockpit.commands.agent_bootstrap import _context_paths
     from research_cockpit.commands.list_agent_commands import agent_command_manifest
     from research_cockpit.commands.option_workstream_context import compact_option_workstream_context
@@ -228,6 +236,11 @@ def _compact_smoke_checks(root: Path, *, query: str, progress: bool = False) -> 
 
     root_arg = str(root)
     state: dict[str, Any] = {}
+    if validation_state is not None:
+        state["nodes"] = validation_state.nodes
+        state["current"] = validation_state.current
+        state["explicit_edges"] = validation_state.explicit_edges
+
 
     def ensure_core() -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
         return state["nodes"], state["current"], state["explicit_edges"]
@@ -248,16 +261,25 @@ def _compact_smoke_checks(root: Path, *, query: str, progress: bool = False) -> 
         return state["suggestions"]
 
     def validate_check() -> dict[str, Any]:
-        nodes = load_nodes(root)
-        current = load_yaml(root / "current_state.yaml")
-        explicit_edges = load_explicit_edges(root)
-        validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
-        state["nodes"] = nodes
-        state["current"] = current
-        state["explicit_edges"] = explicit_edges
+        if validation_payload is not None and validation_state is not None:
+            if not validation_payload.get("ok"):
+                raise ValueError("; ".join(str(error) for error in validation_payload.get("errors", [])))
+            nodes = validation_state.nodes
+            explicit_edges = validation_state.explicit_edges
+            reused_validation = True
+        else:
+            nodes = load_nodes(root)
+            current = load_yaml(root / "current_state.yaml")
+            explicit_edges = load_explicit_edges(root)
+            validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
+            state["nodes"] = nodes
+            state["current"] = current
+            state["explicit_edges"] = explicit_edges
+            reused_validation = False
         return {
             "node_count": len(nodes),
             "edge_count": len(explicit_edges),
+            "reused_validation": reused_validation,
         }
 
     def bootstrap_contract_check() -> dict[str, Any]:
@@ -382,6 +404,40 @@ def _compact_smoke_checks(root: Path, *, query: str, progress: bool = False) -> 
             progress=progress,
         ))
     return checks
+
+
+def compact_root_smoke_from_validation(
+    root: Path,
+    validation_payload: dict[str, Any],
+    validation_state: FullValidationState,
+    *,
+    query: str = "demo",
+    progress: bool = False,
+) -> dict[str, Any]:
+    checks = _compact_smoke_checks(
+        root,
+        query=query,
+        progress=progress,
+        validation_payload=validation_payload,
+        validation_state=validation_state,
+    )
+    failed = next((check for check in checks if not check["passed"]), None)
+    _emit_progress(
+        progress,
+        "summary",
+        event="phase_end",
+        status="failed" if failed else "completed",
+    )
+    return {
+        "ok": failed is None,
+        "mode": "compact",
+        "skill_root": str(PLUGIN_ROOT),
+        "plugin_root": str(PLUGIN_ROOT),
+        "root": str(root),
+        "python": sys.executable,
+        "checks": checks,
+    }
+
 
 def _changed_smoke_checks(root: Path, *, node_id: str, progress: bool = False) -> list[dict[str, Any]]:
     from research_cockpit.commands.context import context_payload

@@ -253,6 +253,12 @@ class WorkStartTests(unittest.TestCase):
                 "run": {"launcher": "shell", "command": "python train.py"},
             },
         )
+        assignment_path = self.root / "assignments" / "assign_x.yaml"
+        assignment = load_yaml(assignment_path)
+        fresh_now = datetime.now(timezone.utc)
+        assignment["lease"]["heartbeat_at"] = fresh_now.isoformat().replace("+00:00", "Z")
+        assignment["lease"]["expires_at"] = (fresh_now + timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+        save_yaml(assignment_path, assignment)
         out = subprocess.run(
             [
                 sys.executable,

@@ -15,6 +15,8 @@ _ROLE_FACADE_COMMANDS = {
     "review open",
     "review report",
     "coord review",
+    "coord overview",
+    "coord handoff",
 }
 
 _RETAINED_REPLACEMENTS = {
@@ -136,7 +138,8 @@ _CORE_COMMANDS_BY_ROLE = {
         "commands",
     },
     "coordinator": {
-        "bootstrap",
+        "coord overview",
+        "coord handoff",
         "search",
         "suggest-next-actions",
         "start-agent-session",
@@ -145,9 +148,6 @@ _CORE_COMMANDS_BY_ROLE = {
         "coord review",
         "promote-decision",
         "accept-decision",
-        "validate",
-        "build",
-        "smoke",
         "commands",
     },
     "maintainer": {
@@ -280,7 +280,7 @@ def command_role_contract(
     else:
         scope_policy = "root"
 
-    if name == "build":
+    if name in {"build", "coord handoff"}:
         verification_policy = "milestone"
     elif name in {"validate", "smoke"}:
         verification_policy = "conditional"
@@ -320,6 +320,12 @@ def command_role_contract(
     elif name == "coord review":
         input_schema_version = "coord_review_v1"
         output_schema_version = "work_operation_v1"
+    elif name == "coord handoff":
+        input_schema_version = "coord_handoff_v1"
+        output_schema_version = "milestone_handoff_v1"
+    elif name == "coord overview":
+        input_schema_version = "coord_overview_v1"
+        output_schema_version = "coordination_snapshot_v1"
     elif route_kind == "facade":
         input_schema_version = "work_operation_input_v1"
         output_schema_version = "work_operation_v1"

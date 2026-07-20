@@ -101,6 +101,39 @@ def empty_effective_baseline() -> dict[str, Any]:
     }
 
 
+def compact_effective_baseline(
+    effective: dict[str, Any],
+    *,
+    text_limit: int = 200,
+) -> dict[str, Any]:
+    """Return the stable baseline projection shared by indexes and Work Packets."""
+
+    def ref(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict) or not value.get("id"):
+            return None
+        return {
+            key: value[key]
+            for key in ("id", "type", "status")
+            if value.get(key) not in (None, "")
+        }
+
+    reason = str(effective.get("reason") or "").strip()
+    if len(reason) > text_limit:
+        reason = reason[: max(1, text_limit - 3)] + "..."
+    return {
+        "source_node_id": str(effective.get("source_node_id") or ""),
+        "source_kind": str(effective.get("source_kind") or "none"),
+        "option": ref(effective.get("option")),
+        "decision": ref(effective.get("decision")),
+        "artifacts": [
+            item
+            for item in (ref(value) for value in effective.get("artifacts", []) or [])
+            if item is not None
+        ][:20],
+        "reason": reason,
+    }
+
+
 def resolve_effective_baseline(
     nodes: dict[str, ResearchNode],
     node_id: str,

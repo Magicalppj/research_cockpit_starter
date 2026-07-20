@@ -18,6 +18,7 @@ RESEARCH_ROOT = default_data_root()
 COMMAND_LANGUAGE = "bash"
 
 from research_cockpit.context_packs import build_agent_context, build_dashboard_read_models
+from research_cockpit.coordination import build_coordination_snapshot
 from research_cockpit.baselines import (
     build_accepted_decision_rows,
     build_accepted_option_rows,
@@ -1752,21 +1753,6 @@ def render_data_health(
 
 
 def main() -> None:
-    (
-        nodes,
-        current,
-        graph,
-        context,
-        validation_errors,
-        link_rows,
-        action_suggestions,
-        all_action_suggestions,
-        search_index,
-        option_workstreams,
-        saved_graph_views,
-        dashboard_status,
-    ) = load_graph_data()
-
     with st.sidebar:
         language = st.selectbox("界面语言 / Language", ["中文", "English"], index=0)
     text = get_text(language)
@@ -1783,6 +1769,30 @@ def main() -> None:
             format_func=lambda key: text[key],
             key="main_page",
         )
+
+    if page_key == "coordination":
+        st.title(text["page_title"])
+        st.caption(text["page_caption"])
+        st.header(text["coordination"])
+        render_coordination(text)
+        return
+
+    (
+        nodes,
+        current,
+        graph,
+        context,
+        validation_errors,
+        link_rows,
+        action_suggestions,
+        all_action_suggestions,
+        search_index,
+        option_workstreams,
+        saved_graph_views,
+        dashboard_status,
+    ) = load_graph_data()
+
+    with st.sidebar:
         st.divider()
         st.header(text["current_focus"])
         st.write(f"{text['stage']}:", current.get("current_stage"))
@@ -1841,6 +1851,73 @@ def main() -> None:
             all_action_suggestions,
             search_index,
         )
+
+
+def _load_coordination_snapshot(
+    root: Path,
+    *,
+    statuses: set[str] | None = None,
+    page: str | None = None,
+) -> dict[str, Any]:
+    return build_coordination_snapshot(
+        root,
+        limit=100,
+        page=page,
+        statuses=statuses,
+    )
+
+
+def render_coordination(text: dict[str, str]) -> None:
+    statuses = st.multiselect(
+        text["coord_status_filter"],
+        ["queued", "active", "blocked", "completed", "cancelled", "retired"],
+        key="coordination_status_filter",
+    )
+    filter_signature = tuple(sorted(statuses))
+    if st.session_state.get("coordination_filter_signature") != filter_signature:
+        st.session_state["coordination_filter_signature"] = filter_signature
+        st.session_state["coordination_page"] = None
+    page = st.session_state.get("coordination_page")
+    try:
+        snapshot = _load_coordination_snapshot(
+            RESEARCH_ROOT,
+            statuses=set(statuses),
+            page=page,
+        )
+    except ValueError:
+        st.session_state["coordination_page"] = None
+        snapshot = _load_coordination_snapshot(
+            RESEARCH_ROOT,
+            statuses=set(statuses),
+        )
+        page = None
+
+    counts = snapshot["counts"]
+    metric_columns = st.columns(5)
+    metric_columns[0].metric(text["coord_ready"], counts["ready"])
+    metric_columns[1].metric(text["coord_waiting"], counts["waiting"])
+    metric_columns[2].metric(text["coord_stale_inputs"], counts["stale_inputs"])
+    metric_columns[3].metric(text["coord_pending_review"], counts["pending_review"])
+    metric_columns[4].metric(text["coord_expired_leases"], counts["expired_leases"])
+
+    rows = snapshot["assignments"]["items"]
+    if rows:
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    else:
+        st.info(text["coord_no_assignments"])
+
+    warnings = snapshot["overlap_warnings"]["items"]
+    if warnings:
+        st.warning(text["coord_overlap_warnings"] + "\n\n" + "\n".join(f"- {item}" for item in warnings))
+
+    first_column, next_column = st.columns(2)
+    if page and first_column.button(text["coord_first_page"], key="coordination_first_page"):
+        st.session_state["coordination_page"] = None
+        st.rerun()
+    next_page = snapshot.get("next_page")
+    if next_page and next_column.button(text["coord_next_page"], key="coordination_next_page"):
+        st.session_state["coordination_page"] = next_page
+        st.rerun()
 
 
 if __name__ == "__main__":

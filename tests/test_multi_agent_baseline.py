@@ -29,13 +29,13 @@ class MultiAgentBaselineTests(unittest.TestCase):
     def test_legacy_inventory_covers_the_current_manifest_once(self) -> None:
         manifest = agent_command_manifest()
         inventory = legacy_command_inventory(manifest)
+        facade_names = {row["name"] for row in manifest if row.get("route_kind") == "facade"}
 
-        self.assertEqual(len(manifest), 75)
+        self.assertEqual(len(manifest), len(inventory) + len(facade_names))
         self.assertEqual(len(inventory), 70)
         self.assertEqual(
             {row["name"] for row in inventory},
-            {row["name"] for row in manifest}
-            - {"work claim", "work open", "work release", "work renew", "work start"},
+            {row["name"] for row in manifest} - facade_names,
         )
         for row in inventory:
             with self.subTest(command=row["name"]):

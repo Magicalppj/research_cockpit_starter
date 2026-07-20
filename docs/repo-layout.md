@@ -43,6 +43,9 @@ The plugin stores reusable code and tools. The research repo stores project-spec
 - `commands/_runtime.py`: CLI output helpers plus compatibility wrappers for shared mutation/runtime calls.
 - `commands/_assignment_scope_cli.py`: shared assignment-scope CLI flags and structured error output.
 - `mutation_runtime.py` and `mutation_lock.py`: serial mutation lock, preflight, conflict checks, atomic truth-source writes, rollback, and dashboard rebuild handoff.
+- `work_packets.py`, `coordination.py`, and `synthesis.py`: bounded revisioned worker, coordinator, and selected-evidence read models.
+- `milestone_handoffs.py`: optimistic revision-bound coordinator handoff orchestration and durable milestone reports.
+- `commands/build_dashboard.py`: generated dashboard writes serialized by a derived lock; handoff build does not hold the canonical truth lock.
 - `root_snapshot.py` and `validation_index.py`: reusable root snapshots, file fingerprints, dependency-aware changed-scope validation, and explicit full-validation fallback.
 - `cli_progress.py`: stderr progress events that keep stdout machine-readable.
 - `maintenance.py`: repository, worktree, branch, resource, and retention audit domain logic.

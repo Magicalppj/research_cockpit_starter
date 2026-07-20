@@ -10,7 +10,7 @@ These templates are optional starting points for long experiment runs. They writ
 | `smoke-gate` | Run the smallest useful execution before a full run. | `smoke_check` | `full_run` |
 | `full-run` | Start or monitor the real long-running experiment. | `full_run` | `artifact_capture` |
 | `artifact-capture` | Preserve useful files after a run finishes. | `artifact_capture` | `validate_build` |
-| `validate-build` | Run changed-scope worker checks, project checks, or the coordinator/final full gate. | `validation_check` | `next_action_update` |
+| `validate-build` | Run a reported changed-scope check or an explicit diagnostic build; milestone gates belong to `coord handoff`. | `validation_check` | `next_action_update` |
 | `next-action-update` | Record findings, gates, artifacts, and the next focus/action. | `handoff_check` | `done` |
 
 ## Python Template
@@ -45,4 +45,4 @@ Use `manual_run_checklist.md` when no script owns the run. Fill the same fields 
 
 Use `work_close.example.yaml` for the terminal handoff. A final launcher output directory belongs in `evidence_inputs`; `work close` stages it into the canonical artifact store and records the result atomically. Use standalone `ingest-artifact --no-build` only when evidence must be durable before the run closes.
 
-1. Fill `work_start.example.yaml` from the packet and run `work start`; keep its generated run id. 2. Run the experiment. 3. Fill `work_close.example.yaml` and run `work close`; include final `evidence_inputs` or an earlier `artifact_record.existing_record_id`, never both. 4. Trust an internally verified receipt without repeated validate/context. 5. Run full gates only at coordinator merge, release, or research-stage milestone handoff.
+1. Fill `work_start.example.yaml` from the packet and run `work start`; keep its generated run id. 2. Run the experiment. 3. Fill `work_close.example.yaml` and run `work close`; include final `evidence_inputs` or an earlier `artifact_record.existing_record_id`, never both. 4. Trust an internally verified receipt without repeated validate/context. 5. At coordinator merge, release, or research-stage closeout, run one `coord handoff`; do not precede it with standalone full gates.

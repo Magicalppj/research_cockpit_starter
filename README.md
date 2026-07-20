@@ -92,14 +92,15 @@ research-cockpit validate --root research_cockpit --changed-node <node_id> --jso
 research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json
 ```
 
-`milestone handoff`（coordinator merge、release 或 research-stage closeout）前再跑全量 gate；普通 agent turn 不属于 milestone handoff：
+`milestone handoff`（coordinator merge、release 或 research-stage closeout）只调用一次 orchestrator；不要先手工串联 full validate/build/smoke：
 
 ```sh
-research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit
-research-cockpit smoke --root research_cockpit --json --progress
+research-cockpit coord handoff --print-schema
+research-cockpit coord handoff --root research_cockpit --file handoff.yaml --json --compact --progress
 research-cockpit ui --root research_cockpit --server.port 8501
 ```
+
+handoff 内部复用一次 full validation state 完成 build 和 compact smoke，并写入 revision-bound report；普通 agent turn 不属于 milestone handoff。
 
 ## 你会得到什么
 
@@ -116,9 +117,9 @@ Research Cockpit 提供三层能力：
 - `research_cockpit/assignments/*.yaml` 是 assignment-scoped worker 的 cursor、next action 和状态 truth source；`research_cockpit/agents/*.yaml` 保存 agent identity 和 active assignment。
 - `research_cockpit/coordinator_state.yaml` 是 coordinator/UI selection truth source。
 - `research_cockpit/current_state.yaml` 是 legacy/coordinator compatibility state，也就是 coordinator/legacy compatibility layer；它不是普通 worker 的默认 cursor。
-- `research_cockpit/graph/nodes/*.yaml`、`research_cockpit/runs/*.yaml`、`research_cockpit/gate_results/*.{yaml,json}` 和 `research_cockpit/artifact_records/*.yaml` 保存当前结构化事实。
+- `research_cockpit/graph/nodes/*.yaml`、`research_cockpit/runs/*.yaml`、`research_cockpit/gate_results/*.{yaml,json}`、`research_cockpit/artifact_records/*.yaml` 和 `research_cockpit/handoffs/*.yaml` 保存当前结构化事实与 milestone reports。
 - `research_cockpit/graph/interaction_events/**` 与 legacy `graph/interaction_log.yaml` 保存 append-only 操作历史，不替代当前事实。
-- `research_cockpit/dashboards/*` 是生成文件；只在需要刷新生成上下文或 coordinator/milestone handoff 时运行 `research-cockpit build --root <root>`。
+- `research_cockpit/dashboards/*` 是生成文件；仅在明确需要刷新生成上下文时单独运行 `build`，milestone 由 `coord handoff` 内部执行一次 build。
 - 日常修改优先用 CLI 命令，避免直接手改 YAML 后破坏图谱关系。
 - 同一个 data root 的写操作要顺序执行，不要并发写。
 
@@ -131,6 +132,7 @@ Research Cockpit 提供三层能力：
 - 点击图谱节点，在右侧查看概览、证据、资源、关系、行动和 agent 上下文。
 - 在右侧对当前节点收拢/展开整棵分支，或临时显示被默认隐藏的直接子节点。
 - 保存常用 graph view，后续一键恢复筛选条件和分支可见性。
+- Coordination 页面直接读取与 `coord overview` 相同的 bounded read model，查看 assignment readiness、review、lease、stale input 和 scope overlap，不先加载完整节点图。
 
 图谱默认使用 React Flow 和 Dagre layout。PyVis 是 legacy fallback。下游 worker 改 YAML 后先跑 changed-scope 验证；需要刷新 dashboard/UI 时，由 coordinator 或人工在 canonical root 运行 `research-cockpit build --root research_cockpit`，再在 UI 中点击 `Refresh`。如果 dashboard 缺失、损坏或比 truth source 旧，UI 会临时从 YAML/notes/runs/gates 现场重建视图并显示 stale warning；大仓库或多 agent 场景下建议在 canonical root 跑 `research-cockpit build --root research_cockpit --watch --interval 5 --json`。普通数据变化不需要重建 React bundle。
 
@@ -150,19 +152,20 @@ npm run build
 | 初始化 demo 状态 | `research-cockpit init --template demo --root research_cockpit --json` |
 | 全量校验数据 | `research-cockpit validate --root research_cockpit --json` |
 | 检查语义陈旧状态 | `research-cockpit lint --root research_cockpit --semantic --json` |
-| 生成 dashboard/context（coordinator/milestone handoff） | `research-cockpit build --root research_cockpit` |
+| 显式刷新 dashboard/context | `research-cockpit build --root research_cockpit` |
 | 诊断大图 build 性能 | `research-cockpit build --root research_cockpit --json --profile` |
 | 综合维护审计 | `research-cockpit maintenance-audit --root research_cockpit --repo . --json` |
 | 生成 worktree closeout 计划 | `research-cockpit worktree-closeout --root research_cockpit --repo . --worktree ../worktrees/<label> --classification discard_after_recording --dry-run --json` |
 | 生成 sparse worktree 命令计划 | `research-cockpit start-agent-session --root research_cockpit --option <option_id> --label <label> --objective "..." --branch agent/<branch> --worktree ../worktrees/<label> --base main --dry-run --json --sparse --sparse-profile ml-experiment` |
 | 启动 UI | `research-cockpit ui --root research_cockpit --server.port 8501` |
 | 查看可用命令 | `research-cockpit commands --role worker --json --compact --summary-only` |
-| 全局启动上下文 | `research-cockpit bootstrap --root research_cockpit --coordinator --json` |
+| Coordinator 全局 assignment triage | `research-cockpit coord overview --root research_cockpit --json --compact --limit 20` |
 | 单节点 execution context | `research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json` |
 | 单节点变更校验 | `research-cockpit validate --root research_cockpit --changed-node <node_id> --json` |
 | 搜索知识 | `research-cockpit search --root research_cockpit --query "keyword" --json --limit 5 --source node` |
 | 单节点 smoke | `research-cockpit smoke --root research_cockpit --scope changed --id <node_id> --json --progress` |
-| 全量 smoke（milestone handoff） | `research-cockpit smoke --root research_cockpit --json --progress` |
+| Milestone handoff | `research-cockpit coord handoff --root research_cockpit --file handoff.yaml --json --compact --progress` |
+| 诊断 full smoke | `research-cockpit smoke --root research_cockpit --json --progress` |
 
 ## 常见工作流
 
@@ -174,7 +177,7 @@ npm run build
 research-cockpit create-workstream --print-schema
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --dry-run --json --show-diff
 research-cockpit create-workstream --root research_cockpit --file workstream.yaml --no-build --json --compact
-# 仅当 additional_verification_required 为 true 时验证 reported changed scope；全量 gate 只在 milestone handoff 运行。
+# 仅当 additional_verification_required 为 true 时验证 reported changed scope；milestone 只运行一次 coord handoff。
 ```
 
 `create-workstream` 不会自动改变全局 focus、暂停旧方案或删除旧分支。follow-up option 应使用 `open` 状态；文件输入里的 option `planned` 会被规范化为 `open`。
@@ -246,6 +249,38 @@ research-cockpit review report --root research_cockpit --assignment <review_assi
 ```
 
 `review open` 一次返回 reviewer Work Packet、精确 producer result revision 和 bounded evidence links。`review report` 只写 reviewer assignment；coordinator 再用 `coord review --assignment <producer_assignment_id> --file verdict.yaml` 更新 producer review metadata，不改写 producer/reviewer Evidence Bundle。
+
+### Coordinator overview、synthesis 与 milestone handoff
+
+Portfolio triage 先读取一页 Coordination Snapshot；用 `--page <next_page>` 翻页，用 `--since <revision>` 做无变化轮询，不再用 full bootstrap 扫描整个 root：
+
+```sh
+research-cockpit coord overview --root research_cockpit --json --compact --limit 20
+```
+
+`kind: synthesis` 的 assignment 仍用 `work open`。返回的 Work Packet 内嵌 Synthesis Packet，只投影 assignment 捕获的 dependency result revisions 和 selected evidence refs；缺失、未完成或 revision 已变化的输入会明确报告，不自动扫描无关历史补齐。
+
+Milestone 输入使用 `coord_handoff_v1`：
+
+```yaml
+schema_version: coord_handoff_v1
+operation_id: handoff_release_001
+kind: release
+summary: Release candidate handoff
+strict_lifecycle: true
+allow:
+  pending_reviews: false
+  stale_inputs: false
+  active_leases: false
+  unresolved_blockers: false
+```
+
+```sh
+research-cockpit coord handoff --root research_cockpit --file handoff.yaml --json --compact --progress
+```
+
+默认 blocker 包括 pending review、stale input、active lease、expired/unresolved work 和 scope overlap。只有明确的 coordinator policy 才把对应 `allow` 设为 `true`。blocked report 已持久化；状态修复后用新的 operation id，只有同一请求的传输重试才复用原 operation id。
+
 
 ### 3. 提前持久化 incremental evidence
 
@@ -332,10 +367,10 @@ research-cockpit context --root research_cockpit --id <node_id> --view execution
 research-cockpit context --root research_cockpit --id <node_id> --view execution --since <revision> --compact --json
 ```
 
-不知道节点 id、需要全局 triage 时：
+不知道 assignment、需要全局 portfolio triage 时：
 
 ```sh
-research-cockpit bootstrap --root research_cockpit --coordinator --json
+research-cockpit coord overview --root research_cockpit --json --compact --limit 20
 ```
 
 需要完整方案子树、实验摘要和证据计数时：
@@ -377,6 +412,7 @@ research_cockpit/
   artifact_migrations/      # artifact demotion audit reports
   notes/
   artifacts/                # 长期 evidence/result bundles
+  handoffs/                 # immutable operation-id-scoped milestone reports
   dashboards/               # build 生成
 ```
 
@@ -444,7 +480,7 @@ SKILL.md
 2. Final output 已通过 `work_close_v1.evidence_inputs` 保存，或 earlier ingest 的 `record_id` 已通过 `artifact_record.existing_record_id` 关联；需要 durable graph evidence 时已显式 promotion 并记录 reason。
 3. 有用代码已 merge/cherry-pick 或保存 patch。
 4. 需要继承的正向结果已记录 decision 或 `set-baseline`。
-5. closeout 的 compact 结果已内部验证，或已按要求完成 changed-scope 检查；只有同时发生 coordinator merge、release 或 research-stage milestone handoff 时才运行 full validate/build/smoke。
+5. closeout 的 compact 结果已内部验证，或已按要求完成 changed-scope 检查；只有同时发生 coordinator merge、release 或 research-stage milestone handoff 时才运行一次 `coord handoff`，不预先重复 full gates。
 
 更多细节见 `capabilities/experiment-tracking.md`、`capabilities/integrations.md` 和 ADR-0002。
 

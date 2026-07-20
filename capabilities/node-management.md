@@ -22,7 +22,7 @@ Do not create `artifact` nodes for routine files, configs, JSON outputs, or expe
 ## Batch Graph Plans
 
 Use `apply-graph-plan` when creating or updating several graph nodes. It validates the candidate graph once, writes all YAML only after validation passes, and rebuilds once by default.
-Use one batch command or run smaller mutating commands sequentially. Mutations share the active interaction backend and refuse stale writes. Accept an internally verified compact result without repeating validate/context; otherwise verify changed scope. Reserve full build/smoke for coordinator merge, release, or research-stage milestone handoff.
+Use one batch command or run smaller mutating commands sequentially. Mutations share the active interaction backend and refuse stale writes. Accept an internally verified compact result without repeating validate/context; otherwise verify changed scope. Coordinator merge, release, or research-stage closeout uses one `coord handoff`, not a worker-run full build/smoke tail.
 
 ```sh
 research-cockpit apply-graph-plan --print-schema
@@ -137,7 +137,7 @@ research-cockpit update-status --root research_cockpit --id option_x --status ac
 ```
 
 Use only statuses accepted by validation for that node type.
-`update-status` rebuilds dashboards by default; normally pass `--no-build`. Accept an internally verified compact result without another check; otherwise validate the reported changed scope once. Build only when generated dashboards are needed or at milestone handoff. `--summary` still replaces the node summary for compatibility, so preview with `--dry-run --show-diff` before using it on nodes that already have summaries. Dry-run validates the active interaction backend before previewing. For content-only summary changes, prefer `update-node-fields --summary`.
+`update-status` rebuilds dashboards by default; normally pass `--no-build`. Accept an internally verified compact result without another check; otherwise validate the reported changed scope once. Build only when generated dashboards are explicitly needed; `coord handoff` builds internally. `--summary` still replaces the node summary for compatibility, so preview with `--dry-run --show-diff` before using it on nodes that already have summaries. Dry-run validates the active interaction backend before previewing. For content-only summary changes, prefer `update-node-fields --summary`.
 
 Status meanings:
 

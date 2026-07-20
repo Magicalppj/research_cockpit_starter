@@ -243,6 +243,8 @@ ROLE_COMMAND_MODULES: dict[str, dict[str, str]] = {
         "report": "review_report",
     },
     "coord": {
+        "handoff": "coord_handoff",
+        "overview": "coord_overview",
         "review": "coord_review",
     },
 }

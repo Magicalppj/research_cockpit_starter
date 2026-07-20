@@ -4,7 +4,13 @@ Load this playbook only when decomposing, assigning, reviewing, deciding, or han
 
 ## Bounded Triage
 
-Use coordinator bootstrap only when the target is unknown or global triage is required. For a known assignment, open its Work Packet; for a known node, use bounded execution context. Do not chain these reads.
+Use the indexed Coordination Snapshot for unknown-target or global assignment triage:
+
+```sh
+research-cockpit coord overview --root <data-root> --json --compact --limit 20
+```
+
+Filter by status, kind, agent, root node, or review status. Continue with the returned `next_page`; poll a stable query with `--since <revision>`. For a known assignment, open its Work Packet; for a known node, use bounded execution context. Do not chain these reads or substitute full bootstrap.
 
 Create assignments with an objective, subtree scope, dependencies, captured inputs, success criteria, deliverables, and review policy. Keep canonical-root commits short; workers may compute in parallel but same-root truth mutations remain serialized.
 
@@ -17,6 +23,12 @@ Use `research-cockpit commands --role coordinator --name <command> --json --comp
 - Review updates review status and refs; it does not rewrite producer evidence.
 - Prefer bounded summaries and selected evidence refs over dashboard rebuilds or global scans.
 - Successful internally verified mutations do not get a mechanical validate/context/build/smoke tail.
+
+## Synthesis Assignments
+
+A synthesis assignment is opened with the normal `work open` path. Its Work Packet embeds a bounded Synthesis Packet derived only from captured dependency result revisions and selected evidence refs. Missing, unsatisfied, or changed dependencies appear as explicit missing/stale warnings; do not scan unrelated accepted history to fill them.
+
+Candidate options are explicit metadata when supplied, otherwise the selected dependency root nodes. Close synthesis work through the same assignment-scoped `work close` transaction.
 
 ## Apply A Review
 
@@ -38,13 +50,30 @@ This command updates only producer review metadata; it does not rewrite the prod
 
 ## Milestone Handoff
 
-`milestone_handoff` means coordinator merge, release, or research-stage closeout. Only this boundary runs the full gate once:
+`milestone_handoff` means coordinator merge, release, or research-stage closeout. Create the input once; inspect the schema only when needed:
+
+```yaml
+schema_version: coord_handoff_v1
+operation_id: handoff_release_001
+kind: release
+summary: Release candidate handoff
+strict_lifecycle: true
+allow:
+  pending_reviews: false
+  stale_inputs: false
+  active_leases: false
+  unresolved_blockers: false
+```
 
 ```sh
-research-cockpit validate --root <data-root> --json
-research-cockpit build --root <data-root>
-research-cockpit smoke --root <data-root> --json --progress
+research-cockpit coord handoff --root <data-root> --file <handoff.yaml> --json --compact --progress
 ```
+
+This one command captures the target revision, runs full validation once, reuses that state for one dashboard build and one compact smoke, computes Coordination Snapshot blockers, rechecks truth, and commits one `handoffs/*.yaml` report plus audit event. It does not hold the canonical mutation lock while gates run.
+
+Defaults block pending reviews, stale inputs, active leases, unresolved/expired work, and scope overlaps. Set an `allow` value only as an explicit coordinator policy decision. A blocked report is durable: after state changes, use a new operation id. Reuse the same operation id only for an exact retry of the same request; mismatch is rejected before gates run.
+
+Do not run standalone full `validate`, `build`, or `smoke` before this command. Those routes remain for diagnosis, not the milestone recipe.
 
 An ordinary worker or reviewer completion is not a milestone handoff. Use `maintenance.md` only for explicit migration, repair, retention, or repository hygiene work.
 

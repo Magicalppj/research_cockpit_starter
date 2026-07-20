@@ -20,6 +20,7 @@ SUPPORTED_OPERATIONS = (
     "context_execution_unchanged",
     "work_packet",
     "work_packet_unchanged",
+    "coord_overview",
     "node_context_compact",
     "mutation",
     "interaction_append",
@@ -250,6 +251,17 @@ def _command_for(
             root,
             assignment_id,
             since_revision=_current_work_packet_revision(root, assignment_id),
+        )
+    if operation == "coord_overview":
+        return _cli(
+            "coord",
+            "overview",
+            "--root",
+            root,
+            "--limit",
+            "20",
+            "--json",
+            "--compact",
         )
     if operation == "node_context_compact":
         return _cli("node-context", "--root", root, "--id", changed_node, "--compact", "--json")

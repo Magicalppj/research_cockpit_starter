@@ -18,6 +18,7 @@ def ordered_tab_keys(text: dict[str, str]) -> list[str]:
     keys = [
         "research_graph",
         "dashboard",
+        "coordination",
         "baselines",
         "branch_comparison",
         "decision_trace",

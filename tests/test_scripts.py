@@ -4473,7 +4473,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("recommended_next_steps", payload["node_context"])
         self.assertIn("--changed-node option_t5", payload["node_context"]["worker_verify_commands"][0])
         self.assertIn("smoke", payload["node_context"]["worker_verify_commands"][2])
-        self.assertIn("research-cockpit build", payload["node_context"]["final_handoff_commands"][1])
+        self.assertEqual(len(payload["node_context"]["final_handoff_commands"]), 1)
+        self.assertIn("research-cockpit coord handoff", payload["node_context"]["final_handoff_commands"][0])
         self.assertIn("validate_changed", payload["node_context"]["command_drafts"])
         self.assertNotIn("validate", payload["node_context"]["command_drafts"])
         self.assertNotIn("build", payload["node_context"]["command_drafts"])
@@ -5050,7 +5051,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("Do not parallelize mutating commands", rules)
         self.assertEqual(batch_mode["finish_commands"], [])
         self.assertIn("--changed-node <node_id>", " ".join(batch_mode["worker_verify_commands"]))
-        self.assertIn("smoke --root <root> --json", " ".join(batch_mode["final_handoff_commands"]))
+        self.assertIn("coord handoff --root <root>", " ".join(batch_mode["final_handoff_commands"]))
         skeletons = " ".join(payload["mutation_guidance"]["command_skeletons"])
         self.assertLessEqual(len(payload["mutation_guidance"]["command_skeletons"]), 8)
         self.assertIn("--start-experiment", skeletons)
@@ -8586,7 +8587,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             by_name["complete-experiment"]["batch_policy"]["worker_verify_commands"],
         )
         self.assertIn(
-            "research-cockpit smoke --root <root> --json --progress",
+            "research-cockpit coord handoff --root <root> --file handoff.yaml --json --compact --progress",
             by_name["complete-experiment"]["batch_policy"]["final_handoff_commands"],
         )
         self.assertIn("evidence_path", by_name["complete-experiment"]["fields_supported"])
@@ -8781,7 +8782,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("work open", worker_text)
         self.assertIn("--since <revision>", worker_text)
         self.assertIn("milestone_handoff", coordinator_text)
-        self.assertIn("smoke --root <data-root> --json --progress", coordinator_text)
+        self.assertIn(
+            "coord handoff --root <data-root> --file <handoff.yaml> --json --compact --progress",
+            coordinator_text,
+        )
+        self.assertNotIn("validate --root <data-root> --json\nresearch-cockpit build", coordinator_text)
 
         readme_text = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
         integrations_text = (SKILL_ROOT / "capabilities" / "integrations.md").read_text(encoding="utf-8")
@@ -8964,6 +8969,8 @@ class ScriptBehaviorTests(unittest.TestCase):
             "review open",
             "review report",
             "coord review",
+            "coord overview",
+            "coord handoff",
         }
         self.assertEqual(
             command_names,
@@ -9587,7 +9594,8 @@ class ScriptBehaviorTests(unittest.TestCase):
                 )
                 self.assertIn("Dry-run did not write", payload["verification_note"])
                 self.assertIn("final_handoff_commands", payload)
-                self.assertIn("research-cockpit build", payload["final_handoff_commands"][1])
+                self.assertEqual(len(payload["final_handoff_commands"]), 1)
+                self.assertIn("research-cockpit coord handoff", payload["final_handoff_commands"][0])
                 self.assertNotIn("before", payload)
                 self.assertNotIn("after", payload)
 

@@ -2,15 +2,16 @@
 
 ## Source Of Truth
 
-- Treat the project data root `research_cockpit/agents/*.yaml`, `research_cockpit/assignments/*.yaml`, `research_cockpit/coordinator_state.yaml`, `research_cockpit/current_state.yaml`, `research_cockpit/graph/nodes/*.yaml`, `research_cockpit/graph/interaction_events/**`, `research_cockpit/runs/*.yaml`, `research_cockpit/gate_results/*.yaml`, `research_cockpit/gate_results/*.json`, and `research_cockpit/artifact_records/*.yaml` as the truth source for structured state and append-only interaction history.
+- Treat the project data root `research_cockpit/agents/*.yaml`, `research_cockpit/assignments/*.yaml`, `research_cockpit/coordinator_state.yaml`, `research_cockpit/current_state.yaml`, `research_cockpit/graph/nodes/*.yaml`, `research_cockpit/graph/interaction_events/**`, `research_cockpit/runs/*.yaml`, `research_cockpit/gate_results/*.yaml`, `research_cockpit/gate_results/*.json`, `research_cockpit/artifact_records/*.yaml`, and `research_cockpit/handoffs/*.yaml` as the truth source for structured state and append-only interaction history.
 - Treat `research_cockpit/assignments/*.yaml` as the worker-local cursor and next-action source in multi-agent sessions.
 - Treat `research_cockpit/coordinator_state.yaml` as coordinator/UI selection state.
 - Treat `research_cockpit/current_state.yaml` as legacy/coordinator compatibility state, not the default worker cursor.
 - Treat `research_cockpit/artifacts/*` as long-lived evidence payloads, not generated dashboard context.
 - Treat `research_cockpit/artifact_records/*.yaml` as lightweight structured evidence metadata, not generated dashboard context.
 - Treat `research_cockpit/artifact_migrations/*.yaml` as artifact demotion audit reports written by `compact-artifacts`.
+- Treat `research_cockpit/handoffs/*.yaml` as immutable operation-id-scoped milestone reports. Retry the same request with the same operation id; use a new operation id after truth or blocker state changes.
 - Treat `graph/interaction_log.yaml` as the immutable legacy interaction prefix after `graph/interaction_events/manifest.json` exists. New events append under `graph/interaction_events/`; use `migrate-interaction-log` instead of editing either backend.
-- Treat `research_cockpit/dashboards/*` as generated context. Regenerate it only when a consumer needs fresh dashboard context or before coordinator/release/milestone handoff; ordinary worker verification does not require `build`.
+- Treat `research_cockpit/dashboards/*` as generated context. Regenerate it only when a consumer explicitly needs fresh dashboard context; `coord handoff` performs its own single build and ordinary worker verification does not require `build`.
 - Do not infer current state from Markdown notes. Notes are long-form supporting records.
 
 ## Plugin Boundary
@@ -29,7 +30,7 @@ Load exactly one role playbook, then choose one startup path instead of chaining
 1. If explicitly assigned a review assignment, run `research-cockpit review open --root <data-root> --assignment <review_id> --compact --json`; do not separately open producer context.
 2. If assigned worker execution, run `research-cockpit work open --root <data-root> --assignment <assignment_id> --compact --json`; reuse `--since <revision>` for polling.
 3. If assigned a specific node id without an assignment id, run `research-cockpit context --root <data-root> --id <node_id> --view execution --compact --json`.
-4. If the target is unknown or the task is global triage, run `research-cockpit bootstrap --root <data-root> --coordinator --json`.
+4. If the target is unknown or the task is global assignment triage, run `research-cockpit coord overview --root <data-root> --json --compact --limit 20`; use its filters, `next_page`, and `--since` revision instead of full bootstrap.
 5. If continuing an older minimal handoff, use `research-cockpit node-context --root <data-root> --id <node_id> --compact --json`.
 6. Read `<data-root>/dashboards/agent_context_pack.json` and `<data-root>/dashboards/focus_context_pack.json` only when generated dashboard context or a broad focus scan is needed.
 7. Use bounded search such as `research-cockpit search --root <data-root> --query "..." --json --limit 5 --source node` when more context is needed.
@@ -69,15 +70,16 @@ research-cockpit context --root <data-root> --id <node_id> --view execution --co
 
 For role-facade mutations, accept `verification.status: internally_verified` with `additional_verification_required: false`; compatibility mutations may report `verified: true` with the same flag false. Do not run another validate/context cycle after either receipt. Otherwise use only the reported changed scope.
 
-Before coordinator merge, release, or research-stage closeout (`milestone_handoff`), run the full gate. An ordinary agent turn is not a milestone handoff:
+Before coordinator merge, release, or research-stage closeout, create one `coord_handoff_v1` input and run the single milestone entry point:
 
 ```sh
-research-cockpit validate --root <data-root> --json
-research-cockpit build --root <data-root>
-research-cockpit smoke --root <data-root> --json --progress
+research-cockpit coord handoff --print-schema
+research-cockpit coord handoff --root <data-root> --file <handoff.yaml> --json --compact --progress
 ```
 
-Default root `smoke` is compact for large roots. Use `smoke --scope changed --id <node_id> --json --progress` for one-node worker checks, and use `--full` only when explicitly diagnosing the older full subprocess workflow. `--progress` emits JSON lines to stderr; stdout remains a single machine-readable JSON payload.
+`coord handoff` captures one root revision, reuses one full validation state for build and compact smoke, checks lifecycle blockers, and writes one revision-bound report. Do not run standalone full `validate`, `build`, or `smoke` before it. A blocked report is durable; resolve blockers and retry with a new operation id. An exact transport retry reuses the original operation id and receipt.
+
+Standalone full `validate`, `build`, and `smoke` remain diagnostic commands. Default root `smoke` is compact for large roots. Use `smoke --scope changed --id <node_id> --json --progress` for one-node diagnostics, and use `--full` only when explicitly diagnosing the older full subprocess workflow. `--progress` emits JSON lines to stderr; stdout remains a single machine-readable JSON payload.
 
 ## Environment
 

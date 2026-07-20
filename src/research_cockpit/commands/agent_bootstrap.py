@@ -21,9 +21,7 @@ BATCH_WORKER_VERIFY_COMMANDS = [
     "research-cockpit context --root <root> --id <node_id> --view execution --compact --json",
 ]
 BATCH_FINAL_HANDOFF_COMMANDS = [
-    "research-cockpit validate --root <root> --json",
-    "research-cockpit build --root <root>",
-    "research-cockpit smoke --root <root> --json --progress",
+    "research-cockpit coord handoff --root <root> --file handoff.yaml --json --compact --progress",
 ]
 ASSIGNMENT_CURSOR_EXAMPLE_TEMPLATES = [
     'research-cockpit set-cursor --root <root>{scope} --node <node_id> --next-action "..." --no-build',
@@ -294,9 +292,9 @@ def _mutation_guidance(
         "current_focus_node": focus_node_id,
         "current_best_option": current_best_option,
         "pause_candidate_options": sorted(pause_candidates),
-        "batching": "Run known low-risk mutations directly with --no-build; canonical writes are serialized by the runtime lock. Use dry-run for high-risk or file-based batch changes. Accept compact results with verified=true and additional_verification_required=false; otherwise verify only changed scope. Full validate/build/smoke belongs to the coordinator or milestone handoff.",
+        "batching": "Run known low-risk mutations directly with --no-build; canonical writes are serialized by the runtime lock. Use dry-run for high-risk or file-based batch changes. Accept compact results with verified=true and additional_verification_required=false; otherwise verify only changed scope. A coordinator runs milestone handoff gates once through coord handoff.",
         "multi_agent_batch_mode": {
-            "default": "Agents compute in parallel and submit mutations to the canonical root, where runtime locks serialize commits and assignment leases reject conflicting ownership. Compact writes with verified=true and additional_verification_required=false are internally verified; only other writes need changed-scope verification. Full validate/build/smoke belongs to a coordinator or milestone handoff.",
+            "default": "Agents compute in parallel and submit mutations to the canonical root, where runtime locks serialize commits and assignment leases reject conflicting ownership. Compact writes with verified=true and additional_verification_required=false are internally verified; only other writes need changed-scope verification. A coordinator runs milestone handoff gates once through coord handoff.",
             "rules": [
                 "Parallelize compute across assignments; let runtime locks serialize canonical-root commits and handle explicit lease or revision conflicts.",
                 "Use commands --json --compact --name <command> only when a command or flag is unknown; do not rediscover the catalog every turn.",

@@ -10,13 +10,17 @@ from research_cockpit.agent_state import (
     assignment_contract_errors,
     load_assignment,
 )
-from research_cockpit.baselines import resolve_effective_baseline
+from research_cockpit.baselines import (
+    compact_effective_baseline,
+    resolve_effective_baseline,
+)
 from research_cockpit.commands._runtime import stable_payload_revision
 from research_cockpit.public_contracts import parse_public_contract
 from research_cockpit.root_snapshot import (
     indexed_root_snapshot_source,
     load_indexed_root_snapshot,
 )
+from research_cockpit.synthesis import build_synthesis_packet_for_assignment
 from research_cockpit.types import ValidationError
 from research_cockpit.validation_index import (
     is_index_schema_compatible,
@@ -114,30 +118,6 @@ def _lease_projection(
     return projection, state
 
 
-def _compact_baseline(effective: dict[str, Any]) -> dict[str, Any]:
-    def ref(value: Any) -> dict[str, Any] | None:
-        if not isinstance(value, dict) or not value.get("id"):
-            return None
-        return {
-            key: value[key]
-            for key in ("id", "type", "status")
-            if value.get(key) not in (None, "")
-        }
-
-    return {
-        "source_node_id": str(effective.get("source_node_id") or ""),
-        "source_kind": str(effective.get("source_kind") or "none"),
-        "option": ref(effective.get("option")),
-        "decision": ref(effective.get("decision")),
-        "artifacts": [
-            item
-            for item in (ref(value) for value in effective.get("artifacts", []) or [])
-            if item is not None
-        ][:WORK_PACKET_COLLECTION_LIMIT],
-        "reason": _text(effective.get("reason")),
-    }
-
-
 def _baseline_revision(
     root: Path,
     assignment: AssignmentRecord,
@@ -174,7 +154,7 @@ def _baseline_revision(
         assignment.current_node,
         snapshot.current,
     )
-    compact = _compact_baseline(effective)
+    compact = compact_effective_baseline(effective)
     revision = (
         None
         if compact["source_kind"] == "none"
@@ -625,6 +605,8 @@ def build_work_packet_for_assignment(
         "runtime": runtime,
         "changed": True,
     }
+    if assignment.kind == "synthesis":
+        packet["synthesis_packet"] = build_synthesis_packet_for_assignment(root, assignment)
     _fit_budget(packet)
     parse_public_contract(packet)
     if _source_revision(root, assignment, index, lease_state=lease_state) != source_revision:

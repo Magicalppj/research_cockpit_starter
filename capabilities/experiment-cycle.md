@@ -140,6 +140,6 @@ research-cockpit validate --root <data-root> --changed-node <node_id> --json
 research-cockpit context --root <data-root> --id <node_id> --view execution --compact --json
 ```
 
-If validation falls back, follow only its `fallback.recommended_commands` and retry. Full validate/build/root smoke belongs to coordinator merge, release, or research-stage milestone handoff.
+If validation falls back, follow only its `fallback.recommended_commands` and retry. Coordinator merge, release, or research-stage closeout uses one `coord handoff`; standalone full validate/build/root smoke remains diagnostic.
 
 On a stale-write conflict, reread one bounded assignment/execution context and retry the rejected transaction with a new operation id. Agents may compute in parallel; the runtime serializes short truth commits. Do not submit duplicate mutations for the same assignment concurrently.

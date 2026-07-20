@@ -383,9 +383,7 @@ def demote_artifact_node(
         "notes": ["No payload files were deleted by artifact compaction."],
         "verify_commands": [f"research-cockpit validate --root {root} --json"],
         "final_handoff_commands": [
-            f"research-cockpit validate --root {root} --json",
-            f"research-cockpit build --root {root}",
-            f"research-cockpit smoke --root {root} --json --progress",
+            f"research-cockpit coord handoff --root {root} --file handoff.yaml --json --compact --progress",
         ],
     }
     if show_diff:

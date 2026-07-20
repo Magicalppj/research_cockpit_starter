@@ -8,6 +8,7 @@ from typing import Any
 
 from research_cockpit.cli_progress import progress_traced
 from research_cockpit.commands._runtime import json_safe
+from research_cockpit.commands.validate_cockpit import FullValidationState
 from research_cockpit.paths import default_data_root
 import json
 
@@ -331,13 +332,21 @@ def _build_dashboard_payload(
     profiler: _BuildProfiler | None = None,
     include_resource_search: bool = True,
     resource_scan_settings: ResourceScanSettings = DEFAULT_RESOURCE_SCAN_SETTINGS,
+    validation_state: FullValidationState | None = None,
 ) -> dict[str, object]:
-    nodes = _profiled(profiler, "load_nodes", lambda: load_nodes(root))
-    current = _profiled(profiler, "load_current_state", lambda: load_yaml(root / "current_state.yaml"))
-    explicit_edges = _profiled(profiler, "load_explicit_edges", lambda: load_explicit_edges(root))
-    _profiled(profiler, "validate", lambda: validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True))
-    assignments = _profiled(profiler, "load_assignments", lambda: load_assignments(root))
-    runs = _profiled(profiler, "load_runs", lambda: load_runs(root))
+    if validation_state is None:
+        nodes = _profiled(profiler, "load_nodes", lambda: load_nodes(root))
+        current = _profiled(profiler, "load_current_state", lambda: load_yaml(root / "current_state.yaml"))
+        explicit_edges = _profiled(profiler, "load_explicit_edges", lambda: load_explicit_edges(root))
+        _profiled(profiler, "validate", lambda: validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True))
+        assignments = _profiled(profiler, "load_assignments", lambda: load_assignments(root))
+        runs = _profiled(profiler, "load_runs", lambda: load_runs(root))
+    else:
+        nodes = validation_state.nodes
+        current = validation_state.current
+        explicit_edges = validation_state.explicit_edges
+        assignments = validation_state.assignments
+        runs = validation_state.runs
     topology = _profiled(profiler, "build_graph_topology", lambda: GraphTopology.from_nodes(nodes))
     graph_json = _profiled(
         profiler,
@@ -456,11 +465,34 @@ def _build_dashboard_payload(
 
 
 def build_dashboard(root: Path = ROOT) -> list[Path]:
-    return list(_build_dashboard_payload(root)["outputs"])
+    with mutation_lock(root, lock_name=".dashboard-build.lock"):
+        return list(_build_dashboard_payload(root)["outputs"])
+
+
+def build_dashboard_from_validated_state(
+    root: Path,
+    state: FullValidationState,
+    *,
+    include_resource_search: bool = True,
+) -> dict[str, Any]:
+    with mutation_lock(root, lock_name=".dashboard-build.lock"):
+        build_payload = _build_dashboard_payload(
+            root,
+            include_resource_search=include_resource_search,
+            validation_state=state,
+        )
+    outputs = list(build_payload["outputs"])
+    counts = dict(build_payload["counts"])
+    return {
+        "ok": True,
+        "root": str(root),
+        "node_count": counts["node_count"],
+        "written_files": [str(output) for output in outputs],
+    }
 
 
 def build_affected_dashboard(root: Path, *, node_id: str, json_output: bool = False) -> dict[str, Any]:
-    with mutation_lock(root):
+    with mutation_lock(root), mutation_lock(root, lock_name=".dashboard-build.lock"):
         nodes = load_nodes(root)
         if node_id not in nodes:
             raise ValueError(f"changed node does not exist: {node_id!r}")
@@ -528,7 +560,7 @@ def build_dashboard_once(
 ) -> dict:
     resolved_profile_output = _resolve_profile_output(root, profile_output) if profile_output else None
     profile_enabled = profile or resolved_profile_output is not None
-    with mutation_lock(root):
+    with mutation_lock(root), mutation_lock(root, lock_name=".dashboard-build.lock"):
         profiler = _BuildProfiler() if profile_enabled else None
         build_payload = _build_dashboard_payload(
             root,

@@ -29,7 +29,7 @@ The execution view contains only the node status/next action, assignment boundar
 3. Unknown target or global triage:
 
 ```sh
-research-cockpit bootstrap --root research_cockpit --coordinator --json
+research-cockpit coord overview --root research_cockpit --json --compact --limit 20
 ```
 
 4. Older minimal known-node handoff:
@@ -57,7 +57,7 @@ Use filtered command discovery when you only need one workflow surface:
 
 ```sh
 research-cockpit commands --role worker --json --compact --name context
-research-cockpit commands --role coordinator --json --compact --name bootstrap
+research-cockpit commands --role coordinator --json --compact --name "coord overview"
 ```
 
 Role playbooks provide the default path. Use `commands --role <role> --json --compact --name <command>` only when one operation contract is missing; the detailed lookup includes batching and verification policy.

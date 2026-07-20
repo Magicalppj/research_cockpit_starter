@@ -28,12 +28,15 @@ Workflow/domain layer
   assignment_leases.py
   assignment_runs.py
   work_packets.py
+  coordination.py
+  synthesis.py
   assignment_results.py
   assignment_reviews.py
   evidence_bundles.py
   evidence_staging.py
   run_closeout.py
   operation_receipts.py
+  milestone_handoffs.py
   mutation_runtime.py
   root_snapshot.py
   validation_index.py
@@ -74,7 +77,7 @@ Dependency direction should generally flow downward. For example, `commands/*` m
 - `commands/*.py`: command-specific argument parsing and workflow orchestration.
 - `commands/_runtime.py`: shared command helpers for `load_validated_state(...)` and `finish_mutation(...)`.
 - `commands/_assignment_scope_cli.py`: shared `--assignment` / `--coordinator` CLI flags and structured assignment-scope error output.
-- `ui/`: researcher-facing Streamlit app, graph rendering wrappers, text labels, and view formatting helpers.
+- `ui/`: researcher-facing Streamlit app, graph rendering wrappers, text labels, and view formatting helpers. The Coordination page delegates to `coordination.py` and must not duplicate assignment readiness or overlap semantics.
 
 Commands are the public write boundary. A mutating command should validate, prepare candidate data, write truth-source files, append through the active interaction backend via `interaction_log.py`, and optionally rebuild dashboard/context output. Dry-run paths must not write truth sources, interaction history, or generated dashboards.
 
@@ -88,12 +91,15 @@ The root `SKILL.md` is only a role router. Default agent instructions live in `w
 - `assignment_runs.py`: composes lease renewal with the existing create-run domain transaction for `work start`.
 - `work_packets.py`: bounded assignment projections, dependency/input readiness, lease state, stable revisions, and unchanged polling.
 - `assignment_results.py`: validates `work_close_v1`, performs operation replay checks, stages optional final evidence, and delegates one atomic assignment closeout.
+- `coordination.py`: builds the indexed, revisioned, paginated Coordination Snapshot and its shared internal state projection without loading the full graph on a fresh index.
+- `synthesis.py`: projects revision-bound selected dependency Evidence Bundles into a bounded Synthesis Packet; it does not scan unrelated accepted history.
 - `assignment_reviews.py`: builds bounded review packets, records reviewer-only Evidence Bundles, and applies revision-bound coordinator verdicts without rewriting producer results.
 - `evidence_bundles.py`: constructs and validates bounded work/review result contracts and their stable revisions.
 - `evidence_staging.py`: copies and hashes final payloads outside the truth commit lock, then prepares artifact-record changes for atomic closeout.
 - `run_closeout.py`: owns the combined run, gate, finding, artifact record, Evidence Bundle, experiment, cursor, and lease transaction.
 - `operation_receipts.py`: normalized operation hashes, durable receipt lookup from interaction events, and the derived incremental operation index.
 - `mutation_runtime.py`: optimistic multi-file commits, rollback, operation-event append, and post-commit derived-index patching.
+- `milestone_handoffs.py`: captures a root truth revision, reuses one full validation state across build and compact smoke, evaluates coordination blockers, and commits an immutable operation-id-scoped handoff report.
 - `root_snapshot.py`: targeted graph snapshots. `load_indexed_root_snapshot(...)` is the no-full-fallback entry point for latency-bounded reads.
 - `validation_index.py`: generated graph/sidecar signatures and targeted lookup maps used by incremental validation and read models.
 - `node_onboarding.py`: builds read-only node handoff payloads for `node-context`.
@@ -136,7 +142,9 @@ These modules should remain free of command, UI, and dashboard dependencies.
 - Use `assignment_scope.py` for assignment-scoped mutation boundaries.
 - Use `work_packets.py` for assignment-facing read projections and revision polling.
 - Use `assignment_leases.py` and `assignment_runs.py` for lease-aware worker mutations.
-- Use `operation_receipts.py` for operation idempotency; do not create per-operation receipt files.
+- Use `coordination.py` for coordinator/UI portfolio projections and `synthesis.py` for selected-evidence synthesis assignments.
+- Use `milestone_handoffs.py` only for coordinator merge, release, or research-stage closeout gates.
+- Use `operation_receipts.py` for ordinary mutation idempotency; do not create per-operation receipt files. `handoffs/*.yaml` is the deliberate exception because a milestone report is durable research/release truth, not only a retry receipt.
 - Use `assignment_results.py` and `run_closeout.py` for assigned terminal mutations.
 - Use `assignment_reviews.py` for reviewer/coordinator review lifecycle operations.
 - Use `evidence_bundles.py` and `evidence_staging.py` for bounded result contracts and final payload staging.
@@ -167,6 +175,7 @@ Truth-source data lives in:
 - `<data-root>/artifact_records/*.yaml` for lightweight evidence metadata created by record-only artifact ingest
 - `<data-root>/artifact_migrations/*.yaml` for artifact demotion audit reports
 - `<data-root>/artifacts/**` for long-lived evidence payloads and ingest manifests
+- `<data-root>/handoffs/*.yaml` for immutable operation-id-scoped milestone reports and revision-bound gate summaries
 
 Runtime access rules:
 
@@ -174,8 +183,11 @@ Runtime access rules:
 - `operation_receipts.py` derives `<data-root>/dashboards/operation_index.json` from immutable interaction events; a missing or stale index rebuilds from events and never becomes truth.
 - `mutation_runtime.py` owns targeted preflight, optimistic file checks, atomic multi-file transactions, rollback, and validation-index patching.
 - `validation_index.py` is a derived acceleration index; missing, incompatible, or stale indexes must fall back to full validation and return explicit refresh commands.
+- `coordination.py` consumes the assignment projection in the validation index when fresh and performs an explicit assignment-file fallback when stale; UI and CLI use this same builder.
 - `interaction_log.py` owns both legacy YAML compatibility and the JSONL event backend. Commands must append through this module and must not rewrite interaction history.
 - `run_closeout.py` owns both legacy `run_closeout_v1` and facade `work_close_v1` terminal transactions; final payload copy/hash occurs before lock acquisition, while artifact move and truth writes commit together.
+- `milestone_handoffs.py` never holds the canonical mutation lock during validate/build/smoke. It checks the target revision before and inside the short report transaction; `handoffs/` is excluded from the target revision to avoid a self-referential receipt.
+- `commands/build_dashboard.py` uses the derived `.dashboard-build.lock` for generated files. A handoff may therefore build outside the canonical truth lock while same-root dashboard writers remain serialized.
 
 Generated output lives in `<data-root>/dashboards/` and can be rebuilt with:
 
@@ -183,7 +195,9 @@ Generated output lives in `<data-root>/dashboards/` and can be rebuilt with:
 research-cockpit build --root <data-root>
 ```
 
-Generated dashboard files should not become the source of truth for commands or domain logic. The Streamlit UI may use fresh generated dashboard files as a read-through cache for refresh speed, but it must fall back to truth-source builders and surface a stale warning when generated files are missing, malformed, or older than truth-source state.
+Generated dashboard files should not become the source of truth for commands or domain logic. The Streamlit graph views may use fresh generated dashboard files as a read-through cache for refresh speed, but they must fall back to truth-source builders and surface a stale warning when generated files are missing, malformed, or older than truth-source state.
+
+A milestone caller invokes `coord handoff` directly and must not run standalone full validate/build/smoke first. The orchestrator performs one sequence and emits one bounded receipt; standalone commands remain diagnostic entry points.
 
 ## Adding A New Workflow
 

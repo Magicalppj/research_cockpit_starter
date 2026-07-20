@@ -29,6 +29,7 @@ LOCAL_PROGRESS_MODULES = {
     "build_dashboard",
     "complete_run",
     "context",
+    "coord_handoff",
     "ingest_artifact",
     "ingest_gate_result",
     "node_context",

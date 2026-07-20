@@ -23,4 +23,4 @@ Do not request broad discovery at startup. Read `capabilities/maintenance.md` on
 - Verify resolved paths before recursive worktree or temporary-fixture cleanup.
 - A repair or migration receipt must identify changed files and recovery actions.
 
-Full validate/build/smoke runs once only for release or `milestone_handoff`. Ordinary maintenance audits and dry-runs do not trigger that gate.
+Release or `milestone_handoff` runs once through coordinator `coord handoff`; do not precede it with standalone full gates. Ordinary maintenance audits and dry-runs do not trigger that orchestrator.

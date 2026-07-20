@@ -21,7 +21,7 @@ Use `--dry-run --json --show-diff` before evidence/checklist repair when you nee
 
 ## Repair Hints
 
-The UI maps blocking checklist failures to CLI or YAML-field hints. Structural failures such as invalid parents should be repaired in YAML only after validating the intended graph relationship. After a structural YAML repair, run changed-scope `research-cockpit validate`; run `build` only when generated dashboards are needed or at milestone handoff.
+The UI maps blocking checklist failures to CLI or YAML-field hints. Structural failures such as invalid parents should be repaired in YAML only after validating the intended graph relationship. After a structural YAML repair, run changed-scope `research-cockpit validate`; run `build` only when generated dashboards are needed because `coord handoff` builds internally.
 
 ## Promotion
 

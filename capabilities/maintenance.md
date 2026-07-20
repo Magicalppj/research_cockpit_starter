@@ -69,7 +69,7 @@ research-cockpit worktree-closeout --root research_cockpit --repo . --worktree .
 8. Record findings and any follow-up work.
 9. Close or move the assignment cursor when the current node is terminal.
 10. Only then remove the worktree and clean up the temporary branch.
-11. Read the compact verification result. Skip repeated validate/context when `verified: true` and `additional_verification_required: false`; otherwise use `changed-scope` verification only. Full validate/build/root smoke runs only at coordinator merge, release, or research-stage milestone handoff.
+11. Read the compact verification result. Skip repeated validate/context when `verified: true` and `additional_verification_required: false`; otherwise use `changed-scope` verification only. A coordinator merge, release, or research-stage closeout runs one `coord handoff`; do not run standalone full gates first.
 
 `worktree-closeout` is always a planner. It reports blockers, Research Cockpit updates still needed, and shell command drafts for human review. It does not delete worktrees, delete branches, merge branches, or edit YAML.
 

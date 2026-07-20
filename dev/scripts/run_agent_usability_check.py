@@ -295,7 +295,17 @@ def agent_a_cold_start_install(skill_path: Path, python: str, parent: Path) -> d
         checks.extend([
             _run_command(_cli(python, "init", "--root", "research_cockpit"), cwd=research_repo, env=command_env),
             _run_command(
-                _cli(python, "bootstrap", "--root", "research_cockpit", "--coordinator", "--json"),
+                _cli(
+                    python,
+                    "coord",
+                    "overview",
+                    "--root",
+                    "research_cockpit",
+                    "--json",
+                    "--compact",
+                    "--limit",
+                    "20",
+                ),
                 cwd=research_repo,
                 env=command_env,
             ),
@@ -304,13 +314,13 @@ def agent_a_cold_start_install(skill_path: Path, python: str, parent: Path) -> d
     files_changed = _changed_files(repo_before, _file_manifest(research_repo))
     unexpected = _unexpected_writes(files_changed)
     plugin_changed_after_install = _changed_files(plugin_after_install, _file_manifest(plugin_path))
-    bootstrap = checks[-1].get("json") if len(checks) >= 3 and isinstance(checks[-1].get("json"), dict) else {}
+    overview = checks[-1].get("json") if len(checks) >= 3 and isinstance(checks[-1].get("json"), dict) else {}
     observations = {
         "data_root": "research_cockpit",
         "plugin_root": ".agent/skills/research-cockpit",
         "init_command": "research-cockpit init --root research_cockpit",
-        "bootstrap_read_order": ["research-cockpit bootstrap --coordinator"],
-        "bootstrap_without_build": bool(bootstrap) and not any(
+        "startup_read_order": ["research-cockpit coord overview --compact --limit 20"],
+        "overview_without_build": bool(overview) and not any(
             path.startswith("research_cockpit/dashboards/") for path in files_changed
         ),
         "plugin_changed_after_install": plugin_changed_after_install,
@@ -323,7 +333,7 @@ def agent_a_cold_start_install(skill_path: Path, python: str, parent: Path) -> d
         and not unexpected
         and not plugin_changed_after_install
         and not findings
-        and observations["bootstrap_without_build"]
+        and observations["overview_without_build"]
     )
     return _case(
         "agent_a_cold_start_install",

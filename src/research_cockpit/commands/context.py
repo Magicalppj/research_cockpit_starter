@@ -309,7 +309,7 @@ def _compact_bootstrap_payload(bootstrap: dict[str, Any], focus: dict[str, Any])
             "multi_agent_batch_mode": {
                 "rules": list(batch_mode.get("rules", []) or [])[:4],
                 "worker_verify_commands": list(batch_mode.get("worker_verify_commands", []) or [])[:3],
-                "final_handoff_commands": list(batch_mode.get("final_handoff_commands", []) or [])[:3],
+                "final_handoff_commands": list(batch_mode.get("final_handoff_commands", []) or [])[:1],
             },
         },
         "top_suggestions": compact_suggestions,

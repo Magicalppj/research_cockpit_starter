@@ -62,7 +62,7 @@ Use assignment-scoped mutations. Do not mutate coordinator focus, accept decisio
 
 Read the mutation receipt. When `verification.status` is `internally_verified` with `additional_verification_required: false`, or a compatibility receipt reports `verified: true` with the same flag false, do not run another validate, context reread, build, or smoke command.
 
-When additional verification is required, run only the reported changed scope. A normal worker turn is not `milestone_handoff`; full validate/build/smoke belongs to coordinator handoff.
+When additional verification is required, run only the reported changed scope. A normal worker turn is not `milestone_handoff`; the coordinator runs its full gate through one `coord handoff` invocation.
 
 ## Conditional Recovery
 

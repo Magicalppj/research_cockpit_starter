@@ -67,12 +67,10 @@ research-cockpit validate --root research_cockpit --changed-node <node_id> --jso
 research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json
 ```
 
-If changed validation reports `fallback.used_full_validation: true`, follow its `fallback.recommended_commands` and retry. Use `smoke --scope changed --id <node_id>` only when the task needs the integrated one-node workflow. Coordinator merge, release, or research-stage milestone handoff runs the full gate once:
+If changed validation reports `fallback.used_full_validation: true`, follow its `fallback.recommended_commands` and retry. Use `smoke --scope changed --id <node_id>` only when the task needs the integrated one-node workflow. At coordinator merge, release, or research-stage closeout, run one milestone orchestrator without preceding standalone full gates:
 
 ```sh
-research-cockpit validate --root research_cockpit --json
-research-cockpit build --root research_cockpit
-research-cockpit smoke --root research_cockpit --json --progress
+research-cockpit coord handoff --root research_cockpit --file handoff.yaml --json --compact --progress
 ```
 
 Use `research-cockpit commands --json --compact --name <command>` only when a command or flag is unknown; do not rediscover the broad catalog every turn. Specialized compatibility paths remain available: `complete-experiment` for an experiment with no run record, `complete-experiments` for a true multi-experiment batch, `create-followup-experiment` for a standalone follow-up outside run closeout, and `set-cursor` for cursor-only movement. Standalone gate commands remain useful for blocking preflight or recovery before closeout.
@@ -402,6 +400,6 @@ research-cockpit validate --root research_cockpit --changed-node experiment_x --
 research-cockpit context --root research_cockpit --id experiment_x --view execution --compact --json
 ```
 
-Run full validate/build/smoke only as coordinator or milestone handoff.
+Run standalone full validate/build/smoke only for diagnosis; milestone verification uses one coordinator `coord handoff` invocation.
 
 For agent-readable success summaries, set `experiment.result_summary` in `run_closeout_v1`. Keep detailed evidence in the finding and artifact record instead of issuing another summary mutation.

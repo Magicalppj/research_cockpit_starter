@@ -449,9 +449,16 @@ def _node_worker_verify_commands(root: Path, node: ResearchNode, *, command_styl
 
 def _node_final_handoff_commands(root: Path, *, command_style: str = "console") -> list[str]:
     return [
-        _rooted_cli_command(root, "validate", "--json", command_style=command_style),
-        _rooted_cli_command(root, "build", command_style=command_style),
-        _rooted_cli_command(root, "smoke", "--json", "--progress", command_style=command_style),
+        _rooted_cli_command(
+            root,
+            "coord handoff",
+            "--file",
+            "handoff.yaml",
+            "--json",
+            "--compact",
+            "--progress",
+            command_style=command_style,
+        ),
     ]
 
 
@@ -487,11 +494,7 @@ def _node_command_drafts(
         "validate_changed": worker_verify_commands[0],
         "context_changed": worker_verify_commands[1],
         "smoke_changed": worker_verify_commands[2],
-        "final_validate": final_handoff_commands[0],
-        "final_build": final_handoff_commands[1],
-        "final_smoke": final_handoff_commands[2],
-        "validate": final_handoff_commands[0],
-        "build": final_handoff_commands[1],
+        "final_handoff": final_handoff_commands[0],
         "search_node": _rooted_cli_command(root, "search", "--query", node.id, "--json", command_style=command_style),
     }
     if node.type == "option":
@@ -767,8 +770,8 @@ def _compact_node_onboarding_context(payload: dict[str, Any], *, root: Path) -> 
         "evidence_summary": _bound_nested_lists(_compact_evidence_summary(payload)),
         "recommended_next_step": recommended_next_steps[0] if recommended_next_steps else None,
         "worker_verify_commands": list(payload.get("worker_verify_commands", []) or [])[:3],
-        "final_handoff_commands": list(payload.get("final_handoff_commands", []) or [])[:3],
-        "verification_note": "Run worker_verify_commands after local edits; reserve final_handoff_commands for coordinator merge, release, or final handoff.",
+        "final_handoff_commands": list(payload.get("final_handoff_commands", []) or [])[:1],
+        "verification_note": "Run worker_verify_commands after local edits; reserve the single final_handoff_commands entry for coordinator merge, release, or milestone handoff.",
         "command_drafts": _compact_command_drafts(payload.get("command_drafts", {}) or {}),
         "context_freshness": payload.get("context_freshness", {}) or {},
         "success_criteria_summary": _bounded_items(success_criteria, 5),

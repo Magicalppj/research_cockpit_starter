@@ -1276,6 +1276,16 @@ Measured evidence: 37 focused work-close/review/legacy round-trip tests pass (3 
 - synthesis 只加载 selected evidence refs。
 - milestone handoff 单入口执行且不重复 full gate。
 
+Implementation record (2026-07-20):
+
+- `coord overview` now reads the assignment projection from `validation_index.json`, returns revisioned pagination and bounded readiness/review/lease/overlap summaries, and is shared by the UI Coordination page before graph data is loaded.
+- The 5k-node/200-assignment fixture verifies indexed reads, a payload below 32 KiB, and a read-only `coord_overview` benchmark route.
+- Synthesis assignments embed a packet below 4 KiB using only captured dependency result revisions and their selected run/finding/artifact/gate references. If the validation index is unavailable, gate summaries are omitted with an explicit warning instead of scanning unrelated gate records.
+- `coord handoff` captures one truth revision, reuses one full validation state for build and compact smoke, computes lifecycle blockers, and commits one revision-bound report and audit event after an optimistic revision recheck. Dashboard writes use a separate derived-output lock, so full gates do not hold the canonical mutation lock.
+- Runtime guidance, current role playbooks, and command discovery now expose one milestone command rather than the old validate/build/smoke sequence.
+
+Measured evidence: the full suite passes 776 tests with 4 platform-conditioned skips in 271.206 seconds, the portable non-mutating release check passes, and `git diff --check` passes. The independent reviewer remained running for the full 10-minute review window and returned no report, so it was closed instead of retried. Main-thread five-axis review found and fixed two P1 issues with failing regression tests: commit-time truth changes now return `handoff_stale`, and synthesis no longer scans unrelated gate records when the index is unavailable.
+
 ### Phase 6: Concurrency Hardening And Storage Follow-Up
 
 目标：根据证据优化高并发瓶颈，不提前复杂化 locking。
@@ -1360,12 +1370,12 @@ Measured evidence: 37 focused work-close/review/legacy round-trip tests pass (3 
   - Verify: scope and review lifecycle tests。
   - Files: work packet/review domain、commands、tests。
 
-- [ ] T9: 实现 Coordination Snapshot 和 Synthesis Packet。
+- [x] T9: 实现 Coordination Snapshot 和 Synthesis Packet。
   - Acceptance: indexed、paginated、revisioned、bounded。
   - Verify: 5k-node/assignment fixture tests and benchmark。
   - Files: `coordination.py`、`synthesis.py`、commands/UI adapters、tests。
 
-- [ ] T10: 实现 coordinator milestone handoff。
+- [x] T10: 实现 coordinator milestone handoff。
   - Acceptance: one validate/build/smoke sequence and one receipt。
   - Verify: release fixture mutation test。
   - Files: handoff domain/command、release scripts、tests。

@@ -11,7 +11,7 @@ Research Cockpit stores structured research state under one project-local `resea
 
 Use one canonical data root. Prefer an explicit absolute `--root <data-root>` when cwd is unreliable. Project state belongs in the caller repository, never in the plugin directory. Set `RESEARCH_COCKPIT_ROOT` and, for assigned work, `RESEARCH_COCKPIT_ASSIGNMENT_ID` when repeated flags are inconvenient.
 
-Structured truth lives in nodes, assignments, runs, gates, artifact records, coordinator state, and append-only interaction events. Markdown notes and artifact payloads are supporting evidence. Generated dashboards are rebuildable views, not startup context or truth.
+Structured truth lives in nodes, assignments, runs, gates, artifact records, milestone handoffs, coordinator state, and append-only interaction events. Markdown notes and artifact payloads are supporting evidence. Generated dashboards are rebuildable views, not startup context or truth.
 
 ## Select One Role
 
@@ -38,7 +38,13 @@ Reviewer:
 research-cockpit review open --root <data-root> --assignment <review_assignment_id> --json --compact
 ```
 
-Use coordinator bootstrap only when the target is unknown and the task is global triage. Known-node work without an assignment uses bounded `context --view execution`. Do not chain packet, context, bootstrap, dashboard packs, and broad search for the same startup.
+Coordinator portfolio triage uses one bounded snapshot:
+
+```sh
+research-cockpit coord overview --root <data-root> --json --compact --limit 20
+```
+
+Known-node work without an assignment uses bounded `context --view execution`. Do not chain packet, context, overview, bootstrap, dashboard packs, and broad search for the same startup.
 
 ## Shared Invariants
 
@@ -51,7 +57,7 @@ Use coordinator bootstrap only when the target is unknown and the task is global
 - Final run output can be staged by `work close`; standalone artifact records are for earlier durability, and graph promotion requires a durable navigation reason.
 - `graph/interaction_log.yaml` becomes an immutable legacy prefix after the event manifest exists.
 - A role-facade receipt with `verification.status: internally_verified` and `additional_verification_required: false` needs no validation, reread, build, or smoke tail; legacy receipts may use `verified: true`.
-- Full validate/build/smoke runs only at `milestone_handoff`, not after an ordinary agent turn.
+- A `milestone_handoff` runs once through `coord handoff`; do not precede it with standalone full validate/build/smoke. Ordinary agent turns never run that gate.
 
 ## Progressive Discovery
 
