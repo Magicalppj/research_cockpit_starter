@@ -236,8 +236,8 @@ def _readability_findings(skill_path: Path) -> list[str]:
     readme_text = (skill_path / "README.md").read_text(encoding="utf-8", errors="ignore")
     if "--record-only --dry-run" in readme_text:
         findings.append("README.md presents the compatibility record flag as the default ingest recipe")
-    if not re.search(r"research-cockpit create-run[^\n]*--assignment <assignment_id>", readme_text):
-        findings.append("README.md worker create-run recipe omits --assignment")
+    if not re.search(r"research-cockpit work start[^\n]*--assignment <assignment_id>", readme_text):
+        findings.append("README.md worker start recipe omits --assignment")
 
     integrations_text = (skill_path / "capabilities" / "integrations.md").read_text(
         encoding="utf-8", errors="ignore"
@@ -588,11 +588,55 @@ def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict
     run_id = "run_usability_closeout"
     experiment_id = "experiment_demo_prompt_refinement"
     next_experiment_id = "experiment_demo_prompt_refinement_followup"
-    record_id = f"artifact_{experiment_id}_{run_id}"
     source = research_repo / ".agent_runs" / run_id
     source.mkdir(parents=True)
     (source / "metrics.json").write_text('{"score": 0.91}', encoding="utf-8")
-    closeout_path = research_repo / "closeout.yaml"
+    closeout_path = parent / "worker_closeout.yaml"
+    repo_before = _file_manifest(research_repo)
+    env = _package_env(plugin_path)
+    create_check = _run_command(
+        _cli(
+            python,
+            "create-run",
+            "--root",
+            str(root),
+            "--id",
+            run_id,
+            "--experiment",
+            experiment_id,
+            "--status",
+            "running",
+            "--start-experiment",
+            "--no-build",
+            "--json",
+            "--compact",
+        ),
+        cwd=research_repo,
+        env=env,
+    )
+    ingest_check = _run_command(
+        _cli(
+            python,
+            "ingest-artifact",
+            "--root",
+            str(root),
+            "--node",
+            experiment_id,
+            "--from",
+            str(source),
+            "--run-id",
+            run_id,
+            "--link",
+            "metrics=metrics.json",
+            "--no-build",
+            "--json",
+            "--compact",
+        ),
+        cwd=research_repo,
+        env=env,
+    )
+    ingest_payload = ingest_check.get("json") if isinstance(ingest_check.get("json"), dict) else {}
+    record_id = str(ingest_payload.get("target", {}).get("artifact_id") or "")
     _write_yaml(
         closeout_path,
         {
@@ -615,66 +659,22 @@ def agent_f_worker_closeout(skill_path: Path, python: str, parent: Path) -> dict
             },
         },
     )
-    repo_before = _file_manifest(research_repo)
-    env = _package_env(plugin_path)
-    checks = [
-        _run_command(
-            _cli(
-                python,
-                "create-run",
-                "--root",
-                str(root),
-                "--id",
-                run_id,
-                "--experiment",
-                experiment_id,
-                "--status",
-                "running",
-                "--start-experiment",
-                "--no-build",
-                "--json",
-                "--compact",
-            ),
-            cwd=research_repo,
-            env=env,
+    closeout_check = _run_command(
+        _cli(
+            python,
+            "complete-run",
+            "--root",
+            str(root),
+            "--file",
+            str(closeout_path),
+            "--no-build",
+            "--json",
+            "--compact",
         ),
-        _run_command(
-            _cli(
-                python,
-                "ingest-artifact",
-                "--root",
-                str(root),
-                "--node",
-                experiment_id,
-                "--from",
-                str(source),
-                "--run-id",
-                run_id,
-                "--link",
-                "metrics=metrics.json",
-                "--no-build",
-                "--json",
-                "--compact",
-            ),
-            cwd=research_repo,
-            env=env,
-        ),
-        _run_command(
-            _cli(
-                python,
-                "complete-run",
-                "--root",
-                str(root),
-                "--file",
-                str(closeout_path),
-                "--no-build",
-                "--json",
-                "--compact",
-            ),
-            cwd=research_repo,
-            env=env,
-        ),
-    ]
+        cwd=research_repo,
+        env=env,
+    )
+    checks = [create_check, ingest_check, closeout_check]
 
     create_payload = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
     ingest_payload = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}

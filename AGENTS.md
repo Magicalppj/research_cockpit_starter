@@ -40,13 +40,17 @@ Use `--since <revision>` for repeated known-node polling. Do not run both `boots
 
 - Prefer `research-cockpit` commands over manual YAML edits for all supported operations.
 - Use assignment-scoped mutating CLI commands with `--assignment <assignment_id>` when working as a downstream agent.
+- If an opened packet is unclaimed, use one `work claim --return-packet` call and continue from its returned packet; do not reopen it immediately.
 - Use coordinator/global mutating commands for focus, baseline, suggestions, and lifecycle cleanup only when explicitly acting as coordinator.
 - Use `work open` as the assignment handoff; use `research-cockpit context --id <node_id> --view execution --compact --json` only for a known node without an assignment.
 - Use `effective_baseline` from `context`/`node-context` as the default inherited option, decision, and artifact bundle; do not scan all accepted history unless asked.
 - Do not directly set a decision to `accepted`; use `research-cockpit accept-decision --root <data-root> --id <decision_id>`.
 - Do not execute a suggested command just because it appears in Action Guidance. Queue, dismiss, or complete suggestions only when asked.
+- Give every mutating role-facade call a stable operation id in its flags or structured input; reuse it only for an exact retry of the same request.
+- Treat `work renew` as recovery/diagnostic only. Normal mutations and launcher heartbeat renew the lease without another model-visible command.
 - For ordinary experiment run output, use `ingest-artifact --json --compact --no-build`; record mode is the default and `--record-only` remains an explicit compatibility flag. Create a graph artifact only with `--promote --promotion-reason "..."`, or promote an existing record with `promote-artifact-record --promotion-reason "..."`.
-- Start a planned/queued experiment and its run together with `create-run --status running --start-experiment --json --compact --no-build`.
+- Start a claimed assignment with `work start`; it generates the run id and atomically starts the experiment while renewing the lease.
+- Use `create-run --status running --start-experiment` only as a compatibility route for legacy data without an active lease.
 - Close the run with one `complete-run --file <closeout.yaml> --json --compact --no-build` transaction. Its `experiment` and optional `next_experiment` blocks record the outcome, create at most one sibling follow-up, and move an assignment cursor. After ingest, use `artifact_record.existing_record_id`; do not repeat `complete-experiment`, `create-followup-experiment`, or `set-cursor` for the same closeout.
 - Use `compact-artifacts --dry-run` before artifact demotion. Execute only one `can_demote` artifact with `--execute --id <artifact_id>`; this writes an artifact record and migration report but must not delete payload files.
 
@@ -59,7 +63,7 @@ research-cockpit validate --root <data-root> --changed-node <node_id> --json
 research-cockpit context --root <data-root> --id <node_id> --view execution --compact --json
 ```
 
-For CLI mutations, accept `verified: true` with `additional_verification_required: false` as completed worker verification; do not run another validate/context cycle. Otherwise use only the reported changed scope.
+For role-facade mutations, accept `verification.status: internally_verified` with `additional_verification_required: false`; compatibility mutations may report `verified: true` with the same flag false. Do not run another validate/context cycle after either receipt. Otherwise use only the reported changed scope.
 
 Before coordinator merge, release, or research-stage closeout (`milestone_handoff`), run the full gate. An ordinary agent turn is not a milestone handoff:
 

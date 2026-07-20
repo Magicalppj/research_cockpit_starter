@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -17,6 +18,12 @@ from research_cockpit.interaction_log import (
     validate_interaction_append_target,
 )
 from research_cockpit.mutation_lock import MutationError, mutation_lock
+from research_cockpit.operation_receipts import (
+    OperationIdConflict,
+    operation_source_signature,
+    patch_operation_index,
+    replay_or_conflict,
+)
 from research_cockpit.storage import load_yaml, save_text
 
 
@@ -35,6 +42,7 @@ YamlChange = tuple[Path, dict[str, Any] | None, dict[str, Any]]
 TextChange = tuple[Path, str | None, str]
 ReadDependency = tuple[Path, bytes | None]
 ReadBefore = Callable[[Path], Any]
+CommitValidator = Callable[[], None]
 
 
 def patch_validation_index(root: Path, changed_paths: list[Path]) -> dict[str, Any]:
@@ -450,16 +458,47 @@ def execute_mutation_transaction(
     text_changes: list[tuple] | None = None,
     staged_moves: list[tuple[Path, Path]] | None = None,
     read_dependencies: list[tuple[Path, bytes | None]] | None = None,
+    operation_request: dict[str, Any] | None = None,
+    commit_validators: list[CommitValidator] | None = None,
 ) -> dict[str, Any]:
     if not interactions:
         raise ValueError("mutation transaction requires at least one interaction event")
     planned_yaml = _coerce_yaml_changes(yaml_changes)
     planned_text = _coerce_text_changes(text_changes)
     planned_reads = _coerce_read_dependencies(read_dependencies)
+    planned_commit_validators = list(commit_validators or [])
     planned_moves = [
         (Path(source), Path(target), Path(target).exists())
         for source, target in staged_moves or []
     ]
+    planned_interactions = deepcopy(interactions)
+    if operation_request is not None:
+        required = {
+            "scope",
+            "operation_id",
+            "request_hash",
+            "receipt",
+            "operation",
+            "assignment_id",
+        }
+        missing = sorted(required - set(operation_request))
+        if missing:
+            raise ValueError(
+                "operation_request is missing fields: " + ", ".join(missing)
+            )
+        if not isinstance(operation_request["receipt"], dict):
+            raise ValueError("operation_request.receipt must be a mapping")
+        first = planned_interactions[0]
+        extra = dict(first.get("extra") or {})
+        extra.update(
+            {
+                "operation_scope": str(operation_request["scope"]),
+                "operation_id": str(operation_request["operation_id"]),
+                "operation_request_hash": str(operation_request["request_hash"]),
+                "operation_receipt": deepcopy(operation_request["receipt"]),
+            }
+        )
+        first["extra"] = extra
     existing_move_targets = [str(target) for _, target, existed in planned_moves if existed]
     if existing_move_targets:
         raise ValueError(
@@ -473,9 +512,46 @@ def execute_mutation_transaction(
     ])
     written_files: list[str] = []
     backups: dict[Path, bytes | None] = {}
+    operation_event: dict[str, Any] | None = None
+    operation_signature_before: str | None = None
+    operation_signature_after: str | None = None
 
     with mutation_lock(root):
         ensure_interaction_log_valid(root)
+
+        if operation_request is not None:
+            try:
+                replay = replay_or_conflict(
+                    root,
+                    scope=str(operation_request["scope"]),
+                    operation_id=str(operation_request["operation_id"]),
+                    request_hash=str(operation_request["request_hash"]),
+                    operation=str(operation_request["operation"]),
+                    assignment_id=operation_request["assignment_id"],
+                )
+            except OperationIdConflict as exc:
+                raise MutationError(
+                    str(exc),
+                    {
+                        "ok": False,
+                        "status": "idempotency_conflict",
+                        "partial_success": False,
+                        "rolled_back": False,
+                        "written_files": [],
+                        "operation_receipt": exc.receipt,
+                    },
+                ) from exc
+            if replay is not None:
+                return {
+                    "ok": True,
+                    "status": "replayed",
+                    "partial_success": False,
+                    "rolled_back": False,
+                    "written_files": [],
+                    "interaction_count": 0,
+                    "replayed": True,
+                    "operation_receipt": replay,
+                }
 
         conflict_files = [
             *_conflicting_files(planned_yaml, _read_yaml_before),
@@ -506,9 +582,14 @@ def execute_mutation_transaction(
                 },
             )
 
+        for validator in planned_commit_validators:
+            validator()
+
         for path, _, _ in [*planned_yaml, *planned_text]:
             backups[path] = path.read_bytes() if path.exists() else None
         event_checkpoint = interaction_append_checkpoint(root)
+        if operation_request is not None:
+            operation_signature_before = operation_source_signature(root)
         try:
             with progress_phase("commit"):
                 for path, _, after in planned_yaml:
@@ -521,8 +602,11 @@ def execute_mutation_transaction(
                     target.parent.mkdir(parents=True, exist_ok=True)
                     source.replace(target)
                     written_files.append(str(target))
-                for interaction in interactions:
-                    _append_interaction_log_unlocked(root, prevalidated=True, **interaction)
+                for interaction in planned_interactions:
+                    appended = _append_interaction_log_unlocked(
+                        root, prevalidated=True, **interaction
+                    )
+                    operation_event = operation_event or appended
         except Exception as exc:
             rollback_errors = restore_interaction_append_checkpoint(root, event_checkpoint)
             rollback_errors.extend(_restore_files(backups))
@@ -550,6 +634,8 @@ def execute_mutation_transaction(
                 payload["rollback_errors"] = rollback_errors
             raise MutationError(f"Mutation transaction failed; status={status}: {exc}", payload) from exc
 
+        if operation_request is not None:
+            operation_signature_after = operation_source_signature(root)
         if rebuild_dashboard:
             try:
                 from research_cockpit.commands.build_dashboard import build_dashboard
@@ -568,6 +654,24 @@ def execute_mutation_transaction(
                         "recovery_commands": [f"research-cockpit build --root {root}"],
                     },
                 ) from exc
+
+    operation_index_warning = ""
+    if operation_request is not None:
+        try:
+            if (
+                operation_event is None
+                or operation_signature_before is None
+                or operation_signature_after is None
+            ):
+                raise RuntimeError("operation index patch metadata was not captured")
+            patch_operation_index(
+                root,
+                event=operation_event,
+                source_signature_before=operation_signature_before,
+                source_signature_after=operation_signature_after,
+            )
+        except Exception as exc:
+            operation_index_warning = str(exc)
 
     if not rebuild_dashboard:
         changed_paths = [path for path, _, _ in [*planned_yaml, *planned_text]]
@@ -598,14 +702,20 @@ def execute_mutation_transaction(
                 },
             ) from exc
 
-    return {
+    result = {
         "ok": True,
         "status": "changed",
         "partial_success": False,
         "rolled_back": False,
         "written_files": written_files,
-        "interaction_count": len(interactions),
+        "interaction_count": len(planned_interactions),
     }
+    if operation_request is not None:
+        result["replayed"] = False
+        result["operation_receipt"] = deepcopy(operation_request["receipt"])
+    if operation_index_warning:
+        result["operation_index_warning"] = operation_index_warning
+    return result
 
 
 def finish_mutation(

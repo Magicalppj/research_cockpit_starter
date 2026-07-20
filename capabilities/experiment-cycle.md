@@ -26,13 +26,13 @@ Mutate one canonical data root sequentially. Pass `--assignment <assignment_id>`
 
 ### 1. Start The Run
 
-Create the run and move a planned/queued experiment to `running` in one transaction:
+Use the `work_start_v1` file from `worker-loop.md` to create a runtime-named run, move a planned/queued experiment to `running`, and renew its lease in one transaction:
 
 ```sh
-research-cockpit create-run --root <data-root> --assignment <assignment_id> --id <run_id> --experiment <experiment_id> --status running --start-experiment --json --compact --no-build
+research-cockpit work start --root <data-root> --assignment <assignment_id> --file <start.yaml> --json --compact
 ```
 
-Do not issue a separate experiment status command. Add launcher, progress, resource, or retention flags only when that metadata exists.
+Use the returned `entities.run_id` in later evidence and closeout input. Do not issue a separate lease renewal or experiment status command. Add launcher, progress, resource, or retention fields under `run` only when that metadata exists.
 
 ### 2. Preserve Output When Needed
 
@@ -97,7 +97,7 @@ Use `run-context` only when full operational details are required. Launcher outp
 
 ## Verification Contract
 
-For successful non-dry-run `create-run`, `ingest-artifact`, and structured `complete-run`, compact output should report:
+A successful `work start` reports `verification.status: internally_verified` and `additional_verification_required: false`. Successful non-dry-run `ingest-artifact` and structured `complete-run` compatibility receipts report:
 
 ```json
 {"verified":true,"additional_verification_required":false,"verification_stage":"internal_verify","verify_commands":[]}
@@ -114,4 +114,4 @@ research-cockpit context --root <data-root> --id <node_id> --view execution --co
 
 If validation falls back, follow only its `fallback.recommended_commands` and retry. Full validate/build/root smoke belongs to coordinator merge, release, or research-stage milestone handoff.
 
-On a stale-write conflict, reread one bounded assignment/execution context and retry the rejected transaction. Never parallelize mutations against the same data root.
+On a stale-write conflict, reread one bounded assignment/execution context and retry the rejected transaction with a new operation id. Agents may compute in parallel; the runtime serializes short truth commits. Do not submit duplicate mutations for the same assignment concurrently.

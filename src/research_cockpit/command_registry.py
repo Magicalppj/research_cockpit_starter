@@ -231,6 +231,10 @@ def command_lifecycle_for_command(command_name: str, *, mutating: bool) -> str:
 
 ROLE_COMMAND_MODULES: dict[str, dict[str, str]] = {
     "work": {
+        "claim": "work_claim",
         "open": "work_open",
+        "release": "work_release",
+        "renew": "work_renew",
+        "start": "work_start",
     },
 }

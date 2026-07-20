@@ -31,7 +31,7 @@ Use this checklist when a run is started by hand and no script owns the lifecycl
 ## Research Cockpit Update
 
 ```sh
-research-cockpit create-run --root research_cockpit --assignment <assignment_id> --id <run_id> --experiment <experiment_id> --status running --start-experiment --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build
+research-cockpit work start --root research_cockpit --assignment <assignment_id> --file <work_start.yaml> --json --compact
 research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node <experiment_id> --from <launcher_output_dir> --run-id <run_id> --agent <agent_id> --link gate_result=gate_result.json --no-build --json --compact
 research-cockpit complete-run --root research_cockpit --file <closeout.yaml> --assignment <assignment_id> --no-build --json --compact
 ```

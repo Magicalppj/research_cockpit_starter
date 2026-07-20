@@ -284,6 +284,13 @@ def assignment_contract_errors(assignment: AssignmentRecord) -> list[str]:
             if not isinstance(value, str) or not value.strip():
                 errors.append(f"{prefix}: {key}[{index}] must be a non-empty string")
 
+    if "lease_epoch_counter" in raw:
+        counter = raw.get("lease_epoch_counter")
+        if isinstance(counter, bool) or not isinstance(counter, int) or counter < 0:
+            errors.append(
+                f"{prefix}: lease_epoch_counter must be an integer >= 0"
+            )
+
     if "lease" in raw:
         lease = raw.get("lease")
         if not isinstance(lease, dict):

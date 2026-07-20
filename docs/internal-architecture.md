@@ -25,7 +25,11 @@ Public entrypoints
 Workflow/domain layer
   agent_sessions.py
   assignment_scope.py
+  assignment_leases.py
+  assignment_runs.py
   work_packets.py
+  operation_receipts.py
+  mutation_runtime.py
   root_snapshot.py
   validation_index.py
   node_onboarding.py
@@ -75,7 +79,11 @@ The root `SKILL.md` is only a role router. Default agent instructions live in `w
 
 - `agent_sessions.py`: assignment-scoped handoff payloads, canonical root boundaries, and worker startup command templates.
 - `assignment_scope.py`: assignment mutation boundaries, out-of-scope write checks, and coordinator override handling.
+- `assignment_leases.py`: claim, renew, release, owner/epoch checks, lease renewal planning, heartbeat hooks, and expired-lease reassignment guards.
+- `assignment_runs.py`: composes lease renewal with the existing create-run domain transaction for `work start`.
 - `work_packets.py`: bounded assignment projections, dependency/input readiness, lease state, stable revisions, and unchanged polling.
+- `operation_receipts.py`: normalized operation hashes, durable receipt lookup from interaction events, and the derived incremental operation index.
+- `mutation_runtime.py`: optimistic multi-file commits, rollback, operation-event append, and post-commit derived-index patching.
 - `root_snapshot.py`: targeted graph snapshots. `load_indexed_root_snapshot(...)` is the no-full-fallback entry point for latency-bounded reads.
 - `validation_index.py`: generated graph/sidecar signatures and targeted lookup maps used by incremental validation and read models.
 - `node_onboarding.py`: builds read-only node handoff payloads for `node-context`.
@@ -97,7 +105,7 @@ Domain modules should work with loaded `ResearchNode` objects and plain dictiona
 - `graph_core.py`: node/edge loading, focus path derivation, graph traversal, node context serialization, and graph JSON.
 - `resources.py`: extracts link rows from node `links`, `linked_artifacts`, `config_path`, `path`, and `run_id` fields.
 - `graph_views.py`: saved graph view normalization, ID generation, load, and upsert.
-- `interaction_log.py`: append-only interaction event helpers and recent interaction selection.
+- `interaction_log.py`: append-only interaction event helpers, recent interaction selection, and the truth record for idempotent operation receipts.
 
 Sidecar files such as `graph_views.yaml` and `interaction_log.yaml` support UI and agent context. They are not schema replacements for truth-source graph nodes.
 
@@ -117,6 +125,9 @@ These modules should remain free of command, UI, and dashboard dependencies.
 - Use `agent_state.py` for agent, assignment, and coordinator state records/loaders.
 - Use `assignment_scope.py` for assignment-scoped mutation boundaries.
 - Use `work_packets.py` for assignment-facing read projections and revision polling.
+- Use `assignment_leases.py` and `assignment_runs.py` for lease-aware worker mutations.
+- Use `operation_receipts.py` for operation idempotency; do not create per-operation receipt files.
+- Use `runtime_ids.py` for collision-resistant run, record, artifact, and follow-up ids.
 - Use `root_snapshot.py` and `validation_index.py` for bounded indexed graph reads.
 - Use `resources.py` for link/resource rows.
 - Use `context_packs.py` for context payloads.
@@ -147,6 +158,7 @@ Truth-source data lives in:
 Runtime access rules:
 
 - `root_snapshot.py` owns compact indexed reads for known-node and assignment-scoped context.
+- `operation_receipts.py` derives `<data-root>/dashboards/operation_index.json` from immutable interaction events; a missing or stale index rebuilds from events and never becomes truth.
 - `mutation_runtime.py` owns targeted preflight, optimistic file checks, atomic multi-file transactions, rollback, and validation-index patching.
 - `validation_index.py` is a derived acceleration index; missing, incompatible, or stale indexes must fall back to full validation and return explicit refresh commands.
 - `interaction_log.py` owns both legacy YAML compatibility and the JSONL event backend. Commands must append through this module and must not rewrite interaction history.

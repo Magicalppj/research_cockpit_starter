@@ -40,6 +40,7 @@ from research_cockpit.model import (
 )
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.paths import default_data_root
+from research_cockpit.runtime_ids import generate_runtime_id
 
 ROOT = default_data_root()
 PATH_SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
@@ -304,7 +305,11 @@ def ingest_artifact(
         target_node_ids=[node_id],
     )
 
-    artifact_id = artifact_id or f"artifact_{node_id}_{run_id}"
+    artifact_id = artifact_id or generate_runtime_id(
+        "record" if is_record else "artifact",
+        scope_hint=assignment_id or node_id,
+        slug_hint=run_id,
+    )
     _validate_path_segment("artifact_id", artifact_id)
     if artifact_id in nodes:
         raise FileExistsError(root / "graph" / "nodes" / f"{artifact_id}.yaml")

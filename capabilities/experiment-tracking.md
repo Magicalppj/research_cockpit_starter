@@ -52,14 +52,14 @@ Use `assignment-view` when assigning parallel agents. It lists high-priority que
 Mutate one canonical root sequentially and pass `--assignment <assignment_id>` for worker writes. A normal experiment needs only these state mutations:
 
 ```sh
-research-cockpit create-run --root research_cockpit --assignment <assignment_id> --id run_x --experiment experiment_x --status running --start-experiment --json --compact --no-build
+research-cockpit work start --root research_cockpit --assignment <assignment_id> --file start.yaml --json --compact
 research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from <output_dir> --run-id run_x --link metrics=metrics.json --json --compact --no-build
 research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
 ```
 
-The ingest step is optional when no payload must be preserved. In `run_closeout_v1`, use `artifact_record.existing_record_id` for an ingested record; the same transaction can finish the run, record gates and a finding, set `experiment.status` and `result_summary`, create at most one sibling `next_experiment`, and move the assignment cursor. Do not repeat `complete-experiment`, `create-followup-experiment`, or `set-cursor` for that closeout.
+The start receipt supplies the runtime-generated run id. The ingest step is optional when no payload must be preserved. In `run_closeout_v1`, use `artifact_record.existing_record_id` for an ingested record; the same transaction can finish the run, record gates and a finding, set `experiment.status` and `result_summary`, create at most one sibling `next_experiment`, and move the assignment cursor. Do not repeat `complete-experiment`, `create-followup-experiment`, or `set-cursor` for that closeout.
 
-All three successful non-dry-run commands validate their candidate state and reject stale writes. If compact output reports `verified: true` and `additional_verification_required: false`, proceed without another validate/context cycle. Use `--dry-run` only for unfamiliar or high-risk batch input, not as a mandatory first invocation.
+All three successful non-dry-run commands validate their candidate state and reject stale writes. For `work start`, trust `verification.status: internally_verified` with `additional_verification_required: false`; compatibility receipts use `verified: true` with the same flag false. Proceed without another validate/context cycle. Use dry-run only for unfamiliar or high-risk compatibility input, not as a mandatory first invocation.
 
 For a long-running job, call `update-run` only when status or progress metadata changes. Use the following fallback only after a manual truth-source edit or when compact output requires extra verification:
 
@@ -151,13 +151,13 @@ Use run/job records for concrete executions of an experiment: launcher command, 
 Launcher-produced output directories should follow `docs/launcher-output-conventions.md`: `run_record.txt` for the human handoff, `progress.json` for heartbeat state, `gate_result.json` for machine-readable gates, and `artifact_manifest.json` for evidence links. Starter templates live in `templates/launcher/`. The convention works for shell, Python, tmux, scheduler, and manual flows because all stable records are still created through `research-cockpit` commands.
 
 ```sh
-research-cockpit create-run --root research_cockpit --assignment <assignment_id> --id run_x --experiment experiment_x --status running --start-experiment --launcher tmux --command "python train.py" --progress-file artifacts/experiment_x/run_x/progress.json --json --compact --no-build
+research-cockpit work start --root research_cockpit --assignment <assignment_id> --file start.yaml --json --compact
 # Only when status or operational metadata changed:
 research-cockpit update-run --root research_cockpit --assignment <assignment_id> --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
 research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
 ```
 
-`create-run --start-experiment` avoids a separate experiment status write. `complete-run --file` is the normal terminal operation; inspect `complete-run --print-schema` only when the file contract is unknown, and use dry-run only when a preview is needed. A successful structured closeout is internally verified, so do not add validate/context.
+`work start` atomically renews the lease, creates a runtime-named run, and starts the experiment; put launcher metadata under `run` in `work_start_v1`. `complete-run --file` remains the terminal compatibility operation until `work close` lands. Inspect its schema only when unknown and use dry-run only when a preview is needed. A successful structured closeout is internally verified, so do not add validate/context.
 
 Use `run-context` only for full operational details of a known long-running job and `list-runs` only for an explicit run inventory. Bounded bootstrap/context summaries already expose short active, failed, stale, and recently completed run state.
 

@@ -834,16 +834,17 @@ Phase 0 已冻结以下 role-oriented public groups。实现阶段可复用旧 c
 
 ```sh
 research-cockpit work open --root <root> --assignment <id> --json --compact
-research-cockpit work claim --root <root> --assignment <id> --operation-id <id> --return-packet --json --compact
-research-cockpit work renew --root <root> --assignment <id> --lease <lease_id> --json --compact
-research-cockpit work start --root <root> --assignment <id> --file start.yaml --json --compact --no-build
+research-cockpit work claim --root <root> --assignment <id> --agent <agent_id> --operation-id <id> --return-packet --json --compact
+research-cockpit work renew --root <root> --assignment <id> --agent <agent_id> --lease-id <lease_id> --lease-epoch <epoch> --operation-id <id> --json --compact
+research-cockpit work release --root <root> --assignment <id> --agent <agent_id> --lease-id <lease_id> --lease-epoch <epoch> --operation-id <id> --json --compact
+research-cockpit work start --root <root> --assignment <id> --file start.yaml --json --compact
 research-cockpit work record --root <root> --assignment <id> --file evidence.yaml --json --compact --no-build
 research-cockpit work close --root <root> --assignment <id> --file closeout.yaml --json --compact --no-build
 ```
 
 `work claim --return-packet` 是冻结的 public flag；claim receipt 必须直接携带 bounded packet。
 
-`work start/record/close` 应直接调用现有 create-run、ingest-artifact 和 complete-run domain functions，不复制事务实现，也不启动这些 legacy CLI 的 subprocess。`work close` 应支持可选 `evidence_inputs`，将最终 artifact staging 与 Evidence Bundle closeout 合并为一次 agent invocation；`work record` 保留给增量、流式或必须提前 durable 的证据。所有成功 mutation receipt 必须足以结束当前步骤，不要求立即 reopen packet。
+`work start/record/close` 应直接调用现有 create-run、ingest-artifact 和 complete-run domain functions，不复制事务实现，也不启动这些 legacy CLI 的 subprocess。`work_start_v1` 保存 lease/operation identity 和可选 launcher metadata；facade 固定为 no-build，因此不重复暴露 `--no-build`。`work close` 应支持可选 `evidence_inputs`，将最终 artifact staging 与 Evidence Bundle closeout 合并为一次 agent invocation；`work record` 保留给增量、流式或必须提前 durable 的证据。所有成功 mutation receipt 必须足以结束当前步骤，不要求立即 reopen packet。
 
 ### Reviewer
 
@@ -1218,6 +1219,14 @@ Measured evidence: role-specific filtering returns 8 worker core commands and `4
 - same operation id 重试返回相同 receipt。
 - operation id payload mismatch 被拒绝且无写入。
 
+Phase 3 implementation record：
+
+- `work claim/renew/release/start` 复用同一 mutation transaction；lease owner、epoch、expiry、active-run/heartbeat guard 和 agent/assignment 更新原子提交。`work start` 同事务续租、创建 runtime-named run 并启动 experiment，不串联 legacy subprocess。
+- operation receipt 与 mutation event 同步追加，`operation_index.json` 仅作为可重建 lookup acceleration；fresh serial writes 增量 patch，缺失、stale 或并发更新时回退一次 event rebuild。
+- runtime-generated IDs 已用于 run、artifact record/graph artifact 和 default follow-up；显式 legacy IDs 与已有 persisted records 继续可读写。launcher/runtime heartbeat 不写 stdout，普通 open/start/close recipe 不包含显式 renew。
+- claim commit 在 root lock 内重查 overlap invariant，避免两个不同但重叠的 exclusive assignments 同时通过锁外 preflight；`work start` receipt 保存非空 packet revision，exact retry 原样返回。
+
+Measured evidence: 43 Phase 3 focused tests cover same-target and overlapping-assignment concurrency, lease expiry/reassignment/heartbeat, exact retry and payload mismatch, operation-index rebuild/patch, runtime IDs, launcher metadata, CLI files and role contracts. The broader gates pass with 411 script tests (1 existing skip), 110 model tests, the vendored agent-usability closeout, and the non-mutating portable release check. The release check reports root plus worker instructions at `8457 bytes`, below the `12 KiB` contract. Independent review found and closed two P1 issues: overlapping assignment claims could both commit because scope reads were absent from the transaction boundary, and `work start` persisted a null revision.
 ### Phase 4: Evidence Bundle, Review And Proposal
 
 目标：让 worker closeout 成为可审核交付，而不是若干松散文件。
@@ -1322,12 +1331,12 @@ Measured evidence: role-specific filtering returns 8 worker core commands and `4
   - Verify: release instruction-surface checks、无上下文 reader test。
   - Files: `SKILL.md`、`agents/openai.yaml`、`capabilities/*-loop.md`。
 
-- [ ] T5: 实现 claim/renew/release lease transaction。
+- [x] T5: 实现 claim/renew/release lease transaction。
   - Acceptance: owner/epoch/expiry checks 原子且 assignment scope 不回退。
   - Verify: concurrent claim、expiry、active-run guard tests。
   - Files: `assignment_leases.py`、command wrappers、mutation tests。
 
-- [ ] T6: 实现 operation id 和 runtime-generated ids。
+- [x] T6: 实现 operation id 和 runtime-generated ids。
   - Acceptance: retry idempotent，payload mismatch 无写入。
   - Verify: subprocess retry/concurrency tests。
   - Files: receipt/id helpers、representative commands、tests。

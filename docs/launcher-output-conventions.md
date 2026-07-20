@@ -14,7 +14,7 @@ Keep paths in launcher files relative to the run output directory whenever possi
 
 | File | Purpose | Ingest path |
 | --- | --- | --- |
-| `run_record.txt` | Human-readable run handoff: ids, commands, process hints, and output paths. | Copy fields into `create-run`, `update-run`, or `complete-run`. |
+| `run_record.txt` | Human-readable run handoff: ids, commands, process hints, and output paths. | Put initial metadata in `work start`, then use `update-run` or `complete-run` only when needed. |
 | `progress.json` | Machine-readable heartbeat for long-running work. | Reference with `--progress-file artifacts/<experiment_id>/<run_id>/progress.json`. |
 | `gate_result.json` | Machine-readable gate outcome for preflight, dataset, cache, smoke, training, or evaluation gates. | Attach with `ingest-gate-result` or write with `record-gate-result`. |
 | `artifact_manifest.json` | Machine-readable summary of files worth preserving as evidence. | Use it to choose `ingest-artifact --link` values or `create-artifact --link` values. |
@@ -50,8 +50,8 @@ Only `run_id`, `experiment_id`, `status`, and `command` are expected for every l
 Typical run ingestion:
 
 ```sh
-research-cockpit create-run --root research_cockpit --id run_x --experiment experiment_x --status running --start-experiment --launcher shell --command "python train.py --config config.yaml" --progress-file artifacts/experiment_x/run_x/progress.json --monitor-command "tail -f artifacts/experiment_x/run_x/logs/run.log" --no-build
-research-cockpit update-run --root research_cockpit --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
+research-cockpit work start --root research_cockpit --assignment <assignment_id> --file work_start.yaml --json --compact
+research-cockpit update-run --root research_cockpit --assignment <assignment_id> --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
 research-cockpit complete-run --print-schema
 research-cockpit complete-run --root research_cockpit --file closeout.yaml --assignment <assignment_id> --json --compact --no-build
 ```
@@ -150,7 +150,7 @@ Use link values relative to the run output directory. When the output directory 
 research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link metrics=outputs/metrics.json --link config=config.yaml --link gate_result=gate_result.json --json --compact --no-build
 ```
 
-The default artifact record id is `artifact_<experiment_id>_<run_id>`. Keep it as a record for ordinary run output; promote it with `promote-artifact-record --promotion-reason "..."` before using it where a graph artifact id is required.
+`ingest-artifact` returns a runtime-generated record id in `target.artifact_id`. Reuse that exact value as `artifact_record.existing_record_id`; do not derive it from experiment or run ids. Keep ordinary output as a record, and promote it with `promote-artifact-record --promotion-reason "..."` only when a graph artifact is required.
 
 If the run directory already lives at a stable path, create or link the artifact directly:
 

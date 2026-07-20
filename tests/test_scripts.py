@@ -1000,7 +1000,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_index_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.91}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -1011,7 +1011,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             record_only=True,
         )
         build_dashboard(self.root)
-        record_id = "artifact_exp_t5_run_index_record"
+        record_id = result["record_id"]
 
         with patch("research_cockpit.commands.validate_cockpit.load_nodes", side_effect=AssertionError("full node scan")):
             payload = validation_payload(self.root, changed_records=[f"artifact:{record_id}"])
@@ -1055,7 +1055,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_changed_record_file"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.92}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -1066,7 +1066,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             record_only=True,
         )
         build_dashboard(self.root)
-        record_id = "artifact_exp_t5_run_changed_record_file"
+        record_id = result["record_id"]
         record_path = self.root / "artifact_records" / "exp_t5.yaml"
         records = load_yaml(record_path)
         records["records"][record_id]["links"] = ["not", "a", "mapping"]
@@ -3093,6 +3093,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn(f"--assignment {assignment_id}", guidance_text)
         self.assertIn(f"complete-run --root <root> --assignment {assignment_id} --file closeout.yaml", guidance_text)
         guidance_commands = " ".join(bootstrap_payload["mutation_guidance"]["command_skeletons"])
+        self.assertIn("work claim", guidance_commands)
+        self.assertIn("work start", guidance_commands)
+        self.assertNotIn("create-run", guidance_commands)
         self.assertNotIn("create-followup-experiment", guidance_commands)
         self.assertNotIn("migrate-terminal-next-actions", guidance_text)
         self.assertIn("set-cursor", guidance_text)
@@ -5041,7 +5044,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("internally verified", batch_mode["default"])
         self.assertIn("milestone handoff", batch_mode["default"])
         self.assertNotIn("final handoff", batch_mode["default"])
-        self.assertIn("commands --json --compact --name", " ".join(batch_mode["rules"]))
+        rules = " ".join(batch_mode["rules"])
+        self.assertIn("commands --json --compact --name", rules)
+        self.assertIn("compute", rules)
+        self.assertNotIn("Do not parallelize mutating commands", rules)
         self.assertEqual(batch_mode["finish_commands"], [])
         self.assertIn("--changed-node <node_id>", " ".join(batch_mode["worker_verify_commands"]))
         self.assertIn("smoke --root <root> --json", " ".join(batch_mode["final_handoff_commands"]))
@@ -8786,10 +8792,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("append compact events to `interaction_log.yaml`", graph_text)
         self.assertNotIn("append compact events to `graph/interaction_log.yaml`", experiment_text)
         self.assertIsNotNone(
-            re.search(r"research-cockpit create-run[^\n]*--assignment <assignment_id>", readme_text)
+            re.search(r"research-cockpit work start[^\n]*--assignment <assignment_id>", readme_text)
         )
         self.assertIsNotNone(
-            re.search(r"research-cockpit create-run[^\n]*--assignment <assignment_id>", experiment_text)
+            re.search(r"research-cockpit work start[^\n]*--assignment <assignment_id>", experiment_text)
         )
 
     def test_public_agent_docs_use_transactional_experiment_cycle(self) -> None:
@@ -8799,7 +8805,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             ROOT_DIR / "capabilities" / "experiment-tracking.md",
         )
         required = (
-            "--start-experiment",
+            "work start",
             "complete-run",
             "existing_record_id",
             "next_experiment",
@@ -8820,7 +8826,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 text = path.read_text(encoding="utf-8")
                 for token in required:
                     self.assertIn(token, text)
-                self.assertLess(text.index("--start-experiment"), text.index("complete-experiment"))
+                self.assertLess(text.index("work start"), text.index("complete-experiment"))
                 self.assertFalse(incomplete & {line.strip() for line in text.splitlines()})
 
         experiment = paths[2].read_text(encoding="utf-8")
@@ -8839,7 +8845,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertLess(worker.index("experiment-cycle.md"), worker.index("experiment-tracking.md"))
         self.assertLessEqual(len(cycle.encode("utf-8")), 10 * 1024)
         for token in (
-            "--start-experiment",
+            "work start",
             "ingest-artifact",
             "complete-run",
             "existing_record_id",
@@ -8947,7 +8953,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         command_names = set(by_name)
 
         legacy_names = {*COMMAND_MODULES, "init", "ui"}
-        self.assertEqual(command_names, {*legacy_names, "work open"})
+        self.assertEqual(
+            command_names,
+            {*legacy_names, "work claim", "work open", "work release", "work renew", "work start"},
+        )
         self.assertEqual(set(COMMAND_GROUP_BY_COMMAND), legacy_names)
         self.assertEqual(set(COMMAND_GROUP_CHOICES), {str(item["group"]) for item in manifest})
 
@@ -9129,7 +9138,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         for filename in ("run_record.txt", "progress.json", "gate_result.json", "artifact_manifest.json"):
             self.assertIn(filename, text)
-        for command in ("create-run", "update-run", "complete-run", "ingest-gate-result", "ingest-artifact"):
+        for command in ("work start", "update-run", "complete-run", "ingest-gate-result", "ingest-artifact"):
             self.assertIn(f"research-cockpit {command}", text)
         for launcher_mode in ("shell", "Python", "scheduler", "manual"):
             self.assertIn(launcher_mode, text)
@@ -11053,8 +11062,9 @@ class ScriptBehaviorTests(unittest.TestCase):
             run_id="run_default_record",
             rebuild_dashboard=False,
         )
-        record_id = "artifact_exp_t5_run_default_record"
+        record_id = result["record_id"]
 
+        self.assertRegex(record_id, r"^record_exp_t5_run_default_record_[a-f0-9]{12}$")
         self.assertTrue(result["record_only"])
         self.assertEqual(result["mode"], "record")
         self.assertEqual(result["record_id"], record_id)
@@ -11097,12 +11107,13 @@ class ScriptBehaviorTests(unittest.TestCase):
             promotion_reason="Durable result used for baseline comparison.",
         )
         target = self.root / "artifacts" / "exp_t5" / "run_001"
-        artifact = load_yaml(self.root / "graph" / "nodes" / "artifact_exp_t5_run_001.yaml")
+        artifact_id = result["artifact_id"]
+        artifact = load_yaml(self.root / "graph" / "nodes" / f"{artifact_id}.yaml")
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
         manifest = json.loads((target / "_research_cockpit_ingest.json").read_text(encoding="utf-8"))
 
         self.assertTrue(result["changed"])
-        self.assertEqual(result["artifact_id"], "artifact_exp_t5_run_001")
+        self.assertRegex(artifact_id, r"^artifact_exp_t5_run_001_[a-f0-9]{12}$")
         self.assertEqual(result["stable_path"], "artifacts/exp_t5/run_001")
         self.assertEqual(result["source_path_resolved"], str(source.resolve()))
         self.assertEqual(result["resolved_inputs"]["manifest_source_path"], "worktrees/agent_t5/.agent_runs/run_001")
@@ -11117,10 +11128,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(artifact["promotion"]["source"], "ingest_artifact")
         self.assertEqual(result["mode"], "promote")
         self.assertEqual(result["promotion_reason"], "Durable result used for baseline comparison.")
-        self.assertEqual(experiment["linked_artifacts"], ["artifact_exp_t5_run_001"])
+        self.assertEqual(experiment["linked_artifacts"], [artifact_id])
         self.assertEqual(manifest["node_id"], "exp_t5")
         self.assertEqual(manifest["run_id"], "run_001")
-        self.assertEqual(manifest["artifact_id"], "artifact_exp_t5_run_001")
+        self.assertEqual(manifest["artifact_id"], artifact_id)
         self.assertEqual(manifest["agent_id"], "agent_t5")
         self.assertFalse(Path(manifest["source_path"]).is_absolute())
         self.assertEqual(manifest["source_path"], "worktrees/agent_t5/.agent_runs/run_001")
@@ -11169,10 +11180,10 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
+        record_id = result["record_id"]
         record_path = self.root / "artifact_records" / "exp_t5.yaml"
         records = load_yaml(record_path)
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
-        record_id = "artifact_exp_t5_run_record"
         record = records["records"][record_id]
 
         self.assertTrue(result["changed"])
@@ -11237,9 +11248,9 @@ class ScriptBehaviorTests(unittest.TestCase):
             check=False,
         )
         payload = json.loads(out.stdout)
-        record_id = "artifact_exp_t5_run_cli_record"
 
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        record_id = payload["target"]["artifact_id"]
         self.assertEqual(payload["target"]["mode"], "record")
         self.assertEqual(payload["changed_scope"]["nodes"], ["exp_t5"])
         self.assertEqual(payload["changed_scope"]["records"], [f"artifact:{record_id}"])
@@ -11255,7 +11266,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_list_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.95}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -11264,7 +11275,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
-        record_id = "artifact_exp_t5_run_list_record"
+        record_id = result["record_id"]
 
         full = subprocess.run(
             [
@@ -11312,7 +11323,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_visible_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.97, "label": "record-only-search"}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -11323,7 +11334,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
-        record_id = "artifact_exp_t5_run_visible_record"
+        record_id = result["record_id"]
 
         rows = build_link_rows(self.root, load_nodes(self.root))
         linked_record_rows = [
@@ -11424,7 +11435,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_problem_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.88}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -11434,7 +11445,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
-        record_id = "artifact_exp_t5_run_problem_record"
+        record_id = result["record_id"]
         problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
         problem = load_yaml(problem_path)
         problem["linked_artifact_records"] = [record_id]
@@ -11449,7 +11460,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_promote_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.96}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -11459,7 +11470,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
-        record_id = "artifact_exp_t5_run_promote_record"
+        record_id = result["record_id"]
         artifact_id = "artifact_promoted_record"
 
         dry_run = subprocess.run(
@@ -11671,7 +11682,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["would_change"])
         self.assertEqual(payload["created"], [])
         self.assertEqual(payload["updated"], ["exp_t5"])
-        self.assertEqual(payload["changed_scope"]["records"], ["artifact:artifact_exp_t5_run_002"])
+        record_id = payload["target"]["artifact_id"]
+        self.assertEqual(payload["changed_scope"]["records"], [f"artifact:{record_id}"])
         self.assertEqual(payload["target"]["mode"], "record")
         self.assertEqual(payload["resolved_inputs"]["source_path_resolved"], str(source.resolve()))
         self.assertEqual(payload["resolved_inputs"]["manifest_source_path"], "worktrees/agent_t5/.agent_runs/run_002")
@@ -14630,6 +14642,25 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(followup["next_actions"], ["Run follow-up gate."])
         self.assertEqual(current["current_focus_node"], "exp_t5_followup")
         self.assertEqual(current["next_actions"], ["Run follow-up gate."])
+
+    def test_create_followup_experiment_generates_primary_id_by_default(self) -> None:
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+
+        result = create_followup_experiment(
+            self.root,
+            from_experiment="exp_t5",
+            title="Runtime follow up",
+            rebuild_dashboard=False,
+        )
+
+        node_id = result["node_id"]
+        self.assertRegex(
+            node_id,
+            r"^experiment_option_t5_Runtime_follow_up_[a-f0-9]{12}$",
+        )
+        self.assertTrue((self.root / "graph" / "nodes" / f"{node_id}.yaml").exists())
 
     def test_create_followup_experiment_rejects_non_active_source_status(self) -> None:
         with self.assertRaisesRegex(ValueError, "must be done or running"):

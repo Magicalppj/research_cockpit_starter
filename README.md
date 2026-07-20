@@ -183,15 +183,15 @@ research-cockpit create-workstream --root research_cockpit --file workstream.yam
 
 ### 2. 执行并事务化收尾一个实验
 
-Assignment-scoped worker 的默认路径是“创建并启动、可选 ingest、一次收尾”，不需要分别更新实验状态、记录 finding、创建 follow-up 和移动 cursor：
+Assignment-scoped worker 的默认路径是“领取/打开、创建并启动、可选 ingest、一次收尾”，不需要单独续租、分别更新实验状态、记录 finding、创建 follow-up 或移动 cursor。`start.yaml` 使用 `work_start_v1`，包含 packet 返回的 agent/lease/epoch、稳定 operation id，以及可选的 `run` launcher metadata：
 
 ```sh
-research-cockpit create-run --root research_cockpit --assignment <assignment_id> --id run_x --experiment experiment_x --status running --start-experiment --json --compact --no-build
+research-cockpit work start --root research_cockpit --assignment <assignment_id> --file start.yaml --json --compact
 research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from <output_dir> --run-id run_x --link metrics=metrics.json --json --compact --no-build
 research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
 ```
 
-没有需要保留的 payload 时跳过 `ingest-artifact`。常用最小 `closeout.yaml` 如下；没有后续实验或 artifact record 时分别省略对应块：
+`work start` receipt 的 `entities.run_id` 替代手工 run id。没有需要保留的 payload 时跳过 `ingest-artifact`。常用最小 `closeout.yaml` 如下；没有后续实验或 artifact record 时分别省略对应块：
 
 ```yaml
 schema_version: run_closeout_v1
@@ -231,10 +231,10 @@ research-cockpit promote-artifact-record --root research_cockpit --id artifact_e
 
 ### 4. 跟踪长任务 run / gate
 
-长实验仍使用同一三步主流程；只有状态或 progress metadata 变化时才增加 `update-run`，不要为了轮询重复写入：
+长实验仍使用同一主流程；把 launcher、command、progress file、resources 和 retention 写入 `start.yaml` 的 `run` mapping。只有运行后状态或 metadata 变化时才增加 `update-run`，不要为了轮询重复写入：
 
 ```sh
-research-cockpit create-run --root research_cockpit --assignment <assignment_id> --id run_x --experiment experiment_x --status running --start-experiment --launcher tmux --command "python train.py" --progress-file artifacts/experiment_x/run_x/progress.json --json --compact --no-build
+research-cockpit work start --root research_cockpit --assignment <assignment_id> --file start.yaml --json --compact
 research-cockpit update-run --root research_cockpit --assignment <assignment_id> --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
 research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link gate_result=gate_result.json --json --compact --no-build
 research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build

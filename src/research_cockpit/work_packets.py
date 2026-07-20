@@ -471,14 +471,13 @@ def _fit_budget(packet: dict[str, Any]) -> None:
         raise ValueError("Work Packet cannot fit the 8 KiB output budget")
 
 
-def build_work_packet(
+def build_work_packet_for_assignment(
     root: Path,
-    assignment_id: str,
+    assignment: AssignmentRecord,
     *,
     since_revision: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    assignment = load_assignment(root, assignment_id)
     index = load_validation_index(root)
     errors = [
         *assignment_contract_errors(assignment),
@@ -567,11 +566,7 @@ def build_work_packet(
         compatibility_warnings.append(
             "Legacy active assignment has no lease and remains usable until explicitly migrated."
         )
-    legacy_usable = (
-        "inputs" not in assignment.raw
-        and "lease" not in assignment.raw
-        and assignment.status in {"active", "blocked"}
-    )
+    legacy_usable = "inputs" not in assignment.raw and assignment.status in {"active", "blocked"}
     allowed_operations = _allowed_operations(
         assignment,
         readiness=readiness,
@@ -633,3 +628,18 @@ def build_work_packet(
             f"{assignment.assignment_id}: Work Packet sources changed during projection; retry work open"
         ])
     return packet
+
+
+def build_work_packet(
+    root: Path,
+    assignment_id: str,
+    *,
+    since_revision: str | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    return build_work_packet_for_assignment(
+        root,
+        load_assignment(root, assignment_id),
+        since_revision=since_revision,
+        now=now,
+    )

@@ -36,6 +36,8 @@ Use coordinator bootstrap only when the target is unknown and the task is global
 
 - Assignment scope is the worker/reviewer concurrency boundary; coordinator state owns global/UI selection.
 - Use CLI mutations for supported structured writes and pass `--assignment` for assignment-scoped work.
+- Mutating role facades require an operation id. Reuse it only for an exact retry; a changed request requires a new id.
+- Successful assignment mutations renew the lease. Explicit `work renew` is recovery-only; launcher heartbeat stays outside model-visible turns.
 - Same-root truth commits remain serialized; long computation and experiments happen outside the commit lock.
 - Never execute suggested actions automatically or set a decision directly to accepted.
 - Ordinary run output is an artifact record; graph artifact promotion requires a durable navigation reason.
