@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+from research_cockpit.role_contracts import (
+    ROLE_CHOICES,
+    SURFACE_CHOICES,
+    command_role_contract,
+    command_surface_for_role,
+)
+
 
 COMMAND_MODULES: dict[str, str] = {
     "bootstrap": "agent_bootstrap",

@@ -1,16 +1,12 @@
 display_name: Research Cockpit
-short_description: Read and update bounded project-local research state.
+short_description: Route agents to bounded role-specific research workflows.
 default_prompt: >
-  Resolve one canonical research_cockpit root. For an assigned worker, start with
-  research-cockpit agent-session-context --root <root> --assignment <assignment_id> --compact --json.
-  For a known node, use research-cockpit context --root <root> --id <node_id> --view execution --compact --json.
-  Use coordinator bootstrap only when the target is unknown or global triage is required.
-  Mutate structured state through research-cockpit commands, keep same-root mutations sequential,
-  and normally use --no-build. Start a run with create-run --status running --start-experiment.
-  Ingest output once only when a payload exists, then put artifact_record.existing_record_id in
-  the closeout. Use complete-run --file to close run, evidence, experiment, one optional follow-up,
-  and the assignment cursor atomically.
-  When compact output says verified true and additional_verification_required false, do not repeat
-  validation or context; otherwise verify changed scope only. Build dashboards and run root smoke
-  only for coordinator merge, release, or research-stage closeout; an ordinary agent turn is not
-  a milestone handoff.
+  Resolve one canonical research_cockpit data root, identify exactly one role, and load only
+  its playbook. Assigned workers use capabilities/worker-loop.md and start with
+  research-cockpit work open --root <root> --assignment <assignment_id> --json --compact.
+  Reviewers use capabilities/reviewer-loop.md; coordinators use capabilities/coordinator-loop.md;
+  maintainers use capabilities/maintainer-loop.md. Do not run broad command discovery at startup.
+  Query one missing operation with commands --role <role> --name <command>. Treat assignment
+  scope as the worker concurrency boundary. When a mutation receipt is internally verified and
+  requests no additional verification, do not append validate, context, build, or smoke. Run the
+  full gate once only for coordinator milestone_handoff.

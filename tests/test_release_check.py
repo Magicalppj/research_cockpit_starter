@@ -53,23 +53,29 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertEqual(track["summary"]["artifact_default_mode"], "record")
         self.assertEqual(track["summary"]["ingest_verification_mode"], "internal_non_dry_run")
         self.assertEqual(track["summary"]["ingest_worker_verify_commands"], [])
+        self.assertTrue(track["summary"]["manifest_rows_present"])
+        self.assertEqual(track["summary"]["manifest_help_missing"], [])
         self.assertTrue(track["summary"]["structured_closeout_documented"])
 
     def test_instruction_surface_track_enforces_router_budget(self) -> None:
         track = instruction_surface_track(SKILL_ROOT)
 
         self.assertTrue(track["passed"], track)
-        self.assertLessEqual(track["summary"]["line_count"], 120)
-        self.assertLessEqual(track["summary"]["byte_count"], 16 * 1024)
-        self.assertLessEqual(track["summary"]["command_mentions"], 15)
+        self.assertLessEqual(track["summary"]["line_count"], 90)
+        self.assertLess(track["summary"]["root_bytes"], 6 * 1024)
+        self.assertLess(track["summary"]["root_worker_bytes"], 12 * 1024)
+        self.assertLessEqual(track["summary"]["command_mentions"], 5)
+        self.assertEqual(track["summary"]["missing_playbooks"], [])
+        self.assertEqual(track["summary"]["forbidden_role_routes"], [])
         self.assertEqual(track["summary"]["incomplete_lines"], [])
 
     def test_instruction_surface_track_rejects_truncated_instruction_lines(self) -> None:
         package = self.tmp_root / "truncated-skill"
         package.mkdir()
+        shutil.copytree(SKILL_ROOT / "capabilities", package / "capabilities")
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         skill = skill.replace(
-            "- Generated `dashboards/*` files are rebuilt, never hand-authored.",
+            "- Assigned worker: read `capabilities/worker-loop.md`.",
             "-",
         )
         (package / "SKILL.md").write_text(skill, encoding="utf-8")
@@ -82,10 +88,10 @@ class SkillReleaseCheckTests(unittest.TestCase):
         track = read_only_startup_track(SKILL_ROOT, sys.executable)
 
         self.assertTrue(track["passed"], track)
-        self.assertEqual(track["summary"]["command_count"], 2)
+        self.assertEqual(track["summary"]["command_count"], 1)
         commands = [" ".join(check["command"]) for check in track["checks"]]
         self.assertTrue(any("--view execution" in command for command in commands), commands)
-        self.assertTrue(any("--summary-only" in command for command in commands), commands)
+        self.assertFalse(any("--summary-only" in command for command in commands), commands)
 
     def test_public_scan_reports_private_path_like_content(self) -> None:
         package = self.tmp_root / "research-cockpit"

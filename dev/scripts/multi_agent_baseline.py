@@ -151,190 +151,24 @@ WORKFLOW_BASELINE_EVIDENCE = {
 }
 
 
-_RETAINED_REPLACEMENTS = {
-    "init": "init",
-    "ui": "ui",
-    "commands": "commands --role <role>",
-}
-_MAINTENANCE_REPLACEMENTS = {
-    "lint": "maintenance audit",
-    "repair-interaction-log": "maintenance repair",
-    "migrate-interaction-log": "maintenance migrate",
-    "active-resources": "maintenance audit",
-    "worktree-audit": "maintenance audit",
-    "branch-audit": "maintenance audit",
-    "artifact-retention-audit": "maintenance audit",
-    "maintenance-audit": "maintenance audit",
-    "worktree-closeout": "maintenance audit",
-    "import-worktree-findings": "maintenance migrate",
-    "compact-artifacts": "maintenance compact",
-    "migrate-terminal-next-actions": "maintenance migrate",
-    "cleanup-suggestion-lifecycle": "maintenance repair",
-}
-_HANDOFF_COMMANDS = {"validate", "build", "smoke"}
-_WORK_OPEN_COMMANDS = {
-    "context",
-    "node-context",
-    "agent-session-context",
-    "option-workstream-context",
-    "run-context",
-    "artifact-records",
-}
-_WORK_CLAIM_COMMANDS = {"claim-option", "claim-workstream"}
-_WORK_START_COMMANDS = {"create-run"}
-_WORK_RECORD_COMMANDS = {
-    "update-run",
-    "record-gate-result",
-    "ingest-gate-result",
-    "ingest-artifact",
-    "record-finding",
-    "update-finding",
-    "create-artifact",
-    "link-artifact",
-    "update-node-fields",
-    "update-workstream-fields",
-    "create-note",
-}
-_WORK_CLOSE_COMMANDS = {
-    "complete-run",
-    "complete-experiment",
-    "close-current-experiment",
-    "complete-experiments",
-    "create-followup-experiment",
-    "report-option-workstream",
-    "finalize-workstream",
-    "set-cursor",
-}
-_COORD_OVERVIEW_COMMANDS = {
-    "bootstrap",
-    "search",
-    "suggest-next-actions",
-    "assignment-view",
-}
-_COORD_ASSIGN_COMMANDS = {
-    "add-node",
-    "apply-graph-plan",
-    "create-workstream",
-    "close-branch",
-    "update-status",
-    "set-focus",
-    "set-agent-focus",
-    "sync-focus-actions",
-    "start-agent-session",
-    "apply-suggestion",
-    "update-suggestion-state",
-}
-_COORD_REVIEW_COMMANDS = {
-    "check-decision-acceptance",
-    "promote-artifact-record",
-}
-_COORD_DECIDE_COMMANDS = {
-    "promote-decision",
-    "update-decision-evidence",
-    "update-decision-checklist",
-    "accept-decision",
-    "set-baseline",
-}
-
-_AUDIENCE_OVERRIDES = {
-    "option-workstream-context": ("worker", "reviewer", "coordinator"),
-    "check-decision-acceptance": ("reviewer", "coordinator"),
-}
-
-
-def _replacement_for(name: str, group: str) -> str:
-    if name in _RETAINED_REPLACEMENTS:
-        return _RETAINED_REPLACEMENTS[name]
-    if name in _MAINTENANCE_REPLACEMENTS:
-        return _MAINTENANCE_REPLACEMENTS[name]
-    if name in _HANDOFF_COMMANDS:
-        return "coord handoff"
-    if name in _WORK_OPEN_COMMANDS:
-        return "work open"
-    if name in _WORK_CLAIM_COMMANDS:
-        return "work claim"
-    if name in _WORK_START_COMMANDS:
-        return "work start"
-    if name in _WORK_RECORD_COMMANDS:
-        return "work record"
-    if name in _WORK_CLOSE_COMMANDS:
-        return "work close"
-    if name in _COORD_OVERVIEW_COMMANDS:
-        return "coord overview"
-    if name in _COORD_ASSIGN_COMMANDS:
-        return "coord assign"
-    if name in _COORD_REVIEW_COMMANDS:
-        return "coord review"
-    if name in _COORD_DECIDE_COMMANDS:
-        return "coord decide"
-    fallback = {
-        "artifact": "work record",
-        "build": "coord handoff",
-        "context": "work open",
-        "decision": "coord decide",
-        "focus": "coord overview",
-        "graph": "coord assign",
-        "maintenance": "maintenance audit",
-        "run": "work record",
-        "ui": "ui",
-    }
-    return fallback[group]
-
-
-def _audiences_for(name: str, replacement: str) -> tuple[str, ...]:
-    if name in _AUDIENCE_OVERRIDES:
-        return _AUDIENCE_OVERRIDES[name]
-    if replacement.startswith("work "):
-        return ("worker", "coordinator")
-    if replacement.startswith("review "):
-        return ("reviewer", "coordinator")
-    if replacement.startswith("coord "):
-        return ("coordinator",)
-    if replacement.startswith("maintenance "):
-        return ("maintainer",)
-    if replacement.startswith("commands"):
-        return ("worker", "reviewer", "coordinator", "maintainer")
-    if replacement == "ui":
-        return ("coordinator",)
-    return ("maintainer",)
-
-
 def legacy_command_inventory(
     manifest: list[dict[str, object]] | None = None,
 ) -> list[dict[str, Any]]:
     rows = manifest if manifest is not None else agent_command_manifest()
-    inventory: list[dict[str, Any]] = []
-    for row in rows:
-        name = str(row["name"])
-        group = str(row["group"])
-        replacement = _replacement_for(name, group)
-        if name in _RETAINED_REPLACEMENTS:
-            disposition = "retain_unique"
-        elif replacement.startswith("maintenance "):
-            disposition = "move_to_role_group"
-        else:
-            disposition = "remove_after_facade"
-        surface = (
-            "maintenance"
-            if replacement.startswith("maintenance ") or name == "init"
-            else "advanced"
-            if name in {"ui", "commands"}
-            else "core"
-        )
-        intent = replacement.split()[1] if " " in replacement else replacement
-        inventory.append(
-            {
-                "name": name,
-                "audiences": _audiences_for(name, replacement),
-                "surface": surface,
-                "intent": intent,
-                "canonical_replacement": replacement,
-                "removal_disposition": disposition,
-                "group": group,
-                "mutating": bool(row.get("mutating")),
-            }
-        )
-    return inventory
+    return [
+        {
+            "name": str(row["name"]),
+            "audiences": tuple(str(item) for item in row.get("audiences", [])),
+            "surface": str(row["surface"]),
+            "intent": str(row["intent"]),
+            "canonical_replacement": str(row["canonical_replacement"]),
+            "removal_disposition": str(row["removal_disposition"]),
+            "group": str(row["group"]),
+            "mutating": bool(row.get("mutating")),
+        }
+        for row in rows
+        if row.get("route_kind") != "facade"
+    ]
 
 
 def parse_progress_events(stderr: str) -> dict[str, float | None]:

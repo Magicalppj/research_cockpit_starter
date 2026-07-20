@@ -9,7 +9,7 @@ Use `capabilities/experiment-tracking.md` only for advanced workstream planning,
 Start from the assignment when one exists:
 
 ```sh
-research-cockpit agent-session-context --root <data-root> --assignment <assignment_id> --compact --json
+research-cockpit work open --root <data-root> --assignment <assignment_id> --compact --json
 ```
 
 Without an assignment, read the known experiment directly:

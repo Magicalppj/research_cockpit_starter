@@ -153,7 +153,7 @@ def assert_mutation_json_failed_without_writes(testcase: unittest.TestCase, payl
 
 
 def cli_command(command: str, *args: str) -> list[str]:
-    return [sys.executable, "-m", "research_cockpit.cli", command, *args]
+    return [sys.executable, "-m", "research_cockpit.cli", *command.split(), *args]
 
 
 class ScriptBehaviorTests(unittest.TestCase):
@@ -8769,9 +8769,13 @@ class ScriptBehaviorTests(unittest.TestCase):
                 self.assertEqual(bad_smoke, [])
 
         skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("--view execution", skill_text)
-        self.assertIn("--since <revision>", skill_text)
-        self.assertIn("Default `smoke` is compact", skill_text)
+        worker_text = (SKILL_ROOT / "capabilities" / "worker-loop.md").read_text(encoding="utf-8")
+        coordinator_text = (SKILL_ROOT / "capabilities" / "coordinator-loop.md").read_text(encoding="utf-8")
+        self.assertIn("capabilities/worker-loop.md", skill_text)
+        self.assertIn("work open", worker_text)
+        self.assertIn("--since <revision>", worker_text)
+        self.assertIn("milestone_handoff", coordinator_text)
+        self.assertIn("smoke --root <data-root> --json --progress", coordinator_text)
 
         readme_text = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
         integrations_text = (SKILL_ROOT / "capabilities" / "integrations.md").read_text(encoding="utf-8")
@@ -8826,13 +8830,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
 
     def test_skill_routes_normal_experiment_cycle_to_bounded_capability(self) -> None:
-        skill = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
+        worker = (ROOT_DIR / "capabilities" / "worker-loop.md").read_text(encoding="utf-8")
         path = ROOT_DIR / "capabilities" / "experiment-cycle.md"
 
         self.assertTrue(path.exists())
         cycle = path.read_text(encoding="utf-8")
-        self.assertIn("capabilities/experiment-cycle.md", skill)
-        self.assertLess(skill.index("experiment-cycle.md"), skill.index("experiment-tracking.md"))
+        self.assertIn("experiment-cycle.md", worker)
+        self.assertLess(worker.index("experiment-cycle.md"), worker.index("experiment-tracking.md"))
         self.assertLessEqual(len(cycle.encode("utf-8")), 10 * 1024)
         for token in (
             "--start-experiment",
@@ -8942,8 +8946,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         by_name = {item["name"]: item for item in manifest}
         command_names = set(by_name)
 
-        self.assertEqual(command_names, {*COMMAND_MODULES, "init", "ui"})
-        self.assertEqual(set(COMMAND_GROUP_BY_COMMAND), command_names)
+        legacy_names = {*COMMAND_MODULES, "init", "ui"}
+        self.assertEqual(command_names, {*legacy_names, "work open"})
+        self.assertEqual(set(COMMAND_GROUP_BY_COMMAND), legacy_names)
         self.assertEqual(set(COMMAND_GROUP_CHOICES), {str(item["group"]) for item in manifest})
 
         for group_name, actions in GROUPED_COMMAND_ALIASES.items():
@@ -9132,9 +9137,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("launcher_run_record_v1", text)
 
         capability = (ROOT_DIR / "capabilities" / "experiment-tracking.md").read_text(encoding="utf-8")
-        skill = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
+        worker = (ROOT_DIR / "capabilities" / "worker-loop.md").read_text(encoding="utf-8")
         self.assertIn("docs/launcher-output-conventions.md", capability)
-        self.assertIn("docs/launcher-output-conventions.md", skill)
+        self.assertIn("experiment-tracking.md", worker)
 
     def test_launcher_templates_cover_modes_and_write_standard_files(self) -> None:
         template_dir = ROOT_DIR / "templates" / "launcher"
@@ -9250,16 +9255,12 @@ class ScriptBehaviorTests(unittest.TestCase):
     def test_skill_is_a_bounded_router_instead_of_a_command_catalog(self) -> None:
         skill = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertLessEqual(len(skill.splitlines()), 120)
-        self.assertLessEqual(len(skill.encode("utf-8")), 16 * 1024)
-        self.assertLessEqual(skill.count("research-cockpit "), 15)
-        self.assertIn("## Read Route", skill)
-        self.assertIn("not a sequence to execute", skill)
-        self.assertIn("--view execution", skill)
-        self.assertIn("--since <revision>", skill)
-        self.assertIn("--start-experiment", skill)
-        self.assertIn("existing_record_id", skill)
-        self.assertIn("next_experiment", skill)
+        self.assertLessEqual(len(skill.splitlines()), 80)
+        self.assertLessEqual(len(skill.encode("utf-8")), 8 * 1024)
+        self.assertLessEqual(skill.count("research-cockpit "), 5)
+        self.assertIn("## Select One Role", skill)
+        self.assertIn("not a command sequence", skill)
+        self.assertIn("exactly one bounded packet", skill)
         self.assertIn("milestone_handoff", skill)
         self.assertFalse(
             {"-", "Use", "3. Read compact mutation fields"}
@@ -9267,15 +9268,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         self.assertNotIn("## Command Reference", skill)
         for capability in (
-            "graph-state.md",
-            "focus-context.md",
-            "node-management.md",
-            "experiment-tracking.md",
-            "decision-adr.md",
-            "ui-dashboard.md",
-            "integrations.md",
-            "maintenance.md",
-            "troubleshooting.md",
+            "worker-loop.md",
+            "reviewer-loop.md",
+            "coordinator-loop.md",
+            "maintainer-loop.md",
         ):
             self.assertIn(capability, skill)
 

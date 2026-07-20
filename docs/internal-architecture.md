@@ -6,7 +6,7 @@ This document is for maintainers and coding agents changing the Research Cockpit
 
 ## Goals
 
-- Keep the public `research-cockpit` CLI stable for humans and agents.
+- Keep one canonical public CLI surface per release while preserving legacy structured data and artifact compatibility.
 - Keep project-specific research state outside the plugin, under the caller repository's `research_cockpit/` data root.
 - Make source modules small enough that future changes can be reviewed by domain area.
 - Avoid circular imports by keeping lower-level data helpers independent from commands and UI.
@@ -18,6 +18,7 @@ This document is for maintainers and coding agents changing the Research Cockpit
 Public entrypoints
   cli.py
   command_registry.py
+  role_contracts.py
   commands/*
   ui/*
 
@@ -58,13 +59,17 @@ Dependency direction should generally flow downward. For example, `commands/*` m
 ### Public Entry Points
 
 - `cli.py`: maps `research-cockpit <subcommand>` to command modules.
-- `command_registry.py`: owns command metadata and legacy script-name to CLI-name mapping used in suggested commands.
+- `command_registry.py`: owns CLI routing and re-exports the role contract choices used by discovery.
+- `role_contracts.py`: is the single source for command audiences, surfaces, intents, scope, verification, canonical replacement, and cutover disposition.
+- `commands/list_agent_commands.py`: projects the route and role contract into full, compact, role-filtered, and name-filtered manifests.
 - `commands/*.py`: command-specific argument parsing and workflow orchestration.
 - `commands/_runtime.py`: shared command helpers for `load_validated_state(...)` and `finish_mutation(...)`.
 - `commands/_assignment_scope_cli.py`: shared `--assignment` / `--coordinator` CLI flags and structured assignment-scope error output.
 - `ui/`: researcher-facing Streamlit app, graph rendering wrappers, text labels, and view formatting helpers.
 
 Commands are the public write boundary. A mutating command should validate, prepare candidate data, write truth-source files, append through the active interaction backend via `interaction_log.py`, and optionally rebuild dashboard/context output. Dry-run paths must not write truth sources, interaction history, or generated dashboards.
+
+The root `SKILL.md` is only a role router. Default agent instructions live in `worker-loop.md`, `reviewer-loop.md`, `coordinator-loop.md`, and `maintainer-loop.md`; deeper capability documents are conditional references, not startup context. Broad manifest discovery is not a normal startup step.
 
 ### Workflow And Domain Layer
 

@@ -6,7 +6,11 @@ from research_cockpit.commands._runtime import emit_json
 from research_cockpit.command_registry import (
     COMMAND_GROUP_CHOICES,
     COMMAND_STATUS_CHOICES,
+    ROLE_CHOICES,
+    SURFACE_CHOICES,
     command_group_for_command,
+    command_role_contract,
+    command_surface_for_role,
     command_lifecycle_for_command,
     grouped_aliases_for_command,
     subcommand_for_script,
@@ -53,11 +57,23 @@ COMPACT_COMMAND_KEYS = {
     "primary_target",
     "target_aliases",
     "status_aliases",
+    "audiences",
+    "surface",
+    "intent",
+    "work_packet_kinds",
+    "scope_policy",
+    "idempotency",
+    "verification_policy",
+    "input_schema_version",
+    "output_schema_version",
+    "canonical_replacement",
+    "removal_disposition",
+    "route_kind",
+    "core_roles",
 }
 SUMMARY_COMMAND_KEYS = {
     "name",
     "canonical_name",
-    "purpose",
     "group",
     "status",
     "input_modes",
@@ -72,6 +88,9 @@ SUMMARY_COMMAND_KEYS = {
     "can_batch",
     "batch_policy_mode",
     "primary_target",
+    "audiences",
+    "surface",
+    "intent",
 }
 BATCH_WORKER_VERIFY_COMMANDS = [
     "research-cockpit validate --root <root> --changed-node <node_id> --json",
@@ -85,6 +104,7 @@ BATCH_FINAL_HANDOFF_COMMANDS = [
 ASSIGNMENT_SCOPE_FLAGS = ["--assignment", "--coordinator"]
 
 WORKFLOW_TAGS_BY_COMMAND = {
+    "work open": ["read", "evidence"],
     "init": ["maintenance"],
     "ui": ["read"],
     "bootstrap": ["read", "focus"],
@@ -202,6 +222,7 @@ SHOW_DIFF_COMMANDS = {
 CAPABILITY_BY_COMMAND = {
     "init": "capabilities/integrations.md",
     "ui": "capabilities/ui-dashboard.md",
+    "work open": "capabilities/worker-loop.md",
     "agent_bootstrap.py": "capabilities/focus-context.md",
     "validate_cockpit.py": "capabilities/troubleshooting.md",
     "lint_semantic.py": "capabilities/troubleshooting.md",
@@ -410,7 +431,16 @@ COMMANDS: list[dict[str, object]] = [
         "supports_no_build": False,
         "supports_compact": True,
         "supports_root": False,
-        "extra_supported_flags": ["--summary-only"],
+        "extra_supported_flags": [
+            "--summary-only",
+            "--name",
+            "--role",
+            "--surface",
+            "--workflow",
+            "--group",
+            "--status",
+            "--deprecated",
+        ],
         "recommended_when": "Choose the shortest safe command for a workflow.",
     },
     {
@@ -1412,6 +1442,23 @@ COMMANDS: list[dict[str, object]] = [
 ]
 
 
+ROLE_FACADE_COMMANDS: list[dict[str, object]] = [
+    {
+        "name": "work open",
+        "purpose": "Open one bounded assignment Work Packet or return an unchanged revision receipt.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<assignment_id>"],
+        "extra_supported_flags": ["--assignment", "--since"],
+        "group": "context",
+        "recommended_when": "Start or resume assignment-scoped worker or reviewer work.",
+    },
+]
+
+
 PROGRESS_COMMAND_SCRIPTS = {
     "build_dashboard.py",
     "complete_run.py",
@@ -1455,7 +1502,7 @@ def _flag_support(row: dict[str, object]) -> tuple[list[str], list[str]]:
         supported.extend(["--watch", "--interval", "--max-iterations"])
     if bool(row.get("supports_profile")):
         supported.extend(["--profile", "--profile-output"])
-    return sorted(supported), sorted(unsupported)
+    return sorted(set(supported)), sorted(set(unsupported))
 
 
 def _input_modes(row: dict[str, object], supported_flags: list[str]) -> list[str]:
@@ -1512,9 +1559,15 @@ def agent_command_manifest(
     group: str | None = None,
     status: str | None = None,
     deprecated: bool = False,
+    role: str | None = None,
+    surface: str | None = None,
 ) -> list[dict[str, object]]:
+    if role is not None and role not in ROLE_CHOICES:
+        raise ValueError(f"Unknown command role: {role}")
+    if surface is not None and surface not in SURFACE_CHOICES:
+        raise ValueError(f"Unknown command surface: {surface}")
     rows: list[dict[str, object]] = []
-    for command in COMMANDS:
+    for command in [*COMMANDS, *ROLE_FACADE_COMMANDS]:
         command_name = str(command["name"])
         subcommand = subcommand_for_script(command_name) if command_name.endswith(".py") else command_name
         if name and subcommand != name:
@@ -1531,12 +1584,20 @@ def agent_command_manifest(
         writes_generated_files = bool(
             command.get("writes_generated_files", rebuild_default or command.get("writes_dashboard", False))
         )
+        command_group = str(command.get("group") or command_group_for_command(subcommand))
+        role_contract = command_role_contract(
+            subcommand,
+            group=command_group,
+            mutating=mutating,
+            verification_mode=verification_mode,
+        )
         row = {
             **command,
             "name": subcommand,
             "canonical_name": str(command.get("canonical_name", subcommand)),
             "verification_mode": verification_mode,
-            "group": command_group_for_command(subcommand),
+            "group": command_group,
+            **role_contract,
             "status": str(command.get("status", "active")),
             "aliases": [*list(command.get("aliases", [])), *grouped_aliases_for_command(subcommand)],
             "replacement": command.get("replacement"),
@@ -1571,6 +1632,17 @@ def agent_command_manifest(
         row["supported_flags"] = supported_flags
         row["unsupported_flags"] = unsupported_flags
         row["input_modes"] = _input_modes(row, supported_flags)
+        if role:
+            if role not in row["audiences"]:
+                continue
+            row["surface"] = command_surface_for_role(
+                subcommand,
+                role,
+                str(row["surface"]),
+            )
+        effective_surface = surface or ("core" if role and not name else None)
+        if effective_surface and row["surface"] != effective_surface:
+            continue
         if workflow and workflow not in row["workflow_tags"]:
             continue
         if group and row["group"] != group:
@@ -1596,7 +1668,9 @@ def main() -> None:
     parser.add_argument("--json", action="store_true", help="Print machine-readable command manifest")
     parser.add_argument("--compact", action="store_true", help="Print a short agent discovery payload.")
     parser.add_argument("--summary-only", action="store_true", help="Print minimal command selection fields.")
-    parser.add_argument("--name", help="Return only one command by subcommand name.")
+    parser.add_argument("--name", help="Return only one command by canonical command name.")
+    parser.add_argument("--role", choices=ROLE_CHOICES, help="Return commands available to one agent role.")
+    parser.add_argument("--surface", choices=SURFACE_CHOICES, help="Filter one command surface.")
     parser.add_argument("--workflow", choices=WORKFLOW_CHOICES, help="Return commands tagged for one workflow.")
     parser.add_argument("--group", choices=GROUP_CHOICES, help="Return commands in one canonical command group.")
     parser.add_argument("--status", choices=STATUS_CHOICES, help="Return commands with one lifecycle status.")
@@ -1617,6 +1691,8 @@ def main() -> None:
         group=args.group,
         status=args.status,
         deprecated=args.deprecated,
+        role=args.role,
+        surface=args.surface,
     )
     if args.json:
         emit_json({"commands": commands}, compact=args.summary_only)

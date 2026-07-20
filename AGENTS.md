@@ -24,15 +24,15 @@
 
 ## Read Order
 
-Choose one startup path instead of chaining every context command.
+Load exactly one role playbook, then choose one startup path instead of chaining context commands.
 
-1. If assigned a specific assignment id, run `research-cockpit agent-session-context --root <data-root> --assignment <assignment_id> --compact --json`; use `bootstrap --assignment` only when validation/search/global summaries are needed.
+1. If assigned a specific assignment id, run `research-cockpit work open --root <data-root> --assignment <assignment_id> --compact --json`; reuse `--since <revision>` for polling.
 2. If assigned a specific node id without an assignment id, run `research-cockpit context --root <data-root> --id <node_id> --view execution --compact --json`.
 3. If the target is unknown or the task is global triage, run `research-cockpit bootstrap --root <data-root> --coordinator --json`.
 4. If continuing an older minimal handoff, use `research-cockpit node-context --root <data-root> --id <node_id> --compact --json`.
 5. Read `<data-root>/dashboards/agent_context_pack.json` and `<data-root>/dashboards/focus_context_pack.json` only when generated dashboard context or a broad focus scan is needed.
 6. Use bounded search such as `research-cockpit search --root <data-root> --query "..." --json --limit 5 --source node` when more context is needed.
-7. Use `research-cockpit commands --json --compact --summary-only` for broad command discovery; use `research-cockpit commands --json --compact --name <command>` for one command's detailed batching flags.
+7. If one operation is missing, use `research-cockpit commands --role <role> --json --compact --name <command>`; do not run broad discovery during normal startup.
 
 Use `--since <revision>` for repeated known-node polling. Do not run both `bootstrap` and a wider context view for normal known-node work. If the working directory is unreliable, use absolute `--root` paths.
 
@@ -41,7 +41,7 @@ Use `--since <revision>` for repeated known-node polling. Do not run both `boots
 - Prefer `research-cockpit` commands over manual YAML edits for all supported operations.
 - Use assignment-scoped mutating CLI commands with `--assignment <assignment_id>` when working as a downstream agent.
 - Use coordinator/global mutating commands for focus, baseline, suggestions, and lifecycle cleanup only when explicitly acting as coordinator.
-- Use `research-cockpit context --id <node_id> --view execution --compact --json` as the default read-only handoff when continuing work from a known node id.
+- Use `work open` as the assignment handoff; use `research-cockpit context --id <node_id> --view execution --compact --json` only for a known node without an assignment.
 - Use `effective_baseline` from `context`/`node-context` as the default inherited option, decision, and artifact bundle; do not scan all accepted history unless asked.
 - Do not directly set a decision to `accepted`; use `research-cockpit accept-decision --root <data-root> --id <decision_id>`.
 - Do not execute a suggested command just because it appears in Action Guidance. Queue, dismiss, or complete suggestions only when asked.

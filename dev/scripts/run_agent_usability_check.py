@@ -34,6 +34,12 @@ SURFACE_DOCS = (
     "templates/launcher/README.md",
     "templates/launcher/manual_run_checklist.md",
 )
+ROLE_PLAYBOOK_FILES = (
+    "worker-loop.md",
+    "reviewer-loop.md",
+    "coordinator-loop.md",
+    "maintainer-loop.md",
+)
 CAPABILITY_FILES = (
     "decision-adr.md",
     "experiment-cycle.md",
@@ -191,11 +197,22 @@ def _readability_findings(skill_path: Path) -> list[str]:
             findings.append(f"{path.relative_to(skill_path).as_posix()} contains old plugin script command")
 
     skill_text = (skill_path / "SKILL.md").read_text(encoding="utf-8", errors="ignore")
+    role_texts: list[str] = []
+    for playbook in ROLE_PLAYBOOK_FILES:
+        playbook_path = skill_path / "capabilities" / playbook
+        if f"capabilities/{playbook}" not in skill_text:
+            findings.append(f"SKILL.md does not route to capabilities/{playbook}")
+        if not playbook_path.exists():
+            findings.append(f"capabilities/{playbook} is missing")
+            continue
+        role_texts.append(playbook_path.read_text(encoding="utf-8", errors="ignore"))
+
+    role_routes = "\n".join(role_texts)
     for capability in CAPABILITY_FILES:
-        if f"capabilities/{capability}" not in skill_text:
-            findings.append(f"SKILL.md does not route to capabilities/{capability}")
         if not (skill_path / "capabilities" / capability).exists():
             findings.append(f"capabilities/{capability} is missing")
+        elif capability not in role_routes:
+            findings.append(f"role playbooks do not route to capabilities/{capability}")
 
     decision_text = (skill_path / "capabilities" / "decision-adr.md").read_text(encoding="utf-8", errors="ignore")
     if "YAML" in decision_text and (
@@ -326,11 +343,6 @@ def agent_b_read_only_context(skill_path: Path, python: str, parent: Path) -> di
     env = _package_env(plugin_path)
     checks = [
         _run_command(
-            _cli(python, "commands", "--json", "--compact", "--summary-only"),
-            cwd=research_repo,
-            env=env,
-        ),
-        _run_command(
             _cli(
                 python,
                 "context",
@@ -348,14 +360,13 @@ def agent_b_read_only_context(skill_path: Path, python: str, parent: Path) -> di
         ),
     ]
     files_changed = _changed_files(repo_before, _file_manifest(research_repo))
-    manifest = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
-    context = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
+    context = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
     findings = _readability_findings(plugin_path)
     observations = {
         "schema_version": context.get("schema_version"),
-        "command_summary_present": bool(manifest.get("commands")),
+        "broad_discovery_avoided": True,
         "node_id": (context.get("node") or {}).get("id"),
-        "output_within_budget": checks[1].get("stdout_bytes", 0) <= 4 * 1024,
+        "output_within_budget": checks[0].get("stdout_bytes", 0) <= 4 * 1024,
         "has_execution_invariants": all(
             field in context
             for field in ("assignment_boundary", "active_run", "blocking_gate", "effective_baseline", "revision")
@@ -367,7 +378,7 @@ def agent_b_read_only_context(skill_path: Path, python: str, parent: Path) -> di
         and not files_changed
         and not findings
         and observations["schema_version"] == "execution_context_v1"
-        and observations["command_summary_present"]
+        and observations["broad_discovery_avoided"]
         and observations["node_id"] == DEMO_OPTION_ID
         and observations["output_within_budget"]
         and observations["has_execution_invariants"]

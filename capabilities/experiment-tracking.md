@@ -27,14 +27,12 @@ For parallel agents that run code in git worktrees, prefer `start-agent-session`
 ```sh
 research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label cache_probe --objective "Run experiments" --branch agent/option_x-cache_probe --worktree ../worktrees/cache_probe --base main --create-worktree --dry-run --json --show-diff
 research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label cache_probe --objective "Run experiments" --branch agent/option_x-cache_probe --worktree ../worktrees/cache_probe --base main --create-worktree --no-build
-research-cockpit agent-session-context --root D:/main_repo/research_cockpit --assignment <assignment_id> --compact --json
-# Optional broad summary:
-research-cockpit bootstrap --root D:/main_repo/research_cockpit --assignment <assignment_id> --json
+research-cockpit work open --root D:/main_repo/research_cockpit --assignment <assignment_id> --compact --json
 ```
 
 Dry-run generated ids are preview-only; pass explicit `--agent` and `--assignment` / `--assignment-id` on the execute command when the same ids must be reused. Relative `--worktree` values resolve against the canonical repository root (`--root` parent), matching `git -C <repo> worktree add`. Do not store local absolute worktree paths in YAML. `start-agent-session` writes `session_id`, `owner`, `status`, `objective`, `git_branch`, `worktree_label`, `report_to_problem`, `started_at`, and `updated_at`; absolute paths appear only in JSON `handoff`/`launch_env`. `--create-worktree` expects a new branch/worktree path; for an already-created worktree, rerun without `--create-worktree`.
 
-For assigned downstream agents, `agent-session-context` assignment data is the primary task context; in scoped bootstrap output, use `assignment_scope` / `agent_scope` and `assignment_cursor`. Treat global `current_state`, `coordinator_state`, and `focus.current_focus_node` as coordinator metadata that may point to another agent's branch. Do not leave the assigned option subtree unless the user explicitly assigns a different node or branch.
+For assigned downstream agents, the Work Packet is the primary task context. Treat global `current_state`, `coordinator_state`, and `focus.current_focus_node` as coordinator metadata that may point to another agent's branch. Do not leave the assignment scope unless the coordinator creates or updates an assignment.
 
 Read workstream context:
 

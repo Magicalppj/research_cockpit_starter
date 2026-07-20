@@ -4,6 +4,8 @@ Use this capability when cleaning up temporary worktrees, branches, generated ou
 
 Maintenance is audit-first. Research Cockpit should help agents decide what is safe, what is blocked, and what evidence must be preserved. It should not silently delete user files, git branches, worktrees, outputs, or caches.
 
+Repository-scoped maintenance starts from the narrow audit for the named subsystem. Use `work open` only when the task identifies an existing assignment; do not create or infer an assignment merely to inspect repository hygiene.
+
 See also:
 
 - `docs/artifact-retention-policy.md`
@@ -55,7 +57,7 @@ Before deleting a worktree:
 research-cockpit worktree-closeout --root research_cockpit --repo . --worktree ../worktrees/<label> --classification discard_after_recording --dry-run --json
 ```
 
-3. Read scoped context with `agent-session-context` or `option-workstream-context`.
+3. If the closeout maps to an existing assignment, read it with `work open`. Otherwise remain repository-scoped and use the audit payload; use `option-workstream-context` only for an explicit recursive branch audit.
 4. Check for queued or running runs that reference the worktree, output root, cache root, GPU, port, PID, or model path.
 5. Check the outer repo and any explicitly relevant nested repos for dirty state.
 6. Classify the code changes:

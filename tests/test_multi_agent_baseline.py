@@ -30,11 +30,11 @@ class MultiAgentBaselineTests(unittest.TestCase):
         manifest = agent_command_manifest()
         inventory = legacy_command_inventory(manifest)
 
-        self.assertEqual(len(manifest), 70)
-        self.assertEqual(len(inventory), len(manifest))
+        self.assertEqual(len(manifest), 71)
+        self.assertEqual(len(inventory), 70)
         self.assertEqual(
             {row["name"] for row in inventory},
-            {row["name"] for row in manifest},
+            {row["name"] for row in manifest} - {"work open"},
         )
         for row in inventory:
             with self.subTest(command=row["name"]):

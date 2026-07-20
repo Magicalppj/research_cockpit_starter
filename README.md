@@ -156,7 +156,7 @@ npm run build
 | 生成 worktree closeout 计划 | `research-cockpit worktree-closeout --root research_cockpit --repo . --worktree ../worktrees/<label> --classification discard_after_recording --dry-run --json` |
 | 生成 sparse worktree 命令计划 | `research-cockpit start-agent-session --root research_cockpit --option <option_id> --label <label> --objective "..." --branch agent/<branch> --worktree ../worktrees/<label> --base main --dry-run --json --sparse --sparse-profile ml-experiment` |
 | 启动 UI | `research-cockpit ui --root research_cockpit --server.port 8501` |
-| 查看可用命令 | `research-cockpit commands --json --compact --summary-only` |
+| 查看可用命令 | `research-cockpit commands --role worker --json --compact --summary-only` |
 | 全局启动上下文 | `research-cockpit bootstrap --root research_cockpit --coordinator --json` |
 | 单节点 execution context | `research-cockpit context --root research_cockpit --id <node_id> --view execution --compact --json` |
 | 单节点变更校验 | `research-cockpit validate --root research_cockpit --changed-node <node_id> --json` |
@@ -283,7 +283,7 @@ research-cockpit set-baseline --root research_cockpit --node problem_x --clear -
 有 `assignment_id` 的下游 worker，优先读取 assignment-scoped handoff：
 
 ```sh
-research-cockpit agent-session-context --root research_cockpit --assignment <assignment_id> --compact --json
+research-cockpit work open --root research_cockpit --assignment <assignment_id> --compact --json
 ```
 
 已知节点 id 时，优先用一个命令读取 bounded execution context。首次响应会返回 `revision`；重复轮询传入 `--since`，无变化时只返回最小 revision 响应：
@@ -305,13 +305,13 @@ research-cockpit bootstrap --root research_cockpit --coordinator --json
 research-cockpit option-workstream-context --root research_cockpit --id <option_id> --compact --json
 ```
 
-选择命令面时先用 summary-only command discovery：
+选择命令面时先用 role-scoped command discovery：
 
 ```sh
-research-cockpit commands --json --compact --summary-only --workflow evidence
-research-cockpit commands --json --compact --summary-only --group artifact
-research-cockpit commands --json --compact --summary-only --group run --status active
-research-cockpit commands --json --compact --name create-workstream
+research-cockpit commands --role worker --json --compact --summary-only
+research-cockpit commands --role coordinator --json --compact --name start-agent-session
+research-cockpit commands --role maintainer --surface maintenance --json --compact --summary-only
+research-cockpit commands --role coordinator --json --compact --name create-workstream
 research-cockpit artifact create --help
 ```
 

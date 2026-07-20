@@ -33,16 +33,23 @@ REQUIRED_PACKAGE_PATHS = (
     "src/research_cockpit/execution_context.py",
     "src/research_cockpit/paths.py",
     "src/research_cockpit/command_registry.py",
+    "src/research_cockpit/role_contracts.py",
+    "src/research_cockpit/work_packets.py",
     "src/research_cockpit/ui/app.py",
     "src/research_cockpit/commands/agent_bootstrap.py",
     "src/research_cockpit/commands/skill_smoke_test.py",
     "src/research_cockpit/commands/list_agent_commands.py",
+    "src/research_cockpit/commands/work_open.py",
     "src/research_cockpit/commands/claim_option.py",
     "src/research_cockpit/commands/option_workstream_context.py",
     "src/research_cockpit/commands/report_option_workstream.py",
     "src/research_cockpit/commands/update_decision_checklist.py",
     "examples/demo_research_cockpit/current_state.yaml",
     "templates/minimal_research_cockpit/current_state.yaml",
+    "capabilities/worker-loop.md",
+    "capabilities/reviewer-loop.md",
+    "capabilities/coordinator-loop.md",
+    "capabilities/maintainer-loop.md",
     "capabilities/graph-state.md",
     "capabilities/focus-context.md",
     "capabilities/maintenance.md",
@@ -296,68 +303,131 @@ def public_scan_track(skill_path: Path) -> dict[str, Any]:
 
 
 def instruction_surface_track(skill_path: Path) -> dict[str, Any]:
-    skill_file = skill_path / "SKILL.md"
-    if not skill_file.is_file():
-        return _track(
-            "instruction_surface",
-            False,
-            summary={"missing": "SKILL.md"},
-        )
-
-    text = skill_file.read_text(encoding="utf-8", errors="replace")
-    required_routes = (
-        "graph-state.md",
-        "focus-context.md",
-        "node-management.md",
-        "experiment-cycle.md",
-        "experiment-tracking.md",
-        "decision-adr.md",
-        "ui-dashboard.md",
-        "integrations.md",
-        "maintenance.md",
-        "troubleshooting.md",
-    )
-    required_terms = (
-        "--view execution",
-        "--since <revision>",
-        "--start-experiment",
-        "internal_verify",
-        "worker_verify",
-        "run_closeout",
-        "existing_record_id",
-        "next_experiment",
-        "milestone_handoff",
-        "assignments/*.yaml",
-        "sequential",
-    )
-    line_count = len(text.splitlines())
-    byte_count = len(text.encode("utf-8"))
-    command_mentions = text.count("research-cockpit ")
-    missing_routes = [item for item in required_routes if item not in text]
-    missing_terms = [item for item in required_terms if item not in text]
-    incomplete_lines = [
-        {"line": index, "text": line}
-        for index, line in enumerate(text.splitlines(), start=1)
-        if line.strip() in {"-", "Use", "3. Read compact mutation fields"}
+    relative_paths = {
+        "root": "SKILL.md",
+        "worker": "capabilities/worker-loop.md",
+        "reviewer": "capabilities/reviewer-loop.md",
+        "coordinator": "capabilities/coordinator-loop.md",
+        "maintainer": "capabilities/maintainer-loop.md",
+    }
+    missing_playbooks = [
+        relative_path
+        for relative_path in relative_paths.values()
+        if not (skill_path / relative_path).is_file()
     ]
+    texts = {
+        role: (
+            (skill_path / relative_path).read_text(encoding="utf-8", errors="replace")
+            if (skill_path / relative_path).is_file()
+            else ""
+        )
+        for role, relative_path in relative_paths.items()
+    }
+
+    required_routes = (
+        "capabilities/worker-loop.md",
+        "capabilities/reviewer-loop.md",
+        "capabilities/coordinator-loop.md",
+        "capabilities/maintainer-loop.md",
+    )
+    required_terms = {
+        "root": (
+            "research-cockpit work open",
+            "commands --role <role> --name <command>",
+            "milestone_handoff",
+        ),
+        "worker": (
+            "--since <revision>",
+            "additional_verification_required",
+            "artifact_record.existing_record_id",
+        ),
+        "reviewer": ("producer result revision", "read-only"),
+        "coordinator": ("milestone_handoff", "canonical-root"),
+    }
+    missing_routes = [item for item in required_routes if item not in texts["root"]]
+    missing_terms = [
+        f"{role}:{term}"
+        for role, terms in required_terms.items()
+        for term in terms
+        if term not in texts[role]
+    ]
+
+    forbidden_by_role = {
+        "root": ("commands --json --compact --summary-only",),
+        "worker": (
+            "research-cockpit bootstrap",
+            "research-cockpit build",
+            "research-cockpit maintenance",
+            "commands --json --compact --summary-only",
+        ),
+        "reviewer": (
+            "research-cockpit create-run",
+            "research-cockpit maintenance",
+            "commands --json --compact --summary-only",
+        ),
+        "coordinator": ("commands --json --compact --summary-only",),
+    }
+    forbidden_role_routes = [
+        f"{role}:{token}"
+        for role, tokens in forbidden_by_role.items()
+        for token in tokens
+        if token in texts[role]
+    ]
+    incomplete_lines = [
+        {"file": relative_paths[role], "line": index, "text": line}
+        for role, text in texts.items()
+        for index, line in enumerate(text.splitlines(), start=1)
+        if line.strip() == "-"
+    ]
+
+    role_bytes = {role: len(text.encode("utf-8")) for role, text in texts.items()}
+    role_estimated_tokens = {
+        role: (byte_count + 3) // 4
+        for role, byte_count in role_bytes.items()
+    }
+    root_role_bytes = {
+        role: role_bytes["root"] + role_bytes[role]
+        for role in ("worker", "reviewer", "coordinator", "maintainer")
+    }
+    root_worker_bytes = root_role_bytes["worker"]
+    root_lines = len(texts["root"].splitlines())
+    root_command_mentions = texts["root"].count("research-cockpit ")
     passed = (
-        line_count <= 120
-        and byte_count <= 16 * 1024
-        and command_mentions <= 15
+        not missing_playbooks
+        and role_bytes["root"] < 6 * 1024
+        and role_bytes["worker"] < 6 * 1024
+        and role_bytes["reviewer"] < 5 * 1024
+        and role_bytes["coordinator"] < 5 * 1024
+        and role_bytes["maintainer"] < 5 * 1024
+        and all(byte_count < 12 * 1024 for byte_count in root_role_bytes.values())
+        and root_lines <= 90
+        and root_command_mentions <= 5
         and not missing_routes
         and not missing_terms
+        and not forbidden_role_routes
         and not incomplete_lines
     )
     return _track(
         "instruction_surface",
         passed,
         summary={
-            "line_count": line_count,
-            "line_budget": 120,
-            "byte_count": byte_count,
-            "byte_budget": 16 * 1024,
-            "command_mentions": command_mentions,
-            "command_mention_budget": 15,
+            "root_bytes": role_bytes["root"],
+            "root_byte_budget": 6 * 1024,
+            "root_worker_bytes": root_worker_bytes,
+            "root_worker_estimated_tokens": (root_worker_bytes + 3) // 4,
+            "combined_byte_budget": 12 * 1024,
+            "combined_estimated_token_budget": 3 * 1024,
+            "root_role_bytes": root_role_bytes,
+            "role_bytes": role_bytes,
+            "role_estimated_tokens": role_estimated_tokens,
+            "missing_playbooks": missing_playbooks,
+            "forbidden_role_routes": forbidden_role_routes,
+            "line_count": root_lines,
+            "line_budget": 90,
+            "byte_count": role_bytes["root"],
+            "byte_budget": 6 * 1024,
+            "command_mentions": root_command_mentions,
+            "command_mention_budget": 5,
             "missing_routes": missing_routes,
             "missing_terms": missing_terms,
             "incomplete_lines": incomplete_lines,
@@ -426,7 +496,6 @@ def read_only_startup_track(skill_path: Path, python: str) -> dict[str, Any]:
     node_id = _current_option_id(skill_path) or "option_demo_prompt_refinement"
     commands = [
         _cli(python, "context", "--root", root, "--id", node_id, "--view", "execution", "--compact", "--json"),
-        _cli(python, "commands", "--json", "--compact", "--summary-only"),
     ]
     env = _package_env(skill_path)
     checks = [_run_command(command, cwd=skill_path, env=env) for command in commands]
@@ -482,6 +551,27 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
         _run_command(_cli(python, "complete-run", "--print-schema"), cwd=skill_path, env=env),
         _run_command(_cli(python, "ingest-artifact", "--help"), cwd=skill_path, env=env),
         _run_command(_cli(python, "promote-artifact-record", "--help"), cwd=skill_path, env=env),
+        _run_command(
+            _cli(
+                python,
+                "commands",
+                "--role",
+                "worker",
+                "--name",
+                "work open",
+                "--json",
+                "--compact",
+            ),
+            cwd=skill_path,
+            env=env,
+        ),
+        _run_command(
+            _cli(python, "commands", "--name", "commands", "--json", "--compact"),
+            cwd=skill_path,
+            env=env,
+        ),
+        _run_command(_cli(python, "work", "open", "--help"), cwd=skill_path, env=env),
+        _run_command(_cli(python, "commands", "--help"), cwd=skill_path, env=env),
     ]
 
     ingest_payload = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
@@ -491,6 +581,12 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
     promote_rows = promote_payload.get("commands", []) if isinstance(promote_payload, dict) else []
     ingest_row = ingest_rows[0] if ingest_rows and isinstance(ingest_rows[0], dict) else {}
     promote_row = promote_rows[0] if promote_rows and isinstance(promote_rows[0], dict) else {}
+    work_payload = checks[6].get("json") if isinstance(checks[6].get("json"), dict) else {}
+    commands_payload = checks[7].get("json") if isinstance(checks[7].get("json"), dict) else {}
+    work_rows = work_payload.get("commands", []) if isinstance(work_payload, dict) else []
+    commands_rows = commands_payload.get("commands", []) if isinstance(commands_payload, dict) else []
+    work_row = work_rows[0] if work_rows and isinstance(work_rows[0], dict) else {}
+    commands_row = commands_rows[0] if commands_rows and isinstance(commands_rows[0], dict) else {}
 
     ingest_flags = set(ingest_row.get("supported_flags", []) or [])
     promote_flags = set(promote_row.get("supported_flags", []) or [])
@@ -500,6 +596,18 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
         {f"ingest-artifact:{flag}" for flag in required_ingest_flags - ingest_flags}
         | {f"promote-artifact-record:{flag}" for flag in required_promote_flags - promote_flags}
     )
+    manifest_help_missing: list[str] = []
+    manifest_help_pairs = (
+        ("ingest-artifact", ingest_row, checks[4].get("stdout", "")),
+        ("promote-artifact-record", promote_row, checks[5].get("stdout", "")),
+        ("work open", work_row, checks[8].get("stdout", "")),
+        ("commands", commands_row, checks[9].get("stdout", "")),
+    )
+    for command_name, row, help_text in manifest_help_pairs:
+        for flag in row.get("supported_flags", []) or []:
+            if flag != "--progress" and flag not in help_text:
+                manifest_help_missing.append(f"{command_name}:{flag}")
+    manifest_rows_present = all(row for _, row, _ in manifest_help_pairs)
 
     public_paths = [
         skill_path / "AGENTS.md",
@@ -545,6 +653,8 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
     passed = (
         all(check["passed"] for check in checks)
         and not missing_flags
+        and manifest_rows_present
+        and not manifest_help_missing
         and not promotion_examples_missing_reason
         and structured_closeout_documented
         and context_schema_version == "execution_context_v1"
@@ -568,6 +678,8 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
             "ingest_verification_mode": ingest_verification_mode,
             "ingest_worker_verify_commands": ingest_worker_verify_commands,
             "missing_flags": missing_flags,
+            "manifest_rows_present": manifest_rows_present,
+            "manifest_help_missing": manifest_help_missing,
             "structured_closeout_documented": structured_closeout_documented,
             "closeout_schema_ok": schema_ok,
             "promotion_examples_missing_reason": promotion_examples_missing_reason,

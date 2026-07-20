@@ -1175,6 +1175,8 @@ Parser mode is part of the contract:
 
 目标：先完成 role metadata、discovery 和 playbook；同一版本 facade 完整覆盖后按 cutover contract 删除被取代的 public routes。
 
+Status: completed on 2026-07-19 and independently reviewed on 2026-07-20. The manifest now contains 70 legacy routes plus the canonical `work open` facade; legacy inventory remains independently fixed at 70 until cutover.
+
 任务：
 
 - command manifest 增加 audiences、surface、intent、idempotency 和 verification policy。
@@ -1191,6 +1193,8 @@ Parser mode is part of the contract:
 - 根 router 加一个 worker playbook 的总输入小于 12 KB，已知 assignment 的默认 recipe 不超过 3 次 CLI。
 - release/usability trace 中不存在成功 mutation 后机械 validate、context reread、build 或 smoke。
 - existing command/help/parser parity tests 继续通过。
+
+Measured evidence: role-specific filtering returns 8 worker core commands and `4787 bytes`; root router is `3663 bytes`, root plus worker is `6659 bytes`, and the largest root-plus-role pair remains below `12 KiB`. The read-only startup release trace executes one bounded context command and no broad discovery. Full/`--name` manifests retain all contract fields while summary-only omits descriptive detail. Independent review found and closed cross-role core leakage, maintainer `build` audience drift, facade/discovery flag drift, coarse coordinator assignment intent, and ambiguous repository-scoped maintenance startup; exhaustive manifest/help parity and representative release checks pass after repair.
 
 ### Phase 3: Claim, Lease And Idempotency
 
@@ -1308,12 +1312,12 @@ Parser mode is part of the contract:
   - Verify: targeted loader tests、large fixture benchmark。
   - Files: `work_packets.py`、context command wrapper、`tests/test_scripts.py`。
 
-- [ ] T3: 增加 command audience/surface/intent metadata。
+- [x] T3: 增加 command audience/surface/intent metadata。
   - Acceptance: role-filtered discovery 与 help/parser contract 一致。
   - Verify: manifest parity/release tests。
   - Files: `command_registry.py`、`list_agent_commands.py`、tests。
 
-- [ ] T4: 拆分 role playbooks 和根 skill router。
+- [x] T4: 拆分 role playbooks 和根 skill router。
   - Acceptance: worker 不加载 coordinator/maintenance 流程；根 skill 达到预算。
   - Verify: release instruction-surface checks、无上下文 reader test。
   - Files: `SKILL.md`、`agents/openai.yaml`、`capabilities/*-loop.md`。
