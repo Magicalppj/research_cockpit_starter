@@ -47,12 +47,14 @@ Then start and close; the start receipt supplies the generated `entities.run_id`
 
 ```sh
 research-cockpit work start --root <data-root> --assignment <assignment_id> --file <start.yaml> --json --compact
-research-cockpit complete-run --root <data-root> --assignment <assignment_id> --file <closeout.yaml> --json --compact --no-build
+research-cockpit work close --root <data-root> --assignment <assignment_id> --file <closeout.yaml> --json --compact
 ```
 
-This is three agent-visible CLI calls including open, or three calls starting with claim for initially unowned work. `work start` creates the run, starts the experiment, and renews the lease in one transaction. Reuse one operation id only for an exact retry of the unchanged file; use a new id when its request changes. Normal mutations renew the lease, and a long-running launcher should call the runtime heartbeat hook outside model turns. Do not add `work renew` to the normal recipe.
+Create `closeout.yaml` from `templates/launcher/work_close.example.yaml`. Its `work_close_v1` control fields bind the agent, lease epoch, operation id, and packet `input_revision`; its `run`, `experiment`, `finding`, and `assignment_result` blocks close all related truth in one transaction. A `next_experiment` is a same-scope continuation. Put cross-scope or portfolio follow-ups under `assignment_result.proposals` with `kind: new_branch`; close never creates an assignment for that proposal.
 
-Use one additional `ingest-artifact --json --compact --no-build` only when a durable payload exists before close. In closeout, reference its returned `artifact_record.existing_record_id`; do not repeat experiment completion, follow-up creation, or cursor movement already included by `complete-run`.
+This is three agent-visible CLI calls including open, or three calls starting with claim for initially unowned work. `work start` creates the run, starts the experiment, and renews the lease. `work close` persists the run terminal state, finding, bounded Evidence Bundle, optional follow-up cursor, assignment result, and lease transition atomically. Reuse an operation id only for an exact retry of the unchanged file; use a new id when its request changes. Normal mutations renew the lease, and a long-running launcher should call the runtime heartbeat hook outside model turns. Do not add `work renew` to the normal recipe.
+
+When final payload files become available only at close, add `evidence_inputs.source` and source-relative `links` to `work_close_v1`; staging, hashing, artifact-record creation, and closeout remain one CLI call. Use one additional `ingest-artifact --json --compact --no-build` only when incremental or streaming evidence must be durable before close, then reference its `record_id` through `artifact_record.existing_record_id`. Do not repeat experiment completion, follow-up creation, or cursor movement after `work close`.
 
 Use assignment-scoped mutations. Do not mutate coordinator focus, accept decisions, or run lifecycle cleanup unless the assignment explicitly delegates that authority.
 

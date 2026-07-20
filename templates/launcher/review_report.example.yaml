@@ -1,0 +1,14 @@
+schema_version: review_report_v1
+agent_id: <reviewer_agent_id>
+lease_id: <lease_id>
+lease_epoch: 1
+operation_id: <unique_operation_id>
+input_revision: <input_revision_from_review_open>
+producer_result_revision: <producer_result_revision_from_review_open>
+verdict: approved
+summary: <bounded_review_summary>
+findings: []
+evidence_inspected:
+  - <artifact_record_or_commit_ref>
+validation_performed:
+  - <targeted_validation>

@@ -14,10 +14,10 @@ Keep paths in launcher files relative to the run output directory whenever possi
 
 | File | Purpose | Ingest path |
 | --- | --- | --- |
-| `run_record.txt` | Human-readable run handoff: ids, commands, process hints, and output paths. | Put initial metadata in `work start`, then use `update-run` or `complete-run` only when needed. |
+| `run_record.txt` | Human-readable run handoff: ids, commands, process hints, and output paths. | Put initial metadata in `work start`; use `update-run` only when it changes and `work close` for terminal state. |
 | `progress.json` | Machine-readable heartbeat for long-running work. | Reference with `--progress-file artifacts/<experiment_id>/<run_id>/progress.json`. |
 | `gate_result.json` | Machine-readable gate outcome for preflight, dataset, cache, smoke, training, or evaluation gates. | Attach with `ingest-gate-result` or write with `record-gate-result`. |
-| `artifact_manifest.json` | Machine-readable summary of files worth preserving as evidence. | Use it to choose `ingest-artifact --link` values or `create-artifact --link` values. |
+| `artifact_manifest.json` | Machine-readable summary of files worth preserving as evidence. | Use its relative paths as `work_close_v1.evidence_inputs.links`; use ingest links only for evidence that must be durable before close. |
 
 ## `run_record.txt`
 
@@ -52,8 +52,7 @@ Typical run ingestion:
 ```sh
 research-cockpit work start --root research_cockpit --assignment <assignment_id> --file work_start.yaml --json --compact
 research-cockpit update-run --root research_cockpit --assignment <assignment_id> --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
-research-cockpit complete-run --print-schema
-research-cockpit complete-run --root research_cockpit --file closeout.yaml --assignment <assignment_id> --json --compact --no-build
+research-cockpit work close --root research_cockpit --file work_close.yaml --assignment <assignment_id> --json --compact
 ```
 
 ## `progress.json`
@@ -144,13 +143,24 @@ For long-run preflight checks, use `gate_type: "preflight"` and add a `preflight
 }
 ```
 
-Use link values relative to the run output directory. When the output directory is disposable, first preserve it with `ingest-artifact`; repeated `--link key=relative/path` values should come from the manifest:
+Use link values relative to the run output directory. For final output in a disposable worktree, put the source and manifest-selected links directly in `work_close_v1`:
+
+```yaml
+evidence_inputs:
+  source: <launcher_output_dir>
+  links:
+    metrics: outputs/metrics.json
+    config: config.yaml
+    gate_result: gate_result.json
+```
+
+Use standalone ingest only when the output must be durable before close:
 
 ```sh
 research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link metrics=outputs/metrics.json --link config=config.yaml --link gate_result=gate_result.json --json --compact --no-build
 ```
 
-`ingest-artifact` returns a runtime-generated record id in `target.artifact_id`. Reuse that exact value as `artifact_record.existing_record_id`; do not derive it from experiment or run ids. Keep ordinary output as a record, and promote it with `promote-artifact-record --promotion-reason "..."` only when a graph artifact is required.
+`ingest-artifact` returns a runtime-generated record id in `target.artifact_id`. Reuse that exact value as `artifact_record.existing_record_id`; do not derive it from experiment or run ids. Keep output as a record and promote it with `promote-artifact-record --promotion-reason "..."` only when graph navigation requires it.
 
 If the run directory already lives at a stable path, create or link the artifact directly:
 
@@ -167,6 +177,6 @@ Shell, Python, and manual launch flows should follow the same sequence:
 3. Update `progress.json` during long-running work.
 4. Write `gate_result.json` for each gate that should drive the next action.
 5. Write `artifact_manifest.json` before handoff so an agent can preserve only useful outputs.
-6. Ingest the artifact bundle once, then use one `complete-run --file <closeout.yaml>` transaction to close the run, reference `artifact_record.existing_record_id`, attach gates, record the finding, finish the experiment, and optionally create one follow-up. With an assignment, the follow-up becomes its cursor. An internally verified result needs no repeated validate/context.
+6. Use one `work close --file <work_close.yaml>` transaction. Put final output under `evidence_inputs`; use `artifact_record.existing_record_id` only for evidence ingested earlier. The same close attaches gates, records the finding/result, finishes or advances the assignment, and needs no repeated validate/context after an internally verified receipt.
 
 Do not store machine-local absolute paths in canonical Research Cockpit records. Keep those details in local launcher logs unless they are needed as short human hints in `run_record.txt`.

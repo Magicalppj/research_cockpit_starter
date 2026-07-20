@@ -236,5 +236,13 @@ ROLE_COMMAND_MODULES: dict[str, dict[str, str]] = {
         "release": "work_release",
         "renew": "work_renew",
         "start": "work_start",
+        "close": "work_close",
+    },
+    "review": {
+        "open": "review_open",
+        "report": "review_report",
+    },
+    "coord": {
+        "review": "coord_review",
     },
 }

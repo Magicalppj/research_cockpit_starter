@@ -115,7 +115,7 @@ Research Cockpit 提供三层能力：
 
 - `research_cockpit/assignments/*.yaml` 是 assignment-scoped worker 的 cursor、next action 和状态 truth source；`research_cockpit/agents/*.yaml` 保存 agent identity 和 active assignment。
 - `research_cockpit/coordinator_state.yaml` 是 coordinator/UI selection truth source。
-- `research_cockpit/current_state.yaml` 是 legacy/coordinator compatibility state，不是普通 worker 的默认 cursor。
+- `research_cockpit/current_state.yaml` 是 legacy/coordinator compatibility state，也就是 coordinator/legacy compatibility layer；它不是普通 worker 的默认 cursor。
 - `research_cockpit/graph/nodes/*.yaml`、`research_cockpit/runs/*.yaml`、`research_cockpit/gate_results/*.{yaml,json}` 和 `research_cockpit/artifact_records/*.yaml` 保存当前结构化事实。
 - `research_cockpit/graph/interaction_events/**` 与 legacy `graph/interaction_log.yaml` 保存 append-only 操作历史，不替代当前事实。
 - `research_cockpit/dashboards/*` 是生成文件；只在需要刷新生成上下文或 coordinator/milestone handoff 时运行 `research-cockpit build --root <root>`。
@@ -183,41 +183,73 @@ research-cockpit create-workstream --root research_cockpit --file workstream.yam
 
 ### 2. 执行并事务化收尾一个实验
 
-Assignment-scoped worker 的默认路径是“领取/打开、创建并启动、可选 ingest、一次收尾”，不需要单独续租、分别更新实验状态、记录 finding、创建 follow-up 或移动 cursor。`start.yaml` 使用 `work_start_v1`，包含 packet 返回的 agent/lease/epoch、稳定 operation id，以及可选的 `run` launcher metadata：
+Assignment-scoped worker 的默认路径是“领取/打开、创建并启动、一次收尾”，共不超过 3 次 CLI；不需要单独续租、ingest final payload、分别更新实验状态、记录 finding、创建 follow-up 或移动 cursor。`start.yaml` 使用 `work_start_v1`：
 
 ```sh
 research-cockpit work start --root research_cockpit --assignment <assignment_id> --file start.yaml --json --compact
-research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from <output_dir> --run-id run_x --link metrics=metrics.json --json --compact --no-build
-research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
+research-cockpit work close --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact
 ```
 
-`work start` receipt 的 `entities.run_id` 替代手工 run id。没有需要保留的 payload 时跳过 `ingest-artifact`。常用最小 `closeout.yaml` 如下；没有后续实验或 artifact record 时分别省略对应块：
+`work start` receipt 的 `entities.run_id` 替代手工 run id。`closeout.yaml` 使用 `work_close_v1`，控制字段取自当前 packet；final payload 可通过 `evidence_inputs` 同步 staging，无 payload 时省略该块：
 
 ```yaml
-schema_version: run_closeout_v1
+schema_version: work_close_v1
+agent_id: agent_x
+lease_id: lease_x
+lease_epoch: 1
+operation_id: op_close_x
+input_revision: input-v1:x
 run:
   id: run_x
   status: completed
 experiment:
   status: done
   result_summary: "..."
-artifact_record:
-  existing_record_id: artifact_experiment_x_run_x
 finding:
   statement: "..."
   confidence: medium
+  outcome: mixed
+assignment_result:
+  outcome: mixed
+  summary: "..."
+  delivery:
+    git_commit: null
+    changed_files: []
+    tests:
+      status: passed
+      summary: "..."
+  proposals: []
+evidence_inputs:
+  source: ../worktree/.agent_runs/run_x
+  title: Final run evidence
+  summary: "..."
+  links:
+    metrics: outputs/metrics.json
 next_experiment:
   id: experiment_x_followup
   title: "..."
   next_action: "..."
 ```
 
-`complete-run --file` 会在一个事务中写入 run 终态、gate、finding、artifact-record link、experiment 结果、最多一个 sibling follow-up，并在传入 assignment 时自动移动 worker cursor。普通成功写入返回 `verified: true` 与 `additional_verification_required: false`，此时不要在三步之间重复运行 validate/context。只有不熟悉 schema 时才运行 `research-cockpit complete-run --print-schema`。
+`evidence_inputs`、`next_experiment` 均可省略；若证据已提前 ingest，则省略 `evidence_inputs` 并改用 `artifact_record.existing_record_id`，两者不可同时出现。`work close` 会原子写入 run、gate、finding、Evidence Bundle、experiment、cursor 和 lease transition。成功 receipt 已内部验证，不要重复 validate/context。完整模板见 `templates/launcher/work_close.example.yaml`。
 
-兼容命令仍保留，但不是默认链路：没有 run record 的单实验可用 `complete-experiment`；真正的多实验批处理可用 `complete-experiments`；closeout 之外的独立 follow-up 可用 `create-followup-experiment`；仅移动 cursor 时才单独使用 `set-cursor`。`close-current-experiment` 只用于 coordinator/legacy global-focus 工作流。
-### 3. 从 worktree ingest run output
+兼容命令仍保留，但不是默认链路：无 active lease 的旧 run 可用 `complete-run`；没有 run record 的单实验可用 `complete-experiment`；真正的多实验批处理可用 `complete-experiments`。`create-followup-experiment`、`set-cursor` 和 `close-current-experiment` 只用于显式恢复/兼容场景。
 
-临时 worktree 的普通 run output 只复制一次到 canonical data root，并默认记录为轻量 artifact record：
+
+### Reviewer 两步审核
+
+Reviewer 不再单独读取 producer context：
+
+```sh
+research-cockpit review open --root research_cockpit --assignment <review_assignment_id> --json --compact
+research-cockpit review report --root research_cockpit --assignment <review_assignment_id> --file review.yaml --json --compact
+```
+
+`review open` 一次返回 reviewer Work Packet、精确 producer result revision 和 bounded evidence links。`review report` 只写 reviewer assignment；coordinator 再用 `coord review --assignment <producer_assignment_id> --file verdict.yaml` 更新 producer review metadata，不改写 producer/reviewer Evidence Bundle。
+
+### 3. 提前持久化 incremental evidence
+
+仅当 streaming/intermediate output 必须在 close 前可恢复或供其他 agent 使用时，才增加 standalone ingest：
 
 ```sh
 research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from ../worktrees/agent_x/.agent_runs/run_x --run-id run_x --agent agent_x --link metrics=metrics.json --json --compact --no-build
@@ -225,7 +257,7 @@ research-cockpit ingest-artifact --root research_cockpit --assignment <assignmen
 research-cockpit promote-artifact-record --root research_cockpit --id artifact_experiment_x_run_x --artifact-id artifact_experiment_x_run_x_promoted --link-to experiment_x --promotion-reason "用于 decision 或 baseline 的长期证据" --json --compact
 ```
 
-`ingest-artifact` 会复制 payload、写 `_research_cockpit_ingest.json`、创建 artifact record，并关联 experiment；它不创建 `graph/nodes/artifact_*.yaml`。成功的非 dry-run ingest 已内部验证，不需要 changed-scope validate/context。仅在 source path、link 或 promotion 输入需要预览时使用 `--dry-run`。已有 record 的提升必须提供 `--promotion-reason`。
+`ingest-artifact` 会复制 payload 并创建轻量 artifact record；close 时通过 `artifact_record.existing_record_id` 引用。final-only payload 应直接使用 `work_close_v1.evidence_inputs`，省掉此命令。只有 durable graph evidence 才 promotion，并必须提供 `--promotion-reason`。
 
 `smoke` 默认使用 compact 检查路径，避免在大图仓库里生成完整 `bootstrap`、`suggest-next-actions` 和 `node-context` JSON。大 root 下使用 `--progress` 把阶段进度输出到 stderr；仅在诊断旧完整子进程流程时加 `--full`。
 
@@ -236,11 +268,10 @@ research-cockpit promote-artifact-record --root research_cockpit --id artifact_e
 ```sh
 research-cockpit work start --root research_cockpit --assignment <assignment_id> --file start.yaml --json --compact
 research-cockpit update-run --root research_cockpit --assignment <assignment_id> --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
-research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link gate_result=gate_result.json --json --compact --no-build
-research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
+research-cockpit work close --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact
 ```
 
-`complete-run --file` 负责 terminal run、gate metadata、finding、artifact-record link、experiment 终态、一个可选 follow-up 和 assignment cursor。阻塞性 preflight 必须在昂贵任务前独立记录；其他 gate 可直接放入 closeout。仅状态恢复才使用 `complete-run --id`，仅确需读取运行状态时才调用 `run-context`。
+`work close` 负责 terminal run、gate metadata、finding、Evidence Bundle、experiment、可选 follow-up、assignment 和 final payload。阻塞性 preflight 才提前记录；普通 gate/final evidence 直接随 close 提交。仅 legacy 状态恢复使用 `complete-run --id`，仅确需读取运行状态时调用 `run-context`。
 ### 5. 显式创建或关联 artifact
 
 ```sh
@@ -285,6 +316,14 @@ research-cockpit set-baseline --root research_cockpit --node problem_x --clear -
 ```sh
 research-cockpit work open --root research_cockpit --assignment <assignment_id> --compact --json
 ```
+有 `review_assignment_id` 的 reviewer 使用独立入口；不要再执行 worker packet 或 producer context 命令：
+
+```sh
+research-cockpit review open --root research_cockpit --assignment <review_assignment_id> --compact --json
+```
+
+正常 reviewer handoff 必须已分配 agent 和 active lease，因而默认只需 `review open -> review report` 两次调用。
+
 
 已知节点 id 时，优先用一个命令读取 bounded execution context。首次响应会返回 `revision`；重复轮询传入 `--since`，无变化时只返回最小 revision 响应：
 
@@ -395,14 +434,14 @@ SKILL.md
 规则：
 
 - Worktree 里做代码改动、运行实验、保存本地输出。
-- 用默认 `ingest-artifact --json --compact --no-build` 把普通 `.agent_runs/<run_id>/` 复制到 canonical store 并写入 artifact record；只有 durable evidence 需要图节点时才使用带 `--promotion-reason` 的 promotion。
+- Final output 通过 `work_close_v1.evidence_inputs` 一次复制到 canonical store；只有必须在 close 前 durable 的 incremental/streaming output 才单独运行 `ingest-artifact`。只有 durable evidence 需要图节点时才显式 promotion 并提供 reason。
 - 不在 worktree 里 `research-cockpit init`，也不把 worktree-local path 当作长期 `--evidence-path`。
-- Structured `complete-run --file` closeout 会自动推进 assignment cursor；只有独立的 cursor-only 变更才使用 `set-cursor --assignment <assignment_id>`。全局 `set-focus` 和 lifecycle cleanup 由 coordinator 处理，`set-agent-focus` 只保留旧兼容场景。
+- `work close --file` 会完成或推进 assignment cursor；只有显式恢复才单独使用 `set-cursor`。全局 `set-focus` 和 lifecycle cleanup 由 coordinator 处理，`set-agent-focus` 只保留旧兼容场景。
 
 删除 worktree 前检查：
 
-1. 有价值的 run directory 已 ingest，并能在 Resources/context 里看到。
-2. 普通 output 的 `record_id` 已通过 `complete-run --file` 中的 `artifact_record.existing_record_id` 关联到 finding；需要 durable graph evidence 时已显式 promotion 并记录 reason。
+1. 有价值的 final run directory 已随 `work close` 保存，或 earlier durable output 已 ingest，并能从 Evidence Bundle refs 定位。
+2. Final output 已通过 `work_close_v1.evidence_inputs` 保存，或 earlier ingest 的 `record_id` 已通过 `artifact_record.existing_record_id` 关联；需要 durable graph evidence 时已显式 promotion 并记录 reason。
 3. 有用代码已 merge/cherry-pick 或保存 patch。
 4. 需要继承的正向结果已记录 decision 或 `set-baseline`。
 5. closeout 的 compact 结果已内部验证，或已按要求完成 changed-scope 检查；只有同时发生 coordinator merge、release 或 research-stage milestone handoff 时才运行 full validate/build/smoke。

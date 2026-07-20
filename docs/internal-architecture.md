@@ -28,6 +28,11 @@ Workflow/domain layer
   assignment_leases.py
   assignment_runs.py
   work_packets.py
+  assignment_results.py
+  assignment_reviews.py
+  evidence_bundles.py
+  evidence_staging.py
+  run_closeout.py
   operation_receipts.py
   mutation_runtime.py
   root_snapshot.py
@@ -82,6 +87,11 @@ The root `SKILL.md` is only a role router. Default agent instructions live in `w
 - `assignment_leases.py`: claim, renew, release, owner/epoch checks, lease renewal planning, heartbeat hooks, and expired-lease reassignment guards.
 - `assignment_runs.py`: composes lease renewal with the existing create-run domain transaction for `work start`.
 - `work_packets.py`: bounded assignment projections, dependency/input readiness, lease state, stable revisions, and unchanged polling.
+- `assignment_results.py`: validates `work_close_v1`, performs operation replay checks, stages optional final evidence, and delegates one atomic assignment closeout.
+- `assignment_reviews.py`: builds bounded review packets, records reviewer-only Evidence Bundles, and applies revision-bound coordinator verdicts without rewriting producer results.
+- `evidence_bundles.py`: constructs and validates bounded work/review result contracts and their stable revisions.
+- `evidence_staging.py`: copies and hashes final payloads outside the truth commit lock, then prepares artifact-record changes for atomic closeout.
+- `run_closeout.py`: owns the combined run, gate, finding, artifact record, Evidence Bundle, experiment, cursor, and lease transaction.
 - `operation_receipts.py`: normalized operation hashes, durable receipt lookup from interaction events, and the derived incremental operation index.
 - `mutation_runtime.py`: optimistic multi-file commits, rollback, operation-event append, and post-commit derived-index patching.
 - `root_snapshot.py`: targeted graph snapshots. `load_indexed_root_snapshot(...)` is the no-full-fallback entry point for latency-bounded reads.
@@ -127,6 +137,9 @@ These modules should remain free of command, UI, and dashboard dependencies.
 - Use `work_packets.py` for assignment-facing read projections and revision polling.
 - Use `assignment_leases.py` and `assignment_runs.py` for lease-aware worker mutations.
 - Use `operation_receipts.py` for operation idempotency; do not create per-operation receipt files.
+- Use `assignment_results.py` and `run_closeout.py` for assigned terminal mutations.
+- Use `assignment_reviews.py` for reviewer/coordinator review lifecycle operations.
+- Use `evidence_bundles.py` and `evidence_staging.py` for bounded result contracts and final payload staging.
 - Use `runtime_ids.py` for collision-resistant run, record, artifact, and follow-up ids.
 - Use `root_snapshot.py` and `validation_index.py` for bounded indexed graph reads.
 - Use `resources.py` for link/resource rows.
@@ -162,7 +175,7 @@ Runtime access rules:
 - `mutation_runtime.py` owns targeted preflight, optimistic file checks, atomic multi-file transactions, rollback, and validation-index patching.
 - `validation_index.py` is a derived acceleration index; missing, incompatible, or stale indexes must fall back to full validation and return explicit refresh commands.
 - `interaction_log.py` owns both legacy YAML compatibility and the JSONL event backend. Commands must append through this module and must not rewrite interaction history.
-- `run_closeout.py` owns the `run_closeout_v1` transaction across run, gate metadata, artifact-record link, finding, and next actions.
+- `run_closeout.py` owns both legacy `run_closeout_v1` and facade `work_close_v1` terminal transactions; final payload copy/hash occurs before lock acquisition, while artifact move and truth writes commit together.
 
 Generated output lives in `<data-root>/dashboards/` and can be rebuilt with:
 

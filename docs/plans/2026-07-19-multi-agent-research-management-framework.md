@@ -838,8 +838,8 @@ research-cockpit work claim --root <root> --assignment <id> --agent <agent_id> -
 research-cockpit work renew --root <root> --assignment <id> --agent <agent_id> --lease-id <lease_id> --lease-epoch <epoch> --operation-id <id> --json --compact
 research-cockpit work release --root <root> --assignment <id> --agent <agent_id> --lease-id <lease_id> --lease-epoch <epoch> --operation-id <id> --json --compact
 research-cockpit work start --root <root> --assignment <id> --file start.yaml --json --compact
-research-cockpit work record --root <root> --assignment <id> --file evidence.yaml --json --compact --no-build
-research-cockpit work close --root <root> --assignment <id> --file closeout.yaml --json --compact --no-build
+research-cockpit work record --root <root> --assignment <id> --file evidence.yaml --json --compact
+research-cockpit work close --root <root> --assignment <id> --file closeout.yaml --json --compact
 ```
 
 `work claim --return-packet` 是冻结的 public flag；claim receipt 必须直接携带 bounded packet。
@@ -850,16 +850,16 @@ research-cockpit work close --root <root> --assignment <id> --file closeout.yaml
 
 ```sh
 research-cockpit review open --root <root> --assignment <review_id> --json --compact
-research-cockpit review report --root <root> --assignment <review_id> --file review.yaml --json --compact --no-build
+research-cockpit review report --root <root> --assignment <review_id> --file review.yaml --json --compact
 ```
 
 ### Coordinator
 
 ```sh
 research-cockpit coord overview --root <root> --json --compact --limit 20
-research-cockpit coord assign --root <root> --file packet.yaml --json --compact --no-build
-research-cockpit coord review --root <root> --assignment <id> --file verdict.yaml --json --compact --no-build
-research-cockpit coord decide --root <root> --file decision.yaml --json --compact --no-build
+research-cockpit coord assign --root <root> --file packet.yaml --json --compact
+research-cockpit coord review --root <root> --assignment <id> --file verdict.yaml --json --compact
+research-cockpit coord decide --root <root> --file decision.yaml --json --compact
 research-cockpit coord handoff --root <root> --file handoff.yaml --json --progress
 ```
 
@@ -1248,6 +1248,15 @@ Measured evidence: 43 Phase 3 focused tests cover same-target and overlapping-as
 - new-branch proposal 不自动创建 assignment。
 - negative/inconclusive bundle 可以完成并进入 review。
 
+Implementation record (2026-07-20):
+
+- `work close` 接收 bounded result/delivery/proposals 和可选 `evidence_inputs`，在 root lock 外完成受限 snapshot、内容 hash 和 link 校验，在单次 transaction 中提交 staged payload、run/experiment closeout、finding、assignment result refs 与 cursor。
+- assignment 保存 revision-bound Evidence Bundle reference；operation request hash 包含 evidence snapshot hash，exact retry 可复现，源内容变化的同 operation id 被拒绝。
+- `review open`、`review report` 和 `coord review` 形成只读 reviewer scope、结构化 verdict 与 coordinator disposition；producer bundle 不被 review 更新重写，new-branch proposal 也不隐式创建 assignment。
+- commit validators 重查 producer/reviewer lease、input revision、dependency assignment、baseline sources 和 allowed operation；evidence staged move 同时约束 root containment、symlink/junction ancestry、source identity 与 rollback cleanup。
+
+Measured evidence: 37 focused work-close/review/legacy round-trip tests pass (3 platform/privilege-conditioned symlink or junction tests skipped), 411 script behavior tests pass (1 existing skip), `git diff --cached --check` passes, and the non-mutating portable release check passes. Independent review raised and closed three P1 issues (commit-time freshness, evidence link/TOCTOU safety, and evidence-content idempotency) plus two P2 coverage gaps (full rollback and real 0.2.x facade round-trip).
+
 ### Phase 5: Coordination, Synthesis And Handoff
 
 目标：给 coordinator 提供 bounded control plane。
@@ -1341,12 +1350,12 @@ Measured evidence: 43 Phase 3 focused tests cover same-target and overlapping-as
   - Verify: subprocess retry/concurrency tests。
   - Files: receipt/id helpers、representative commands、tests。
 
-- [ ] T7: 扩展 closeout 为 Evidence Bundle result。
+- [x] T7: 扩展 closeout 为 Evidence Bundle result。
   - Acceptance: result refs、delivery、proposals 和 input revision 原子落盘。
   - Verify: transaction rollback/stale dependency tests。
   - Files: `run_closeout.py`、`assignment_results.py`、file schemas、tests。
 
-- [ ] T8: 实现 reviewer packet 和 review verdict。
+- [x] T8: 实现 reviewer packet 和 review verdict。
   - Acceptance: reviewer read-only，producer result 不被改写。
   - Verify: scope and review lifecycle tests。
   - Files: work packet/review domain、commands、tests。

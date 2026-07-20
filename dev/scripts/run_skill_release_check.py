@@ -618,11 +618,12 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
     ]
     public_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in public_paths)
     structured_closeout_documented = (
-        "complete-run --root" in public_text
+        "work start --root" in public_text
+        and "work close --root" in public_text
         and "--file closeout.yaml" in public_text
-        and "existing_record_id" in public_text
+        and "work_close_v1" in public_text
+        and "evidence_inputs" in public_text
         and "next_experiment" in public_text
-        and "--start-experiment" in public_text
     )
     promotion_examples_missing_reason: list[str] = []
     for path in public_paths:

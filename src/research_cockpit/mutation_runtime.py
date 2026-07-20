@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+import stat
 import tempfile
 from typing import Any
 import yaml
@@ -448,6 +449,77 @@ def _remove_staged_path(path: Path) -> None:
     else:
         path.unlink(missing_ok=True)
 
+
+def _lexists(path: Path) -> bool:
+    return os.path.lexists(path)
+
+
+def _is_link_like(path: Path, info: os.stat_result | None = None) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return stat.S_ISLNK((info or os.lstat(path)).st_mode) or bool(
+        is_junction and is_junction()
+    )
+
+
+def _staged_path_issues(root: Path, path: Path) -> list[str]:
+    root_path = root.resolve(strict=True)
+    candidate = path.absolute()
+    try:
+        relative = candidate.relative_to(root_path)
+    except ValueError:
+        return [f"staged move path escapes data root: {candidate}"]
+    issues: list[str] = []
+    current = root_path
+    for part in relative.parts:
+        current = current / part
+        if not _lexists(current):
+            continue
+        info = os.lstat(current)
+        if _is_link_like(current, info):
+            issues.append(f"staged move path contains a symlink or junction: {current}")
+            break
+    return issues
+
+
+def _staged_move_conflicts(
+    root: Path,
+    source: Path,
+    target: Path,
+    target_existed: bool,
+) -> list[str]:
+    conflicts = [
+        *_staged_path_issues(root, source),
+        *_staged_path_issues(root, target),
+    ]
+    if not _lexists(source):
+        conflicts.append(str(source))
+    else:
+        source_info = os.lstat(source)
+        if not stat.S_ISDIR(source_info.st_mode) or _is_link_like(source, source_info):
+            conflicts.append(f"staged move source is not a directory: {source}")
+    if _lexists(target) != target_existed:
+        conflicts.append(str(target))
+    return conflicts
+
+
+def _commit_staged_move(
+    root: Path,
+    source: Path,
+    target: Path,
+    target_existed: bool,
+) -> None:
+    conflicts = _staged_move_conflicts(root, source, target, target_existed)
+    if conflicts:
+        raise OSError("Unsafe staged move: " + "; ".join(conflicts))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conflicts = _staged_move_conflicts(root, source, target, target_existed)
+    if conflicts:
+        raise OSError(
+            "Unsafe staged move after parent creation: " + "; ".join(conflicts)
+        )
+    source.replace(target)
+
+
 @progress_traced("apply_transaction")
 def execute_mutation_transaction(
     root: Path,
@@ -468,7 +540,7 @@ def execute_mutation_transaction(
     planned_reads = _coerce_read_dependencies(read_dependencies)
     planned_commit_validators = list(commit_validators or [])
     planned_moves = [
-        (Path(source), Path(target), Path(target).exists())
+        (Path(source), Path(target), _lexists(Path(target)))
         for source, target in staged_moves or []
     ]
     planned_interactions = deepcopy(interactions)
@@ -559,10 +631,9 @@ def execute_mutation_transaction(
             *_conflicting_read_dependencies(planned_reads),
         ]
         for source, target, existed in planned_moves:
-            if not source.exists():
-                conflict_files.append(str(source))
-            if target.exists() != existed:
-                conflict_files.append(str(target))
+            conflict_files.extend(
+                _staged_move_conflicts(root, source, target, existed)
+            )
         if conflict_files:
             error = "Mutation conflict: truth-source file changed after command planning"
             raise MutationError(
@@ -598,9 +669,8 @@ def execute_mutation_transaction(
                 for path, _, after_text in planned_text:
                     save_text(path, after_text)
                     written_files.append(str(path))
-                for source, target, _ in planned_moves:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    source.replace(target)
+                for source, target, existed in planned_moves:
+                    _commit_staged_move(root, source, target, existed)
                     written_files.append(str(target))
                 for interaction in planned_interactions:
                     appended = _append_interaction_log_unlocked(

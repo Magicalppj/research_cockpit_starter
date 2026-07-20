@@ -20,9 +20,9 @@ research-cockpit context --root <data-root> --id <experiment_id> --view executio
 
 Do not prepend command discovery, bootstrap, artifact inventory, or a generated context pack unless the target or required command is unknown.
 
-## Three Mutations
+## Default Assigned Path
 
-Mutate one canonical data root sequentially. Pass `--assignment <assignment_id>` for worker writes.
+Mutate one canonical data root sequentially. The normal path is one packet read, one `work start`, and one `work close`.
 
 ### 1. Start The Run
 
@@ -34,22 +34,27 @@ research-cockpit work start --root <data-root> --assignment <assignment_id> --fi
 
 Use the returned `entities.run_id` in later evidence and closeout input. Do not issue a separate lease renewal or experiment status command. Add launcher, progress, resource, or retention fields under `run` only when that metadata exists.
 
-### 2. Preserve Output When Needed
+### 2. Preserve Incremental Evidence Only
 
-Skip this step when the run has no payload that must survive. Otherwise ingest the run directory once:
+Skip this step unless evidence must be durable before the run closes, such as streaming output or a shared intermediate result. In that exceptional case, ingest once:
 
 ```sh
 research-cockpit ingest-artifact --root <data-root> --assignment <assignment_id> --node <experiment_id> --from <output_dir> --run-id <run_id> --json --compact --no-build
 ```
 
-The default is a lightweight artifact record. Keep the returned record id; do not list records or promote a graph artifact unless another task explicitly needs that result.
+Keep the returned record id for closeout. Final payload available at close belongs in `work_close_v1.evidence_inputs` and does not need this extra invocation.
 
 ### 3. Close Atomically
 
-Write one small `run_closeout_v1` file:
+Write one small `work_close_v1` file using lease and revision values from the packet:
 
 ```yaml
-schema_version: run_closeout_v1
+schema_version: work_close_v1
+agent_id: agent_x
+lease_id: lease_x
+lease_epoch: 1
+operation_id: op_close_x
+input_revision: input-v1:x
 run:
   id: run_x
   status: completed
@@ -60,6 +65,16 @@ finding:
   statement: The tested configuration met the acceptance criterion.
   confidence: strong
   outcome: positive
+assignment_result:
+  outcome: positive
+  summary: The bounded experiment passed.
+  delivery:
+    git_commit: null
+    changed_files: []
+    tests:
+      status: passed
+      summary: Targeted checks passed.
+  proposals: []
 next_experiment:
   id: experiment_x_followup
   title: Scale the verified configuration
@@ -68,20 +83,33 @@ next_experiment:
   next_action: Start the full run.
 ```
 
-After ingest, add this block; otherwise omit it:
+After an earlier standalone ingest, add this block:
 
 ```yaml
 artifact_record:
   existing_record_id: artifact_experiment_x_run_x
 ```
 
+For final payload available at close, use this block instead; `source` is a directory and links are source-relative:
+
+```yaml
+evidence_inputs:
+  source: ../worktree/.agent_runs/run_x
+  title: Final run evidence
+  summary: Metrics and logs retained at close.
+  links:
+    metrics: outputs/metrics.json
+```
+
+Do not combine `evidence_inputs` with `artifact_record`.
+
 Then apply one transaction:
 
 ```sh
-research-cockpit complete-run --root <data-root> --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
+research-cockpit work close --root <data-root> --assignment <assignment_id> --file closeout.yaml --json --compact
 ```
 
-`experiment` is optional for a status-only run closeout. A `done` experiment requires a finding. `next_experiment` is optional and limited to one planned/queued sibling; with assignment scope it also advances the worker cursor and inherits `next_action`. If `next_action` is omitted, the assignment's old actions are cleared. Include gate rows only for gate payloads that already exist.
+A `done` experiment requires a finding. `next_experiment` is optional and limited to one same-scope sibling; it keeps the assignment active and advances its cursor. Without it, close completes the assignment, releases its lease, and records pending/not-required review state. Cross-scope follow-ups are `assignment_result.proposals` and never create assignments automatically.
 
 Do not repeat the experiment conclusion, follow-up creation, artifact-record link, or cursor movement with standalone commands after this transaction.
 
@@ -97,7 +125,7 @@ Use `run-context` only when full operational details are required. Launcher outp
 
 ## Verification Contract
 
-A successful `work start` reports `verification.status: internally_verified` and `additional_verification_required: false`. Successful non-dry-run `ingest-artifact` and structured `complete-run` compatibility receipts report:
+Successful `work start` and `work close` receipts report `verification.status: internally_verified` and `additional_verification_required: false`. A standalone compatibility `ingest-artifact` reports:
 
 ```json
 {"verified":true,"additional_verification_required":false,"verification_stage":"internal_verify","verify_commands":[]}

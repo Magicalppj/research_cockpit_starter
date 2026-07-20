@@ -870,9 +870,9 @@ def validate_assignments(
             errors.append(
                 f"{assignment.assignment_id}: invalid assignment status {assignment.status!r}; allowed: {allowed}"
             )
-        if not assignment.agent_id and assignment.status != "queued":
+        if not assignment.agent_id and assignment.status in {"active", "blocked"}:
             errors.append(f"{assignment.assignment_id}: agent_id is required")
-        elif assignment.agent_id not in agents:
+        elif assignment.agent_id and assignment.agent_id not in agents:
             errors.append(
                 f"{assignment.assignment_id}: agent_id references missing agent {assignment.agent_id!r}"
             )

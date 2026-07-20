@@ -18,6 +18,24 @@ Use `research-cockpit commands --role coordinator --name <command> --json --comp
 - Prefer bounded summaries and selected evidence refs over dashboard rebuilds or global scans.
 - Successful internally verified mutations do not get a mechanical validate/context/build/smoke tail.
 
+## Apply A Review
+
+Consume a completed reviewer result by exact producer/review revisions:
+
+```yaml
+schema_version: coord_review_v1
+operation_id: op_apply_review_x
+review_assignment_id: assign_review_x
+review_result_revision: result-v1:review
+producer_result_revision: result-v1:producer
+```
+
+```sh
+research-cockpit coord review --root <data-root> --assignment <producer_assignment_id> --file <verdict.yaml> --json --compact
+```
+
+This command updates only producer review metadata; it does not rewrite the producer Evidence Bundle or reviewer result. `approved` and `changes_requested` become terminal review states and store the reviewer result revision. `inconclusive` keeps producer review pending with a null result revision; the immutable audit event still records the inspected reviewer revision. Do not create an assignment merely because a worker Evidence Bundle contains a `new_branch` proposal; evaluate and assign it separately.
+
 ## Milestone Handoff
 
 `milestone_handoff` means coordinator merge, release, or research-stage closeout. Only this boundary runs the full gate once:

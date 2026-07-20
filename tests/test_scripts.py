@@ -2457,7 +2457,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         current_path = self.root / "current_state.yaml"
         before = load_yaml(current_path)
         after = {**before, "current_hypothesis": "staged candidate"}
-        staging_dir = self.tmp_root / "staging" / "artifact_payload"
+        staging_dir = self.root / ".staging" / "artifact_payload"
         target_dir = self.root / "artifacts" / "exp_t5" / "run_staged"
         staging_dir.mkdir(parents=True)
         (staging_dir / "metrics.json").write_text('{"score": 1}', encoding="utf-8")
@@ -8847,7 +8847,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         for token in (
             "work start",
             "ingest-artifact",
-            "complete-run",
+            "work close",
             "existing_record_id",
             "next_experiment",
             "additional_verification_required",
@@ -8857,6 +8857,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "complete-experiments",
             "create-workstream",
             "create-followup-experiment",
+            "complete-run",
         ):
             self.assertNotIn(advanced_command, cycle)
 
@@ -8953,9 +8954,20 @@ class ScriptBehaviorTests(unittest.TestCase):
         command_names = set(by_name)
 
         legacy_names = {*COMMAND_MODULES, "init", "ui"}
+        role_facades = {
+            "work claim",
+            "work open",
+            "work release",
+            "work renew",
+            "work start",
+            "work close",
+            "review open",
+            "review report",
+            "coord review",
+        }
         self.assertEqual(
             command_names,
-            {*legacy_names, "work claim", "work open", "work release", "work renew", "work start"},
+            legacy_names | role_facades,
         )
         self.assertEqual(set(COMMAND_GROUP_BY_COMMAND), legacy_names)
         self.assertEqual(set(COMMAND_GROUP_CHOICES), {str(item["group"]) for item in manifest})
@@ -9138,7 +9150,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         for filename in ("run_record.txt", "progress.json", "gate_result.json", "artifact_manifest.json"):
             self.assertIn(filename, text)
-        for command in ("work start", "update-run", "complete-run", "ingest-gate-result", "ingest-artifact"):
+        for command in ("work start", "update-run", "work close", "ingest-gate-result", "ingest-artifact"):
             self.assertIn(f"research-cockpit {command}", text)
         for launcher_mode in ("shell", "Python", "scheduler", "manual"):
             self.assertIn(launcher_mode, text)
@@ -9223,13 +9235,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(manifest["schema_version"], "artifact_manifest_v1")
         self.assertEqual(manifest["links"]["metrics"], "outputs/metrics.json")
 
-    def test_launcher_docs_use_record_first_structured_closeout(self) -> None:
+    def test_launcher_docs_use_final_evidence_structured_closeout(self) -> None:
         template_dir = ROOT_DIR / "templates" / "launcher"
         readme = (template_dir / "README.md").read_text(encoding="utf-8")
         manual = (template_dir / "manual_run_checklist.md").read_text(encoding="utf-8")
 
         for text in (readme, manual):
-            self.assertIn("complete-run --file", text)
+            self.assertIn("work close", text)
+            self.assertIn("evidence_inputs", text)
             self.assertIn("existing_record_id", text)
         self.assertNotIn("one final validation/build/smoke pass", readme)
         self.assertNotRegex(
@@ -9347,6 +9360,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertLess(len(out.stdout.encode("utf-8")), 25000)
         self.assertIn("create-artifact", by_name)
         self.assertIn("supported_flags", by_name["create-artifact"])
+        self.assertNotIn("supports_json", by_name["create-artifact"])
+        self.assertNotIn("supports_no_build", by_name["create-artifact"])
+        self.assertNotIn("input_modes", by_name["create-artifact"])
         self.assertIn("batch_policy_mode", by_name["complete-experiment"])
         self.assertNotIn("batch_policy", by_name["complete-experiment"])
         self.assertNotIn("unsupported_flags", by_name["create-artifact"])

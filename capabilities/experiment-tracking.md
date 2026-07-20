@@ -53,13 +53,12 @@ Mutate one canonical root sequentially and pass `--assignment <assignment_id>` f
 
 ```sh
 research-cockpit work start --root research_cockpit --assignment <assignment_id> --file start.yaml --json --compact
-research-cockpit ingest-artifact --root research_cockpit --assignment <assignment_id> --node experiment_x --from <output_dir> --run-id run_x --link metrics=metrics.json --json --compact --no-build
-research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
+research-cockpit work close --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact
 ```
 
-The start receipt supplies the runtime-generated run id. The ingest step is optional when no payload must be preserved. In `run_closeout_v1`, use `artifact_record.existing_record_id` for an ingested record; the same transaction can finish the run, record gates and a finding, set `experiment.status` and `result_summary`, create at most one sibling `next_experiment`, and move the assignment cursor. Do not repeat `complete-experiment`, `create-followup-experiment`, or `set-cursor` for that closeout.
+The start receipt supplies the runtime-generated run id. `work_close_v1` can finish the run, record gates/finding/result, stage final `evidence_inputs`, create at most one same-scope `next_experiment`, and move or complete the assignment atomically. Use standalone `ingest-artifact` only when incremental evidence must be durable before close, then reference `artifact_record.existing_record_id`. Do not repeat completion, follow-up, or cursor commands.
 
-All three successful non-dry-run commands validate their candidate state and reject stale writes. For `work start`, trust `verification.status: internally_verified` with `additional_verification_required: false`; compatibility receipts use `verified: true` with the same flag false. Proceed without another validate/context cycle. Use dry-run only for unfamiliar or high-risk compatibility input, not as a mandatory first invocation.
+Both facade mutations validate candidate state and reject stale writes. Trust `verification.status: internally_verified` with `additional_verification_required: false`; do not add validate/context. Compatibility routes are advanced recovery paths, not a mandatory preview or default worker chain.
 
 For a long-running job, call `update-run` only when status or progress metadata changes. Use the following fallback only after a manual truth-source edit or when compact output requires extra verification:
 
@@ -154,10 +153,10 @@ Launcher-produced output directories should follow `docs/launcher-output-convent
 research-cockpit work start --root research_cockpit --assignment <assignment_id> --file start.yaml --json --compact
 # Only when status or operational metadata changed:
 research-cockpit update-run --root research_cockpit --assignment <assignment_id> --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
-research-cockpit complete-run --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
+research-cockpit work close --root research_cockpit --assignment <assignment_id> --file closeout.yaml --json --compact
 ```
 
-`work start` atomically renews the lease, creates a runtime-named run, and starts the experiment; put launcher metadata under `run` in `work_start_v1`. `complete-run --file` remains the terminal compatibility operation until `work close` lands. Inspect its schema only when unknown and use dry-run only when a preview is needed. A successful structured closeout is internally verified, so do not add validate/context.
+`work start` atomically renews the lease, creates a runtime-named run, and starts the experiment; put launcher metadata under `run` in `work_start_v1`. `work close` is the terminal assigned-work operation and accepts final evidence staging. `complete-run --file` remains an advanced compatibility route for legacy state without an active lease. A successful facade closeout is internally verified, so do not add validate/context.
 
 Use `run-context` only for full operational details of a known long-running job and `list-runs` only for an explicit run inventory. Bounded bootstrap/context summaries already expose short active, failed, stale, and recently completed run state.
 
@@ -234,7 +233,7 @@ Both commands create a `gate_results/<gate_id>.yaml` metadata record. `record-ga
 
 For long-running or disk-heavy experiments, record enough run metadata to support later cleanup decisions. Existing run fields such as `pid`, `tmux_session`, `log_root`, `output_root`, `progress_file`, and `config_file` are operational hints; they do not by themselves prove a path is safe to remove.
 
-When a run consumes resources that cleanup must respect, persist an active resource declaration in the run record with `create-run`, `update-run`, or `complete-run` using `--resources-json` or `--resources-file`. Launcher output and artifact manifests may still duplicate the same details for human review, but they are no longer the primary write path.
+For assigned work, put initial resource declarations under `work_start_v1.run`, update them only when they change, and include terminal values in `work close`. `create-run` and `complete-run` are legacy/unleased recovery routes. Launcher output and artifact manifests may duplicate the details for human review, but they are not the primary write path.
 
 ```yaml
 resources:
@@ -269,7 +268,7 @@ output_retention:
   cleanup_notes: "Metrics and bundle preserved; intermediate generations are reproducible."
 ```
 
-Persist retention intent with `create-run`, `update-run`, or `complete-run`; prefer `--output-retention-file` for generated mappings and shell portability, and reserve `--output-retention-json` for short hand-written JSON. Retention metadata is advisory unless a project has explicitly opted into stricter lint rules. Missing retention information should be handled as a maintenance warning, not as a reason to bypass normal finding or run completion workflows. For the full cleanup and branch/worktree policy, read `capabilities/maintenance.md`.
+For assigned work, put retention intent under `work_start_v1.run`, use `update-run` only when it changes, and preserve the terminal value in `work close`. File input remains preferable to inline JSON for compatibility commands because shell quoting differs across platforms. Retention metadata is advisory unless a project opts into stricter lint rules; missing metadata is a maintenance warning, not a reason to bypass normal closeout. For the full cleanup and branch/worktree policy, read `capabilities/maintenance.md`.
 
 ## Artifacts
 
@@ -300,7 +299,7 @@ research-cockpit record-finding --root research_cockpit --experiment experiment_
 
 Use `--evidence-path` and repeated `--evidence-link key=value` when the result directory, image, report, or metrics JSON should be recorded with the finding. The command creates an `artifact_<finding_id>` artifact, links it from the finding, and mirrors it on the experiment top-level `linked_artifacts` field so context, resource tables, and dashboards can show where the conclusion came from. Use `create-artifact` plus `--artifact-id` when you need custom artifact metadata.
 
-Do not pass worktree-local output paths to `--evidence-path` for long-lived evidence. For a normal run, ingest once and reference the returned record with `artifact_record.existing_record_id` in `complete-run --file`. A standalone finding may use `--artifact-id` only after explicit promotion created a graph artifact node.
+Do not pass worktree-local output paths to `--evidence-path` for long-lived evidence. For final run output, use `work_close_v1.evidence_inputs`; for earlier durable ingest, reference the returned record with `artifact_record.existing_record_id` in `work close`. A standalone finding may use `--artifact-id` only after explicit promotion created a graph artifact node.
 
 `--artifact-id` must be an existing artifact node id, not a file path. A finding can be recorded without any artifact; the command succeeds but JSON output includes `warnings: ["missing_evidence_artifact"]`.
 
@@ -311,7 +310,7 @@ research-cockpit complete-experiment --root research_cockpit --id experiment_x -
 research-cockpit complete-experiment --root research_cockpit --id experiment_x --finding "..." --confidence medium --evidence-path artifacts/experiment_x/run_x --evidence-link metrics=artifacts/experiment_x/run_x/metrics.json --json --compact
 ```
 
-`complete-experiment` appends a structured finding, sets the experiment status to `done`, optionally updates `result_summary`, creates inline evidence artifacts when requested, and clears experiment-local `next_actions`. It does not close a run, link an artifact record, create a follow-up, or move a cursor; prefer `complete-run --file` whenever those actions belong to the same closeout.
+`complete-experiment` is a compatibility operation that appends a finding and updates one experiment without closing an assignment run. Prefer `work close` whenever run, evidence, result, follow-up, cursor, and lease changes belong to one assigned closeout.
 
 In this compatibility path, a terminal assignment cursor still requires a separate `set-cursor`; the structured run closeout avoids that extra mutation. Coordinator/global focus remains separate:
 

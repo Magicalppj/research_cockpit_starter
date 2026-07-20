@@ -1,0 +1,26 @@
+schema_version: work_close_v1
+agent_id: <agent_id>
+lease_id: <lease_id>
+lease_epoch: 1
+operation_id: <unique_operation_id>
+input_revision: <input_revision_from_work_packet>
+run:
+  id: <run_id>
+  status: completed
+experiment:
+  status: done
+  result_summary: <bounded_result_summary>
+finding:
+  statement: <evidence_backed_finding>
+  confidence: medium
+  outcome: positive
+assignment_result:
+  outcome: positive
+  summary: <bounded_assignment_summary>
+  delivery:
+    git_commit: null
+    changed_files: []
+    tests:
+      status: passed
+      summary: <targeted_verification_summary>
+  proposals: []

@@ -200,7 +200,7 @@ def _scope_errors(
     prefix = assignment.assignment_id
     if assignment.status not in _ASSIGNMENT_STATUSES:
         errors.append(f"{prefix}: invalid assignment status {assignment.status!r}")
-    if not assignment.agent_id and assignment.status != "queued":
+    if not assignment.agent_id and assignment.status in {"active", "blocked"}:
         errors.append(f"{prefix}: agent_id is required")
     if not assignment.root_node:
         errors.append(f"{prefix}: root_node is required")
@@ -375,6 +375,10 @@ def _allowed_operations(
     if assignment.status == "queued":
         return ["claim"] if assignment.agent_id is None else []
     if lease_state == "expired":
+        return []
+    if assignment.kind == "review":
+        if readiness == "ready" and lease_state in {"active", "legacy_unknown"}:
+            return ["review"]
         return []
     if legacy_usable:
         return ["start", "record", "close"]

@@ -25,7 +25,7 @@ class RoleDiscoveryTests(unittest.TestCase):
         manifest = agent_command_manifest()
         by_name = {str(row["name"]): row for row in manifest}
 
-        self.assertEqual(len(manifest), 75)
+        self.assertEqual(len(manifest), 79)
         self.assertIn("work open", by_name)
         for name, row in by_name.items():
             with self.subTest(command=name):
@@ -57,7 +57,18 @@ class RoleDiscoveryTests(unittest.TestCase):
         self.assertEqual(by_name["work start"]["input_schema_version"], "work_start_v1")
         self.assertEqual(by_name["work start"]["required_flags"], ["--assignment", "<assignment_id>", "--file", "<path>"])
         self.assertEqual(by_name["work start"]["surface"], "core")
+        self.assertEqual(by_name["work close"]["input_schema_version"], "work_close_v1")
+        self.assertEqual(by_name["work close"]["surface"], "core")
+        self.assertEqual(by_name["review open"]["audiences"], ["reviewer", "coordinator"])
+        self.assertEqual(by_name["review open"]["scope_policy"], "read_only")
+        self.assertEqual(by_name["review open"]["work_packet_kinds"], ["review"])
+        self.assertEqual(by_name["review report"]["input_schema_version"], "review_report_v1")
+        self.assertEqual(by_name["review report"]["idempotency"], "required")
+        self.assertEqual(by_name["coord review"]["audiences"], ["coordinator"])
+        self.assertEqual(by_name["coord review"]["scope_policy"], "coordinator")
         self.assertEqual(by_name["create-run"]["surface"], "advanced")
+        self.assertEqual(by_name["complete-run"]["surface"], "advanced")
+        self.assertEqual(by_name["ingest-artifact"]["surface"], "advanced")
         self.assertEqual(by_name["add-node"]["intent"], "assign")
         self.assertEqual(by_name["build"]["audiences"], ["coordinator", "maintainer"])
 
@@ -76,6 +87,9 @@ class RoleDiscoveryTests(unittest.TestCase):
         self.assertLessEqual(len(manifest), 12)
         self.assertLess(len(encoded), 8 * 1024)
         self.assertIn("work open", {str(row["name"]) for row in manifest})
+        self.assertIn("work close", {str(row["name"]) for row in manifest})
+        self.assertNotIn("complete-run", {str(row["name"]) for row in manifest})
+        self.assertNotIn("ingest-artifact", {str(row["name"]) for row in manifest})
         self.assertTrue(
             all("worker" in row["audiences"] and row["surface"] == "core" for row in manifest)
         )

@@ -5,12 +5,16 @@ from typing import Any
 
 ROLE_CHOICES = ("worker", "reviewer", "coordinator", "maintainer")
 SURFACE_CHOICES = ("core", "advanced", "maintenance")
-_WORK_FACADE_COMMANDS = {
+_ROLE_FACADE_COMMANDS = {
     "work claim",
+    "work close",
     "work open",
     "work release",
     "work renew",
     "work start",
+    "review open",
+    "review report",
+    "coord review",
 }
 
 _RETAINED_REPLACEMENTS = {
@@ -120,19 +124,15 @@ _CORE_COMMANDS_BY_ROLE = {
         "work open",
         "work claim",
         "work start",
-        "ingest-artifact",
-        "complete-run",
+        "work close",
         "validate",
         "smoke",
         "search",
         "commands",
     },
     "reviewer": {
-        "work open",
-        "context",
-        "option-workstream-context",
-        "check-decision-acceptance",
-        "search",
+        "review open",
+        "review report",
         "commands",
     },
     "coordinator": {
@@ -142,6 +142,7 @@ _CORE_COMMANDS_BY_ROLE = {
         "start-agent-session",
         "set-focus",
         "check-decision-acceptance",
+        "coord review",
         "promote-decision",
         "accept-decision",
         "validate",
@@ -165,7 +166,7 @@ _CORE_COMMANDS_BY_ROLE = {
 
 
 def canonical_replacement_for_command(name: str, group: str) -> str:
-    if name in _WORK_FACADE_COMMANDS:
+    if name in _ROLE_FACADE_COMMANDS:
         return name
     if name in _RETAINED_REPLACEMENTS:
         return _RETAINED_REPLACEMENTS[name]
@@ -253,6 +254,7 @@ def _intent(name: str, replacement: str) -> str:
         "repair": "maintain",
         "migrate": "maintain",
         "compact": "maintain",
+        "report": "review",
     }.get(intent, intent)
 
 
@@ -265,12 +267,14 @@ def command_role_contract(
 ) -> dict[str, Any]:
     replacement = canonical_replacement_for_command(name, group)
     audiences = _audiences(name, replacement)
-    if name in _WORK_FACADE_COMMANDS:
+    if name.startswith("coord "):
+        scope_policy = "coordinator"
+    elif name == "review open":
+        scope_policy = "read_only"
+    elif name.startswith(("work ", "review ")) or replacement.startswith("work "):
         scope_policy = "assignment"
     elif not mutating:
         scope_policy = "read_only"
-    elif replacement.startswith("work "):
-        scope_policy = "assignment"
     elif replacement.startswith("coord "):
         scope_policy = "coordinator"
     else:
@@ -290,7 +294,7 @@ def command_role_contract(
     else:
         verification_policy = "conditional"
 
-    route_kind = "facade" if name in _WORK_FACADE_COMMANDS else "legacy"
+    route_kind = "facade" if name in _ROLE_FACADE_COMMANDS else "legacy"
     if route_kind == "facade" or name in _RETAINED_REPLACEMENTS:
         disposition = "retain_unique"
     elif replacement.startswith("maintenance "):
@@ -304,6 +308,18 @@ def command_role_contract(
     elif name == "work start":
         input_schema_version = "work_start_v1"
         output_schema_version = "work_operation_v1"
+    elif name == "work close":
+        input_schema_version = "work_close_v1"
+        output_schema_version = "work_operation_v1"
+    elif name == "review open":
+        input_schema_version = "review_open_v1"
+        output_schema_version = "review_open_v1"
+    elif name == "review report":
+        input_schema_version = "review_report_v1"
+        output_schema_version = "work_operation_v1"
+    elif name == "coord review":
+        input_schema_version = "coord_review_v1"
+        output_schema_version = "work_operation_v1"
     elif route_kind == "facade":
         input_schema_version = "work_operation_input_v1"
         output_schema_version = "work_operation_v1"
@@ -316,7 +332,11 @@ def command_role_contract(
         "surface": _surface(name, audiences, replacement),
         "core_roles": [role for role, names in _CORE_COMMANDS_BY_ROLE.items() if name in names],
         "intent": _intent(name, replacement),
-        "work_packet_kinds": ["*"] if {"worker", "reviewer"} & set(audiences) else [],
+        "work_packet_kinds": (
+            ["review"]
+            if name.startswith("review ")
+            else (["*"] if {"worker", "reviewer"} & set(audiences) else [])
+        ),
         "scope_policy": scope_policy,
         "idempotency": "required" if route_kind == "facade" and mutating else "unsupported",
         "verification_policy": verification_policy,

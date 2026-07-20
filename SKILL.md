@@ -24,10 +24,18 @@ Do not load other role playbooks by default. A worker or reviewer does not becom
 
 ## Startup Rule
 
-An assigned worker or reviewer opens exactly one bounded packet:
+An assigned role opens exactly one bounded packet; do not substitute one role's packet command for the other.
+
+Worker:
 
 ```sh
 research-cockpit work open --root <data-root> --assignment <assignment_id> --json --compact
+```
+
+Reviewer:
+
+```sh
+research-cockpit review open --root <data-root> --assignment <review_assignment_id> --json --compact
 ```
 
 Use coordinator bootstrap only when the target is unknown and the task is global triage. Known-node work without an assignment uses bounded `context --view execution`. Do not chain packet, context, bootstrap, dashboard packs, and broad search for the same startup.
@@ -40,9 +48,9 @@ Use coordinator bootstrap only when the target is unknown and the task is global
 - Successful assignment mutations renew the lease. Explicit `work renew` is recovery-only; launcher heartbeat stays outside model-visible turns.
 - Same-root truth commits remain serialized; long computation and experiments happen outside the commit lock.
 - Never execute suggested actions automatically or set a decision directly to accepted.
-- Ordinary run output is an artifact record; graph artifact promotion requires a durable navigation reason.
+- Final run output can be staged by `work close`; standalone artifact records are for earlier durability, and graph promotion requires a durable navigation reason.
 - `graph/interaction_log.yaml` becomes an immutable legacy prefix after the event manifest exists.
-- A successful receipt with `verified: true` and `additional_verification_required: false` needs no validation, reread, build, or smoke tail.
+- A role-facade receipt with `verification.status: internally_verified` and `additional_verification_required: false` needs no validation, reread, build, or smoke tail; legacy receipts may use `verified: true`.
 - Full validate/build/smoke runs only at `milestone_handoff`, not after an ordinary agent turn.
 
 ## Progressive Discovery

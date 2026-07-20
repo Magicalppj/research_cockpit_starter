@@ -26,13 +26,14 @@
 
 Load exactly one role playbook, then choose one startup path instead of chaining context commands.
 
-1. If assigned a specific assignment id, run `research-cockpit work open --root <data-root> --assignment <assignment_id> --compact --json`; reuse `--since <revision>` for polling.
-2. If assigned a specific node id without an assignment id, run `research-cockpit context --root <data-root> --id <node_id> --view execution --compact --json`.
-3. If the target is unknown or the task is global triage, run `research-cockpit bootstrap --root <data-root> --coordinator --json`.
-4. If continuing an older minimal handoff, use `research-cockpit node-context --root <data-root> --id <node_id> --compact --json`.
-5. Read `<data-root>/dashboards/agent_context_pack.json` and `<data-root>/dashboards/focus_context_pack.json` only when generated dashboard context or a broad focus scan is needed.
-6. Use bounded search such as `research-cockpit search --root <data-root> --query "..." --json --limit 5 --source node` when more context is needed.
-7. If one operation is missing, use `research-cockpit commands --role <role> --json --compact --name <command>`; do not run broad discovery during normal startup.
+1. If explicitly assigned a review assignment, run `research-cockpit review open --root <data-root> --assignment <review_id> --compact --json`; do not separately open producer context.
+2. If assigned worker execution, run `research-cockpit work open --root <data-root> --assignment <assignment_id> --compact --json`; reuse `--since <revision>` for polling.
+3. If assigned a specific node id without an assignment id, run `research-cockpit context --root <data-root> --id <node_id> --view execution --compact --json`.
+4. If the target is unknown or the task is global triage, run `research-cockpit bootstrap --root <data-root> --coordinator --json`.
+5. If continuing an older minimal handoff, use `research-cockpit node-context --root <data-root> --id <node_id> --compact --json`.
+6. Read `<data-root>/dashboards/agent_context_pack.json` and `<data-root>/dashboards/focus_context_pack.json` only when generated dashboard context or a broad focus scan is needed.
+7. Use bounded search such as `research-cockpit search --root <data-root> --query "..." --json --limit 5 --source node` when more context is needed.
+8. If one operation is missing, use `research-cockpit commands --role <role> --json --compact --name <command>`; do not run broad discovery during normal startup.
 
 Use `--since <revision>` for repeated known-node polling. Do not run both `bootstrap` and a wider context view for normal known-node work. If the working directory is unreliable, use absolute `--root` paths.
 
@@ -42,16 +43,19 @@ Use `--since <revision>` for repeated known-node polling. Do not run both `boots
 - Use assignment-scoped mutating CLI commands with `--assignment <assignment_id>` when working as a downstream agent.
 - If an opened packet is unclaimed, use one `work claim --return-packet` call and continue from its returned packet; do not reopen it immediately.
 - Use coordinator/global mutating commands for focus, baseline, suggestions, and lifecycle cleanup only when explicitly acting as coordinator.
-- Use `work open` as the assignment handoff; use `research-cockpit context --id <node_id> --view execution --compact --json` only for a known node without an assignment.
+- Use `review open` for review assignments and `work open` for worker assignments; use `research-cockpit context --id <node_id> --view execution --compact --json` only for a known node without an assignment.
 - Use `effective_baseline` from `context`/`node-context` as the default inherited option, decision, and artifact bundle; do not scan all accepted history unless asked.
 - Do not directly set a decision to `accepted`; use `research-cockpit accept-decision --root <data-root> --id <decision_id>`.
 - Do not execute a suggested command just because it appears in Action Guidance. Queue, dismiss, or complete suggestions only when asked.
 - Give every mutating role-facade call a stable operation id in its flags or structured input; reuse it only for an exact retry of the same request.
 - Treat `work renew` as recovery/diagnostic only. Normal mutations and launcher heartbeat renew the lease without another model-visible command.
-- For ordinary experiment run output, use `ingest-artifact --json --compact --no-build`; record mode is the default and `--record-only` remains an explicit compatibility flag. Create a graph artifact only with `--promote --promotion-reason "..."`, or promote an existing record with `promote-artifact-record --promotion-reason "..."`.
 - Start a claimed assignment with `work start`; it generates the run id and atomically starts the experiment while renewing the lease.
 - Use `create-run --status running --start-experiment` only as a compatibility route for legacy data without an active lease.
-- Close the run with one `complete-run --file <closeout.yaml> --json --compact --no-build` transaction. Its `experiment` and optional `next_experiment` blocks record the outcome, create at most one sibling follow-up, and move an assignment cursor. After ingest, use `artifact_record.existing_record_id`; do not repeat `complete-experiment`, `create-followup-experiment`, or `set-cursor` for the same closeout.
+- Close assigned work with one `work close --file <closeout.yaml> --json --compact` transaction. It records run/finding/result, optional same-scope `next_experiment`, assignment cursor, and lease transition. Do not repeat `complete-run`, `complete-experiment`, `create-followup-experiment`, or `set-cursor` for that closeout.
+- Put a final payload directory in `work_close_v1.evidence_inputs` so staging, hash, artifact record, and closeout remain one invocation. Use standalone `ingest-artifact --json --compact --no-build` only for incremental/streaming evidence that must be durable before close; reference its record with `artifact_record.existing_record_id`.
+- Create a graph artifact only with `--promote --promotion-reason "..."`, or promote an existing record with `promote-artifact-record --promotion-reason "..."`.
+- A `new_branch` closeout proposal never creates an assignment automatically; only the coordinator evaluates and assigns it.
+- Reviewers use `review open` then `review report`; report writes only the reviewer assignment. Coordinators use `coord review` to update producer review metadata without rewriting either Evidence Bundle.
 - Use `compact-artifacts --dry-run` before artifact demotion. Execute only one `can_demote` artifact with `--execute --id <artifact_id>`; this writes an artifact record and migration report but must not delete payload files.
 
 ## Verification

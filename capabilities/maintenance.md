@@ -121,7 +121,7 @@ research-cockpit promote-artifact-record --root research_cockpit --id <record_id
 
 ## Run Closeout
 
-When closeout records gates, evidence, a finding, experiment terminal state, or one simple follow-up, use `complete-run --file closeout.yaml` so all truth-source updates commit as one transaction. With an assignment, the follow-up becomes its cursor. Set `artifact_record.existing_record_id` when ingest already created the record. Use `complete-run --id` only for status-only recovery.
+For an active leased assignment, use `work close --file closeout.yaml` so gates, evidence, finding, result, experiment state, one same-scope follow-up, cursor, and lease transition commit together. Use `complete-run` only for legacy/unleased recovery, and `complete-run --id` only for status-only recovery.
 
 A completed run should answer what can be cleaned:
 
@@ -138,7 +138,7 @@ output_retention:
 ```
 
 This metadata is advisory. A missing retention policy should be treated as a warning, not a hard validation failure, until a project explicitly opts into stricter rules.
-Use `create-run`, `update-run`, or `complete-run` with `--output-retention-file` to persist generated run retention metadata; use `--output-retention-json` only for short hand-written JSON because shell quoting differs across platforms.
+Put initial retention metadata under `work_start_v1.run`; use `update-run` only when it changes, or `complete-run` for legacy recovery. Prefer file input over inline JSON because shell quoting differs across platforms.
 
 ## Active Resource Declaration
 
