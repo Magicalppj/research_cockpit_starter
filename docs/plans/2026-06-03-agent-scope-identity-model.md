@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented historical plan. Assignment-scoped identity, worker-local cursors, and coordinator state are now implemented. Current operational guidance: `AGENTS.md`, `SKILL.md`, `capabilities/graph-state.md`, and `docs/internal-architecture.md`; the remaining sections preserve the original design rationale.
+Implemented historical plan, superseded operationally by the 0.3.0 role facade. Command examples below are not executable on the current CLI. Current operational guidance: `AGENTS.md`, `SKILL.md`, `capabilities/graph-state.md`, and `docs/migrations/0.3.0-cli-cutover.md`.
 
 ## Date
 

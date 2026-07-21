@@ -66,41 +66,41 @@ def _run_worker_step(name: str, command: list[str], *, require_changed: bool = F
 
 def benchmark_worker_edit_flow(root: Path, *, node_id: str, summary: str) -> dict[str, Any]:
     unique_summary = f"{summary} {time.time_ns()}"
-    steps = [
-        _run_worker_step(
-            "mutate_no_build",
-            _cli_args(
-                "update-node-fields",
-                "--root",
-                str(root),
-                "--id",
-                node_id,
-                "--summary",
-                unique_summary,
-                "--no-build",
-                "--json",
-                "--compact",
-            ),
-            require_changed=True,
+    plan_path = root / "dashboards" / ".benchmark-coord-assign.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "coord_assign_v1",
+                "operation_id": f"op_benchmark_edit_{time.time_ns()}",
+                "action": "graph_plan",
+                "graph_plan": {
+                    "nodes": [],
+                    "updates": [{"id": node_id, "fields": {"summary": unique_summary}}],
+                },
+            }
         ),
-        _run_worker_step(
-            "compact_context",
-            _cli_args(
-                "context",
-                "--root",
-                str(root),
-                "--id",
-                node_id,
-                "--with-bootstrap",
-                "--with-artifacts",
-                "--compact",
-                "--json",
-            ),
-        ),
-        _run_worker_step("full_validate", _cli_args("validate", "--root", str(root), "--json")),
-        _run_worker_step("build", _cli_args("build", "--root", str(root), "--json")),
-        _run_worker_step("compact_smoke", _cli_args("smoke", "--root", str(root), "--json", "--progress")),
-    ]
+        encoding="utf-8",
+    )
+    try:
+        steps = [
+            _run_worker_step(
+                "coord_assign_update",
+                _cli_args(
+                    "coord",
+                    "assign",
+                    "--root",
+                    str(root),
+                    "--file",
+                    str(plan_path),
+                    "--json",
+                    "--compact",
+                ),
+                require_changed=True,
+            )
+        ]
+    finally:
+        plan_path.unlink(missing_ok=True)
     return {
         "ok": all(step["passed"] for step in steps),
         "node_id": node_id,

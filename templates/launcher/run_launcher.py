@@ -70,7 +70,7 @@ def parse_links(values: list[str]) -> dict[str, str]:
 
 
 def write_run_record(args: argparse.Namespace, cfg: dict, status: str, started_at: str, finished_at: str) -> None:
-    monitor_command = args.monitor_command or "tail -f logs/run.log"
+    monitor_command = args.monitor_command
     fields = [
         ("schema_version", "launcher_run_record_v1"),
         ("run_id", args.run_id),

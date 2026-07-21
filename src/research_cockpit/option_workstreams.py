@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from research_cockpit.command_registry import cli_command_for_script
 from research_cockpit.graph_core import (
     GraphTopology,
     child_ids,
@@ -20,8 +19,9 @@ from research_cockpit.gate_result_records import build_gate_summaries_by_experim
 from research_cockpit.run_summaries import build_run_summaries_by_experiment
 
 
-def _workflow_command(script_name: str, *parts: str) -> str:
-    return cli_command_for_script(script_name, *parts)
+def _canonical_command(route: str, *parts: str) -> str:
+    command = ["research-cockpit", *route.split(), *parts]
+    return " ".join(str(part) for part in command if part not in ("", None))
 
 
 def build_option_subtree(
@@ -152,40 +152,46 @@ def build_option_workstream_context(
         "blockers": unique_strings(blockers),
         "hierarchy_policy": hierarchy_policy(parent_option_id=option_id),
         "suggested_commands": {
-            "claim": _workflow_command(
-                "claim_option.py",
-                "--option",
-                option_id,
+            "claim": _canonical_command(
+                "work claim",
+                "--assignment",
+                "<assignment_id>",
                 "--agent",
                 "<agent_id>",
-                '--objective "Describe objective"',
-            ),
-            "context": _workflow_command("option_workstream_context.py", "--id", option_id, "--compact", "--json"),
-            "context_option_alias": _workflow_command("option_workstream_context.py", "--option", option_id, "--json"),
-            "create_child_workstream": _workflow_command(
-                "create_workstream.py",
-                "--file",
-                "workstream.yaml",
-                "--dry-run",
-                "--json",
-                "--show-diff",
-            ),
-            "finalize": _workflow_command(
-                "finalize_workstream.py",
-                "--file",
-                "finalize.yaml",
+                "--operation-id",
+                "<operation_id>",
+                "--return-packet",
                 "--json",
                 "--compact",
             ),
-            "report": _workflow_command(
-                "report_option_workstream.py",
-                "--option",
-                option_id,
-                "--agent",
-                "<agent_id>",
-                "--recommend",
-                "continue",
-                '--summary "Summarize evidence and recommendation"',
+            "context": _canonical_command("context", "--id", option_id, "--view", "execution", "--compact", "--json"),
+            "context_option_alias": _canonical_command(
+                "context", "--id", option_id, "--view", "execution", "--compact", "--json"
+            ),
+            "create_child_workstream": _canonical_command(
+                "coord assign",
+                "--file",
+                "<coord_assign.yaml>",
+                "--json",
+                "--compact",
+            ),
+            "finalize": _canonical_command(
+                "work close",
+                "--assignment",
+                "<assignment_id>",
+                "--file",
+                "<closeout.yaml>",
+                "--json",
+                "--compact",
+            ),
+            "report": _canonical_command(
+                "work close",
+                "--assignment",
+                "<assignment_id>",
+                "--file",
+                "<closeout.yaml>",
+                "--json",
+                "--compact",
             ),
         },
         "current_focus_related": option_id in set(current.get("current_focus_path", []) or []),

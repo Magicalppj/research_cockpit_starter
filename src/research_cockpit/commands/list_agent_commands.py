@@ -5,8 +5,13 @@ import argparse
 from research_cockpit.commands._runtime import emit_json
 from research_cockpit.command_registry import (
     COMMAND_GROUP_CHOICES,
+    COMMAND_MODULES,
     COMMAND_STATUS_CHOICES,
+    ROLE_CHOICES,
+    SURFACE_CHOICES,
     command_group_for_command,
+    command_role_contract,
+    command_surface_for_role,
     command_lifecycle_for_command,
     grouped_aliases_for_command,
     subcommand_for_script,
@@ -21,70 +26,63 @@ STATUS_ALIASES = {"option": {"planned": "open"}}
 CONFLICT_POLICY = "Truth-source mutation fails without writing if target files changed after command planning; reread context and retry."
 COMPACT_COMMAND_KEYS = {
     "name",
-    "canonical_name",
     "purpose",
     "command",
-    "group",
-    "lifecycle",
-    "status",
-    "aliases",
-    "replacement",
-    "input_modes",
-    "workflow_tags",
     "mutating",
-    "verification_mode",
-    "supports_json",
-    "supports_dry_run",
-    "supports_no_build",
-    "supports_compact",
-    "supports_build",
-    "supports_watch",
-    "supports_profile",
-    "supports_show_diff",
-    "supports_root",
     "supported_flags",
-    "unsupported_flags",
-    "can_batch",
-    "batch_policy",
-    "requires_serial_mutation",
-    "conflict_policy",
-    "verification_mode",
     "schema_command",
-    "primary_target",
-    "target_aliases",
-    "status_aliases",
+    "audiences",
+    "surface",
+    "intent",
+    "work_packet_kinds",
+    "idempotency",
+    "verification_policy",
+    "input_schema_version",
+    "output_schema_version",
 }
 SUMMARY_COMMAND_KEYS = {
     "name",
-    "canonical_name",
-    "purpose",
     "group",
     "status",
-    "input_modes",
     "workflow_tags",
     "mutating",
     "verification_mode",
-    "supports_json",
-    "supports_dry_run",
-    "supports_no_build",
-    "supports_compact",
     "supported_flags",
     "can_batch",
     "batch_policy_mode",
     "primary_target",
+    "audiences",
+    "surface",
+    "intent",
 }
 BATCH_WORKER_VERIFY_COMMANDS = [
     "research-cockpit validate --root <root> --changed-node <node_id> --json",
     "research-cockpit context --root <root> --id <node_id> --view execution --compact --json",
 ]
 BATCH_FINAL_HANDOFF_COMMANDS = [
-    "research-cockpit validate --root <root> --json",
-    "research-cockpit build --root <root>",
-    "research-cockpit smoke --root <root> --json --progress",
+    "research-cockpit coord handoff --root <root> --file handoff.yaml --json --compact --progress",
 ]
 ASSIGNMENT_SCOPE_FLAGS = ["--assignment", "--coordinator"]
 
 WORKFLOW_TAGS_BY_COMMAND = {
+    "work open": ["read", "evidence"],
+    "work claim": ["evidence"],
+    "work release": ["evidence"],
+    "work renew": ["evidence"],
+    "work start": ["evidence"],
+    "work record": ["evidence"],
+    "work close": ["evidence"],
+    "review open": ["read", "evidence"],
+    "review report": ["evidence"],
+    "coord review": ["evidence", "decision"],
+    "coord overview": ["read", "focus"],
+    "coord handoff": ["maintenance", "graph"],
+    "coord assign": ["graph", "evidence", "focus"],
+    "coord decide": ["decision", "evidence"],
+    "maintenance audit": ["read", "maintenance"],
+    "maintenance repair": ["maintenance"],
+    "maintenance migrate": ["maintenance"],
+    "maintenance compact": ["maintenance", "evidence"],
     "init": ["maintenance"],
     "ui": ["read"],
     "bootstrap": ["read", "focus"],
@@ -202,7 +200,25 @@ SHOW_DIFF_COMMANDS = {
 CAPABILITY_BY_COMMAND = {
     "init": "capabilities/integrations.md",
     "ui": "capabilities/ui-dashboard.md",
+    "work open": "capabilities/worker-loop.md",
+    "work claim": "capabilities/worker-loop.md",
+    "work release": "capabilities/worker-loop.md",
+    "work renew": "capabilities/worker-loop.md",
+    "work start": "capabilities/worker-loop.md",
+    "work close": "capabilities/worker-loop.md",
+    "work record": "capabilities/worker-loop.md",
+    "review open": "capabilities/reviewer-loop.md",
+    "review report": "capabilities/reviewer-loop.md",
+    "coord review": "capabilities/coordinator-loop.md",
+    "coord overview": "capabilities/coordinator-loop.md",
+    "coord handoff": "capabilities/coordinator-loop.md",
     "agent_bootstrap.py": "capabilities/focus-context.md",
+    "coord assign": "capabilities/coordinator-loop.md",
+    "coord decide": "capabilities/coordinator-loop.md",
+    "maintenance audit": "capabilities/maintainer-loop.md",
+    "maintenance repair": "capabilities/maintenance.md",
+    "maintenance migrate": "capabilities/maintenance.md",
+    "maintenance compact": "capabilities/maintenance.md",
     "validate_cockpit.py": "capabilities/troubleshooting.md",
     "lint_semantic.py": "capabilities/troubleshooting.md",
     "repair_interaction_log.py": "capabilities/troubleshooting.md",
@@ -410,7 +426,16 @@ COMMANDS: list[dict[str, object]] = [
         "supports_no_build": False,
         "supports_compact": True,
         "supports_root": False,
-        "extra_supported_flags": ["--summary-only"],
+        "extra_supported_flags": [
+            "--summary-only",
+            "--name",
+            "--role",
+            "--surface",
+            "--workflow",
+            "--group",
+            "--status",
+            "--deprecated",
+        ],
         "recommended_when": "Choose the shortest safe command for a workflow.",
     },
     {
@@ -1412,6 +1437,286 @@ COMMANDS: list[dict[str, object]] = [
 ]
 
 
+ROLE_FACADE_COMMANDS: list[dict[str, object]] = [
+    {
+        "name": "work open",
+        "purpose": "Open one bounded assignment Work Packet or return an unchanged revision receipt.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<assignment_id>"],
+        "extra_supported_flags": ["--assignment", "--since"],
+        "group": "context",
+        "recommended_when": "Start or resume assignment-scoped worker or reviewer work.",
+    },
+    {
+        "name": "work claim",
+        "purpose": "Atomically claim one queued assignment and return its bounded Work Packet.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<assignment_id>", "--agent", "<agent_id>", "--operation-id", "<operation_id>", "--return-packet"],
+        "extra_supported_flags": ["--assignment", "--agent", "--operation-id", "--return-packet", "--lease-seconds", "--reassign", "--coordinator"],
+        "group": "context",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Claim an unowned assignment or explicitly recover an expired lease as coordinator.",
+    },
+    {
+        "name": "work start",
+        "purpose": "Create a runtime-named run, start its experiment, and renew the assignment lease atomically.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<assignment_id>", "--file", "<path>"],
+        "extra_supported_flags": ["--assignment", "--file", "--print-schema"],
+        "schema_command": "research-cockpit work start --print-schema",
+        "group": "run",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Start the assignment's experiment without a separate lease-renew command.",
+    },
+    {
+        "name": "work close",
+        "purpose": "Close one run and atomically persist its finding, Evidence Bundle, assignment result, and lease transition.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<assignment_id>", "--file", "<path>"],
+        "extra_supported_flags": ["--assignment", "--file", "--print-schema"],
+        "schema_command": "research-cockpit work close --print-schema",
+        "group": "run",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Finish assigned work in one transaction; include evidence_inputs only for final payload staging.",
+    },
+    {
+        "name": "review open",
+        "purpose": "Open one read-only review packet with the exact producer result revision and bounded evidence links.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<review_assignment_id>"],
+        "extra_supported_flags": ["--assignment"],
+        "group": "context",
+        "recommended_when": "Start an assigned review without separately opening producer context.",
+    },
+    {
+        "name": "review report",
+        "purpose": "Persist a revision-bound review Evidence Bundle on the reviewer assignment without modifying producer truth.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<review_assignment_id>", "--file", "<path>"],
+        "extra_supported_flags": ["--assignment", "--file"],
+        "group": "context",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Submit the complete review once; do not edit or validate the producer assignment afterward.",
+    },
+    {
+        "name": "coord overview",
+        "purpose": "Read a revisioned and paginated coordination summary without constructing full bootstrap context.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": [],
+        "extra_supported_flags": ["--status", "--kind", "--agent", "--root-node", "--review-status", "--limit", "--page", "--since"],
+        "group": "context",
+        "recommended_when": "Triage assignment readiness, leases, reviews, and scope overlaps from one bounded snapshot.",
+    },
+    {
+        "name": "coord handoff",
+        "purpose": "Run one revision-bound milestone gate that reuses a single full validation snapshot for build and compact smoke.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema", "--progress"],
+        "schema_command": "research-cockpit coord handoff --print-schema",
+        "group": "maintenance",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Use once before coordinator merge, release, or research-stage closeout; do not run separate validate, build, and smoke first.",
+    },
+    {
+        "name": "coord review",
+        "purpose": "Apply a reviewer verdict or promote one artifact record without rewriting its Evidence Bundle.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--assignment", "--file", "--print-schema", "--action"],
+        "schema_command": "research-cockpit coord review --print-schema --action assignment_result",
+        "group": "context",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Apply an exact review revision, or promote reviewed evidence for cross-assignment reuse.",
+    },
+    {
+        "name": "work renew",
+        "purpose": "Recover or diagnose a lease heartbeat outside the normal worker recipe.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<assignment_id>", "--agent", "<agent_id>", "--lease-id", "<lease_id>", "--lease-epoch", "<lease_epoch>", "--operation-id", "<operation_id>"],
+        "extra_supported_flags": ["--assignment", "--agent", "--lease-id", "--lease-epoch", "--operation-id", "--lease-seconds"],
+        "group": "context",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Recover a long-idle lease only when launcher heartbeat or normal mutation renewal was unavailable.",
+    },
+    {
+        "name": "work release",
+        "purpose": "Release an idle assignment lease without discarding its monotonic epoch history.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<assignment_id>", "--agent", "<agent_id>", "--lease-id", "<lease_id>", "--lease-epoch", "<lease_epoch>", "--operation-id", "<operation_id>"],
+        "extra_supported_flags": ["--assignment", "--agent", "--lease-id", "--lease-epoch", "--operation-id"],
+        "group": "context",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Explicitly return unfinished idle work to the coordinator queue.",
+    },
+]
+
+
+CUTOVER_FACADE_COMMANDS: list[dict[str, object]] = [
+    {
+        "name": "work record",
+        "purpose": "Persist incremental assignment evidence and renew its lease in one idempotent operation.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<assignment_id>", "--file", "<path>"],
+        "extra_supported_flags": ["--assignment", "--file", "--print-schema"],
+        "schema_command": "research-cockpit work record --print-schema",
+        "group": "run",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Persist streaming evidence that must be durable before work close.",
+    },
+    {
+        "name": "coord assign",
+        "purpose": "Apply one coordinator graph plan or create one assignment session from versioned input.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema", "--action"],
+        "schema_command": "research-cockpit coord assign --print-schema --action graph_plan",
+        "group": "graph",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Create or update research nodes, then assign one option to an isolated agent session.",
+    },
+    {
+        "name": "coord decide",
+        "purpose": "Promote, update, accept, or baseline one decision through a versioned coordinator operation.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema", "--action"],
+        "schema_command": "research-cockpit coord decide --print-schema --action set_baseline",
+        "group": "decision",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Change accepted research direction only after evidence and review are ready.",
+    },
+    {
+        "name": "maintenance audit",
+        "purpose": "Run one repository and data-root lifecycle audit without mutation.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": [],
+        "extra_supported_flags": ["--repo", "--base", "--min-size-gb", "--max-files"],
+        "group": "maintenance",
+        "recommended_when": "Identify concrete maintenance work before loading a repair, migration, or compaction procedure.",
+    },
+    {
+        "name": "maintenance repair",
+        "purpose": "Repair one selected interaction-log or suggestion-lifecycle issue from versioned input.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema"],
+        "schema_command": "research-cockpit maintenance repair --print-schema",
+        "group": "maintenance",
+        "verification_mode": "structured_file_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Execute only the bounded repair selected by maintenance audit.",
+    },
+    {
+        "name": "maintenance migrate",
+        "purpose": "Plan or execute one explicit legacy-data migration while preserving source evidence.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema"],
+        "schema_command": "research-cockpit maintenance migrate --print-schema",
+        "group": "maintenance",
+        "verification_mode": "structured_file_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Run a reviewed migration plan with explicit execution intent.",
+    },
+    {
+        "name": "maintenance compact",
+        "purpose": "Plan or demote one eligible graph artifact without deleting payload files.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema"],
+        "schema_command": "research-cockpit maintenance compact --print-schema",
+        "group": "maintenance",
+        "verification_mode": "structured_file_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Dry-run first, then demote one can_demote artifact per invocation.",
+    },
+]
+
+
 PROGRESS_COMMAND_SCRIPTS = {
     "build_dashboard.py",
     "complete_run.py",
@@ -1455,7 +1760,7 @@ def _flag_support(row: dict[str, object]) -> tuple[list[str], list[str]]:
         supported.extend(["--watch", "--interval", "--max-iterations"])
     if bool(row.get("supports_profile")):
         supported.extend(["--profile", "--profile-output"])
-    return sorted(supported), sorted(unsupported)
+    return sorted(set(supported)), sorted(set(unsupported))
 
 
 def _input_modes(row: dict[str, object], supported_flags: list[str]) -> list[str]:
@@ -1512,12 +1817,25 @@ def agent_command_manifest(
     group: str | None = None,
     status: str | None = None,
     deprecated: bool = False,
+    role: str | None = None,
+    surface: str | None = None,
 ) -> list[dict[str, object]]:
+    if role is not None and role not in ROLE_CHOICES:
+        raise ValueError(f"Unknown command role: {role}")
+    if surface is not None and surface not in SURFACE_CHOICES:
+        raise ValueError(f"Unknown command surface: {surface}")
     rows: list[dict[str, object]] = []
-    for command in COMMANDS:
+    for command in [*COMMANDS, *ROLE_FACADE_COMMANDS, *CUTOVER_FACADE_COMMANDS]:
         command_name = str(command["name"])
         subcommand = subcommand_for_script(command_name) if command_name.endswith(".py") else command_name
-        if name and subcommand != name:
+        if command_name.endswith(".py") and subcommand not in COMMAND_MODULES:
+            continue
+        name_matches = (
+            not name
+            or subcommand == name
+            or (role is not None and " " not in name and subcommand.rsplit(" ", 1)[-1] == name)
+        )
+        if not name_matches:
             continue
         mutating = bool(command["mutating"])
         verification_mode = str(
@@ -1531,12 +1849,20 @@ def agent_command_manifest(
         writes_generated_files = bool(
             command.get("writes_generated_files", rebuild_default or command.get("writes_dashboard", False))
         )
+        command_group = str(command.get("group") or command_group_for_command(subcommand))
+        role_contract = command_role_contract(
+            subcommand,
+            group=command_group,
+            mutating=mutating,
+            verification_mode=verification_mode,
+        )
         row = {
             **command,
             "name": subcommand,
             "canonical_name": str(command.get("canonical_name", subcommand)),
             "verification_mode": verification_mode,
-            "group": command_group_for_command(subcommand),
+            "group": command_group,
+            **role_contract,
             "status": str(command.get("status", "active")),
             "aliases": [*list(command.get("aliases", [])), *grouped_aliases_for_command(subcommand)],
             "replacement": command.get("replacement"),
@@ -1571,6 +1897,17 @@ def agent_command_manifest(
         row["supported_flags"] = supported_flags
         row["unsupported_flags"] = unsupported_flags
         row["input_modes"] = _input_modes(row, supported_flags)
+        if role:
+            if role not in row["audiences"]:
+                continue
+            row["surface"] = command_surface_for_role(
+                subcommand,
+                role,
+                str(row["surface"]),
+            )
+        effective_surface = surface or ("core" if role and not name else None)
+        if effective_surface and row["surface"] != effective_surface:
+            continue
         if workflow and workflow not in row["workflow_tags"]:
             continue
         if group and row["group"] != group:
@@ -1588,6 +1925,14 @@ def agent_command_manifest(
         elif compact:
             row = {key: value for key, value in row.items() if key in COMPACT_COMMAND_KEYS}
         rows.append(row)
+    if name and not rows:
+        raise ValueError(f"Unknown command name {name!r} for role {role or 'any'}")
+    if name and " " not in name and not any(row.get("name") == name for row in rows):
+        if len(rows) > 1:
+            choices = ", ".join(sorted(str(row["name"]) for row in rows))
+            raise ValueError(
+                f"Ambiguous command name {name!r}; use one canonical route: {choices}"
+            )
     return rows
 
 
@@ -1596,7 +1941,9 @@ def main() -> None:
     parser.add_argument("--json", action="store_true", help="Print machine-readable command manifest")
     parser.add_argument("--compact", action="store_true", help="Print a short agent discovery payload.")
     parser.add_argument("--summary-only", action="store_true", help="Print minimal command selection fields.")
-    parser.add_argument("--name", help="Return only one command by subcommand name.")
+    parser.add_argument("--name", help="Return only one command by canonical command name.")
+    parser.add_argument("--role", choices=ROLE_CHOICES, help="Return commands available to one agent role.")
+    parser.add_argument("--surface", choices=SURFACE_CHOICES, help="Filter one command surface.")
     parser.add_argument("--workflow", choices=WORKFLOW_CHOICES, help="Return commands tagged for one workflow.")
     parser.add_argument("--group", choices=GROUP_CHOICES, help="Return commands in one canonical command group.")
     parser.add_argument("--status", choices=STATUS_CHOICES, help="Return commands with one lifecycle status.")
@@ -1617,9 +1964,11 @@ def main() -> None:
         group=args.group,
         status=args.status,
         deprecated=args.deprecated,
+        role=args.role,
+        surface=args.surface,
     )
     if args.json:
-        emit_json({"commands": commands}, compact=args.summary_only)
+        emit_json({"commands": commands}, compact=args.compact or args.summary_only)
         return
 
     for command in commands:

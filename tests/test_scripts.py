@@ -44,6 +44,8 @@ from research_cockpit.command_registry import (
     COMMAND_GROUP_CHOICES,
     COMMAND_MODULES,
     GROUPED_COMMAND_ALIASES,
+    LEGACY_COMMAND_MODULES,
+    ROLE_COMMAND_MODULES,
 )
 from research_cockpit.baselines import (
     build_accepted_decision_rows,
@@ -153,7 +155,22 @@ def assert_mutation_json_failed_without_writes(testcase: unittest.TestCase, payl
 
 
 def cli_command(command: str, *args: str) -> list[str]:
-    return [sys.executable, "-m", "research_cockpit.cli", command, *args]
+    parts = command.split()
+    if len(parts) == 1 and parts[0] in LEGACY_COMMAND_MODULES and parts[0] not in COMMAND_MODULES:
+        return [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "from research_cockpit.cli import _run_module_name; "
+                "_run_module_name(sys.argv[1], sys.argv[3:], "
+                "display_command_name=sys.argv[2])"
+            ),
+            LEGACY_COMMAND_MODULES[parts[0]],
+            parts[0],
+            *args,
+        ]
+    return [sys.executable, "-m", "research_cockpit.cli", *parts, *args]
 
 
 class ScriptBehaviorTests(unittest.TestCase):
@@ -562,7 +579,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["node_id"], "problem_text")
         self.assertEqual(payload["target_status"], "resolved")
         self.assertEqual([item["id"] for item in payload["blocking_descendants"]], ["option_t5", "exp_t5"])
-        self.assertIn("close-branch", payload["suggested_commands"][0])
+        self.assertIn("coord assign", payload["suggested_commands"][0])
         self.assertEqual(before, problem_path.read_text(encoding="utf-8"))
 
     def test_close_branch_dry_run_lists_safe_updates_and_experiment_warning(self) -> None:
@@ -1000,7 +1017,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_index_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.91}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -1011,7 +1028,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             record_only=True,
         )
         build_dashboard(self.root)
-        record_id = "artifact_exp_t5_run_index_record"
+        record_id = result["record_id"]
 
         with patch("research_cockpit.commands.validate_cockpit.load_nodes", side_effect=AssertionError("full node scan")):
             payload = validation_payload(self.root, changed_records=[f"artifact:{record_id}"])
@@ -1055,7 +1072,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_changed_record_file"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.92}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -1066,7 +1083,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             record_only=True,
         )
         build_dashboard(self.root)
-        record_id = "artifact_exp_t5_run_changed_record_file"
+        record_id = result["record_id"]
         record_path = self.root / "artifact_records" / "exp_t5.yaml"
         records = load_yaml(record_path)
         records["records"][record_id]["links"] = ["not", "a", "mapping"]
@@ -1850,7 +1867,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(worker_flow["node_id"], "experiment_perf_0000")
         self.assertEqual(
             [step["name"] for step in worker_flow["steps"]],
-            ["mutate_no_build", "compact_context", "full_validate", "build", "compact_smoke"],
+            ["coord_assign_update"],
         )
         for step in worker_flow["steps"]:
             self.assertEqual(step["returncode"], 0, step.get("stderr_preview") or step.get("stdout_preview") or step["name"])
@@ -1949,7 +1966,8 @@ class ScriptBehaviorTests(unittest.TestCase):
                 self.assertGreaterEqual(sample["wall_time_ms"], 0)
                 self.assertGreaterEqual(sample["cpu_time_ms"], 0)
                 self.assertGreaterEqual(sample["stdout_bytes"], 1)
-                self.assertGreater(sample["stderr_bytes"], 0)
+                if operation["operation"] != "run_closeout":
+                    self.assertGreater(sample["stderr_bytes"], 0)
                 self.assertIn("changed_file_count", sample)
                 self.assertIn("written_bytes", sample)
                 if operation["operation"] == "run_closeout":
@@ -2051,7 +2069,8 @@ class ScriptBehaviorTests(unittest.TestCase):
             ["Coordinator: assign GPU window.", "Run focused smoke."],
         )
         self.assertIn("next_action_scopes", combined_payload["focus"])
-        self.assertIn("next_action_scopes", combined_payload["node_context"])
+        self.assertNotIn("next_action_scopes", combined_payload["node_context"])
+        self.assertIn("next_action_scopes", combined_payload["node_context"]["omitted_fields"])
 
     def test_dashboard_next_action_scopes_keep_global_only_actions_separate(self) -> None:
         current = load_yaml(self.root / "current_state.yaml")
@@ -2457,7 +2476,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         current_path = self.root / "current_state.yaml"
         before = load_yaml(current_path)
         after = {**before, "current_hypothesis": "staged candidate"}
-        staging_dir = self.tmp_root / "staging" / "artifact_payload"
+        staging_dir = self.root / ".staging" / "artifact_payload"
         target_dir = self.root / "artifacts" / "exp_t5" / "run_staged"
         staging_dir.mkdir(parents=True)
         (staging_dir / "metrics.json").write_text('{"score": 1}', encoding="utf-8")
@@ -2873,10 +2892,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["root_boundary"]["do_not_mutate_worktree_root"])
         self.assertEqual(payload["handoff"]["launch_env"]["RESEARCH_COCKPIT_ROOT"], str(self.root.resolve()))
         self.assertEqual(payload["handoff"]["stable_artifact_root"], str((self.root / "artifacts").resolve()))
-        self.assertIn("ingest-artifact", payload["handoff"]["commands"]["ingest_artifact"])
-        self.assertNotIn("--record-only", payload["handoff"]["commands"]["ingest_artifact"])
-        self.assertIn("--no-build", payload["handoff"]["commands"]["ingest_artifact"])
-        self.assertTrue(any("worktree paths" in item for item in payload["handoff"]["guardrails"]))
+        self.assertEqual(set(payload["handoff"]["commands"]), {"open", "record", "close"})
+        self.assertIn("open", payload["handoff"]["commands"]["open"])
+        self.assertIn("--assignment", payload["handoff"]["commands"]["open"])
+        self.assertTrue(any("worktree" in item.lower() for item in payload["handoff"]["guardrails"]))
         self.assertIn("git", payload["git_command"][0])
         self.assertIn("diff", payload)
         self.assertEqual(before, option_path.read_text(encoding="utf-8"))
@@ -2985,8 +3004,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         payload = ctx.exception.payload
         self.assertTrue(payload["created_worktree"])
         self.assertEqual(payload["worktree"], str(worktree))
-        self.assertIn("--worktree", payload["recovery_commands"][0])
-        self.assertNotIn("--create-worktree", payload["recovery_commands"][0])
+        self.assertTrue(payload["recovery_commands"][0].startswith("research-cockpit coord assign"))
+        self.assertFalse(any("start-agent-session" in command for command in payload["recovery_commands"]))
 
     def test_start_agent_session_records_session_without_absolute_worktree(self) -> None:
         worktree = self.tmp_root / "worktrees" / "agent_t5"
@@ -3047,7 +3066,8 @@ class ScriptBehaviorTests(unittest.TestCase):
             payload["startup_command_args"],
             [
                 "research-cockpit",
-                "agent-session-context",
+                "work",
+                "open",
                 "--root",
                 str(self.root.resolve()),
                 "--assignment",
@@ -3067,19 +3087,28 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(validate_cockpit(self.root, load_nodes(self.root)), [])
         out = subprocess.run(
             [
-                *cli_command("bootstrap"),
+                *cli_command("work"),
+                "open",
                 "--root",
                 str(self.root),
                 "--assignment",
                 assignment_id,
                 "--json",
+                "--compact",
             ],
             capture_output=True,
             text=True,
             check=False,
         )
         self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
-        bootstrap_payload = json.loads(out.stdout)
+        work_packet = json.loads(out.stdout)
+        self.assertEqual(work_packet["schema_version"], "work_packet_v1")
+        self.assertEqual(work_packet["assignment_id"], assignment_id)
+        bootstrap_payload = agent_bootstrap_payload(
+            self.root,
+            build=False,
+            assignment_id=assignment_id,
+        )
         self.assertEqual(bootstrap_payload["scope"]["mode"], "assignment")
         self.assertEqual(bootstrap_payload["scope"]["primary_context"], "assignment_scope")
         self.assertEqual(bootstrap_payload["scope"]["assignment_id"], assignment_id)
@@ -3091,11 +3120,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         guidance_text = json.dumps(bootstrap_payload["mutation_guidance"])
         self.assertIn(f"--assignment {assignment_id}", guidance_text)
-        self.assertIn(f"complete-run --root <root> --assignment {assignment_id} --file closeout.yaml", guidance_text)
+        self.assertIn(f"work close --root <root> --assignment {assignment_id} --file closeout.yaml", guidance_text)
         guidance_commands = " ".join(bootstrap_payload["mutation_guidance"]["command_skeletons"])
+        self.assertIn("work claim", guidance_commands)
+        self.assertIn("work start", guidance_commands)
+        self.assertNotIn("create-run", guidance_commands)
         self.assertNotIn("create-followup-experiment", guidance_commands)
         self.assertNotIn("migrate-terminal-next-actions", guidance_text)
-        self.assertIn("set-cursor", guidance_text)
+        self.assertNotIn("set-cursor", guidance_text)
         self.assertNotIn("research-cockpit init", guidance_text)
         self.assertNotIn("set-baseline", guidance_text)
         self.assertNotIn("sync-focus-actions", guidance_text)
@@ -3122,7 +3154,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn(f"'{data_root.resolve()}'", payload["startup_command"])
         out = subprocess.run(
             [
-                *cli_command("agent-session-context"),
+                *cli_command("work"),
                 *payload["startup_command_args"][2:],
             ],
             capture_output=True,
@@ -3131,7 +3163,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
         context_payload = json.loads(out.stdout)
-        self.assertEqual(context_payload["assignment"]["assignment_id"], payload["assignment_id"])
+        self.assertEqual(context_payload["assignment_id"], payload["assignment_id"])
 
     def test_start_agent_session_cli_generates_identity_without_agent_arg(self) -> None:
         worktree = self.tmp_root / "worktrees" / "cache_probe"
@@ -3442,9 +3474,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["required_root"], str(self.root.resolve()))
         self.assertTrue(payload["do_not_mutate_worktree_root"])
         self.assertEqual(payload["stable_artifact_root"], str((self.root / "artifacts").resolve()))
-        self.assertIn("ingest-artifact", payload["handoff"]["commands"]["ingest_artifact"])
-        self.assertNotIn("--record-only", payload["handoff"]["commands"]["ingest_artifact"])
-        self.assertIn("--no-build", payload["handoff"]["commands"]["ingest_artifact"])
+        self.assertIn("open", payload["handoff"]["commands"]["open"])
+        self.assertIn("record", payload["handoff"]["commands"]["record"])
+        self.assertIn("close", payload["handoff"]["commands"]["close"])
         self.assertEqual(payload["assignment"]["current_node"], "option_t5")
         self.assertEqual(payload["agent_focus"]["source"], "assignment")
         self.assertEqual(payload["agent_focus"]["current_focus_node"], "option_t5")
@@ -3492,13 +3524,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["assignment_cursor"]["current_node"], "exp_t5")
         self.assertEqual(payload["agent_focus"]["source"], "assignment")
         self.assertEqual(payload["agent_focus"]["current_focus_node"], "exp_t5")
-        self.assertIn("--assignment", payload["handoff"]["commands"]["read_context"])
-        self.assertIn("set-cursor", payload["handoff"]["commands"]["set_cursor"])
+        self.assertIn("--assignment", payload["handoff"]["commands"]["open"])
+        self.assertIn("close", payload["handoff"]["commands"]["close"])
         self.assertEqual(payload_by_agent["assignment"]["assignment_id"], session["assignment_id"])
         self.assertEqual(payload_by_agent["assignment"]["current_node"], "exp_t5")
         self.assertEqual(payload_by_agent["agent_focus"]["source"], "assignment")
-        self.assertIn("--assignment", payload_by_agent["handoff"]["commands"]["read_context"])
-        self.assertIn("set-cursor", payload_by_agent["handoff"]["commands"]["set_cursor"])
+        self.assertIn("--assignment", payload_by_agent["handoff"]["commands"]["open"])
+        self.assertNotIn("set_cursor", payload_by_agent["handoff"]["commands"])
         self.assertNotIn("set_agent_focus", payload_by_agent["handoff"]["commands"])
 
     def test_set_cursor_cli_compact_json_uses_assignment_target(self) -> None:
@@ -3785,7 +3817,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertNotIn("active_option.parent", payload["hierarchy_policy"]["workstream_file_hint"])
         self.assertIn("active_option.parent", payload["hierarchy_policy"]["command_created_shape"])
         self.assertIn("create_child_workstream", payload["suggested_commands"])
-        self.assertIn("--id option_t5", payload["suggested_commands"]["context"])
+        suggested = payload["suggested_commands"]
+        self.assertIn("research-cockpit work claim", suggested["claim"])
+        self.assertIn("research-cockpit context --id option_t5", suggested["context"])
+        self.assertEqual(suggested["context_option_alias"], suggested["context"])
+        self.assertIn("research-cockpit coord assign", suggested["create_child_workstream"])
+        self.assertTrue(all("research-cockpit work close" in suggested[key] for key in ("finalize", "report")))
         self.assertNotIn("subtree_nodes", payload)
         self.assertNotIn("experiments", payload)
 
@@ -3846,12 +3883,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["node"]["id"], "option_t5")
         self.assertEqual(payload["type_context"]["kind"], "option")
-        self.assertIn("--root", payload["command_drafts"]["claim_option"])
-        self.assertNotIn("python scripts", payload["command_drafts"]["claim_option"])
-        self.assertNotIn(".py", payload["command_drafts"]["claim_option"])
-        command = [item for item in manifest if item["name"] == "node-context"][0]
+        self.assertIn("--root", payload["command_drafts"]["claim_assignment"])
+        self.assertNotIn("python scripts", payload["command_drafts"]["claim_assignment"])
+        self.assertNotIn(".py", payload["command_drafts"]["claim_assignment"])
+        command = [item for item in manifest if item["name"] == "context"][0]
         self.assertFalse(command["mutating"])
         self.assertTrue(command["supports_json"])
+        self.assertNotIn("node-context", {item["name"] for item in manifest})
 
     def test_context_and_node_context_skip_bad_interaction_events_with_warnings(self) -> None:
         save_yaml(
@@ -3886,12 +3924,15 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
 
         payload = node_context_payload(self.root, node_id="decision_t5")
+        compact_context = context_payload(self.root, node_id="decision_t5", compact=True)
 
         self.assertEqual(payload["node"]["id"], "decision_t5")
         self.assertFalse(payload["type_context"]["acceptance"]["ready"])
+        self.assertEqual(compact_context["decision_acceptance"], payload["type_context"]["acceptance"])
         self.assertTrue(payload["type_context"]["repair_hints"])
         repair_commands = " ".join(item.get("command", "") for item in payload["type_context"]["repair_hints"])
-        self.assertIn("record-finding", repair_commands)
+        self.assertIn("work record", repair_commands)
+        self.assertIn("coord decide", repair_commands)
         self.assertIn("--root", repair_commands)
 
     def test_report_option_workstream_writes_report_and_marks_reported(self) -> None:
@@ -4223,7 +4264,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             [item["id"] for item in errors_by_node["option_t5"]["blocking_descendants"]],
             ["exp_t5"],
         )
-        self.assertIn("close-branch", payload["suggested_commands"][0])
+        self.assertIn("coord assign", payload["suggested_commands"][0])
         self.assertEqual(before, option_path.read_text(encoding="utf-8"))
 
     def test_finalize_workstream_file_summary_relative_to_finalize_file(self) -> None:
@@ -4459,24 +4500,21 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["related"]["experiments"][0]["id"], "exp_t5")
         self.assertEqual(payload["artifacts"]["artifact_ids"], ["artifact_cache"])
         self.assertIn("mutation_guidance", payload["bootstrap"])
-        self.assertIn("complete_experiments", payload["recommended_commands"])
+        self.assertIn("close_assignment", payload["recommended_commands"])
         self.assertEqual(payload["target_context"]["node_id"], "option_t5")
         self.assertEqual(payload["focus"]["current_focus_node"], "problem_text")
         self.assertTrue(payload["context_boundary"]["target_differs_from_global_focus"])
         self.assertIn("target node", payload["context_boundary"]["warning"])
-        self.assertEqual(payload["node_context"]["node"]["id"], "option_t5")
+        self.assertNotIn("node", payload["node_context"])
         self.assertTrue(payload["node_context"]["compact"])
         self.assertIn("omitted_fields", payload["node_context"])
         self.assertNotIn("recommended_next_steps", payload["node_context"])
-        self.assertIn("--changed-node option_t5", payload["node_context"]["worker_verify_commands"][0])
-        self.assertIn("smoke", payload["node_context"]["worker_verify_commands"][2])
-        self.assertIn("research-cockpit build", payload["node_context"]["final_handoff_commands"][1])
-        self.assertIn("validate_changed", payload["node_context"]["command_drafts"])
-        self.assertNotIn("validate", payload["node_context"]["command_drafts"])
-        self.assertNotIn("build", payload["node_context"]["command_drafts"])
+        self.assertNotIn("worker_verify_commands", payload["node_context"])
+        self.assertNotIn("final_handoff_commands", payload["node_context"])
+        self.assertNotIn("command_drafts", payload["node_context"])
         self.assertLess(len(json.dumps(payload, ensure_ascii=False).encode("utf-8")), 30000)
 
-    def test_context_compact_v2_bounds_related_experiments_and_serializes_tersely(self) -> None:
+    def test_context_compact_v3_bounds_related_experiments_and_serializes_tersely(self) -> None:
         option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
         option = load_yaml(option_path)
         sibling_ids = [f"exp_compact_{index:02d}" for index in range(25)]
@@ -4502,13 +4540,13 @@ class ScriptBehaviorTests(unittest.TestCase):
             compact=True,
         )
 
-        self.assertEqual(payload["schema_version"], "context_compact_v2")
-        self.assertEqual(payload["node_context"]["schema_version"], "node_context_nested_compact_v2")
+        self.assertEqual(payload["schema_version"], "context_compact_v3")
+        self.assertEqual(payload["node_context"]["schema_version"], "node_context_nested_compact_v3")
         self.assertLessEqual(len(payload["related"]["experiments"]), 10)
         self.assertEqual(payload["related"]["experiments_count"], 26)
         self.assertEqual(payload["related"]["experiments_omitted_count"], 16)
         self.assertLessEqual(len(payload["focus"]["next_actions"]), 5)
-        self.assertEqual(payload["current_global_focus"], payload["focus"])
+        self.assertNotIn("current_global_focus", payload)
         self.assertLess(len(json.dumps(payload, ensure_ascii=False).encode("utf-8")), 20000)
 
     def test_context_execution_view_is_bounded_and_keeps_execution_invariants(self) -> None:
@@ -4587,6 +4625,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], "execution_context_v1")
         self.assertTrue(payload["changed"])
         self.assertEqual(payload["node"]["id"], "exp_t5")
+        self.assertEqual(
+            payload["node"]["parent"],
+            {"id": "option_t5", "type": "option", "status": "active"},
+        )
         self.assertEqual(payload["node"]["next_action"], "Run the bounded evaluation.")
         self.assertEqual(payload["assignment_boundary"]["assignment_id"], "assignment_t5")
         self.assertEqual(payload["active_run"]["run_id"], "run_t5")
@@ -4922,7 +4964,14 @@ class ScriptBehaviorTests(unittest.TestCase):
         json.loads(progress_mutation.stdout)
         mutation_phases = {event["phase"] for event in events(progress_mutation.stderr)}
         self.assertTrue(
-            {"targeted_preflight", "apply_transaction", "lock_wait", "index_update"}
+            {
+                "targeted_preflight",
+                "apply_transaction",
+                "lock_wait",
+                "lock_hold",
+                "commit",
+                "index_update",
+            }
             <= mutation_phases
         )
         self.assertNotIn(secret_summary, progress_mutation.stderr)
@@ -5028,31 +5077,34 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("top_suggestions", payload)
         self.assertIn("search_summary", payload)
         self.assertIn("mutation_guidance", payload)
-        self.assertIn("apply-graph-plan", " ".join(payload["mutation_guidance"]["command_skeletons"]))
+        self.assertIn("coord assign", " ".join(payload["mutation_guidance"]["command_skeletons"]))
         batch_mode = payload["mutation_guidance"]["multi_agent_batch_mode"]
         self.assertIn("coordinator", batch_mode["default"])
         self.assertIn("internally verified", batch_mode["default"])
         self.assertIn("milestone handoff", batch_mode["default"])
         self.assertNotIn("final handoff", batch_mode["default"])
-        self.assertIn("commands --json --compact --name", " ".join(batch_mode["rules"]))
+        rules = " ".join(batch_mode["rules"])
+        self.assertIn("commands --role <role> --name <command>", rules)
+        self.assertIn("compute", rules)
+        self.assertNotIn("Do not parallelize mutating commands", rules)
         self.assertEqual(batch_mode["finish_commands"], [])
         self.assertIn("--changed-node <node_id>", " ".join(batch_mode["worker_verify_commands"]))
-        self.assertIn("smoke --root <root> --json", " ".join(batch_mode["final_handoff_commands"]))
+        self.assertIn("coord handoff --root <root>", " ".join(batch_mode["final_handoff_commands"]))
         skeletons = " ".join(payload["mutation_guidance"]["command_skeletons"])
         self.assertLessEqual(len(payload["mutation_guidance"]["command_skeletons"]), 8)
-        self.assertIn("--start-experiment", skeletons)
-        self.assertIn("complete-run --root <root> --file closeout.yaml", skeletons)
+        self.assertIn("coord overview", skeletons)
+        self.assertIn("coord decide", skeletons)
         self.assertNotIn("complete-experiment", skeletons)
         self.assertNotIn("create-followup-experiment", skeletons)
-        self.assertNotIn("--record-only", skeletons)
-        self.assertIn("complete-run --root <root> --file closeout.yaml", " ".join(batch_mode["examples"]["findings"]))
-        self.assertNotIn("--record-only", " ".join(batch_mode["examples"]["artifacts"]))
-        self.assertIn("update-run", " ".join(batch_mode["examples"]["runs"]))
-        self.assertIn("complete-run --root <root> --file closeout.yaml", " ".join(batch_mode["examples"]["runs"]))
-        self.assertIn("sync-focus-actions", " ".join(batch_mode["examples"]["next_actions"]))
+        self.assertNotIn("apply-graph-plan", skeletons)
+        self.assertEqual(batch_mode["examples"]["findings"], [])
+        self.assertEqual(batch_mode["examples"]["artifacts"], [])
+        self.assertEqual(batch_mode["examples"]["runs"], [])
+        self.assertEqual(batch_mode["examples"]["gates"], [])
+        self.assertIn("coord assign", " ".join(batch_mode["examples"]["next_actions"]))
         hierarchy = payload["mutation_guidance"]["hierarchy_policy"]
         self.assertEqual(hierarchy["default_branch_shape"], "option -> problem -> option -> experiment/decision")
-        self.assertIn("create-workstream", hierarchy["recommended_command"])
+        self.assertIn("coord assign", hierarchy["recommended_command"])
         self.assertIsInstance(payload["git"]["worktree_dirty"], bool)
         self.assertEqual(payload["run_overview"]["running_count"], 1)
         self.assertEqual(payload["run_overview"]["failed_count"], 1)
@@ -5153,7 +5205,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["agent_scope"]["option_context"]["option"]["id"], "option_t5")
         self.assertEqual(payload["focus"]["current_focus_node"], "exp_other")
         self.assertTrue(payload["focus"]["coordinator_only"])
-        self.assertIn("agent-session-context", payload["agent_scope"]["handoff"]["commands"]["read_context"])
+        self.assertIn("open", payload["agent_scope"]["handoff"]["commands"]["open"])
         self.assertEqual(
             payload["mutation_guidance"]["hierarchy_policy"]["workstream_file_hint"]["problem.parent"],
             "option_t5",
@@ -7271,11 +7323,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_id["run_cli_active_resources_list"]["resources"]["gpu_ids"], ["1"])
         self.assertEqual(human_out.returncode, 0, human_out.stdout + human_out.stderr)
         self.assertIn("resources=gpu_ids", human_out.stdout)
-        self.assertIn("active-resources", manifest)
-        self.assertFalse(manifest["active-resources"]["mutating"])
-        self.assertIn("maintenance", manifest["active-resources"]["workflow_tags"])
-        self.assertIn("--include-terminal", manifest["active-resources"]["supported_flags"])
-        self.assertIn("resources", manifest["active-resources"]["fields_supported"])
+        self.assertNotIn("active-resources", manifest)
+        self.assertFalse(manifest["maintenance audit"]["mutating"])
+        self.assertIn("maintenance", manifest["maintenance audit"]["workflow_tags"])
+        self.assertIn("--repo", manifest["maintenance audit"]["supported_flags"])
 
     def test_worktree_audit_joins_git_worktrees_to_assignments_and_runs(self) -> None:
         session = self.start_t5_assignment()
@@ -7713,29 +7764,19 @@ class ScriptBehaviorTests(unittest.TestCase):
     def test_worktree_and_branch_audit_manifest_metadata(self) -> None:
         manifest = {item["name"]: item for item in agent_command_manifest()}
 
-        self.assertFalse(manifest["worktree-audit"]["mutating"])
-        self.assertFalse(manifest["branch-audit"]["mutating"])
-        self.assertFalse(manifest["worktree-closeout"]["mutating"])
-        self.assertIn("maintenance", manifest["worktree-audit"]["workflow_tags"])
-        self.assertIn("maintenance", manifest["branch-audit"]["workflow_tags"])
-        self.assertIn("maintenance", manifest["worktree-closeout"]["workflow_tags"])
-        self.assertIn("--repo", manifest["worktree-audit"]["supported_flags"])
-        self.assertIn("--include-nested", manifest["worktree-audit"]["supported_flags"])
-        self.assertIn("label", manifest["worktree-audit"]["fields_supported"])
-        self.assertNotIn("worktree_label", manifest["worktree-audit"]["fields_supported"])
-        self.assertIn("--repo", manifest["branch-audit"]["supported_flags"])
-        self.assertIn("--base", manifest["branch-audit"]["supported_flags"])
-        self.assertIn("name", manifest["branch-audit"]["fields_supported"])
-        self.assertNotIn("branch", manifest["branch-audit"]["fields_supported"])
-        self.assertIn("--worktree", manifest["worktree-closeout"]["supported_flags"])
-        self.assertIn("--classification", manifest["worktree-closeout"]["supported_flags"])
-        self.assertIn("execution_commands", manifest["worktree-closeout"]["fields_supported"])
+        audit = manifest["maintenance audit"]
+        self.assertFalse(audit["mutating"])
+        self.assertIn("maintenance", audit["workflow_tags"])
+        self.assertIn("--repo", audit["supported_flags"])
+        self.assertIn("--base", audit["supported_flags"])
+        for removed in ("worktree-audit", "branch-audit", "worktree-closeout"):
+            self.assertNotIn(removed, manifest)
 
         maintenance_manifest = {
             item["name"]: item
             for item in agent_command_manifest(compact=True, workflow="maintenance")
         }
-        self.assertIn("worktree-closeout", maintenance_manifest)
+        self.assertIn("maintenance audit", maintenance_manifest)
 
     def test_artifact_retention_audit_flags_large_missing_and_active_blockers(self) -> None:
         repo = self.tmp_root
@@ -7972,7 +8013,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(by_id["artifact_keep_critical"]["classification"], "must_keep_node")
         self.assertEqual(by_id["artifact_review_linked"]["classification"], "needs_review")
         self.assertEqual(by_id["artifact_missing_path"]["classification"], "cannot_demote")
-        self.assertIn("artifact_demote_run_output", by_id["artifact_demote_run_output"]["recommended_command"])
+        compact_command = by_id["artifact_demote_run_output"]["recommended_command"]
+        self.assertIn("maintenance compact", compact_command)
+        self.assertNotIn("artifact_demote_run_output", compact_command)
         self.assertIn("No payload files are deleted", payload["notes"][0])
 
         missing_dry_run = subprocess.run(
@@ -8156,21 +8199,19 @@ class ScriptBehaviorTests(unittest.TestCase):
     def test_retention_and_maintenance_audit_manifest_metadata(self) -> None:
         manifest = {item["name"]: item for item in agent_command_manifest()}
 
-        self.assertFalse(manifest["artifact-retention-audit"]["mutating"])
-        self.assertFalse(manifest["maintenance-audit"]["mutating"])
-        self.assertIn("maintenance", manifest["artifact-retention-audit"]["workflow_tags"])
-        self.assertIn("maintenance", manifest["maintenance-audit"]["workflow_tags"])
-        self.assertIn("--repo", manifest["artifact-retention-audit"]["supported_flags"])
-        self.assertIn("--min-size-gb", manifest["artifact-retention-audit"]["supported_flags"])
-        self.assertIn("--repo", manifest["maintenance-audit"]["supported_flags"])
-        self.assertIn("--base", manifest["maintenance-audit"]["supported_flags"])
-        self.assertIn("--min-size-gb", manifest["maintenance-audit"]["supported_flags"])
-        self.assertTrue(manifest["compact-artifacts"]["mutating"])
-        self.assertIn("maintenance", manifest["compact-artifacts"]["workflow_tags"])
-        self.assertIn("--dry-run", manifest["compact-artifacts"]["supported_flags"])
-        self.assertIn("--show-diff", manifest["compact-artifacts"]["supported_flags"])
-        self.assertIn("--execute", manifest["compact-artifacts"]["supported_flags"])
-        self.assertIn("--no-build", manifest["compact-artifacts"]["supported_flags"])
+        audit = manifest["maintenance audit"]
+        self.assertFalse(audit["mutating"])
+        self.assertIn("maintenance", audit["workflow_tags"])
+        self.assertIn("--repo", audit["supported_flags"])
+        self.assertIn("--base", audit["supported_flags"])
+        self.assertIn("--min-size-gb", audit["supported_flags"])
+        compact = manifest["maintenance compact"]
+        self.assertTrue(compact["mutating"])
+        self.assertIn("maintenance", compact["workflow_tags"])
+        self.assertIn("--file", compact["supported_flags"])
+        self.assertIn("--print-schema", compact["supported_flags"])
+        for removed in ("artifact-retention-audit", "maintenance-audit", "compact-artifacts"):
+            self.assertNotIn(removed, manifest)
 
     def test_run_metadata_write_support_and_context_output(self) -> None:
         resources_file = self.tmp_root / "resources.json"
@@ -8391,359 +8432,47 @@ class ScriptBehaviorTests(unittest.TestCase):
     def test_metadata_write_manifest_flags(self) -> None:
         manifest = {item["name"]: item for item in agent_command_manifest()}
 
-        for command_name in ("create-run", "update-run", "complete-run"):
+        for command_name in ("work start", "work record", "work close"):
             with self.subTest(command_name=command_name):
-                self.assertIn("--resources-json", manifest[command_name]["supported_flags"])
-                self.assertIn("--resources-file", manifest[command_name]["supported_flags"])
-                self.assertIn("--output-retention-json", manifest[command_name]["supported_flags"])
-                self.assertIn("--output-retention-file", manifest[command_name]["supported_flags"])
-                self.assertIn("resources", manifest[command_name]["fields_supported"])
-                self.assertIn("output_retention", manifest[command_name]["fields_supported"])
-        self.assertIn("--metadata-file", manifest["update-node-fields"]["supported_flags"])
-        self.assertIn("artifact_kind", manifest["update-node-fields"]["fields_supported"])
-        self.assertIn("retention", manifest["update-node-fields"]["fields_supported"])
+                self.assertTrue(manifest[command_name]["mutating"])
+                self.assertEqual(manifest[command_name]["verification_policy"], "internal")
+        self.assertIn("--file", manifest["work record"]["supported_flags"])
+        self.assertIn("--print-schema", manifest["work record"]["supported_flags"])
+        self.assertEqual(manifest["work record"]["input_schema_version"], "work_record_v1")
+        self.assertEqual(manifest["work close"]["input_schema_version"], "work_close_v1")
+        self.assertIn("--print-schema", manifest["work close"]["supported_flags"])
+        self.assertEqual(
+            manifest["work close"]["schema_command"], "research-cockpit work close --print-schema"
+        )
 
     def test_list_agent_commands_manifest_marks_mutating_commands(self) -> None:
         manifest = agent_command_manifest()
         by_name = {item["name"]: item for item in manifest}
 
+        canonical_names = {
+            *COMMAND_MODULES,
+            "init",
+            "ui",
+            *(
+                f"{group_name} {action_name}"
+                for group_name, actions in ROLE_COMMAND_MODULES.items()
+                for action_name in actions
+            ),
+        }
+        self.assertEqual(set(by_name), canonical_names)
         self.assertFalse(by_name["validate"]["mutating"])
-        self.assertTrue(by_name["repair-interaction-log"]["mutating"])
-        self.assertTrue(by_name["repair-interaction-log"]["supports_dry_run"])
-        self.assertTrue(by_name["repair-interaction-log"]["supports_show_diff"])
-        self.assertFalse(by_name["repair-interaction-log"]["writes_truth_source"])
-        self.assertIn("maintenance", by_name["repair-interaction-log"]["workflow_tags"])
         self.assertFalse(by_name["search"]["mutating"])
-        self.assertIn("--limit", by_name["search"]["supported_flags"])
-        self.assertIn("--source", by_name["search"]["supported_flags"])
-        self.assertIn("--node-type", by_name["search"]["supported_flags"])
-        self.assertIn("--focus-only", by_name["search"]["supported_flags"])
-        self.assertFalse(by_name["suggest-next-actions"]["mutating"])
-        self.assertIn("--limit", by_name["suggest-next-actions"]["supported_flags"])
-        self.assertIn("--kind", by_name["suggest-next-actions"]["supported_flags"])
-        self.assertIn("--focus-only", by_name["suggest-next-actions"]["supported_flags"])
-        self.assertNotIn("every agent session", by_name["bootstrap"]["recommended_when"])
-        self.assertFalse(by_name["smoke"]["mutating"])
-        self.assertIn("--full", by_name["smoke"]["supported_flags"])
-        self.assertIn("--scope", by_name["smoke"]["supported_flags"])
-        self.assertIn("--id", by_name["smoke"]["supported_flags"])
-        self.assertIn("--progress", by_name["smoke"]["supported_flags"])
-        self.assertIn("--changed-node", by_name["validate"]["supported_flags"])
-        self.assertIn("--changed-file", by_name["validate"]["supported_flags"])
-        self.assertIn("--affected", by_name["build"]["supported_flags"])
-        self.assertIn("--id", by_name["build"]["supported_flags"])
-        self.assertIn("--changed-files", by_name["validate"]["supported_flags"])
-        self.assertIn("--changed-record", by_name["validate"]["supported_flags"])
-        self.assertFalse(by_name["commands"]["mutating"])
-        self.assertTrue(by_name["commands"]["supports_compact"])
-        self.assertFalse(by_name["commands"]["supports_root"])
-        self.assertIn("--root", by_name["commands"]["unsupported_flags"])
-        self.assertNotIn("--root", by_name["commands"]["supported_flags"])
-        self.assertIn("read", by_name["commands"]["workflow_tags"])
-        self.assertTrue(by_name["init"]["mutating"])
-        self.assertFalse(by_name["ui"]["mutating"])
-        self.assertEqual(by_name["init"]["capability_file"], "capabilities/integrations.md")
-        self.assertEqual(by_name["ui"]["capability_file"], "capabilities/ui-dashboard.md")
-        self.assertTrue(by_name["record-finding"]["mutating"])
-        self.assertTrue(by_name["record-finding"]["supports_json"])
-        self.assertTrue(by_name["record-finding"]["supports_dry_run"])
-        self.assertTrue(by_name["record-finding"]["supports_no_build"])
-        self.assertIn("evidence_path", by_name["record-finding"]["fields_supported"])
-        self.assertIn("evidence_links", by_name["record-finding"]["fields_supported"])
-        self.assertNotIn("evidence_artifact_id", by_name["record-finding"]["fields_supported"])
-        self.assertTrue(by_name["update-finding"]["supports_json"])
-        self.assertTrue(by_name["create-artifact"]["supports_dry_run"])
-        self.assertIn("evidence", by_name["create-artifact"]["workflow_tags"])
-        self.assertEqual(by_name["create-artifact"]["file_schema"], "artifact_v1")
-        self.assertIn("link_to:", by_name["create-artifact"]["example_file"])
-        self.assertIn("--print-schema", by_name["create-artifact"]["schema_command"])
-        self.assertIn("--file", by_name["create-artifact"]["supported_flags"])
-        self.assertIn("--print-schema", by_name["create-artifact"]["supported_flags"])
-        self.assertIn("artifact_kind", by_name["create-artifact"]["fields_supported"])
-        self.assertIn("retention", by_name["create-artifact"]["fields_supported"])
-        self.assertEqual(by_name["create-artifact"]["group"], "artifact")
-        self.assertEqual(by_name["create-artifact"]["canonical_name"], "create-artifact")
-        self.assertEqual(by_name["create-artifact"]["status"], "active")
-        self.assertIn("artifact create", by_name["create-artifact"]["aliases"])
-        self.assertIn("flags", by_name["create-artifact"]["input_modes"])
-        self.assertIn("file", by_name["create-artifact"]["input_modes"])
-        self.assertIn("schema", by_name["create-artifact"]["input_modes"])
-        self.assertTrue(by_name["link-artifact"]["supports_no_build"])
-        self.assertEqual(by_name["link-artifact"]["group"], "artifact")
-        self.assertIn("flags", by_name["link-artifact"]["input_modes"])
-        self.assertFalse(by_name["context"]["mutating"])
-        self.assertTrue(by_name["context"]["supports_json"])
-        self.assertTrue(by_name["context"]["supports_compact"])
-        self.assertEqual(by_name["context"]["group"], "context")
-        self.assertIn("focus", by_name["context"]["workflow_tags"])
-        self.assertIn("--assignment", by_name["bootstrap"]["supported_flags"])
-        for command_name in (
-            "apply-graph-plan",
-            "create-workstream",
-            "update-status",
-            "create-run",
-            "update-run",
-            "complete-run",
-            "record-gate-result",
-            "ingest-artifact",
-            "record-finding",
-            "complete-experiment",
-        ):
-            with self.subTest(command_name=command_name):
-                self.assertIn("--assignment", by_name[command_name]["supported_flags"])
-                self.assertIn("--coordinator", by_name[command_name]["supported_flags"])
-        self.assertEqual(by_name["create-run"]["verification_mode"], "internal_non_dry_run")
-        self.assertEqual(by_name["ingest-artifact"]["verification_mode"], "internal_non_dry_run")
-        self.assertEqual(by_name["complete-run"]["verification_mode"], "structured_file_non_dry_run")
-        for command_name in ("create-run", "ingest-artifact", "complete-run"):
-            self.assertEqual(by_name[command_name]["batch_policy"]["worker_verify_commands"], [])
-            self.assertEqual(by_name[command_name]["batch_policy"]["final_handoff_commands"], [])
-        self.assertIn(
-            "artifact_record.existing_record_id",
-            by_name["complete-run"]["fields_supported"],
-        )
-        self.assertTrue(by_name["node-context"]["supports_compact"])
-        self.assertIn("read", by_name["node-context"]["workflow_tags"])
-        self.assertTrue(by_name["add-node"]["supports_json"])
-        self.assertTrue(by_name["add-node"]["supports_dry_run"])
-        self.assertTrue(by_name["add-node"]["supports_no_build"])
-        self.assertTrue(by_name["add-node"]["supports_compact"])
-        self.assertTrue(by_name["add-node"]["supports_show_diff"])
-        self.assertIn("graph", by_name["add-node"]["workflow_tags"])
-        self.assertEqual(by_name["add-node"]["group"], "graph")
-        self.assertTrue(by_name["add-node"]["writes_truth_source"])
-        self.assertTrue(by_name["add-node"]["writes_generated_files"])
-        self.assertTrue(by_name["add-node"]["can_batch"])
-        self.assertTrue(by_name["update-status"]["supports_no_build"])
-        self.assertTrue(by_name["update-status"]["supports_json"])
-        self.assertTrue(by_name["update-status"]["supports_dry_run"])
-        self.assertTrue(by_name["set-focus"]["supports_json"])
-        self.assertTrue(by_name["set-focus"]["supports_dry_run"])
-        self.assertTrue(by_name["set-focus"]["supports_compact"])
-        self.assertTrue(by_name["set-agent-focus"]["supports_dry_run"])
-        self.assertTrue(by_name["set-agent-focus"]["supports_compact"])
-        self.assertIn("agent_focuses", by_name["set-agent-focus"]["fields_supported"])
-        self.assertTrue(by_name["set-cursor"]["supports_dry_run"])
-        self.assertTrue(by_name["set-cursor"]["supports_compact"])
-        self.assertIn("--assignment", by_name["set-cursor"]["supported_flags"])
-        self.assertIn("assignment.current_node", by_name["set-cursor"]["fields_supported"])
-        self.assertTrue(by_name["apply-graph-plan"]["supports_json"])
-        self.assertTrue(by_name["apply-graph-plan"]["supports_dry_run"])
-        self.assertTrue(by_name["apply-graph-plan"]["supports_no_build"])
-        self.assertTrue(by_name["apply-graph-plan"]["can_batch"])
-        self.assertEqual(by_name["apply-graph-plan"]["file_schema"], "graph_plan_v1")
-        self.assertIn("nodes:", by_name["apply-graph-plan"]["example_file"])
-        self.assertIn("--print-schema", by_name["apply-graph-plan"]["schema_command"])
-        self.assertEqual(by_name["apply-graph-plan"]["status_aliases"], {"option": {"planned": "open"}})
-        self.assertTrue(by_name["create-workstream"]["supports_json"])
-        self.assertEqual(by_name["create-workstream"]["file_schema"], "workstream_v1")
-        self.assertIn("followup_options:", by_name["create-workstream"]["example_file"])
-        self.assertIn("status: active", by_name["create-workstream"]["example_file"])
-        self.assertIn("hypothesis:", by_name["create-workstream"]["example_file"])
-        self.assertIn("summary:", by_name["create-workstream"]["example_file"])
-        self.assertIn("success_criteria:", by_name["create-workstream"]["example_file"])
-        self.assertIn("metrics:", by_name["create-workstream"]["example_file"])
-        self.assertIn("hypothesis", by_name["create-workstream"]["fields_supported"])
-        self.assertIn("success_criteria", by_name["create-workstream"]["fields_supported"])
-        self.assertIn("metrics", by_name["create-workstream"]["fields_supported"])
-        self.assertIn("option -> problem -> option", by_name["create-workstream"]["hierarchy_guidance"])
-        self.assertEqual(by_name["create-workstream"]["status_aliases"], {"option": {"planned": "open"}})
-        self.assertTrue(by_name["sync-focus-actions"]["supports_dry_run"])
-        for command in manifest:
-            with self.subTest(command=command["name"]):
-                self.assertIn("group", command)
-                self.assertIn("canonical_name", command)
-                self.assertIn("status", command)
-                self.assertIn("aliases", command)
-                self.assertIn("input_modes", command)
-                self.assertEqual(command["status"], "active")
-                self.assertIsInstance(command["aliases"], list)
-                self.assertIn("flags", command["input_modes"])
-        self.assertTrue(by_name["sync-focus-actions"]["supports_compact"])
-        self.assertTrue(by_name["complete-experiment"]["mutating"])
-        self.assertTrue(by_name["complete-experiment"]["supports_json"])
-        self.assertTrue(by_name["complete-experiment"]["supports_dry_run"])
-        self.assertTrue(by_name["complete-experiment"]["supports_no_build"])
-        self.assertTrue(by_name["complete-experiment"]["supports_compact"])
-        self.assertEqual(by_name["complete-experiment"]["batch_policy"]["mode"], "serial_no_build")
-        self.assertTrue(by_name["complete-experiment"]["batch_policy"]["use_no_build"])
-        self.assertEqual(by_name["complete-experiment"]["batch_policy"]["finish_commands"], [])
-        self.assertIn(
-            "research-cockpit validate --root <root> --changed-node <node_id> --json",
-            by_name["complete-experiment"]["batch_policy"]["worker_verify_commands"],
-        )
-        self.assertIn(
-            "research-cockpit smoke --root <root> --json --progress",
-            by_name["complete-experiment"]["batch_policy"]["final_handoff_commands"],
-        )
-        self.assertIn("evidence_path", by_name["complete-experiment"]["fields_supported"])
-        self.assertNotIn("next_actions", by_name["complete-experiment"]["fields_supported"])
-        self.assertNotIn("evidence_artifact_id", by_name["complete-experiment"]["fields_supported"])
-        self.assertTrue(by_name["complete-experiments"]["can_batch"])
-        self.assertTrue(by_name["complete-experiments"]["supports_dry_run"])
-        self.assertEqual(by_name["complete-experiments"]["file_schema"], "experiment_completion_v1")
-        self.assertIn("experiments:", by_name["complete-experiments"]["example_file"])
-        self.assertIn("evidence.links", by_name["complete-experiments"]["fields_supported"])
-        self.assertNotIn("next_actions", by_name["complete-experiments"]["fields_supported"])
-        self.assertNotIn("evidence.artifact_id", by_name["complete-experiments"]["fields_supported"])
-        self.assertNotIn("evidence.title", by_name["complete-experiments"]["fields_supported"])
-        self.assertIn("evidence:", by_name["complete-experiments"]["example_file"])
-        self.assertNotIn("title: First result bundle", by_name["complete-experiments"]["example_file"])
-        self.assertTrue(by_name["finalize-workstream"]["supports_json"])
-        self.assertTrue(by_name["finalize-workstream"]["supports_dry_run"])
-        self.assertEqual(by_name["finalize-workstream"]["file_schema"], "finalize_workstream_v1")
-        self.assertIn("summary_target:", by_name["finalize-workstream"]["example_file"])
-        self.assertIn("--id", by_name["option-workstream-context"]["target_aliases"])
-        self.assertEqual(by_name["option-workstream-context"]["primary_target"], "--id")
-        self.assertTrue(by_name["option-workstream-context"]["supports_compact"])
-        self.assertTrue(by_name["agent-session-context"]["supports_compact"])
-        self.assertEqual(by_name["agent-session-context"]["primary_target"], "--assignment")
-        self.assertIn("--agent", by_name["agent-session-context"]["target_aliases"])
-        self.assertIn("finalize file directory", by_name["finalize-workstream"]["path_resolution"])
-        self.assertTrue(by_name["update-node-fields"]["mutating"])
-        self.assertTrue(by_name["update-node-fields"]["supports_json"])
-        self.assertTrue(by_name["update-node-fields"]["supports_dry_run"])
-        self.assertTrue(by_name["update-node-fields"]["supports_no_build"])
-        self.assertTrue(by_name["update-node-fields"]["supports_compact"])
-        self.assertIn("--root", by_name["update-node-fields"]["supported_flags"])
-        self.assertIn("--compact", by_name["update-node-fields"]["supported_flags"])
-        self.assertNotIn("--compact", by_name["update-node-fields"]["unsupported_flags"])
-        self.assertIn("--compact", by_name["update-decision-evidence"]["unsupported_flags"])
-        self.assertIn("question", by_name["update-node-fields"]["fields_supported"])
-        self.assertIn("supporting_experiments", by_name["update-node-fields"]["fields_supported"])
-        self.assertIn("ready_for_agent", by_name["update-node-fields"]["fields_supported"])
-        self.assertIn("assignment-view", by_name)
-        self.assertFalse(by_name["assignment-view"]["mutating"])
-        self.assertIn("depends_on", by_name["assignment-view"]["fields_supported"])
-        self.assertIn("lint", by_name)
-        self.assertFalse(by_name["lint"]["mutating"])
-        self.assertIn("semantic", by_name["lint"]["fields_supported"])
-        self.assertEqual(by_name["lint"]["command"], "research-cockpit lint --semantic")
-        self.assertIn("--semantic", by_name["lint"]["supported_flags"])
-        self.assertIn("close-current-experiment", by_name)
-        self.assertTrue(by_name["close-current-experiment"]["mutating"])
-        self.assertIn("next_focus", by_name["close-current-experiment"]["fields_supported"])
-        self.assertFalse(by_name["close-current-experiment"]["supports_show_diff"])
-        self.assertIn("--show-diff", by_name["close-current-experiment"]["unsupported_flags"])
-        self.assertIn("create-followup-experiment", by_name)
-        self.assertIn("derived_from", by_name["create-followup-experiment"]["fields_supported"])
-        self.assertIn("coordinator_set_focus", by_name["create-followup-experiment"]["fields_supported"])
-        self.assertNotIn("set_focus", by_name["create-followup-experiment"]["fields_supported"])
-        self.assertTrue(by_name["create-followup-experiment"]["supports_show_diff"])
-        self.assertIn("--assignment", by_name["create-followup-experiment"]["supported_flags"])
-        self.assertIn("--coordinator", by_name["create-followup-experiment"]["supported_flags"])
-        self.assertIn("--show-diff", by_name["create-followup-experiment"]["supported_flags"])
-        self.assertIn("single queued gate", by_name["create-followup-experiment"]["hierarchy_guidance"])
-        self.assertIn("update-workstream-fields", by_name)
-        self.assertIn("agent_workstream.status", by_name["update-workstream-fields"]["fields_supported"])
-        self.assertTrue(by_name["claim-option"]["supports_json"])
-        self.assertTrue(by_name["claim-option"]["supports_dry_run"])
-        self.assertTrue(by_name["claim-workstream"]["supports_dry_run"])
-        self.assertTrue(by_name["start-agent-session"]["supports_dry_run"])
-        self.assertIn("git_branch", by_name["start-agent-session"]["fields_supported"])
-        self.assertIn("sparse_worktree.command_plan", by_name["start-agent-session"]["fields_supported"])
-        self.assertIn("--sparse", by_name["start-agent-session"]["supported_flags"])
-        self.assertIn("--sparse-profile", by_name["start-agent-session"]["supported_flags"])
-        self.assertTrue({
-            "--option", "--objective", "--branch", "--worktree"
-        } <= set(by_name["start-agent-session"]["supported_flags"]))
-        self.assertTrue(by_name["report-option-workstream"]["supports_json"])
-
-        self.assertTrue(by_name["report-option-workstream"]["supports_dry_run"])
-        self.assertTrue(by_name["import-worktree-findings"]["supports_dry_run"])
-        self.assertIn("workstream_report", by_name["import-worktree-findings"]["fields_supported"])
-        self.assertTrue(by_name["ingest-artifact"]["supports_dry_run"])
-        self.assertTrue(by_name["ingest-artifact"]["supports_compact"])
-        self.assertIn("--record-only", by_name["ingest-artifact"]["supported_flags"])
-        self.assertIn("--promote", by_name["ingest-artifact"]["supported_flags"])
-        self.assertIn("--promotion-reason", by_name["ingest-artifact"]["supported_flags"])
-        self.assertTrue({
-            "--node", "--from", "--run-id", "--id", "--title", "--summary", "--agent", "--link"
-        } <= set(by_name["ingest-artifact"]["supported_flags"]))
-        self.assertIn("mode", by_name["ingest-artifact"]["fields_supported"])
-        self.assertIn("run_id", by_name["ingest-artifact"]["fields_supported"])
-        self.assertIn("agent", by_name["ingest-artifact"]["fields_supported"])
-        self.assertIn("artifact-records", by_name)
-        self.assertFalse(by_name["artifact-records"]["mutating"])
-        self.assertTrue(by_name["artifact-records"]["supports_compact"])
-        self.assertEqual(by_name["artifact-records"]["group"], "artifact")
-        self.assertIn("artifact records", by_name["artifact-records"]["aliases"])
-        self.assertIn("--experiment", by_name["artifact-records"]["supported_flags"])
-        self.assertIn("promoted_artifact_id", by_name["artifact-records"]["fields_supported"])
-        self.assertIn("promote-artifact-record", by_name)
-        self.assertTrue(by_name["promote-artifact-record"]["mutating"])
-        self.assertTrue(by_name["promote-artifact-record"]["supports_dry_run"])
-        self.assertTrue(by_name["promote-artifact-record"]["supports_compact"])
-        self.assertEqual(by_name["promote-artifact-record"]["group"], "artifact")
-        self.assertIn("artifact promote-record", by_name["promote-artifact-record"]["aliases"])
-        self.assertIn("--artifact-id", by_name["promote-artifact-record"]["supported_flags"])
-        self.assertIn("--promotion-reason", by_name["promote-artifact-record"]["supported_flags"])
-        self.assertIn("--progress", by_name["promote-artifact-record"]["supported_flags"])
-        self.assertIn("promoted_artifact_id", by_name["promote-artifact-record"]["fields_supported"])
-        self.assertIn("promotion_reason", by_name["promote-artifact-record"]["fields_supported"])
-        self.assertIn("create-run", by_name)
-        self.assertTrue(by_name["create-run"]["mutating"])
-        self.assertTrue(by_name["create-run"]["supports_json"])
-        self.assertTrue(by_name["create-run"]["supports_dry_run"])
-        self.assertTrue(by_name["create-run"]["supports_no_build"])
-        self.assertTrue(by_name["create-run"]["supports_compact"])
-        self.assertTrue(by_name["create-run"]["supports_show_diff"])
-        self.assertIn("--progress", by_name["create-run"]["supported_flags"])
-        self.assertIn("--progress", by_name["create-artifact"]["supported_flags"])
-        self.assertIn("tmux_session", by_name["create-run"]["fields_supported"])
-        self.assertIn("progress_file", by_name["create-run"]["fields_supported"])
-        self.assertTrue({
-            "--id", "--experiment", "--status"
-        } <= set(by_name["create-run"]["supported_flags"]))
-        self.assertTrue(by_name["update-run"]["mutating"])
-        self.assertTrue(by_name["update-run"]["supports_dry_run"])
-        self.assertTrue(by_name["update-run"]["supports_no_build"])
-        self.assertTrue(by_name["complete-run"]["mutating"])
-        self.assertTrue(by_name["complete-run"]["supports_dry_run"])
-        self.assertTrue(by_name["list-runs"]["supports_json"])
-        self.assertTrue(by_name["list-runs"]["supports_compact"])
-        self.assertFalse(by_name["list-runs"]["mutating"])
-        self.assertTrue(by_name["run-context"]["supports_json"])
-        self.assertTrue(by_name["run-context"]["supports_compact"])
-        self.assertFalse(by_name["run-context"]["mutating"])
-        self.assertTrue(by_name["promote-decision"]["supports_json"])
-        self.assertTrue(by_name["promote-decision"]["supports_dry_run"])
-        self.assertTrue(by_name["accept-decision"]["supports_json"])
-        self.assertTrue(by_name["accept-decision"]["supports_dry_run"])
-        self.assertTrue(by_name["apply-suggestion"]["supports_json"])
-        self.assertTrue(by_name["apply-suggestion"]["supports_dry_run"])
-        self.assertTrue(by_name["update-decision-checklist"]["mutating"])
-        self.assertTrue(by_name["update-decision-checklist"]["supports_json"])
-        self.assertTrue(by_name["update-decision-checklist"]["supports_dry_run"])
-        self.assertTrue(by_name["update-decision-checklist"]["supports_no_build"])
-        self.assertIn("next_required_actions", by_name["update-decision-checklist"]["fields_supported"])
-        self.assertTrue(by_name["update-decision-evidence"]["supports_json"])
-        self.assertTrue(by_name["update-decision-evidence"]["supports_dry_run"])
-        self.assertIn("evidence_summary", by_name["update-decision-evidence"]["fields_supported"])
-        self.assertTrue(by_name["cleanup-suggestion-lifecycle"]["supports_dry_run"])
-        self.assertTrue(by_name["update-suggestion-state"]["supports_json"])
-        self.assertTrue(by_name["update-suggestion-state"]["supports_dry_run"])
-        self.assertTrue(by_name["build"]["mutating"])
-        self.assertTrue(by_name["build"]["supports_json"])
-        self.assertTrue(by_name["build"]["supports_watch"])
-        self.assertTrue(by_name["build"]["writes_generated_files"])
-        self.assertFalse(by_name["build"]["writes_truth_source"])
-        self.assertEqual(by_name["build"]["batch_policy"]["mode"], "generated_build")
-        self.assertIn("--watch", by_name["build"]["supported_flags"])
-        self.assertIn("--interval", by_name["build"]["supported_flags"])
-        self.assertIn("--max-iterations", by_name["build"]["supported_flags"])
-        self.assertIn("--profile", by_name["build"]["supported_flags"])
-        self.assertIn("--profile-output", by_name["build"]["supported_flags"])
-        self.assertIn("--skip-resource-search", by_name["build"]["supported_flags"])
-        self.assertTrue(by_name["validate"]["safe_in_plan_mode"])
-        self.assertEqual(by_name["validate"]["batch_policy"]["mode"], "read_only")
-        self.assertFalse(by_name["update-node-fields"]["safe_in_plan_mode"])
-        for command in manifest:
-            if command["mutating"]:
-                self.assertTrue(command["requires_serial_mutation"], command["name"])
-                self.assertIn("changed after command planning", command["conflict_policy"])
+        self.assertTrue(by_name["work record"]["mutating"])
+        self.assertEqual(by_name["work record"]["scope_policy"], "assignment")
+        self.assertEqual(by_name["coord assign"]["scope_policy"], "coordinator")
+        self.assertEqual(by_name["coord decide"]["scope_policy"], "coordinator")
+        self.assertFalse(by_name["maintenance audit"]["mutating"])
+        self.assertTrue(by_name["maintenance repair"]["mutating"])
+        self.assertTrue(by_name["maintenance migrate"]["mutating"])
+        self.assertTrue(by_name["maintenance compact"]["mutating"])
+        self.assertTrue(all(item["route_kind"] != "legacy" for item in manifest))
+        self.assertTrue(all(item["status"] == "active" for item in manifest))
         self.assertTrue(all(item["command"].startswith("research-cockpit ") for item in manifest))
-        self.assertTrue(all("plugin_command" not in item for item in manifest))
 
     def test_agent_facing_docs_prefer_bounded_large_root_reads(self) -> None:
         docs = [
@@ -8762,24 +8491,30 @@ class ScriptBehaviorTests(unittest.TestCase):
                 self.assertEqual(bad_smoke, [])
 
         skill_text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("--view execution", skill_text)
-        self.assertIn("--since <revision>", skill_text)
-        self.assertIn("Default `smoke` is compact", skill_text)
+        worker_text = (SKILL_ROOT / "capabilities" / "worker-loop.md").read_text(encoding="utf-8")
+        coordinator_text = (SKILL_ROOT / "capabilities" / "coordinator-loop.md").read_text(encoding="utf-8")
+        self.assertIn("capabilities/worker-loop.md", skill_text)
+        self.assertIn("work open", worker_text)
+        self.assertIn("--since <revision>", worker_text)
+        self.assertIn("coord handoff", coordinator_text)
+        self.assertIn(
+            "coord handoff --root <data-root> --file handoff.yaml --json --compact --progress",
+            coordinator_text,
+        )
+        self.assertNotIn("validate --root <data-root> --json\nresearch-cockpit build", coordinator_text)
 
         readme_text = (SKILL_ROOT / "README.md").read_text(encoding="utf-8")
         integrations_text = (SKILL_ROOT / "capabilities" / "integrations.md").read_text(encoding="utf-8")
         graph_text = (SKILL_ROOT / "capabilities" / "graph-state.md").read_text(encoding="utf-8")
         experiment_text = (SKILL_ROOT / "capabilities" / "experiment-tracking.md").read_text(encoding="utf-8")
         self.assertNotIn("--record-only --dry-run", readme_text)
-        self.assertIn("artifact_record.existing_record_id", integrations_text)
+        self.assertIn("coord assign", integrations_text)
         self.assertNotIn("append compact events to `interaction_log.yaml`", graph_text)
         self.assertNotIn("append compact events to `graph/interaction_log.yaml`", experiment_text)
         self.assertIsNotNone(
-            re.search(r"research-cockpit create-run[^\n]*--assignment <assignment_id>", readme_text)
+            re.search(r"research-cockpit work start[^\n]*--assignment <assignment_id>", readme_text)
         )
-        self.assertIsNotNone(
-            re.search(r"research-cockpit create-run[^\n]*--assignment <assignment_id>", experiment_text)
-        )
+        self.assertIn("`work start` 创建 run", experiment_text)
 
     def test_public_agent_docs_use_transactional_experiment_cycle(self) -> None:
         paths = (
@@ -8788,10 +8523,10 @@ class ScriptBehaviorTests(unittest.TestCase):
             ROOT_DIR / "capabilities" / "experiment-tracking.md",
         )
         required = (
-            "--start-experiment",
-            "complete-run",
-            "existing_record_id",
-            "next_experiment",
+            "work open",
+            "work start",
+            "work close",
+            "evidence_inputs",
             "additional_verification_required",
         )
         incomplete = {
@@ -8809,7 +8544,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 text = path.read_text(encoding="utf-8")
                 for token in required:
                     self.assertIn(token, text)
-                self.assertLess(text.index("--start-experiment"), text.index("complete-experiment"))
+                self.assertLess(text.index("work start"), text.index("work close"))
                 self.assertFalse(incomplete & {line.strip() for line in text.splitlines()})
 
         experiment = paths[2].read_text(encoding="utf-8")
@@ -8819,19 +8554,19 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
 
     def test_skill_routes_normal_experiment_cycle_to_bounded_capability(self) -> None:
-        skill = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
+        worker = (ROOT_DIR / "capabilities" / "worker-loop.md").read_text(encoding="utf-8")
         path = ROOT_DIR / "capabilities" / "experiment-cycle.md"
 
         self.assertTrue(path.exists())
         cycle = path.read_text(encoding="utf-8")
-        self.assertIn("capabilities/experiment-cycle.md", skill)
-        self.assertLess(skill.index("experiment-cycle.md"), skill.index("experiment-tracking.md"))
+        self.assertIn("experiment-cycle.md", worker)
+        self.assertLess(worker.index("experiment-cycle.md"), worker.index("experiment-tracking.md"))
         self.assertLessEqual(len(cycle.encode("utf-8")), 10 * 1024)
         for token in (
-            "--start-experiment",
-            "ingest-artifact",
-            "complete-run",
-            "existing_record_id",
+            "work start",
+            "work record",
+            "work close",
+            "evidence_inputs",
             "next_experiment",
             "additional_verification_required",
         ):
@@ -8840,6 +8575,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             "complete-experiments",
             "create-workstream",
             "create-followup-experiment",
+            "complete-run",
         ):
             self.assertNotIn(advanced_command, cycle)
 
@@ -8859,14 +8595,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("init", {item["name"] for item in payload["commands"]})
         self.assertIn("ui", {item["name"] for item in payload["commands"]})
         self.assertIn("commands", {item["name"] for item in payload["commands"]})
-        self.assertIn("record-finding", {item["name"] for item in payload["commands"]})
-        self.assertIn("complete-experiment", {item["name"] for item in payload["commands"]})
-        self.assertIn("update-node-fields", {item["name"] for item in payload["commands"]})
-        self.assertIn("apply-graph-plan", {item["name"] for item in payload["commands"]})
-        self.assertIn("create-workstream", {item["name"] for item in payload["commands"]})
-        self.assertIn("sync-focus-actions", {item["name"] for item in payload["commands"]})
-        self.assertIn("start-agent-session", {item["name"] for item in payload["commands"]})
-        self.assertIn("agent-session-context", {item["name"] for item in payload["commands"]})
+        self.assertIn("work record", {item["name"] for item in payload["commands"]})
+        self.assertIn("work close", {item["name"] for item in payload["commands"]})
+        self.assertIn("coord assign", {item["name"] for item in payload["commands"]})
+        self.assertIn("coord decide", {item["name"] for item in payload["commands"]})
+        self.assertIn("maintenance audit", {item["name"] for item in payload["commands"]})
 
     def test_list_agent_commands_filters_by_name_and_workflow(self) -> None:
         by_name_out = subprocess.run(
@@ -8882,13 +8615,13 @@ class ScriptBehaviorTests(unittest.TestCase):
             check=False,
         )
         group_out = subprocess.run(
-            [*cli_command("commands"), "--json", "--compact", "--group", "artifact"],
+            [*cli_command("commands"), "--json", "--compact", "--group", "run"],
             capture_output=True,
             text=True,
             check=False,
         )
         active_status_out = subprocess.run(
-            [*cli_command("commands"), "--json", "--compact", "--group", "artifact", "--status", "active"],
+            [*cli_command("commands"), "--json", "--compact", "--group", "run", "--status", "active"],
             capture_output=True,
             text=True,
             check=False,
@@ -8907,106 +8640,70 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertEqual(by_name_out.returncode, 0, by_name_out.stderr or by_name_out.stdout)
         self.assertEqual([item["name"] for item in by_name_payload["commands"]], ["context"])
-        self.assertTrue(by_name_payload["commands"][0]["supports_compact"])
-        self.assertEqual(by_name_payload["commands"][0]["group"], "context")
-        self.assertEqual(by_name_payload["commands"][0]["status"], "active")
+        self.assertIn("--compact", by_name_payload["commands"][0]["supported_flags"])
         self.assertEqual(workflow_out.returncode, 0, workflow_out.stderr or workflow_out.stdout)
-        self.assertIn("complete-experiments", {item["name"] for item in workflow_payload["commands"]})
-        self.assertIn("create-artifact", {item["name"] for item in workflow_payload["commands"]})
-        self.assertIn("ingest-artifact", {item["name"] for item in workflow_payload["commands"]})
-        self.assertIn("start-agent-session", {item["name"] for item in workflow_payload["commands"]})
-        self.assertTrue(all("evidence" in item["workflow_tags"] for item in workflow_payload["commands"]))
+        evidence_names = {item["name"] for item in workflow_payload["commands"]}
+        self.assertIn("work record", evidence_names)
+        self.assertIn("work close", evidence_names)
+        self.assertIn("coord decide", evidence_names)
         self.assertEqual(group_out.returncode, 0, group_out.stderr or group_out.stdout)
-        self.assertIn("create-artifact", {item["name"] for item in group_payload["commands"]})
-        self.assertIn("ingest-artifact", {item["name"] for item in group_payload["commands"]})
-        self.assertIn("link-artifact", {item["name"] for item in group_payload["commands"]})
-        self.assertTrue(all(item["group"] == "artifact" for item in group_payload["commands"]))
+        self.assertEqual(
+            {item["name"] for item in group_payload["commands"]},
+            {"work start", "work record", "work close"},
+        )
         self.assertEqual(active_status_out.returncode, 0, active_status_out.stderr or active_status_out.stdout)
         self.assertEqual(
             {item["name"] for item in active_status_payload["commands"]},
             {item["name"] for item in group_payload["commands"]},
         )
-        self.assertTrue(all(item["status"] == "active" for item in active_status_payload["commands"]))
         self.assertEqual(deprecated_out.returncode, 0, deprecated_out.stderr or deprecated_out.stdout)
-        self.assertTrue(all(item["status"] != "active" for item in deprecated_payload["commands"]))
+        expected_deprecated = {
+            item["name"]
+            for item in agent_command_manifest(deprecated=True)
+            if item["status"] != "active"
+        }
+        self.assertEqual(
+            {item["name"] for item in deprecated_payload["commands"]},
+            expected_deprecated,
+        )
 
-    def test_command_contract_group_and_alias_metadata_are_consistent(self) -> None:
+    def test_command_contract_group_metadata_is_consistent(self) -> None:
         manifest = agent_command_manifest()
         by_name = {item["name"]: item for item in manifest}
         command_names = set(by_name)
 
-        self.assertEqual(command_names, {*COMMAND_MODULES, "init", "ui"})
+        direct_names = {*COMMAND_MODULES, "init", "ui"}
+        role_facades = {
+            f"{group_name} {action_name}"
+            for group_name, actions in ROLE_COMMAND_MODULES.items()
+            for action_name in actions
+        }
+        self.assertEqual(command_names, direct_names | role_facades)
         self.assertEqual(set(COMMAND_GROUP_BY_COMMAND), command_names)
-        self.assertEqual(set(COMMAND_GROUP_CHOICES), {str(item["group"]) for item in manifest})
+        self.assertEqual(
+            set(COMMAND_GROUP_CHOICES),
+            {str(item["group"]) for item in manifest},
+        )
+        self.assertEqual(GROUPED_COMMAND_ALIASES, {})
 
-        for group_name, actions in GROUPED_COMMAND_ALIASES.items():
-            with self.subTest(group=group_name):
-                self.assertIn(group_name, COMMAND_GROUP_CHOICES)
-            for action_name, command_name in actions.items():
-                with self.subTest(group=group_name, action=action_name):
-                    self.assertIn(command_name, command_names)
-                    self.assertIn(f"{group_name} {action_name}", by_name[command_name]["aliases"])
-
-    def test_grouped_command_aliases_route_without_replacing_top_level_commands(self) -> None:
+    def test_removed_grouped_aliases_are_invalid_choices(self) -> None:
         group_help = subprocess.run(
             [sys.executable, "-m", "research_cockpit.cli", "artifact", "--help"],
             capture_output=True,
             text=True,
             check=False,
         )
-        artifact_create_help = subprocess.run(
-            [sys.executable, "-m", "research_cockpit.cli", "artifact", "create", "--help"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        run_list_help = subprocess.run(
+        run_help = subprocess.run(
             [sys.executable, "-m", "research_cockpit.cli", "run", "list", "--help"],
             capture_output=True,
             text=True,
             check=False,
         )
-        artifact_schema = subprocess.run(
-            [*cli_command("create-artifact"), "--print-schema"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        artifact_alias_schema = subprocess.run(
-            [sys.executable, "-m", "research_cockpit.cli", "artifact", "create", "--print-schema"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        run_list = subprocess.run(
-            [*cli_command("list-runs"), "--root", str(self.root), "--json"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        run_alias_list = subprocess.run(
-            [sys.executable, "-m", "research_cockpit.cli", "run", "list", "--root", str(self.root), "--json"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
 
-        self.assertEqual(group_help.returncode, 0, group_help.stderr or group_help.stdout)
-        self.assertIn("research-cockpit artifact <action>", group_help.stdout)
-        self.assertIn("create", group_help.stdout)
-        self.assertIn("ingest", group_help.stdout)
-        self.assertEqual(artifact_create_help.returncode, 0, artifact_create_help.stderr or artifact_create_help.stdout)
-        self.assertIn("research-cockpit artifact create", artifact_create_help.stdout)
-        self.assertIn("--print-schema", artifact_create_help.stdout)
-        self.assertEqual(run_list_help.returncode, 0, run_list_help.stderr or run_list_help.stdout)
-        self.assertIn("research-cockpit run list", run_list_help.stdout)
-        self.assertIn("--status", run_list_help.stdout)
-        self.assertEqual(artifact_schema.returncode, 0, artifact_schema.stderr or artifact_schema.stdout)
-        self.assertEqual(artifact_alias_schema.returncode, 0, artifact_alias_schema.stderr or artifact_alias_schema.stdout)
-        self.assertEqual(artifact_alias_schema.stdout, artifact_schema.stdout)
-        self.assertEqual(run_list.returncode, 0, run_list.stderr or run_list.stdout)
-        self.assertEqual(run_alias_list.returncode, 0, run_alias_list.stderr or run_alias_list.stdout)
-        self.assertEqual(json.loads(run_alias_list.stdout), json.loads(run_list.stdout))
+        self.assertEqual(group_help.returncode, 2)
+        self.assertIn("invalid choice", group_help.stderr)
+        self.assertEqual(run_help.returncode, 2)
+        self.assertIn("invalid choice", run_help.stderr)
 
     def test_workflow_metrics_detects_manual_truth_patch_even_after_build(self) -> None:
         metrics = workflow_metrics(
@@ -9023,7 +8720,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
     def test_workflow_metrics_treats_truth_mutation_as_explained_change(self) -> None:
         metrics = workflow_metrics(
-            [{"command": cli_command("update-status"), "passed": True}],
+            [{"command": cli_command("coord assign"), "passed": True}],
             files_changed=["research_cockpit/graph/nodes/problem_x.yaml"],
         )
 
@@ -9033,9 +8730,9 @@ class ScriptBehaviorTests(unittest.TestCase):
     def test_workflow_metrics_recognizes_transactional_run_commands(self) -> None:
         metrics = workflow_metrics(
             [
-                {"command": cli_command("create-run"), "passed": True},
-                {"command": cli_command("ingest-artifact"), "passed": True},
-                {"command": cli_command("complete-run"), "passed": True},
+                {"command": cli_command("work start"), "passed": True},
+                {"command": cli_command("work record"), "passed": True},
+                {"command": cli_command("work close"), "passed": True},
             ],
             files_changed=[
                 "research_cockpit/runs/run_x.yaml",
@@ -9048,7 +8745,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(metrics["mutating_count"], 3)
         self.assertEqual(
             metrics["high_level_commands_used"],
-            ["complete-run", "create-run", "ingest-artifact"],
+            ["work close", "work record", "work start"],
         )
 
     def test_documented_flags_match_help_and_manifest(self) -> None:
@@ -9117,17 +8814,19 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         for filename in ("run_record.txt", "progress.json", "gate_result.json", "artifact_manifest.json"):
             self.assertIn(filename, text)
-        for command in ("create-run", "update-run", "complete-run", "ingest-gate-result", "ingest-artifact"):
+        for command in ("work start", "work record", "work close"):
             self.assertIn(f"research-cockpit {command}", text)
+        for removed in ("update-run", "ingest-gate-result", "ingest-artifact"):
+            self.assertNotIn(f"research-cockpit {removed}", text)
         for launcher_mode in ("shell", "Python", "scheduler", "manual"):
             self.assertIn(launcher_mode, text)
         self.assertIn("artifact_manifest_v1", text)
         self.assertIn("launcher_run_record_v1", text)
 
         capability = (ROOT_DIR / "capabilities" / "experiment-tracking.md").read_text(encoding="utf-8")
-        skill = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
+        worker = (ROOT_DIR / "capabilities" / "worker-loop.md").read_text(encoding="utf-8")
         self.assertIn("docs/launcher-output-conventions.md", capability)
-        self.assertIn("docs/launcher-output-conventions.md", skill)
+        self.assertIn("experiment-tracking.md", worker)
 
     def test_launcher_templates_cover_modes_and_write_standard_files(self) -> None:
         template_dir = ROOT_DIR / "templates" / "launcher"
@@ -9192,7 +8891,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         gate = json.loads((run_dir / "gate_result.json").read_text(encoding="utf-8"))
         manifest = json.loads((run_dir / "artifact_manifest.json").read_text(encoding="utf-8"))
 
-        self.assertIn("monitor_command: tail -f logs/run.log", run_record)
+        self.assertIn("monitor_command:", run_record)
+        self.assertNotIn("tail -f", run_record)
         self.assertIn("stop_command:", run_record)
         self.assertEqual(progress["current_stage"], "smoke_gate")
         self.assertEqual(progress["status"], "completed")
@@ -9202,15 +8902,21 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(manifest["schema_version"], "artifact_manifest_v1")
         self.assertEqual(manifest["links"]["metrics"], "outputs/metrics.json")
 
-    def test_launcher_docs_use_record_first_structured_closeout(self) -> None:
+    def test_launcher_docs_use_final_evidence_structured_closeout(self) -> None:
         template_dir = ROOT_DIR / "templates" / "launcher"
         readme = (template_dir / "README.md").read_text(encoding="utf-8")
         manual = (template_dir / "manual_run_checklist.md").read_text(encoding="utf-8")
 
+        work_start = (template_dir / "work_start.example.yaml").read_text(encoding="utf-8")
         for text in (readme, manual):
-            self.assertIn("complete-run --file", text)
+            self.assertIn("work close", text)
+            self.assertIn("evidence_inputs", text)
             self.assertIn("existing_record_id", text)
         self.assertNotIn("one final validation/build/smoke pass", readme)
+        self.assertIn("input_revision:", work_start)
+        self.assertIn("experiment_id:", work_start)
+        self.assertIn('monitor_command: ""', work_start)
+        self.assertNotIn("tail -f", work_start)
         self.assertNotRegex(
             manual,
             r"ingest-gate-result[^\n]+--artifact\s+artifact_<experiment_id>_<run_id>",
@@ -9227,7 +8933,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         for token in ("assignments/*.yaml", "coordinator_state.yaml", "current_state.yaml"):
             self.assertIn(token, readme)
         self.assertIn("legacy/coordinator compatibility", readme)
-        self.assertIn("coordinator/legacy", readme)
+        self.assertIn("coordinator/UI selection", readme)
         self.assertIn("graph/interaction_events/**", agents)
         self.assertNotIn("graph/interaction_events/*.jsonl", agents)
         self.assertNotIn(
@@ -9236,39 +8942,30 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         self.assertIn("active interaction backend", architecture)
         self.assertNotIn("append `interaction_log.yaml`", architecture)
-        self.assertIn("active interaction backend", focus_context)
+        self.assertIn("Artifact payload", focus_context)
         self.assertNotIn("append `interaction_log.yaml`", focus_context)
         self.assertNotIn("dev\\scripts", dev_readme)
 
     def test_skill_is_a_bounded_router_instead_of_a_command_catalog(self) -> None:
         skill = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
 
-        self.assertLessEqual(len(skill.splitlines()), 120)
-        self.assertLessEqual(len(skill.encode("utf-8")), 16 * 1024)
-        self.assertLessEqual(skill.count("research-cockpit "), 15)
-        self.assertIn("## Read Route", skill)
-        self.assertIn("not a sequence to execute", skill)
-        self.assertIn("--view execution", skill)
-        self.assertIn("--since <revision>", skill)
-        self.assertIn("--start-experiment", skill)
-        self.assertIn("existing_record_id", skill)
-        self.assertIn("next_experiment", skill)
-        self.assertIn("milestone_handoff", skill)
+        self.assertLessEqual(len(skill.splitlines()), 80)
+        self.assertLessEqual(len(skill.encode("utf-8")), 8 * 1024)
+        self.assertLessEqual(skill.count("research-cockpit "), 5)
+        self.assertIn("## Role Router", skill)
+        self.assertIn("assignment-scoped Work Packet", skill)
+        self.assertIn("执行一条 startup path", skill)
+        self.assertIn("internal-verified", skill)
         self.assertFalse(
             {"-", "Use", "3. Read compact mutation fields"}
             & {line.strip() for line in skill.splitlines()}
         )
         self.assertNotIn("## Command Reference", skill)
         for capability in (
-            "graph-state.md",
-            "focus-context.md",
-            "node-management.md",
-            "experiment-tracking.md",
-            "decision-adr.md",
-            "ui-dashboard.md",
-            "integrations.md",
-            "maintenance.md",
-            "troubleshooting.md",
+            "worker-loop.md",
+            "reviewer-loop.md",
+            "coordinator-loop.md",
+            "maintainer-loop.md",
         ):
             self.assertIn(capability, skill)
 
@@ -9286,8 +8983,8 @@ class ScriptBehaviorTests(unittest.TestCase):
             "maintenance.py",
         ):
             self.assertIn(module, module_map)
-        self.assertIn("changed-scope", maintenance)
-        self.assertIn("coordinator", maintenance)
+        self.assertIn("maintenance_action_v1", maintenance)
+        self.assertIn("can_demote", maintenance)
     def test_historical_design_docs_point_to_current_guidance(self) -> None:
         historical_docs = (
             ROOT_DIR / "docs" / "plans" / "2026-06-03-agent-scope-identity-model.md",
@@ -9313,13 +9010,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         by_name = {item["name"]: item for item in payload["commands"]}
 
         self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
-        self.assertIn("--print-schema", by_name["create-workstream"]["schema_command"])
-        self.assertEqual(by_name["create-workstream"]["status_aliases"], {"option": {"planned": "open"}})
-        self.assertNotIn("example_file", by_name["create-workstream"])
-        self.assertNotIn("python_module_command", by_name["create-workstream"])
-        self.assertNotIn("cwd", by_name["create-workstream"])
-        self.assertNotIn("fields_supported", by_name["create-workstream"])
-        self.assertNotIn("example_file", by_name["complete-experiments"])
+        self.assertIn("--print-schema", by_name["coord assign"]["schema_command"])
+        self.assertEqual(by_name["coord assign"]["input_schema_version"], "coord_assign_v1")
+        self.assertNotIn("example_file", by_name["coord assign"])
+        self.assertNotIn("python_module_command", by_name["coord assign"])
+        self.assertNotIn("cwd", by_name["coord assign"])
+        self.assertNotIn("fields_supported", by_name["coord assign"])
+        self.assertNotIn("example_file", by_name["work close"])
 
     def test_list_agent_commands_summary_only_keeps_workflow_discovery_small(self) -> None:
         out = subprocess.run(
@@ -9333,12 +9030,15 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         self.assertEqual(out.returncode, 0, out.stderr or out.stdout)
         self.assertLess(len(out.stdout.encode("utf-8")), 25000)
-        self.assertIn("create-artifact", by_name)
-        self.assertIn("supported_flags", by_name["create-artifact"])
-        self.assertIn("batch_policy_mode", by_name["complete-experiment"])
-        self.assertNotIn("batch_policy", by_name["complete-experiment"])
-        self.assertNotIn("unsupported_flags", by_name["create-artifact"])
-        self.assertNotIn("schema_command", by_name["create-artifact"])
+        self.assertIn("work record", by_name)
+        self.assertIn("supported_flags", by_name["work record"])
+        self.assertNotIn("supports_json", by_name["work record"])
+        self.assertNotIn("supports_no_build", by_name["work record"])
+        self.assertNotIn("input_modes", by_name["work record"])
+        self.assertIn("batch_policy_mode", by_name["work close"])
+        self.assertNotIn("batch_policy", by_name["work close"])
+        self.assertNotIn("unsupported_flags", by_name["work record"])
+        self.assertNotIn("schema_command", by_name["work record"])
 
     def test_file_commands_expose_schema_help_and_print_schema(self) -> None:
         expectations = {
@@ -9482,16 +9182,6 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "--compact",
             ],
             [
-                *cli_command("set-focus"),
-                "--root",
-                str(self.root),
-                "--focus-node",
-                "exp_t5",
-                "--dry-run",
-                "--json",
-                "--compact",
-            ],
-            [
                 *cli_command("set-agent-focus"),
                 "--root",
                 str(self.root),
@@ -9559,7 +9249,8 @@ class ScriptBehaviorTests(unittest.TestCase):
                 )
                 self.assertIn("Dry-run did not write", payload["verification_note"])
                 self.assertIn("final_handoff_commands", payload)
-                self.assertIn("research-cockpit build", payload["final_handoff_commands"][1])
+                self.assertEqual(len(payload["final_handoff_commands"]), 1)
+                self.assertIn("research-cockpit coord handoff", payload["final_handoff_commands"][0])
                 self.assertNotIn("before", payload)
                 self.assertNotIn("after", payload)
 
@@ -9570,16 +9261,17 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["mode"], "compact")
         self.assertEqual(payload["root"], str(self.root))
         by_name = {item["name"]: item for item in payload["checks"]}
-        self.assertTrue(by_name["validate_cockpit"]["passed"])
-        self.assertTrue(by_name["agent_bootstrap"]["passed"])
-        self.assertTrue(by_name["list_agent_commands"]["passed"])
-        self.assertTrue(by_name["search_knowledge"]["passed"])
-        self.assertTrue(by_name["suggest_next_actions"]["passed"])
-        self.assertGreaterEqual(by_name["list_agent_commands"]["summary"]["command_count"], 1)
-        self.assertFalse(by_name["search_knowledge"]["summary"]["resource_text_enabled"])
-        self.assertEqual(by_name["node_context"]["summary"]["schema_version"], "node_context_compact_v2")
-        self.assertEqual(by_name["node_context"]["summary"]["smoke_scope"], "compact_node_context")
-        self.assertIn("--compact", by_name["node_context"]["command"])
+        self.assertTrue(by_name["validate"]["passed"])
+        self.assertEqual(set(by_name), {"validate", "commands", "search", "coord_overview", "context"})
+        self.assertTrue(by_name["commands"]["passed"])
+        self.assertTrue(by_name["search"]["passed"])
+        self.assertTrue(by_name["coord_overview"]["passed"])
+        self.assertTrue(by_name["context"]["passed"])
+        self.assertEqual(by_name["commands"]["summary"]["command_count"], 26)
+        self.assertFalse(by_name["search"]["summary"]["resource_text_enabled"])
+        self.assertEqual(by_name["context"]["summary"]["schema_version"], "execution_context_v1")
+        self.assertEqual(by_name["context"]["summary"]["smoke_scope"], "execution_context_contract")
+        self.assertIn("--view", by_name["context"]["command"])
 
     def test_skill_smoke_test_changed_scope_checks_targeted_workflow(self) -> None:
         with patch("research_cockpit.commands.context.agent_bootstrap_payload") as bootstrap:
@@ -9595,12 +9287,12 @@ class ScriptBehaviorTests(unittest.TestCase):
         bootstrap.assert_not_called()
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["mode"], "changed")
-        self.assertEqual([item["name"] for item in payload["checks"]], ["validate_changed", "context", "list_agent_commands"])
+        self.assertEqual([item["name"] for item in payload["checks"]], ["validate_changed", "context"])
         by_name = {item["name"]: item for item in payload["checks"]}
         self.assertEqual(by_name["validate_changed"]["summary"]["changed_nodes"], ["exp_t5"])
         self.assertTrue(by_name["validate_changed"]["summary"]["fallback_used_full_validation"])
         self.assertEqual(by_name["context"]["summary"]["node_id"], "exp_t5")
-        self.assertEqual(by_name["context"]["summary"]["smoke_scope"], "changed_context")
+        self.assertEqual(by_name["context"]["summary"]["smoke_scope"], "changed_execution_context")
 
         out = subprocess.run(
             [
@@ -9638,8 +9330,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["mode"], "full")
         by_name = {item["name"]: item for item in payload["checks"]}
-        self.assertTrue(by_name["agent_bootstrap"]["passed"])
-        self.assertIn("-m", by_name["agent_bootstrap"]["command"])
+        self.assertTrue(by_name["coord_overview"]["passed"])
+        self.assertIn("-m", by_name["coord_overview"]["command"])
 
     def test_skill_smoke_test_uses_python_environment_override(self) -> None:
         with patch.dict(os.environ, {"RESEARCH_COCKPIT_PYTHON": sys.executable}):
@@ -10259,9 +9951,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         followup_warning = next(
             warning for warning in payload["warnings"] if warning["id"] == "terminal_node_has_next_actions"
         )
-        self.assertIn("migrate-terminal-next-actions", followup_warning["command"])
-        self.assertIn("--followup-id <followup_experiment_id>", followup_warning["command"])
-        self.assertIn("--dry-run --json --show-diff", followup_warning["command"])
+        self.assertIn("maintenance migrate", followup_warning["command"])
+        self.assertIn("--file <terminal_next_actions.yaml>", followup_warning["command"])
+        self.assertIn("--json --compact", followup_warning["command"])
         self.assertNotIn("create-followup-experiment", followup_warning["command"])
         self.assertEqual(out.returncode, 1)
         self.assertEqual(cli_payload["warning_count"], len(payload["warnings"]))
@@ -10305,7 +9997,7 @@ class ScriptBehaviorTests(unittest.TestCase):
                 },
             ],
         )
-        self.assertIn("close-branch", warning["command"])
+        self.assertIn("coord assign", warning["command"])
         self.assertEqual(out.returncode, 1)
         self.assertIn("terminal_parent_has_active_descendants", {item["id"] for item in cli_payload["warnings"]})
 
@@ -10352,8 +10044,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         )
         self.assertEqual(run_warning["run_id"], "run_missing_retention")
         self.assertEqual(artifact_warning["node_id"], "artifact_retention_missing")
-        self.assertIn("complete-run", run_warning["command"])
-        self.assertIn("update-node-fields", artifact_warning["command"])
+        self.assertNotIn("command", run_warning)
+        self.assertIn("Existing legacy runs", run_warning["resolution"])
+        self.assertIn("coord assign", artifact_warning["command"])
 
     def test_semantic_lint_does_not_suggest_invalid_followup_for_failed_experiment(self) -> None:
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
@@ -11050,8 +10743,9 @@ class ScriptBehaviorTests(unittest.TestCase):
             run_id="run_default_record",
             rebuild_dashboard=False,
         )
-        record_id = "artifact_exp_t5_run_default_record"
+        record_id = result["record_id"]
 
+        self.assertRegex(record_id, r"^record_exp_t5_run_default_record_[a-f0-9]{12}$")
         self.assertTrue(result["record_only"])
         self.assertEqual(result["mode"], "record")
         self.assertEqual(result["record_id"], record_id)
@@ -11094,12 +10788,13 @@ class ScriptBehaviorTests(unittest.TestCase):
             promotion_reason="Durable result used for baseline comparison.",
         )
         target = self.root / "artifacts" / "exp_t5" / "run_001"
-        artifact = load_yaml(self.root / "graph" / "nodes" / "artifact_exp_t5_run_001.yaml")
+        artifact_id = result["artifact_id"]
+        artifact = load_yaml(self.root / "graph" / "nodes" / f"{artifact_id}.yaml")
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
         manifest = json.loads((target / "_research_cockpit_ingest.json").read_text(encoding="utf-8"))
 
         self.assertTrue(result["changed"])
-        self.assertEqual(result["artifact_id"], "artifact_exp_t5_run_001")
+        self.assertRegex(artifact_id, r"^artifact_exp_t5_run_001_[a-f0-9]{12}$")
         self.assertEqual(result["stable_path"], "artifacts/exp_t5/run_001")
         self.assertEqual(result["source_path_resolved"], str(source.resolve()))
         self.assertEqual(result["resolved_inputs"]["manifest_source_path"], "worktrees/agent_t5/.agent_runs/run_001")
@@ -11114,10 +10809,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(artifact["promotion"]["source"], "ingest_artifact")
         self.assertEqual(result["mode"], "promote")
         self.assertEqual(result["promotion_reason"], "Durable result used for baseline comparison.")
-        self.assertEqual(experiment["linked_artifacts"], ["artifact_exp_t5_run_001"])
+        self.assertEqual(experiment["linked_artifacts"], [artifact_id])
         self.assertEqual(manifest["node_id"], "exp_t5")
         self.assertEqual(manifest["run_id"], "run_001")
-        self.assertEqual(manifest["artifact_id"], "artifact_exp_t5_run_001")
+        self.assertEqual(manifest["artifact_id"], artifact_id)
         self.assertEqual(manifest["agent_id"], "agent_t5")
         self.assertFalse(Path(manifest["source_path"]).is_absolute())
         self.assertEqual(manifest["source_path"], "worktrees/agent_t5/.agent_runs/run_001")
@@ -11166,10 +10861,10 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
+        record_id = result["record_id"]
         record_path = self.root / "artifact_records" / "exp_t5.yaml"
         records = load_yaml(record_path)
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
-        record_id = "artifact_exp_t5_run_record"
         record = records["records"][record_id]
 
         self.assertTrue(result["changed"])
@@ -11234,9 +10929,9 @@ class ScriptBehaviorTests(unittest.TestCase):
             check=False,
         )
         payload = json.loads(out.stdout)
-        record_id = "artifact_exp_t5_run_cli_record"
 
         self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        record_id = payload["target"]["artifact_id"]
         self.assertEqual(payload["target"]["mode"], "record")
         self.assertEqual(payload["changed_scope"]["nodes"], ["exp_t5"])
         self.assertEqual(payload["changed_scope"]["records"], [f"artifact:{record_id}"])
@@ -11252,7 +10947,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_list_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.95}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -11261,7 +10956,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
-        record_id = "artifact_exp_t5_run_list_record"
+        record_id = result["record_id"]
 
         full = subprocess.run(
             [
@@ -11309,7 +11004,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_visible_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.97, "label": "record-only-search"}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -11320,7 +11015,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
-        record_id = "artifact_exp_t5_run_visible_record"
+        record_id = result["record_id"]
 
         rows = build_link_rows(self.root, load_nodes(self.root))
         linked_record_rows = [
@@ -11421,7 +11116,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_problem_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.88}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -11431,7 +11126,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
-        record_id = "artifact_exp_t5_run_problem_record"
+        record_id = result["record_id"]
         problem_path = self.root / "graph" / "nodes" / "problem_text.yaml"
         problem = load_yaml(problem_path)
         problem["linked_artifact_records"] = [record_id]
@@ -11446,7 +11141,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_promote_record"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.96}', encoding="utf-8")
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
@@ -11456,7 +11151,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             rebuild_dashboard=False,
             record_only=True,
         )
-        record_id = "artifact_exp_t5_run_promote_record"
+        record_id = result["record_id"]
         artifact_id = "artifact_promoted_record"
 
         dry_run = subprocess.run(
@@ -11668,7 +11363,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["would_change"])
         self.assertEqual(payload["created"], [])
         self.assertEqual(payload["updated"], ["exp_t5"])
-        self.assertEqual(payload["changed_scope"]["records"], ["artifact:artifact_exp_t5_run_002"])
+        record_id = payload["target"]["artifact_id"]
+        self.assertEqual(payload["changed_scope"]["records"], [f"artifact:{record_id}"])
         self.assertEqual(payload["target"]["mode"], "record")
         self.assertEqual(payload["resolved_inputs"]["source_path_resolved"], str(source.resolve()))
         self.assertEqual(payload["resolved_inputs"]["manifest_source_path"], "worktrees/agent_t5/.agent_runs/run_002")
@@ -13590,11 +13286,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(problem["baseline"]["decision"], "decision_t5")
         self.assertEqual(problem["baseline"]["artifacts"], ["artifact_baseline"])
         self.assertEqual(interaction_events(self.root)[-1]["kind"], "set_baseline")
-        command = [item for item in manifest if item["name"] == "set-baseline"][0]
-        self.assertEqual(
-            command["fields_supported"],
-            ["baseline.option", "baseline.decision", "baseline.artifacts", "baseline.reason"],
-        )
+        command = [item for item in manifest if item["name"] == "coord decide"][0]
+        self.assertEqual(command["input_schema_version"], "coord_decide_v1")
+        self.assertIn("--file", command["supported_flags"])
+        self.assertIn("--print-schema", command["supported_flags"])
+        self.assertNotIn("set-baseline", {item["name"] for item in manifest})
 
         clear = set_baseline(self.root, node_id="problem_text", clear=True, rebuild_dashboard=False)
         cleared = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
@@ -13984,7 +13680,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(option_rows[0]["is_current_option"])
         self.assertEqual(decision_rows, [row for row in decision_rows if row["status"] == "accepted"])
         self.assertEqual(decision_rows[0]["supporting_experiment_count"], 1)
-        self.assertIn("--option option_t5", build_set_baseline_command("problem_text", "option_t5"))
+        self.assertIn("coord decide --file", build_set_baseline_command("problem_text", "option_t5"))
 
         problem = load_yaml(self.root / "graph" / "nodes" / "problem_text.yaml")
         problem["current_best_option"] = "option_t5"
@@ -14001,12 +13697,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             reason='Use $BASE; echo "bad"',
         )
 
-        self.assertEqual(
-            command,
-            "research-cockpit set-baseline --node 'problem weird' "
-            "--option 'option;rm' --decision 'decision$HOME' "
-            "--artifact 'artifact one' --reason 'Use $BASE; echo \"bad\"'",
-        )
+        self.assertEqual(command, "research-cockpit coord decide --file <coord_decide.yaml> --json --compact")
 
     def test_baseline_overview_does_not_use_global_current_option_for_every_problem(self) -> None:
         stage = load_yaml(self.root / "graph" / "nodes" / "stage_text.yaml")
@@ -14628,6 +14319,25 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(current["current_focus_node"], "exp_t5_followup")
         self.assertEqual(current["next_actions"], ["Run follow-up gate."])
 
+    def test_create_followup_experiment_generates_primary_id_by_default(self) -> None:
+        source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        source["status"] = "done"
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", source)
+
+        result = create_followup_experiment(
+            self.root,
+            from_experiment="exp_t5",
+            title="Runtime follow up",
+            rebuild_dashboard=False,
+        )
+
+        node_id = result["node_id"]
+        self.assertRegex(
+            node_id,
+            r"^experiment_option_t5_Runtime_follow_up_[a-f0-9]{12}$",
+        )
+        self.assertTrue((self.root / "graph" / "nodes" / f"{node_id}.yaml").exists())
+
     def test_create_followup_experiment_rejects_non_active_source_status(self) -> None:
         with self.assertRaisesRegex(ValueError, "must be done or running"):
             create_followup_experiment(
@@ -14973,8 +14683,8 @@ class ScriptBehaviorTests(unittest.TestCase):
             )
 
         self.assertTrue(ok["changed"])
-        self.assertIn("set-cursor", ok["recommended_commands"]["set_cursor"])
-        self.assertIn("exp_t5_cache_gate_scoped", ok["recommended_commands"]["set_cursor"])
+        self.assertIn("work close", ok["recommended_commands"]["close_assignment"])
+        self.assertIn(session["assignment_id"], ok["recommended_commands"]["close_assignment"])
         self.assertEqual(out_of_scope.exception.payload["node_id"], "exp_other_migrate_scope")
         self.assertEqual(out_of_scope_parent_before_status.exception.payload["node_id"], "option_other_migrate_scope")
         self.assertFalse((self.root / "graph" / "nodes" / "exp_other_cache_gate_scoped.yaml").exists())
@@ -14989,9 +14699,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         result = migrate_terminal_next_actions(self.root, node_id="exp_t5", dry_run=True)
 
         self.assertFalse(result["would_change"])
-        self.assertEqual(result["strategy"], "create_workstream_guidance")
-        self.assertIn("create-workstream", result["recommended_commands"]["create_workstream"])
-        self.assertIn("Use create-workstream", result["guidance"])
+        self.assertEqual(result["strategy"], "coord_assign_guidance")
+        self.assertIn("coord assign", result["recommended_commands"]["plan_graph"])
+        self.assertIn("coordinator graph plan", result["guidance"])
 
     def test_migrate_terminal_next_actions_guides_non_experiment_terminal_node(self) -> None:
         write_node(
@@ -15017,8 +14727,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         semantic = semantic_lint(self.root)
 
         self.assertFalse(result["would_change"])
-        self.assertEqual(result["strategy"], "create_workstream_guidance")
-        self.assertIn("create-workstream", result["recommended_commands"]["create_workstream"])
+        self.assertEqual(result["strategy"], "coord_assign_guidance")
+        self.assertIn("coord assign", result["recommended_commands"]["plan_graph"])
         self.assertEqual(artifact["next_actions"], ["Replace archived bundle."])
         stale_ids = {item["node_id"] for item in context["next_action_scopes"]["stale_terminal_node_next_actions"]}
         self.assertIn("artifact_old", stale_ids)
@@ -15043,7 +14753,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         after_source = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
 
         self.assertFalse(result["would_change"])
-        self.assertEqual(result["strategy"], "create_workstream_guidance")
+        self.assertEqual(result["strategy"], "coord_assign_guidance")
         self.assertEqual(after_source["next_actions"], ["Investigate failed experiment."])
         self.assertFalse((self.root / "graph" / "nodes" / "exp_t5_failed_followup.yaml").exists())
 
@@ -15081,12 +14791,10 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(payload["would_change"])
         self.assertEqual(payload["created"], ["exp_t5_cache_gate"])
         self.assertEqual(payload["updated"], ["exp_t5"])
-        self.assertIn("migrate-terminal-next-actions", by_name)
-        self.assertTrue(by_name["migrate-terminal-next-actions"]["supports_dry_run"])
-        self.assertTrue(by_name["migrate-terminal-next-actions"]["supports_no_build"])
-        self.assertIn("--assignment", by_name["migrate-terminal-next-actions"]["supported_flags"])
-        self.assertIn("--coordinator", by_name["migrate-terminal-next-actions"]["supported_flags"])
-        self.assertIn("create-workstream", by_name["migrate-terminal-next-actions"]["hierarchy_guidance"])
+        self.assertNotIn("migrate-terminal-next-actions", by_name)
+        self.assertIn("maintenance migrate", by_name)
+        self.assertIn("--file", by_name["maintenance migrate"]["supported_flags"])
+        self.assertEqual(by_name["maintenance migrate"]["route_kind"], "facade")
 
     def test_close_current_experiment_completes_and_moves_global_and_agent_focus(self) -> None:
         current = load_yaml(self.root / "current_state.yaml")
@@ -15243,7 +14951,7 @@ class ScriptBehaviorTests(unittest.TestCase):
             },
         )
 
-        with self.assertRaisesRegex(ValueError, "accept-decision"):
+        with self.assertRaisesRegex(ValueError, "coord decide"):
             apply_graph_plan(
                 self.root,
                 plan={"updates": [{"id": "decision_t5", "status": "accepted"}]},
@@ -16327,7 +16035,7 @@ class ScriptBehaviorTests(unittest.TestCase):
 
         with self.assertRaises(ValueError) as direct_accept:
             update_status(self.root, node_id="decision_t5", status="accepted")
-        self.assertIn("research-cockpit accept-decision", str(direct_accept.exception))
+        self.assertIn("research-cockpit coord decide", str(direct_accept.exception))
 
     def test_promote_decision_rejects_bad_references(self) -> None:
         with self.assertRaises(ValueError) as unknown_option:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 import json
 import yaml
 from pathlib import Path
@@ -10,7 +11,14 @@ from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
 
-from research_cockpit.agent_state import AssignmentRecord, load_agents, load_assignments
+from research_cockpit.agent_state import (
+    AgentRecord,
+    AssignmentRecord,
+    CoordinatorState,
+    load_agents,
+    load_assignments,
+    load_coordinator_state,
+)
 from research_cockpit.cli_progress import progress_traced
 from research_cockpit.commands._runtime import emit_json
 from research_cockpit.lifecycle_guards import terminal_parent_guard_failures
@@ -29,6 +37,19 @@ from research_cockpit.model import (
 )
 from research_cockpit.gate_result_records import validate_gate_result_records
 from research_cockpit.validation_index import is_index_schema_compatible, load_validation_index, node_reference_ids, signature_matches
+from research_cockpit.types import ValidationError
+
+
+@dataclass(frozen=True)
+class FullValidationState:
+    nodes: dict[str, ResearchNode]
+    current: dict[str, Any]
+    explicit_edges: list[dict[str, Any]]
+    runs: dict[str, RunRecord]
+    agents: dict[str, AgentRecord]
+    assignments: dict[str, AssignmentRecord]
+    coordinator_state: CoordinatorState
+
 
 
 def _lifecycle_error_message(error: dict) -> str:
@@ -1091,6 +1112,70 @@ def _incremental_validation_payload(
 
 
 @progress_traced("validate")
+def full_validation_snapshot(
+    root: Path,
+    *,
+    strict_lifecycle: bool = False,
+) -> tuple[dict[str, Any], FullValidationState]:
+    nodes = load_nodes(root)
+    current = load_yaml(root / "current_state.yaml")
+    explicit_edges = load_explicit_edges(root)
+    try:
+        runs = load_runs(root)
+        agents = load_agents(root)
+        assignments = load_assignments(root)
+        coordinator_state = load_coordinator_state(root)
+    except ValidationError:
+        errors = validate_cockpit(
+            root,
+            nodes,
+            current,
+            explicit_edges,
+            include_interaction_log=True,
+            include_gate_results=True,
+        )
+        runs = {}
+        agents = {}
+        assignments = {}
+        coordinator_state = CoordinatorState()
+    else:
+        errors = validate_cockpit(
+            root,
+            nodes,
+            current,
+            explicit_edges,
+            runs=runs,
+            agents=agents,
+            assignments=assignments,
+            coordinator_state=coordinator_state,
+            include_interaction_log=True,
+            include_gate_results=True,
+        )
+    lifecycle_errors = terminal_parent_guard_failures(nodes) if strict_lifecycle else []
+    if lifecycle_errors:
+        errors = [*errors, *[_lifecycle_error_message(error) for error in lifecycle_errors]]
+    ok = not errors
+    payload: dict[str, Any] = {
+        "root": str(root),
+        "valid": ok,
+        "ok": ok,
+        "strict_lifecycle": strict_lifecycle,
+        "node_count": len(nodes),
+        "errors": errors,
+    }
+    if strict_lifecycle:
+        payload["lifecycle_errors"] = lifecycle_errors
+    return payload, FullValidationState(
+        nodes=nodes,
+        current=current,
+        explicit_edges=explicit_edges,
+        runs=runs,
+        agents=agents,
+        assignments=assignments,
+        coordinator_state=coordinator_state,
+    )
+
+
 def validation_payload(
     root: Path,
     *,
@@ -1113,27 +1198,7 @@ def validation_payload(
             validation_index=validation_index,
         )
 
-    nodes = load_nodes(root)
-    errors = validate_cockpit(
-        root,
-        nodes,
-        include_interaction_log=True,
-        include_gate_results=True,
-    )
-    lifecycle_errors = terminal_parent_guard_failures(nodes) if strict_lifecycle else []
-    if lifecycle_errors:
-        errors = [*errors, *[_lifecycle_error_message(error) for error in lifecycle_errors]]
-    ok = not errors
-    payload = {
-        "root": str(root),
-        "valid": ok,
-        "ok": ok,
-        "strict_lifecycle": strict_lifecycle,
-        "node_count": len(nodes),
-        "errors": errors,
-    }
-    if strict_lifecycle:
-        payload["lifecycle_errors"] = lifecycle_errors
+    payload, _state = full_validation_snapshot(root, strict_lifecycle=strict_lifecycle)
     return payload
 
 

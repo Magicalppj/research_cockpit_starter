@@ -1,168 +1,75 @@
 # Subagent Forward Test Cases
 
-This note records the two manual subagent workflow cases that informed
-`dev/scripts/run_subagent_forward_check.py`. They are kept in `dev/` because
-they are project-development verification material, not agent-facing skill
-instructions.
+本文档说明 `dev/scripts/run_subagent_forward_check.py` 当前验证的无上下文 agent 路径。
+它是开发验证材料，不是下游 agent 的 startup 指南。
 
-## Scope
+## 测试边界
 
-- Use isolated temporary data roots under `.test_tmp/`.
-- Do not write `src/`, `tests/`, `SKILL.md`, `README.md`, or `capabilities/`
-  during the subagent run.
-- Prefer `research-cockpit` CLI commands over direct YAML edits.
-- Record command count, failed commands, context reads, build/validate count,
-  manual YAML patches, and unclear CLI affordances.
-- Finish each run with `validate --json` and `build`.
+- 每次运行都在 `.test_tmp/` 下创建独立副本。
+- 原 skill package 必须保持不变。
+- 测试只通过 0.3.0 public CLI surface 操作数据。
+- workflow 指标记录命令数、输出字节、耗时、额外验证和意外写入。
+- role facade 回执若已内部验证，不允许追加 `validate`、`build` 或 `smoke`。
 
-## Case A: New Workstream Creation
+## Track
 
-Goal: test whether an agent with no implementation context can create a new
-problem, active option, planned experiments, and a follow-up option without
-hand-editing YAML or rebuilding after every node.
+### `track_a_known_node_reader`
 
-Suggested isolated root:
+模拟只知道 node id 的 agent。
 
-```text
-.test_tmp/agent_flow_a/research_cockpit
-```
-
-Required graph:
-
-- `problem_agent_flow_latency_budget`
-  - `status: active`
-  - question: how to reduce command count and repeated context reads
-  - hypothesis: high-level batch graph commands reduce YAML patches and rebuilds
-- `option_batch_graph_mutation_api`
-  - `status: active`
-  - should be the problem `current_best_option`
-- Planned experiments under the active option:
-  - `experiment_agent_flow_command_count`
-  - `experiment_agent_flow_no_yaml_patch`
-  - `experiment_agent_flow_single_build`
-- Follow-up option under the same problem:
-  - `option_agent_flow_context_command`
-  - `status: planned` input is acceptable when the CLI normalizes to stored
-    `open`; JSON should report the alias in `normalized_statuses`
-
-Expected short path:
+唯一 startup 路径：
 
 ```sh
-research-cockpit init --root <root> --build --json
-research-cockpit create-workstream --root <root> --file workstream.yaml --dry-run --json --show-diff
-research-cockpit create-workstream --root <root> --file workstream.yaml --no-build
-research-cockpit option-workstream-context --root <root> --id option_batch_graph_mutation_api --compact --json
-research-cockpit validate --root <root> --json
-research-cockpit build --root <root>
+research-cockpit context --root <data-root> --id <node_id> --view execution --json --compact
 ```
 
-Pass signals:
+通过条件：一次命令返回 bounded execution context，不运行 broad discovery，不写数据。
 
-- The agent naturally discovers `create-workstream` or `apply-graph-plan`.
-- No direct YAML patch is needed for `children`, `current_best_option`, or
-  `supporting_experiments`.
-- Compact option context includes experiment summaries with criteria and metric
-  counts, so per-experiment `node-context` is not needed for quick verification.
-- `commands --json --compact --name create-workstream` returns a short command
-  discovery row without long examples or Python/cwd metadata.
+### `track_b_assigned_worker`
 
-## Case B: Evidence Close-Out
-
-Goal: test whether an agent can create minimal initial graph state, record an
-artifact, batch-complete experiments, revise a finding, and finalize an option
-workstream without low-level YAML edits.
-
-Suggested isolated root:
-
-```text
-.test_tmp/agent_flow_b/research_cockpit
-```
-
-Required initial graph:
-
-- `problem_agent_flow_overfit_gate`
-- `option_small_batch_overfit_gate`
-- `experiment_overfit_gate_cached_init`
-- `experiment_overfit_gate_fresh_init`
-
-Required evidence:
-
-- `artifact_overfit_gate_results_20260503`
-  - `status: done`
-  - `path: research_cockpit/notes/options/option_small_batch_overfit_gate.md`
-  - links:
-    - `cached_init=outputs/cached_init_metrics.json`
-    - `fresh_init=outputs/fresh_init_metrics.json`
-  - linked to the option or related experiments
-
-Required experiment completion:
-
-- `experiment_overfit_gate_cached_init`
-  - finding: cached initialization passes the overfit gate with stable loss
-    decrease
-  - later revise this finding statement to Chinese
-- `experiment_overfit_gate_fresh_init`
-  - finding: fresh initialization is slower and should remain a diagnostic
-    baseline
-- Both findings link to the artifact.
-- Each experiment records `result_summary` and `next_actions`.
-
-Expected short path:
+模拟已获得 assignment id 的 worker，执行完整 round trip：
 
 ```sh
-research-cockpit init --root <root> --build --json
-research-cockpit create-workstream --root <root> --file workstream.yaml --no-build
-research-cockpit create-artifact --root <root> --file artifact.yaml --dry-run --json --show-diff
-research-cockpit create-artifact --root <root> --file artifact.yaml --no-build
-research-cockpit complete-experiments --root <root> --file findings.yaml --dry-run --json --show-diff
-research-cockpit complete-experiments --root <root> --file findings.yaml --no-build
-research-cockpit update-finding --root <root> --experiment experiment_overfit_gate_cached_init --finding-id <finding_id> --statement "cached initialization passes the overfit gate with stable loss decrease." --dry-run --json --show-diff
-research-cockpit update-finding --root <root> --experiment experiment_overfit_gate_cached_init --finding-id <finding_id> --statement "缓存初始化通过 overfit gate，loss 下降稳定。" --no-build
-research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact
-research-cockpit finalize-workstream --root <root> --file finalize.yaml --no-build
-research-cockpit validate --root <root> --json
-research-cockpit build --root <root>
+research-cockpit work open --root <data-root> --assignment <assignment_id> --json --compact
+research-cockpit work start --root <data-root> --assignment <assignment_id> --file <work_start.yaml> --json --compact
+research-cockpit work close --root <data-root> --assignment <assignment_id> --file <closeout.yaml> --json --compact
 ```
 
-Pass signals:
+通过条件：总计三次 CLI 调用；closeout 一次提交 run、finding、artifact metadata 与 assignment result；不追加独立验证。
 
-- Artifact `path`, `links`, and reverse `linked_artifacts` are written through
-  CLI commands.
-- `complete-experiments --file` avoids repeated `complete-experiment` calls.
-- `update-finding` preserves `created_at` and writes `updated_at`.
-- `finalize-workstream --file` writes the report by default without replacing
-  node summaries unless `summary_target` explicitly requests it.
-- No focus switch, decision acceptance, old-option pause, or branch deletion
-  happens implicitly.
+### `track_c_reviewer`
 
-## Automated Coverage
+模拟 reviewer 消费 producer revision 并提交一次 verdict：
 
-`dev/scripts/run_subagent_forward_check.py` covers the same friction points in a
-repeatable harness: cwd-independent reads, isolated workstream mutation,
-retrieval branch expansion, compact option context verification, file-based
-finalization, portable startup, and package hygiene. Run it with:
-
-```powershell
-python dev\scripts\run_subagent_forward_check.py --json
+```sh
+research-cockpit review open --root <data-root> --assignment <review_id> --json --compact
+research-cockpit review report --root <data-root> --assignment <review_id> --file <review.yaml> --json --compact
 ```
 
-Each track now includes a `metrics` block so future workflow changes can be
-compared against a stable baseline. The current baseline from this harness is:
+通过条件：总计两次 CLI 调用；review 绑定 producer result revision；不修改 producer evidence truth。
 
-| Track | Commands | Failed | Context reads | Mutations | Dry runs | Build | Validate | High-level commands |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `track_a_read_only_agent` | 4 | 0 | 4 | 0 | 0 | 0 | 0 | none |
-| `track_b_prompt_refinement_workstream` | 7 | 0 | 0 | 6 | 0 | 1 | 1 | none |
-| `track_c_retrieval_branch_agent` | 9 | 0 | 1 | 7 | 0 | 1 | 1 | `option-workstream-context` |
-| `track_d_decision_gate_agent` | 8 | 0 | 2 | 5 | 0 | 1 | 1 | none |
-| `track_f_third_round_workflow` | 3 | 0 | 1 | 2 | 1 | 1 | 0 | `finalize-workstream`, `option-workstream-context` |
-| `track_e_portable_skill_agent` | 3 | 0 | 3 | 0 | 0 | 0 | 0 | none |
+### `track_d_portable_install`
 
-`manual_yaml_patch_detected` should stay `false` for every automated track.
-`truth_source_changed_files` and `explained_truth_source_changes` show which
-YAML/Markdown truth-source writes were observed and whether they were explained
-by a Research Cockpit truth-source mutation command. A dashboard-only rebuild
-does not explain truth-source changes.
-Forward check also asserts that mutating `--dry-run --json` fails against a
-malformed `interaction_log.yaml` with `written_files: []`, instead of producing
-a successful preview that would later fail on actual execution.
+从隔离副本执行 editable install 后验证入口、依赖与已保存数据可读。该 track 不依赖仓库当前工作目录，也不能把本机绝对路径写入 package。
+
+## 运行
+
+完整检查：
+
+```sh
+python dev/scripts/run_subagent_forward_check.py --json
+```
+
+只运行读取与 portable install track：
+
+```sh
+python dev/scripts/run_subagent_forward_check.py --skip-mutating --json
+```
+
+仅在诊断失败副本时使用 `--keep-temp`。正常运行会自动清理临时目录。
+
+## 判定
+
+顶层 `ok` 只有在所有未跳过 track 通过且原 package 未变化时才为 `true`。
+每个 track 的 `workflow_contract` 是稳定门槛；`metrics` 是本次实测，不应复制为长期固定 benchmark。
+失败时先看该 track 的 `checks`、`unexpected_writes` 与 contract violations，不要补跑 broad smoke。

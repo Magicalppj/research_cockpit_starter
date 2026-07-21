@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented historical plan. Incremental validation, record-first artifact ingest, promotion, compaction, and worker/coordinator verification boundaries are implemented. Current operational guidance: `AGENTS.md`, `SKILL.md`, `capabilities/experiment-tracking.md`, `capabilities/maintenance.md`, and `docs/migrations/0.2.0-record-first-artifact-ingest.md`; the remaining sections preserve design history.
+Implemented historical plan, superseded operationally by the 0.3.0 role facade. Its standalone ingest, promotion, and compaction examples are not current commands. Current operational guidance: `AGENTS.md`, `capabilities/worker-loop.md`, `capabilities/maintenance.md`, and `docs/migrations/0.3.0-cli-cutover.md`.
 
 ## Date
 

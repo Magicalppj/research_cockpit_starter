@@ -1,0 +1,13 @@
+schema_version: work_start_v1
+agent_id: <agent_id>
+lease_id: <lease_id>
+lease_epoch: 1
+operation_id: <operation_id>
+input_revision: <input_revision_from_work_packet>
+experiment_id: <packet.cursor.current_node>
+slug: <short_run_slug>
+run:
+  launcher: shell
+  command: python train.py --config config.yaml
+  progress_file: artifacts/{experiment_id}/{run_id}/progress.json
+  monitor_command: ""

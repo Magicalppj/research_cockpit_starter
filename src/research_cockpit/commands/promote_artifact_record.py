@@ -70,6 +70,8 @@ def promote_artifact_record(
     assignment_id: str | None = None,
     coordinator: bool = False,
     promotion_reason: str | None = None,
+    operation_request: dict[str, Any] | None = None,
+    interaction_override: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     reason = str(promotion_reason or "").strip()
     if not reason:
@@ -148,10 +150,10 @@ def promote_artifact_record(
     if dry_run:
         return dry_run_preflight_result(root, result)
 
-    finish_mutation(
+    transaction = finish_mutation(
         root,
         changes,
-        interaction={
+        interaction=interaction_override or {
             "kind": "promote_artifact_record",
             "actor": "researcher",
             "node_id": artifact_id,
@@ -164,9 +166,12 @@ def promote_artifact_record(
             },
         },
         rebuild_dashboard=rebuild_dashboard,
+        operation_request=operation_request,
     )
-    return result
 
+    if operation_request is not None:
+        result["_operation_transaction"] = transaction
+    return result
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="research-cockpit promote-artifact-record")

@@ -35,6 +35,7 @@ from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.resources import build_link_rows, node_artifact_ids, node_artifact_record_ids
 from research_cockpit.root_snapshot import load_root_snapshot
 from research_cockpit.execution_context import execution_context_payload
+from research_cockpit.decisions import build_decision_acceptance_checklist
 
 
 def _related_option_id(nodes: dict[str, Any], node_id: str) -> str | None:
@@ -160,7 +161,16 @@ def _compact_action_scopes(scopes: Any) -> dict[str, Any]:
         if isinstance(value, list):
             limit = 8 if key == "focus_path_ids" else 3
             selected, _, omitted = _bounded_values(value, limit)
-            out[key] = selected
+            out[key] = [
+                {
+                    field: item[field]
+                    for field in ("scope", "node_id", "action", "stale")
+                    if field in item
+                }
+                if isinstance(item, dict)
+                else item
+                for item in selected
+            ]
             omitted_counts[key] = omitted
         elif key != "counts":
             out[key] = value
@@ -224,20 +234,20 @@ def _target_context_payload(nodes: dict[str, Any], node_id: str, global_focus: d
 
 def _compact_nested_node_context(node_payload: dict[str, Any]) -> dict[str, Any]:
     keys = (
-        "node", "parent_path", "parent_path_count", "parent_path_omitted_count",
-        "core_problem", "effective_baseline", "blockers", "blockers_count",
+        "blockers", "blockers_count",
         "blockers_omitted_count", "next_actions", "next_actions_count",
-        "next_actions_omitted_count", "next_action_scopes", "evidence_summary",
-        "recommended_next_step", "worker_verify_commands", "final_handoff_commands",
-        "verification_note", "command_drafts", "context_freshness",
+        "next_actions_omitted_count", "evidence_summary",
+        "recommended_next_step",
         "success_criteria_summary", "metrics_summary", "latest_findings",
-        "key_artifacts", "assignment_cursor", "warnings", "warnings_count",
-        "warnings_omitted_count", "run_summary", "gate_summary",
+        "key_artifacts", "assignment_cursor", "run_summary", "gate_summary",
     )
     out = {
-        "schema_version": "node_context_nested_compact_v2",
+        "schema_version": "node_context_nested_compact_v3",
         "compact": True,
-        "omitted_fields": ["recommended_next_steps"],
+        "omitted_fields": [
+            "node", "parent_path", "core_problem", "effective_baseline",
+            "next_action_scopes", "command_drafts", "verification_commands",
+        ],
     }
     for key in keys:
         if key in node_payload:
@@ -309,7 +319,7 @@ def _compact_bootstrap_payload(bootstrap: dict[str, Any], focus: dict[str, Any])
             "multi_agent_batch_mode": {
                 "rules": list(batch_mode.get("rules", []) or [])[:4],
                 "worker_verify_commands": list(batch_mode.get("worker_verify_commands", []) or [])[:3],
-                "final_handoff_commands": list(batch_mode.get("final_handoff_commands", []) or [])[:3],
+                "final_handoff_commands": list(batch_mode.get("final_handoff_commands", []) or [])[:1],
             },
         },
         "top_suggestions": compact_suggestions,
@@ -336,7 +346,7 @@ def _compact_semantic_warnings(
             f"current_focus_node {focus.id!r} has terminal status {focus.status!r}."
         ),
         "node_id": focus.id,
-        "command": f"research-cockpit set-focus --root {root} --focus-node <next_node>",
+        "command": f"research-cockpit coord assign --root {root} --file <coord_assign.yaml> --json --compact",
     }]
 
 @progress_traced("context_snapshot")
@@ -486,21 +496,23 @@ def context_payload(
             "experiments_omitted_count": related_experiments_omitted,
         },
         "recommended_commands": {
-            "ingest_artifact": "research-cockpit ingest-artifact --root <root> --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --json --compact --no-build",
-            "complete_run": "research-cockpit complete-run --root <root> --file closeout.yaml --assignment <assignment_id> --json --compact --no-build",
-            "complete_experiment": "research-cockpit complete-experiment --root <root> --id <experiment_id> --finding \"...\" --confidence medium --dry-run --json --show-diff",
-            "complete_experiments": "research-cockpit complete-experiments --root <root> --file findings.yaml --dry-run --json --show-diff",
-            "create_artifact": "research-cockpit create-artifact --root <root> --id <artifact_id> --title \"...\" --path artifacts/<node_id>/<run_id> --link-to <node_id> --no-build",
-            "finalize_workstream": "research-cockpit finalize-workstream --root <root> --file finalize.yaml --dry-run --json --compact",
+            "open_assignment": "research-cockpit work open --root <root> --assignment <assignment_id> --json --compact",
+            "record_evidence": "research-cockpit work record --root <root> --assignment <assignment_id> --file <record.yaml> --json --compact",
+            "close_assignment": "research-cockpit work close --root <root> --assignment <assignment_id> --file <closeout.yaml> --json --compact",
+            "coordinate_graph": "research-cockpit coord assign --root <root> --file <coord_assign.yaml> --json --compact",
+            "coordinate_decision": "research-cockpit coord decide --root <root> --file <coord_decide.yaml> --json --compact",
         },
     }
+    if nodes[node_id].type == "decision":
+        payload["decision_acceptance"] = build_decision_acceptance_checklist(nodes, node_id)
     if compact:
-        payload["schema_version"] = "context_compact_v2"
+        payload["schema_version"] = "context_compact_v3"
         payload["compact"] = True
         payload["warnings_count"] = len(node_payload.get("warnings", []))
         payload["warnings_omitted_count"] = max(0, len(node_payload.get("warnings", [])) - 10)
         payload["deprecated_fields"] = ["current_global_focus"]
-    payload["current_global_focus"] = global_focus
+    if not compact:
+        payload["current_global_focus"] = global_focus
     if semantic_omitted_count:
         payload["semantic_warnings_omitted_count"] = semantic_omitted_count
     if with_bootstrap:

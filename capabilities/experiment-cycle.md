@@ -1,117 +1,35 @@
 # Experiment Cycle
 
-Use this capability for the ordinary lifecycle of one assigned experiment: start its run, optionally preserve output, and close the result plus one follow-up atomically.
-
-Use `capabilities/experiment-tracking.md` only for advanced workstream planning, standalone gates/findings, promoted graph artifacts, retention, or legacy recovery.
-
-## Read Once
-
-Start from the assignment when one exists:
+Assignment experiment 的标准控制面只有 open、start、optional record、close。
 
 ```sh
-research-cockpit agent-session-context --root <data-root> --assignment <assignment_id> --compact --json
+research-cockpit work open --root <data-root> --assignment <assignment_id> --json --compact
+research-cockpit work start --root <data-root> --assignment <assignment_id> --file start.yaml --json --compact
+research-cockpit work close --root <data-root> --assignment <assignment_id> --file closeout.yaml --json --compact
 ```
 
-Without an assignment, read the known experiment directly:
+## Start
+
+仅在缺少 input contract 时运行 `research-cockpit work start --print-schema --json --compact`；它不是普通 worker 流程中的额外步骤。
+
+`work_start_v1` 绑定 `agent_id`、`lease_id`、`lease_epoch`、`operation_id`、`input_revision` 和显式 `experiment_id`。前五个 assignment 字段来自 packet，`experiment_id` 取 packet 的 `cursor.current_node`；该节点不是 experiment 时停止并让 coordinator 修正 assignment。Runtime 生成 run id，原子启动 experiment 并续租；不要在模型回合中手动维护 run id 或 heartbeat。
+
+## Evidence
+
+研究程序、训练、评测与日志不计入 Research Cockpit control-plane command budget。最终 output directory 放入 closeout 的 `evidence_inputs`，由 runtime 在锁外 stage/hash，并在事务内写 artifact record/provenance。
+
+必须提前 durable 时使用：
 
 ```sh
-research-cockpit context --root <data-root> --id <experiment_id> --view execution --compact --json
+research-cockpit work record --root <data-root> --assignment <assignment_id> --file record.yaml --json --compact
 ```
 
-Do not prepend command discovery, bootstrap, artifact inventory, or a generated context pack unless the target or required command is unknown.
+Record 不用于进度文本或每个 checkpoint；只用于有独立消费/恢复价值的 evidence。
 
-## Three Mutations
+## Close
 
-Mutate one canonical data root sequentially. Pass `--assignment <assignment_id>` for worker writes.
+`work_close_v1` 可一次包含 run status、experiment result、finding、gates、existing/new artifact record、assignment delivery、tests、proposals、cursor 和 review requirement。同 scope follow-up 使用 `next_experiment`；跨方向工作只提交 `new_branch` proposal。
 
-### 1. Start The Run
+缺少 closeout input contract 时运行 `research-cockpit work close --print-schema --json --compact`，不要先查询完整 command manifest。示例中的 `review_required: false` 继承 assignment policy；仅在 worker 需要追加独立审查时设为 `true`。`finding.confidence` 合法值为 `weak`、`medium`、`strong`。
 
-Create the run and move a planned/queued experiment to `running` in one transaction:
-
-```sh
-research-cockpit create-run --root <data-root> --assignment <assignment_id> --id <run_id> --experiment <experiment_id> --status running --start-experiment --json --compact --no-build
-```
-
-Do not issue a separate experiment status command. Add launcher, progress, resource, or retention flags only when that metadata exists.
-
-### 2. Preserve Output When Needed
-
-Skip this step when the run has no payload that must survive. Otherwise ingest the run directory once:
-
-```sh
-research-cockpit ingest-artifact --root <data-root> --assignment <assignment_id> --node <experiment_id> --from <output_dir> --run-id <run_id> --json --compact --no-build
-```
-
-The default is a lightweight artifact record. Keep the returned record id; do not list records or promote a graph artifact unless another task explicitly needs that result.
-
-### 3. Close Atomically
-
-Write one small `run_closeout_v1` file:
-
-```yaml
-schema_version: run_closeout_v1
-run:
-  id: run_x
-  status: completed
-experiment:
-  status: done
-  result_summary: The bounded experiment passed.
-finding:
-  statement: The tested configuration met the acceptance criterion.
-  confidence: strong
-  outcome: positive
-next_experiment:
-  id: experiment_x_followup
-  title: Scale the verified configuration
-  success_criteria:
-    - Complete the full evaluation.
-  next_action: Start the full run.
-```
-
-After ingest, add this block; otherwise omit it:
-
-```yaml
-artifact_record:
-  existing_record_id: artifact_experiment_x_run_x
-```
-
-Then apply one transaction:
-
-```sh
-research-cockpit complete-run --root <data-root> --assignment <assignment_id> --file closeout.yaml --json --compact --no-build
-```
-
-`experiment` is optional for a status-only run closeout. A `done` experiment requires a finding. `next_experiment` is optional and limited to one planned/queued sibling; with assignment scope it also advances the worker cursor and inherits `next_action`. If `next_action` is omitted, the assignment's old actions are cleared. Include gate rows only for gate payloads that already exist.
-
-Do not repeat the experiment conclusion, follow-up creation, artifact-record link, or cursor movement with standalone commands after this transaction.
-
-## Long-Running Jobs
-
-Use `update-run` only when operational metadata actually changes, such as heartbeat path, status, process id, or output root:
-
-```sh
-research-cockpit update-run --root <data-root> --assignment <assignment_id> --id <run_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build
-```
-
-Use `run-context` only when full operational details are required. Launcher output conventions and templates are in `docs/launcher-output-conventions.md` and `templates/launcher/`.
-
-## Verification Contract
-
-For successful non-dry-run `create-run`, `ingest-artifact`, and structured `complete-run`, compact output should report:
-
-```json
-{"verified":true,"additional_verification_required":false,"verification_stage":"internal_verify","verify_commands":[]}
-```
-
-When those fields match, the worker is done. Do not run validate, context, build, smoke, or a dry-run replay.
-
-Only when compact output requests additional verification, or after a manual truth-source edit, verify the reported changed scope:
-
-```sh
-research-cockpit validate --root <data-root> --changed-node <node_id> --json
-research-cockpit context --root <data-root> --id <node_id> --view execution --compact --json
-```
-
-If validation falls back, follow only its `fallback.recommended_commands` and retry. Full validate/build/root smoke belongs to coordinator merge, release, or research-stage milestone handoff.
-
-On a stale-write conflict, reread one bounded assignment/execution context and retry the rejected transaction. Never parallelize mutations against the same data root.
+成功 close receipt 已包含 result revision、entity refs、lease transition 与 internal verification。`additional_verification_required: false` 时不要 read-after-write。

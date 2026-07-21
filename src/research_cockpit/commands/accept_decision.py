@@ -37,6 +37,7 @@ def accept_decision(
     force_accept: bool = False,
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
+    operation_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     state = load_validated_state(root)
     nodes = state.nodes
@@ -143,6 +144,7 @@ def accept_decision(
             },
         },
         rebuild_dashboard=rebuild_dashboard,
+        operation_request=operation_request,
     )
     return result
 

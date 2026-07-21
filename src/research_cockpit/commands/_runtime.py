@@ -170,11 +170,7 @@ def _changed_node_ids(root: Path, changed_files: list[str], created: list[str], 
 
 
 def _final_handoff_commands(root: Path) -> list[str]:
-    return [
-        f"research-cockpit validate --root {root} --json",
-        f"research-cockpit build --root {root}",
-        f"research-cockpit smoke --root {root} --json --progress",
-    ]
+    return [f"research-cockpit coord handoff --root {root} --file handoff.yaml --json --compact --progress"]
 
 
 def _verify_commands(

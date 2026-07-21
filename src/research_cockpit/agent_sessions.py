@@ -103,79 +103,73 @@ def session_handoff(
     worktree: Path | None = None,
 ) -> dict[str, Any]:
     root_text = str(root.resolve())
-    stable_artifact_root = str((root.resolve() / "artifacts"))
+    stable_artifact_root = str(root.resolve() / "artifacts")
     launch_env = {
         "RESEARCH_COCKPIT_ROOT": root_text,
         "RESEARCH_COCKPIT_AGENT_ID": agent_id,
     }
     if assignment_id:
         launch_env["RESEARCH_COCKPIT_ASSIGNMENT_ID"] = assignment_id
-    read_context_args = [
-        "research-cockpit",
-        "agent-session-context",
-        "--root",
-        root_text,
-    ]
-    if assignment_id:
-        read_context_args.extend(["--assignment", assignment_id])
+        scope = ["--root", root_text, "--assignment", assignment_id]
+        commands = {
+            "open": shell_join(
+                ["research-cockpit", "work", "open", *scope, "--json", "--compact"]
+            ),
+            "record": shell_join(
+                [
+                    "research-cockpit",
+                    "work",
+                    "record",
+                    *scope,
+                    "--file",
+                    "<record.yaml>",
+                    "--json",
+                    "--compact",
+                ]
+            ),
+            "close": shell_join(
+                [
+                    "research-cockpit",
+                    "work",
+                    "close",
+                    *scope,
+                    "--file",
+                    "<closeout.yaml>",
+                    "--json",
+                    "--compact",
+                ]
+            ),
+        }
     else:
-        read_context_args.extend(["--agent", agent_id])
-    read_context_args.extend(["--compact", "--json"])
-    commands = {
-        "read_context": shell_join(read_context_args),
-        "option_context": shell_join([
-            "research-cockpit",
-            "option-workstream-context",
-            "--root",
-            root_text,
-            "--id",
-            option_id,
-            "--compact",
-            "--json",
-        ]),
-        "ingest_artifact": shell_join([
-            "research-cockpit",
-            "ingest-artifact",
-            "--root",
-            root_text,
-            *(["--assignment", assignment_id] if assignment_id else []),
-            "--node",
-            "<node_id>",
-            "--from",
-            "<worktree_output_dir>",
-            "--run-id",
-            "<run_id>",
-            "--agent",
-            agent_id,
-            "--json",
-            "--compact",
-            "--no-build",
-        ]),
-    }
-    if assignment_id:
-        commands["set_cursor"] = shell_join([
-            "research-cockpit",
-            "set-cursor",
-            "--root",
-            root_text,
-            "--assignment",
-            assignment_id,
-            "--node",
-            "<node_id>",
-            "--no-build",
-        ])
-    else:
-        commands["set_agent_focus"] = shell_join([
-            "research-cockpit",
-            "set-agent-focus",
-            "--root",
-            root_text,
-            "--agent",
-            agent_id,
-            "--node",
-            "<node_id>",
-            "--no-build",
-        ])
+        commands = {
+            "read_context": shell_join(
+                [
+                    "research-cockpit",
+                    "context",
+                    "--root",
+                    root_text,
+                    "--id",
+                    option_id,
+                    "--view",
+                    "execution",
+                    "--json",
+                    "--compact",
+                ]
+            ),
+            "coordinate": shell_join(
+                [
+                    "research-cockpit",
+                    "coord",
+                    "assign",
+                    "--root",
+                    root_text,
+                    "--file",
+                    "<coord_assign.yaml>",
+                    "--json",
+                    "--compact",
+                ]
+            ),
+        }
     return {
         "launch_env": launch_env,
         "stable_artifact_root": stable_artifact_root,
@@ -184,12 +178,11 @@ def session_handoff(
             "Do not run research-cockpit init in the worktree.",
             "Do not mutate a worktree-local research_cockpit directory.",
             "Write research state only through the canonical --root shown here.",
-            "Do not use worktree paths as long-lived evidence paths; ingest outputs into the stable artifact root first.",
+            "Put final outputs in work close evidence_inputs; use work record only for evidence that must be durable earlier.",
         ],
         "commands": commands,
         "worktree": str(worktree.resolve()) if worktree else None,
     }
-
 
 def active_session_options(
     nodes: dict[str, ResearchNode],

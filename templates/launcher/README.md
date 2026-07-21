@@ -10,7 +10,7 @@ These templates are optional starting points for long experiment runs. They writ
 | `smoke-gate` | Run the smallest useful execution before a full run. | `smoke_check` | `full_run` |
 | `full-run` | Start or monitor the real long-running experiment. | `full_run` | `artifact_capture` |
 | `artifact-capture` | Preserve useful files after a run finishes. | `artifact_capture` | `validate_build` |
-| `validate-build` | Run changed-scope worker checks, project checks, or the coordinator/final full gate. | `validation_check` | `next_action_update` |
+| `validate-build` | Run a reported changed-scope check or an explicit diagnostic build; milestone gates belong to `coord handoff`. | `validation_check` | `next_action_update` |
 | `next-action-update` | Record findings, gates, artifacts, and the next focus/action. | `handoff_check` | `done` |
 
 ## Python Template
@@ -39,10 +39,10 @@ The shell template uses environment variables so it can be copied into a tmux pa
 
 ## Manual Template
 
-Use `manual_run_checklist.md` when no script owns the run. Fill the same fields by hand, then use the ingestion commands from `docs/launcher-output-conventions.md`.
+Use `manual_run_checklist.md` when no script owns the run. Fill the same fields by hand, then use the role-facade closeout flow from `docs/launcher-output-conventions.md`.
 
 ## Handoff Order
 
-Use `--no-build` for handoff mutations. Default `ingest-artifact` creates an artifact record, and the structured closeout references that returned record through `artifact_record.existing_record_id`.
+Use `work_close.example.yaml` for the terminal handoff. A final launcher output directory belongs in `evidence_inputs`; `work close` stages it into the canonical artifact store and records the result atomically. Use standalone `work record --file <record.yaml>` only when evidence must be durable before the run closes.
 
-1. Start the run and experiment together with `create-run --status running --start-experiment`. 2. Preserve output once with `ingest-artifact` when canonical evidence is needed. 3. Use one `complete-run --file closeout.yaml` transaction for run, gates, record link, finding, experiment terminal state, and one optional follow-up. 4. Skip repeated validate/context when compact output is internally verified; otherwise verify changed scope only. 5. Run full gates only at coordinator merge, release, or research-stage milestone handoff.  Use a separate `ingest-gate-result` only for recovery or an intentionally partial update. Pass `--artifact <artifact_id>` only when that id is an explicitly promoted graph artifact.
+1. Fill `work_start.example.yaml` from the packet, including `input_revision` and `experiment_id: <packet.cursor.current_node>`, then run `work start` and keep its generated run id. 2. Run the experiment. 3. Fill `work_close.example.yaml` and run `work close`; include final `evidence_inputs` or an earlier `artifact_record.existing_record_id`, never both. 4. Trust an internally verified receipt without repeated validate/context. 5. At coordinator merge, release, or research-stage closeout, run one `coord handoff`; do not precede it with standalone full gates.

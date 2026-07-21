@@ -101,6 +101,7 @@ def promoted_artifact_record_update(
     promotion_reason: str,
 ) -> tuple[Path, dict[str, Any], dict[str, Any], dict[str, Any]]:
     path, before, record = find_artifact_record(root, record_id)
+    raw_before = load_yaml(path)
     if record.get("promoted_artifact_id"):
         raise ValueError(f"Artifact record {record_id!r} is already promoted to {record.get('promoted_artifact_id')!r}")
     after = {
@@ -114,7 +115,7 @@ def promoted_artifact_record_update(
     promoted_record["promotion_reason"] = promotion_reason
     promoted_record["updated_at"] = updated_at
     after["records"][record_id] = promoted_record
-    return path, before, after, promoted_record
+    return path, raw_before, after, promoted_record
 
 
 def build_artifact_record(
@@ -157,8 +158,10 @@ def build_artifact_record(
 
 def upsert_artifact_record(root: Path, experiment_id: str, record: dict[str, Any]) -> tuple[Path, dict[str, Any], dict[str, Any]]:
     path = record_file_path(root, experiment_id)
+    raw_before = load_yaml(path) if path.exists() else {}
     before = load_artifact_record_file(root, experiment_id)
     after = {
+        **before,
         "schema_version": SCHEMA_VERSION,
         "experiment_id": experiment_id,
         "records": dict(before.get("records", {})),
@@ -169,4 +172,4 @@ def upsert_artifact_record(root: Path, experiment_id: str, record: dict[str, Any
     if record_id in after["records"]:
         raise FileExistsError(path)
     after["records"][record_id] = record
-    return path, before, after
+    return path, raw_before, after

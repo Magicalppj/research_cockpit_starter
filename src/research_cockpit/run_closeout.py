@@ -14,6 +14,7 @@ from research_cockpit.assignment_scope import ensure_assignment_scope
 from research_cockpit.commands._evidence import append_unique, validate_artifact_ids
 from research_cockpit.commands._runs import RUN_OPTIONAL_FIELDS
 from research_cockpit.commands.record_finding import _next_finding_id, find_node_file
+from research_cockpit.evidence_bundles import plan_work_result_transition
 from research_cockpit.gate_result_records import (
     build_gate_record_data,
     gate_record_path,
@@ -28,6 +29,7 @@ from research_cockpit.model import (
     VALID_FINDING_OUTCOMES,
     load_yaml,
 )
+from research_cockpit.operation_receipts import success_receipt
 from research_cockpit.mutation_runtime import (
     execute_mutation_transaction,
     indexed_artifact_record_stubs,
@@ -176,7 +178,14 @@ def _artifact_record_plan(
         "created_at": str(spec.get("created_at") or date.today()),
         "updated_at": str(spec.get("updated_at") or date.today()),
     }
-    for field_name in ("stable_path", "manifest_path", "retention", "agent"):
+    for field_name in (
+        "stable_path",
+        "manifest_path",
+        "retention",
+        "agent",
+        "source_file_count",
+        "content_sha256",
+    ):
         if spec.get(field_name) is not None:
             record[field_name] = spec[field_name]
     after = {
@@ -240,6 +249,8 @@ def complete_run_closeout(
     show_diff: bool = False,
     assignment_id: str | None = None,
     coordinator: bool = False,
+    operation_context: dict[str, Any] | None = None,
+    staged_moves: list[tuple[Path, Path]] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("Run closeout plan must be a mapping")
@@ -398,9 +409,13 @@ def complete_run_closeout(
         if not statement:
             raise ValueError("finding.statement is required")
         if confidence not in VALID_FINDING_CONFIDENCES:
-            raise ValueError(f"Invalid finding confidence {confidence!r}")
+            allowed = ", ".join(sorted(VALID_FINDING_CONFIDENCES))
+            raise ValueError(
+                f"Invalid finding confidence {confidence!r}; allowed: {allowed}"
+            )
         if outcome is not None and outcome not in VALID_FINDING_OUTCOMES:
-            raise ValueError(f"Invalid finding outcome {outcome!r}")
+            allowed = ", ".join(sorted(VALID_FINDING_OUTCOMES))
+            raise ValueError(f"Invalid finding outcome {outcome!r}; allowed: {allowed}")
         artifact_ids = _string_list(finding_spec.get("artifact_ids"), "finding.artifact_ids")
         validate_artifact_ids(state.nodes, artifact_ids)
         findings = experiment_after.get("findings", []) or []
@@ -467,9 +482,67 @@ def complete_run_closeout(
     assignment_actions = _string_list(next_actions.get("assignment"), "next_actions.assignment")
     if assignment_actions and not resolved_assignment_id:
         raise ValueError("next_actions.assignment requires assignment_id")
+    if next_experiment_data and not assignment_actions:
+        assignment_actions = list(next_experiment_data.get("next_actions", []) or [])
+
+    assignment_result_spec = _mapping(plan.get("assignment_result"), "assignment_result")
+    if operation_context is None and assignment_result_spec:
+        raise ValueError("assignment_result requires the work close command")
+    if operation_context is not None and not assignment_result_spec:
+        raise ValueError("work close requires assignment_result")
 
     updated_assignment_id: str | None = None
-    if resolved_assignment_id and (assignment_actions or next_experiment_data):
+    work_transition: dict[str, Any] | None = None
+    result_revision: str | None = None
+    if operation_context is not None:
+        if dry_run:
+            raise ValueError("work close does not support dry-run")
+        if not resolved_assignment_id:
+            raise ValueError("work close requires assignment_id")
+        if assignment_actions and not next_experiment_data:
+            raise ValueError(
+                "work close next_actions.assignment requires next_experiment; "
+                "use assignment_result.proposals for coordinator follow-up"
+            )
+        required_context = {
+            "agent_id",
+            "lease_id",
+            "lease_epoch",
+            "operation_id",
+            "request_hash",
+            "input_revision",
+            "now",
+        }
+        missing_context = sorted(required_context - set(operation_context))
+        if missing_context:
+            raise ValueError(
+                "work close operation context is missing: " + ", ".join(missing_context)
+            )
+        work_transition = plan_work_result_transition(
+            root,
+            assignment_id=resolved_assignment_id,
+            agent_id=str(operation_context["agent_id"]),
+            lease_id=str(operation_context["lease_id"]),
+            lease_epoch=int(operation_context["lease_epoch"]),
+            operation_id=str(operation_context["operation_id"]),
+            input_revision=str(operation_context["input_revision"]),
+            result_spec=assignment_result_spec,
+            run_ids=[run_id],
+            finding_ids=[finding_id] if finding_id else [],
+            artifact_record_ids=[linked_record["record_id"]] if linked_record else [],
+            next_experiment=next_experiment_data,
+            next_actions=assignment_actions,
+            review_required=operation_context.get("review_required"),
+            now=operation_context["now"],
+            refresh_commit_clock=bool(
+                operation_context.get("refresh_commit_clock", False)
+            ),
+        )
+        yaml_changes.extend(work_transition["changes"])
+        read_dependencies.extend(work_transition["read_dependencies"])
+        result_revision = str(work_transition["result_revision"])
+        updated_assignment_id = resolved_assignment_id
+    elif resolved_assignment_id and (assignment_actions or next_experiment_data):
         assignment_path = root / "assignments" / f"{resolved_assignment_id}.yaml"
         assignment_before = load_yaml(assignment_path)
         if not assignment_before:
@@ -480,8 +553,6 @@ def complete_run_closeout(
         assignment_after = copy.deepcopy(assignment_before)
         if next_experiment_data:
             assignment_after["current_node"] = next_experiment_data["id"]
-            if not assignment_actions:
-                assignment_actions = list(next_experiment_data.get("next_actions", []) or [])
             assignment_after["next_actions"] = assignment_actions
         elif assignment_actions:
             assignment_after["next_actions"] = assignment_actions
@@ -528,6 +599,7 @@ def complete_run_closeout(
         "experiment_status": experiment_status,
         "next_experiment_id": next_experiment_data.get("id") if next_experiment_data else None,
         "assignment_id": updated_assignment_id,
+        "result_revision": result_revision,
         "verified": not dry_run,
         "additional_verification_required": dry_run,
         "dry_run": dry_run,
@@ -548,28 +620,83 @@ def complete_run_closeout(
         }
         return result
 
-    result["transaction"] = execute_mutation_transaction(
-        root,
-        yaml_changes,
-        interactions=[
+    interaction = {
+        "kind": "complete_run_closeout",
+        "actor": "researcher",
+        "node_id": experiment_id,
+        "command": "research-cockpit work close --assignment <assignment_id> --file <closeout.yaml> --json --compact",
+        "after": {
+            "run_id": run_id,
+            "status": status,
+            "gate_ids": gate_ids,
+            "record_id": result["record_id"],
+            "finding_id": finding_id,
+            "experiment_status": experiment_status,
+            "next_experiment_id": result["next_experiment_id"],
+            "assignment_id": updated_assignment_id,
+        },
+    }
+    operation_request: dict[str, Any] | None = None
+    operation_receipt: dict[str, Any] | None = None
+    if operation_context is not None and work_transition is not None:
+        operation_receipt = success_receipt(
+            operation="work close",
+            assignment_id=updated_assignment_id,
+            operation_id=str(operation_context["operation_id"]),
+            changed=True,
+            packet_revision=str(work_transition["packet_revision"]),
+            readiness="ready" if next_experiment_data else "not_applicable",
+            allowed_operations=list(work_transition["allowed_operations"]),
+        )
+        operation_receipt.update(
             {
-                "kind": "complete_run_closeout",
-                "actor": "researcher",
-                "node_id": experiment_id,
-                "command": f"research-cockpit complete-run --file <closeout.yaml>",
-                "after": {
+                "result_revision": result_revision,
+                "entities": {
                     "run_id": run_id,
-                    "status": status,
-                    "gate_ids": gate_ids,
-                    "record_id": result["record_id"],
+                    "experiment_id": experiment_id,
                     "finding_id": finding_id,
-                    "experiment_status": experiment_status,
+                    "artifact_record_id": result["record_id"],
                     "next_experiment_id": result["next_experiment_id"],
-                    "assignment_id": updated_assignment_id,
                 },
             }
-        ],
+        )
+        operation_request = {
+            "scope": f"assignment:{updated_assignment_id}",
+            "operation_id": str(operation_context["operation_id"]),
+            "request_hash": str(operation_context["request_hash"]),
+            "receipt": operation_receipt,
+            "operation": "work close",
+            "assignment_id": updated_assignment_id,
+        }
+        interaction = {
+            "kind": "assignment_work_closed",
+            "actor": str(operation_context["agent_id"]),
+            "node_id": experiment_id,
+            "command": "research-cockpit work close --file <work-close.yaml>",
+            "after": {
+                **interaction["after"],
+                "result_revision": result_revision,
+            },
+        }
+
+    transaction = execute_mutation_transaction(
+        root,
+        yaml_changes,
+        interactions=[interaction],
         rebuild_dashboard=rebuild_dashboard,
+        staged_moves=staged_moves,
         read_dependencies=read_dependencies,
+        commit_validators=(
+            work_transition["commit_validators"] if work_transition is not None else None
+        ),
+        operation_request=operation_request,
     )
+    result["transaction"] = transaction
+    if operation_receipt is not None:
+        replayed_receipt = transaction.get("operation_receipt")
+        result["operation_receipt"] = (
+            copy.deepcopy(replayed_receipt)
+            if isinstance(replayed_receipt, dict)
+            else operation_receipt
+        )
     return result

@@ -8,17 +8,28 @@ import shutil
 import subprocess
 import sys
 
-from research_cockpit.command_registry import COMMAND_MODULES, GROUPED_COMMAND_ALIASES
+from research_cockpit.command_registry import (
+    COMMAND_MODULES,
+    GROUPED_COMMAND_ALIASES,
+    ROLE_COMMAND_MODULES,
+)
 from research_cockpit.cli_progress import progress_session
 from research_cockpit.commands._runtime import configure_utf8_stdio, emit_json, safe_print
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.paths import default_data_root, plugin_root
 
-COMMAND_CHOICES = [*COMMAND_MODULES.keys(), "init", "ui", *GROUPED_COMMAND_ALIASES.keys()]
+COMMAND_CHOICES = [
+    *COMMAND_MODULES.keys(),
+    "init",
+    "ui",
+    *GROUPED_COMMAND_ALIASES.keys(),
+    *ROLE_COMMAND_MODULES.keys(),
+]
 LOCAL_PROGRESS_MODULES = {
     "build_dashboard",
     "complete_run",
     "context",
+    "coord_handoff",
     "ingest_artifact",
     "ingest_gate_result",
     "node_context",
@@ -30,8 +41,7 @@ LOCAL_PROGRESS_MODULES = {
 }
 
 
-def _run_module(command_name: str, argv: list[str], *, display_command_name: str | None = None) -> None:
-    module_name = COMMAND_MODULES[command_name]
+def _run_module_name(module_name: str, argv: list[str], *, display_command_name: str) -> None:
     module = import_module(f"research_cockpit.commands.{module_name}")
     progress_requested = "--progress" in argv
     module_argv = (
@@ -40,10 +50,10 @@ def _run_module(command_name: str, argv: list[str], *, display_command_name: str
         else [item for item in argv if item != "--progress"]
     )
     old_argv = sys.argv
-    sys.argv = [f"research-cockpit {display_command_name or command_name}", *module_argv]
+    sys.argv = [f"research-cockpit {display_command_name}", *module_argv]
     try:
         with progress_session(
-            display_command_name or command_name,
+            display_command_name,
             explicit=progress_requested,
         ):
             module.main()
@@ -61,6 +71,14 @@ def _run_module(command_name: str, argv: list[str], *, display_command_name: str
         raise SystemExit(1) from None
     finally:
         sys.argv = old_argv
+
+
+def _run_module(command_name: str, argv: list[str], *, display_command_name: str | None = None) -> None:
+    _run_module_name(
+        COMMAND_MODULES[command_name],
+        argv,
+        display_command_name=display_command_name or command_name,
+    )
 
 
 def _copytree_contents(source: Path, target: Path) -> None:
@@ -151,6 +169,14 @@ def _print_group_help(group_name: str) -> None:
         print(f"  {action_name:<12} alias for research-cockpit {command_name}")
 
 
+def _print_role_help(role_name: str) -> None:
+    print(f"usage: research-cockpit {role_name} <action> [args]")
+    print()
+    print("actions:")
+    for action_name in sorted(ROLE_COMMAND_MODULES[role_name]):
+        print(f"  {action_name}")
+
+
 def main(argv: list[str] | None = None) -> None:
     configure_utf8_stdio()
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -172,6 +198,23 @@ def main(argv: list[str] | None = None) -> None:
         return
     if command == "ui":
         ui_command(rest)
+        return
+    if command in ROLE_COMMAND_MODULES:
+        if not rest or rest[0] in ("-h", "--help"):
+            _print_role_help(command)
+            return
+        action = rest[0]
+        actions = ROLE_COMMAND_MODULES[command]
+        if action not in actions:
+            parser.error(
+                f"argument action: invalid choice: {action!r} "
+                f"(choose from {', '.join(repr(item) for item in sorted(actions))})"
+            )
+        _run_module_name(
+            actions[action],
+            rest[1:],
+            display_command_name=f"{command} {action}",
+        )
         return
     if command in GROUPED_COMMAND_ALIASES:
         if not rest or rest[0] in ("-h", "--help"):

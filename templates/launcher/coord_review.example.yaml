@@ -1,0 +1,5 @@
+schema_version: coord_review_v1
+operation_id: <unique_operation_id>
+review_assignment_id: <completed_review_assignment_id>
+review_result_revision: <review_result_revision>
+producer_result_revision: <producer_result_revision>

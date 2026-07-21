@@ -6,13 +6,14 @@ from typing import Any
 import hashlib
 import re
 
-from research_cockpit.command_registry import cli_command_for_script
 from research_cockpit.graph_core import child_ids, focus_node_id_from_current, unique_strings
 from research_cockpit.types import ResearchNode
 
 
-def _workflow_command(script_name: str, *parts: str) -> str:
-    return cli_command_for_script(script_name, *parts)
+_COORD_ASSIGN_COMMAND = "research-cockpit coord assign --file <coord_assign.yaml> --json --compact"
+_WORK_START_COMMAND = "research-cockpit work start --assignment <assignment_id> --file <start.yaml> --json --compact"
+_WORK_RECORD_COMMAND = "research-cockpit work record --assignment <assignment_id> --file <record.yaml> --json --compact"
+_COORD_DECIDE_COMMAND = "research-cockpit coord decide --file <coord_decide.yaml> --json --compact"
 
 
 def _priority_rank(priority: str | None) -> int:
@@ -216,7 +217,7 @@ def build_action_suggestions(
                     reason=f"{node.id} is active and has an explicit blocker.",
                     source=node,
                     related_node_ids=[node.parent] if node.parent else [],
-                    suggested_command=_workflow_command("update_status.py", "--id", node.id, "--status", "blocked"),
+                    suggested_command=_COORD_ASSIGN_COMMAND,
                     focus_ids=focus_ids,
                 ))
 
@@ -228,7 +229,7 @@ def build_action_suggestions(
                 reason=f"{node.id} is still planned.",
                 source=node,
                 related_node_ids=[node.parent] if node.parent else [],
-                suggested_command=_workflow_command("update_status.py", "--id", node.id, "--status", "running"),
+                suggested_command=_WORK_START_COMMAND,
                 focus_ids=focus_ids,
             ))
 
@@ -240,14 +241,7 @@ def build_action_suggestions(
                 reason=f"{node.id} is done but has no structured findings.",
                 source=node,
                 related_node_ids=[node.parent] if node.parent else [],
-                suggested_command=_workflow_command(
-                    "record_finding.py",
-                    "--experiment",
-                    node.id,
-                    '--statement "Describe the finding"',
-                    "--confidence",
-                    "medium",
-                ),
+                suggested_command=_WORK_RECORD_COMMAND,
                 focus_ids=focus_ids,
             ))
 
@@ -259,7 +253,7 @@ def build_action_suggestions(
                 reason=f"{node.id} is proposed and needs acceptance or rejection.",
                 source=node,
                 related_node_ids=[node.parent] if node.parent else [],
-                suggested_command=_workflow_command("update_decision_evidence.py", "--id", node.id),
+                suggested_command=_COORD_DECIDE_COMMAND,
                 focus_ids=focus_ids,
             ))
 

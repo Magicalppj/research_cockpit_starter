@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import shutil
 import tempfile
 import time
@@ -29,16 +30,15 @@ from research_cockpit.ui.view_helpers import (
     _collapsed_descendant_ids,
     baseline_command_problem_ids,
     build_accept_decision_command,
-    build_apply_suggestion_command,
     build_check_decision_acceptance_command,
+    build_claim_option_command,
     build_cleanup_suggestion_lifecycle_command,
-    build_create_note_command,
     build_node_overview,
+    build_option_workstream_context_command,
     build_promote_decision_command,
-    build_record_finding_command,
-    build_set_focus_command,
+    build_report_option_workstream_command,
     build_update_decision_checklist_command,
-    build_update_suggestion_state_command,
+    build_update_decision_evidence_command,
     default_detail_node_id,
     default_selected_node_types,
     default_selected_statuses,
@@ -86,6 +86,40 @@ def copy_demo_research_cockpit_without_dashboards(target: Path) -> None:
 
 
 class UiRenderingTests(unittest.TestCase):
+    def test_coordination_page_uses_shared_snapshot_builder(self) -> None:
+        expected = {
+            "schema_version": "coordination_snapshot_v1",
+            "changed": True,
+            "revision": "coord-v1:test",
+        }
+        root = Path("coordination-root")
+        with patch.object(
+            ui_app,
+            "build_coordination_snapshot",
+            return_value=expected,
+        ) as builder:
+            result = ui_app._load_coordination_snapshot(
+                root,
+                statuses={"active"},
+                page="page-token",
+            )
+
+        self.assertEqual(result, expected)
+        builder.assert_called_once_with(
+            root,
+            limit=100,
+            page="page-token",
+            statuses={"active"},
+        )
+
+    def test_coordination_page_routes_before_full_graph_load(self) -> None:
+        source = inspect.getsource(ui_app.main)
+
+        self.assertLess(
+            source.index('if page_key == "coordination"'),
+            source.index("load_graph_data()"),
+        )
+
     def test_update_decision_checklist_label_is_localized(self) -> None:
         text = get_text("中文")
 
@@ -278,7 +312,8 @@ class UiRenderingTests(unittest.TestCase):
 
         self.assertIn("def render_baselines", source)
         self.assertIn("build_set_baseline_command", source)
-        self.assertIn("set-baseline", build_set_baseline_command("problem_t5", "option_t5"))
+        self.assertIn("coord decide", build_set_baseline_command("problem_t5", "option_t5"))
+        self.assertNotIn("set-baseline", build_set_baseline_command("problem_t5", "option_t5"))
         self.assertNotIn("from research_cockpit.commands.set_baseline import", source)
 
     def test_baseline_and_accepted_rows_stay_compact(self) -> None:
@@ -1976,20 +2011,6 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(overview["relations"]["parent"][0]["label"], "T5 option | option_t5 | option/active")
         self.assertEqual(overview["relations"]["children"][0]["label"], "Use T5 | decision_t5 | decision/proposed")
 
-    def test_build_set_focus_command_includes_focus_node(self) -> None:
-        current = {
-            "current_stage": "stage_text",
-            "current_problem": "problem_text",
-            "current_option": "option_t5",
-            "current_focus_path": ["stage_text", "problem_text", "option_t5"],
-        }
-
-        command = build_set_focus_command(current, "exp_t5")
-
-        self.assertIn("research-cockpit set-focus", command)
-        self.assertIn("--focus-node exp_t5", command)
-        self.assertNotIn("--path", command)
-
     def test_node_select_label_includes_title_and_id(self) -> None:
         nodes = {
             "problem_text": SimpleNamespace(
@@ -2061,32 +2082,57 @@ class UiRenderingTests(unittest.TestCase):
                 else os.environ.pop("RESEARCH_COCKPIT_PYTHON", None)
             )
         )
-        finding_command = build_record_finding_command("exp_t5")
         decision_command = build_promote_decision_command("option_t5")
         check_command = build_check_decision_acceptance_command("decision_t5")
         checklist_command = build_update_decision_checklist_command("decision_t5")
+        evidence_command = build_update_decision_evidence_command("decision_t5")
         accept_command = build_accept_decision_command("decision_t5")
-        note_command = build_create_note_command("problem_text")
-        commands = [finding_command, decision_command, check_command, checklist_command, accept_command, note_command]
+        commands_by_route = {
+            "coord decide": [decision_command, checklist_command, evidence_command, accept_command],
+            "context": [check_command, build_option_workstream_context_command("option_t5")],
+            "coord assign": [
+                build_claim_option_command("option_t5"),
+            ],
+            "work close": [build_report_option_workstream_command("option_t5")],
+            "maintenance repair": [build_cleanup_suggestion_lifecycle_command()],
+        }
+        commands = [command for values in commands_by_route.values() for command in values]
 
         self.assertTrue(all(command.startswith("research-cockpit ") for command in commands))
         self.assertFalse(any("D:\\Tools" in command for command in commands))
         self.assertFalse(any("miniconda" in command.lower() for command in commands))
-        self.assertIn("research-cockpit record-finding", finding_command)
-        self.assertIn("--experiment exp_t5", finding_command)
-        self.assertIn("--confidence medium", finding_command)
-        self.assertIn("research-cockpit promote-decision", decision_command)
-        self.assertIn("--option option_t5", decision_command)
-        self.assertIn("--status proposed", decision_command)
-        self.assertIn("research-cockpit check-decision-acceptance", check_command)
-        self.assertIn("--id decision_t5", check_command)
-        self.assertIn("research-cockpit update-decision-checklist", checklist_command)
-        self.assertIn("--alternative <option_id>", checklist_command)
-        self.assertIn("--next-required-action", checklist_command)
-        self.assertIn("research-cockpit accept-decision", accept_command)
-        self.assertIn("--id decision_t5", accept_command)
-        self.assertIn("research-cockpit create-note", note_command)
-        self.assertIn("--node problem_text", note_command)
+        target_commands = {
+            "option_t5": decision_command,
+            "decision_t5": check_command,
+        }
+        for target_id, command in target_commands.items():
+            with self.subTest(target_id=target_id):
+                self.assertIn(target_id, command)
+        self.assertNotIn("coord review", check_command)
+        self.assertNotIn("--file", check_command)
+        for route, route_commands in commands_by_route.items():
+            with self.subTest(route=route):
+                self.assertTrue(
+                    all(command.startswith(f"research-cockpit {route}") for command in route_commands),
+                    route_commands,
+                )
+        removed_routes = (
+            "record-finding",
+            "promote-decision",
+            "check-decision-acceptance",
+            "update-decision-checklist",
+            "update-decision-evidence",
+            "accept-decision",
+            "create-note",
+            "set-focus",
+            "claim-option",
+            "option-workstream-context",
+            "report-option-workstream",
+            "apply-suggestion",
+            "update-suggestion-state",
+            "cleanup-suggestion-lifecycle",
+        )
+        self.assertFalse(any(f"research-cockpit {route}" in command for route in removed_routes for command in commands))
 
     def test_workflow_command_templates_ignore_python_env_override(self) -> None:
         previous = os.environ.get("RESEARCH_COCKPIT_PYTHON")
@@ -2099,9 +2145,9 @@ class UiRenderingTests(unittest.TestCase):
             )
         )
 
-        command = build_record_finding_command("exp_t5")
+        command = build_promote_decision_command("option_t5")
 
-        self.assertTrue(command.startswith("research-cockpit record-finding"))
+        self.assertTrue(command.startswith("research-cockpit coord decide"))
 
     def test_format_finding_rows_keeps_missing_fields_readable(self) -> None:
         rows = format_finding_rows([
@@ -2222,9 +2268,6 @@ class UiRenderingTests(unittest.TestCase):
 
         rows = format_action_suggestion_rows(suggestions)
         filtered = filter_action_suggestions(suggestions, {"run_experiment"}, {"high"}, {"active"}, True)
-        current_command = build_apply_suggestion_command("s1", "current")
-        node_command = build_apply_suggestion_command("s1", "node")
-        lifecycle_command = build_update_suggestion_state_command("s1", "completed")
 
         self.assertEqual(rows[0]["related_node_ids"], "option_t5")
         self.assertEqual(rows[0]["is_focus_related"], "yes")
@@ -2233,11 +2276,6 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(rows[1]["lifecycle_state"], "completed")
         self.assertEqual(rows[1]["lifecycle_reason"], "Done manually.")
         self.assertEqual([item["id"] for item in filtered], ["s1"])
-        self.assertIn("research-cockpit apply-suggestion", current_command)
-        self.assertIn("--id s1", current_command)
-        self.assertIn("--target node", node_command)
-        self.assertIn("research-cockpit update-suggestion-state", lifecycle_command)
-        self.assertIn("--state completed", lifecycle_command)
 
     def test_suggestion_lifecycle_cleanup_helpers_format_rows_and_commands(self) -> None:
         rows = format_suggestion_lifecycle_rows([
@@ -2278,11 +2316,11 @@ class UiRenderingTests(unittest.TestCase):
         self.assertEqual(rows[0]["age_days"], 8)
         self.assertEqual(rows[1]["active_match"], "yes")
         self.assertEqual(rows[1]["age_days"], "")
-        self.assertIn("research-cockpit cleanup-suggestion-lifecycle", dry_run_command)
-        self.assertIn("--dry-run", dry_run_command)
-        self.assertIn("--state completed", clean_completed_command)
-        self.assertIn("--older-than-days 7", clean_completed_command)
-        self.assertNotIn("--dry-run", clean_completed_command)
+        self.assertIn("research-cockpit maintenance repair", dry_run_command)
+        self.assertNotEqual(dry_run_command, clean_completed_command)
+        self.assertIn("dry_run", dry_run_command)
+        self.assertIn("completed", clean_completed_command)
+        self.assertIn("older_7_days_execute", clean_completed_command)
 
     def test_search_helpers_format_and_filter_results(self) -> None:
         index = [
@@ -2412,10 +2450,7 @@ class UiRenderingTests(unittest.TestCase):
             "next_required_actions",
         ])
         self.assertTrue(all(row["repair_kind"] == "command" for row in rows))
-        self.assertTrue(all("research-cockpit update-decision-checklist" in row["suggested_command"] for row in rows))
-        self.assertIn("--alternative <option_id>", rows[0]["suggested_command"])
-        self.assertIn("--consequence", rows[1]["suggested_command"])
-        self.assertIn("--next-required-action", rows[2]["suggested_command"])
+        self.assertTrue(all("research-cockpit coord decide" in row["suggested_command"] for row in rows))
 
     def test_format_decision_repair_hints_maps_evidence_failures_to_commands(self) -> None:
         rows = format_decision_repair_hints({
@@ -2438,12 +2473,10 @@ class UiRenderingTests(unittest.TestCase):
         })
 
         self.assertEqual(rows[0]["repair_kind"], "command")
-        self.assertIn("research-cockpit record-finding", rows[0]["suggested_command"])
-        self.assertIn("--experiment exp_t5", rows[0]["suggested_command"])
-        self.assertIn("research-cockpit update-decision-evidence", rows[0]["suggested_command"])
+        self.assertIn("research-cockpit work close", rows[0]["suggested_command"])
+        self.assertIn("research-cockpit coord decide", rows[0]["suggested_command"])
         self.assertEqual(rows[1]["target_field"], "evidence_summary")
-        self.assertIn("research-cockpit update-decision-evidence", rows[1]["suggested_command"])
-        self.assertIn("--evidence-summary", rows[1]["suggested_command"])
+        self.assertIn("research-cockpit coord decide", rows[1]["suggested_command"])
 
     def test_format_decision_repair_hints_maps_structural_failures_to_yaml(self) -> None:
         rows = format_decision_repair_hints({

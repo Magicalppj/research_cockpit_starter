@@ -21,45 +21,43 @@ BATCH_WORKER_VERIFY_COMMANDS = [
     "research-cockpit context --root <root> --id <node_id> --view execution --compact --json",
 ]
 BATCH_FINAL_HANDOFF_COMMANDS = [
-    "research-cockpit validate --root <root> --json",
-    "research-cockpit build --root <root>",
-    "research-cockpit smoke --root <root> --json --progress",
+    "research-cockpit coord handoff --root <root> --file handoff.yaml --json --compact --progress",
 ]
 ASSIGNMENT_CURSOR_EXAMPLE_TEMPLATES = [
-    'research-cockpit set-cursor --root <root>{scope} --node <node_id> --next-action "..." --no-build',
+    "research-cockpit work close --root <root>{scope} --file closeout.yaml --json --compact",
 ]
 NEXT_ACTION_EXAMPLE_TEMPLATES = [
-    'research-cockpit update-node-fields --root <root>{scope} --id <node_id> --clear-next-actions --next-action "..." --no-build',
+    "research-cockpit work record --root <root>{scope} --file record.yaml --json --compact",
 ]
 GLOBAL_NEXT_ACTION_EXAMPLE_TEMPLATES = [
-    "research-cockpit sync-focus-actions --root <root> --from-node <node_id> --no-build",
-    'research-cockpit update-suggestion-state --root <root> --id <suggestion_id> --state completed --reason "..." --no-build',
+    "research-cockpit coord assign --root <root> --file coord_assign.yaml --json --compact",
 ]
 MUTATION_COMMAND_SKELETON_TEMPLATES = [
     "research-cockpit context --root <root> --id <node_id> --view execution --compact --json",
-    'research-cockpit update-node-fields --root <root>{scope} --id <node_id> --question "..." --tag <tag> --no-build',
-    "research-cockpit apply-graph-plan --root <root>{scope} --file graph_update.yaml --dry-run --json --show-diff",
-    "research-cockpit create-workstream --root <root>{scope} --file workstream.yaml --dry-run --json --show-diff",
-    "research-cockpit create-run --root <root>{scope} --id <run_id> --experiment <experiment_id> --status running --start-experiment --json --compact --no-build",
-    "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --json --compact --no-build",
-    "research-cockpit complete-run --root <root>{scope} --file closeout.yaml --json --compact --no-build",
+    "research-cockpit work start --root <root>{scope} --file work_start.yaml --json --compact",
+    "research-cockpit work record --root <root>{scope} --file record.yaml --json --compact",
+    "research-cockpit work close --root <root>{scope} --file closeout.yaml --json --compact",
+]
+ASSIGNMENT_START_COMMAND_SKELETON_TEMPLATES = [
+    "research-cockpit work claim --root <root>{scope} --agent <agent_id> --operation-id <operation_id> --return-packet --json --compact",
+    "research-cockpit work start --root <root>{scope} --file work_start.yaml --json --compact",
 ]
 GLOBAL_COMMAND_SKELETON_PREFIX: list[str] = []
 GLOBAL_COMMAND_SKELETON_SUFFIX: list[str] = []
 BATCH_EXAMPLE_TEMPLATES = {
     "findings": [
-        "research-cockpit complete-run --root <root>{scope} --file closeout.yaml --json --compact --no-build",
+        "research-cockpit work record --root <root>{scope} --file record.yaml --json --compact",
     ],
     "artifacts": [
-        "research-cockpit ingest-artifact --root <root>{scope} --node <experiment_id> --from <worktree_output_dir> --run-id <run_id> --agent <agent_id> --json --compact --no-build",
+        "research-cockpit work record --root <root>{scope} --file record.yaml --json --compact",
     ],
     "runs": [
-        "research-cockpit create-run --root <root>{scope} --id <run_id> --experiment <experiment_id> --status running --start-experiment --json --compact --no-build",
-        "research-cockpit update-run --root <root>{scope} --id <run_id> --status running --progress-file artifacts/<experiment_id>/<run_id>/progress.json --no-build",
-        "research-cockpit complete-run --root <root>{scope} --file closeout.yaml --json --compact --no-build",
+        "research-cockpit work start --root <root>{scope} --file work_start.yaml --json --compact",
+        "research-cockpit work record --root <root>{scope} --file record.yaml --json --compact",
+        "research-cockpit work close --root <root>{scope} --file closeout.yaml --json --compact",
     ],
     "gates": [
-        'research-cockpit record-gate-result --root <root>{scope} --id <gate_id> --experiment <experiment_id> --run <run_id> --type preflight --passed false --preflight-json "{{}}" --fatal-json "{{}}" --next-allowed-action full_run --json --compact --no-build',
+        "research-cockpit work record --root <root>{scope} --file record.yaml --json --compact",
     ],
 }
 
@@ -256,13 +254,29 @@ def _mutation_guidance(
         next_action_examples.extend(_render_scoped_templates(ASSIGNMENT_CURSOR_EXAMPLE_TEMPLATES, assignment_flag))
     else:
         next_action_examples.extend(GLOBAL_NEXT_ACTION_EXAMPLE_TEMPLATES)
-    command_skeletons = _render_scoped_templates(MUTATION_COMMAND_SKELETON_TEMPLATES, assignment_flag)
-    if not assignment_id:
-        command_skeletons = [*GLOBAL_COMMAND_SKELETON_PREFIX, *command_skeletons, *GLOBAL_COMMAND_SKELETON_SUFFIX]
-    batch_examples = {
-        name: _render_scoped_templates(templates, assignment_flag)
-        for name, templates in BATCH_EXAMPLE_TEMPLATES.items()
-    }
+    command_skeletons: list[str] = []
+    for template in MUTATION_COMMAND_SKELETON_TEMPLATES:
+        if assignment_id and "research-cockpit work start " in template:
+            command_skeletons.extend(
+                _render_scoped_templates(ASSIGNMENT_START_COMMAND_SKELETON_TEMPLATES, assignment_flag)
+            )
+        else:
+            command_skeletons.extend(_render_scoped_templates([template], assignment_flag))
+    if assignment_id:
+        batch_examples = {
+            name: _render_scoped_templates(templates, assignment_flag)
+            for name, templates in BATCH_EXAMPLE_TEMPLATES.items()
+        }
+        batch_examples["runs"] = [command for command in batch_examples["runs"] if "work start" not in command]
+        batch_examples["runs"].insert(0, _render_scoped_templates(ASSIGNMENT_START_COMMAND_SKELETON_TEMPLATES[1:], assignment_flag)[0])
+    else:
+        command_skeletons = [
+            "research-cockpit context --root <root> --id <node_id> --view execution --compact --json",
+            "research-cockpit coord overview --root <root> --json --compact --limit 20",
+            "research-cockpit coord assign --root <root> --file coord_assign.yaml --json --compact",
+            "research-cockpit coord decide --root <root> --file coord_decide.yaml --json --compact",
+        ]
+        batch_examples = {name: [] for name in BATCH_EXAMPLE_TEMPLATES}
     batch_examples["next_actions"] = next_action_examples
 
     pause_candidates: list[str] = []
@@ -276,15 +290,15 @@ def _mutation_guidance(
         "current_focus_node": focus_node_id,
         "current_best_option": current_best_option,
         "pause_candidate_options": sorted(pause_candidates),
-        "batching": "Run known low-risk mutations directly and sequentially with --no-build. Use dry-run for high-risk or file-based batch changes. Accept compact results with verified=true and additional_verification_required=false; otherwise verify only changed scope. Full validate/build/smoke belongs to the coordinator or milestone handoff.",
+        "batching": "Use one canonical role request per lifecycle transition. Reuse internally verified receipts without extra validation; run changed-scope diagnostics only when the receipt requires them. A coordinator runs milestone handoff once through coord handoff.",
         "multi_agent_batch_mode": {
-            "default": "Agents mutate only the canonical root sequentially. Compact writes with verified=true and additional_verification_required=false are internally verified; only other writes need changed-scope verification. Full validate/build/smoke belongs to a coordinator or milestone handoff.",
+            "default": "Agents compute in parallel and submit role-facade requests to the canonical root. Runtime locks serialize commits, leases reject conflicting ownership, and internally verified receipts require no follow-up command. A coordinator runs milestone handoff once through coord handoff.",
             "rules": [
-                "Do not parallelize mutating commands against the same data root.",
-                "Use commands --json --compact --name <command> only when a command or flag is unknown; do not rediscover the catalog every turn.",
-                "Use dry-run only for risky batch input or when a preview is needed.",
-                "Read verified and additional_verification_required before running any changed-scope check.",
-                "On mutation conflict, reread compact context and retry the stale command.",
+                "Parallelize compute across assignments; let runtime locks serialize canonical-root commits and handle explicit lease or revision conflicts.",
+                "Use commands --role <role> --name <command> --json --compact only when one operation is unknown.",
+                "Use maintenance dry-run defaults before explicitly setting execute: true.",
+                "Read verification.status and additional_verification_required before running a changed-scope diagnostic.",
+                "On mutation conflict, reopen the assignment packet and retry with a new operation_id.",
             ],
             "finish_commands": [],
             "worker_verify_commands": BATCH_WORKER_VERIFY_COMMANDS,

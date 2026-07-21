@@ -6,7 +6,7 @@
 
 ## 状态
 
-Implemented。T0-T14 已完成；本文保留初始证据、任务拆分、验收标准和最终验证记录。
+Implemented historical plan。T0-T14 已完成；0.3.0 role facade 已取代其中的旧 operational recipes，当前流程以 `SKILL.md`、`capabilities/` 和 `docs/migrations/0.3.0-cli-cutover.md` 为准。
 
 ## 初始输入与证据边界
 

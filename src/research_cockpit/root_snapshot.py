@@ -13,7 +13,11 @@ from research_cockpit.model import (
     validate_cockpit,
     validate_current_state,
 )
-from research_cockpit.validation_index import is_index_schema_compatible, load_validation_index
+from research_cockpit.validation_index import (
+    file_signature,
+    is_index_schema_compatible,
+    load_validation_index,
+)
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,89 @@ def _selected_node_ids(
     for candidate_id in candidate_ids:
         add(str(candidate_id))
     return selected
+
+
+def indexed_root_snapshot_source(
+    root: Path,
+    *,
+    node_id: str,
+    validation_index: dict[str, Any],
+) -> dict[str, Any]:
+    """Return bounded source signatures without parsing indexed graph YAML."""
+
+    rows = validation_index.get("nodes", {}) or {}
+    if node_id not in rows:
+        raise ValueError(f"Node does not exist: {node_id}")
+    current_path = root / "current_state.yaml"
+    current_data = load_yaml(current_path)
+    current = current_data if isinstance(current_data, dict) else {}
+    current_seed_ids = [
+        str(current.get(field) or "")
+        for field in (
+            "current_focus_node",
+            "current_option",
+            "current_problem",
+            "current_stage",
+        )
+        if current.get(field)
+    ]
+    selected = _selected_node_ids(
+        validation_index,
+        node_id,
+        additional_seed_ids=current_seed_ids,
+    )
+
+    def path_signature(relative_path: str) -> dict[str, Any] | None:
+        path = root / relative_path
+        return file_signature(path) if path.is_file() else None
+
+    node_sources: dict[str, Any] = {}
+    for selected_id in selected:
+        row = rows.get(selected_id, {}) or {}
+        relative_path = str(row.get("file") or "")
+        node_sources[selected_id] = {
+            "index_row": row,
+            "actual_file_signature": path_signature(relative_path) if relative_path else None,
+        }
+
+    target_type = str(rows.get(node_id, {}).get("type") or "")
+    sidecar_sources: dict[str, Any] = {}
+    if target_type == "experiment":
+        for rows_key, by_experiment_key, file_key in (
+            ("runs", "runs_by_experiment", "file"),
+            ("gate_results", "gate_results_by_experiment", "record_file"),
+        ):
+            indexed_rows = validation_index.get(rows_key, {}) or {}
+            sources: dict[str, Any] = {}
+            for record_id in (
+                validation_index.get(by_experiment_key, {}) or {}
+            ).get(node_id, []) or []:
+                row = indexed_rows.get(str(record_id), {}) or {}
+                relative_path = str(row.get(file_key) or "")
+                sources[str(record_id)] = {
+                    "index_row": row,
+                    "actual_file_signature": (
+                        path_signature(relative_path) if relative_path else None
+                    ),
+                }
+            sidecar_sources[rows_key] = sources
+
+    edges = validation_index.get("explicit_edges", {}) or {}
+    edges_path = str(edges.get("file") or "graph/edges.yaml")
+    return {
+        "current_state": {
+            "value": current,
+            "actual_file_signature": (
+                file_signature(current_path) if current_path.is_file() else None
+            ),
+        },
+        "nodes": node_sources,
+        "explicit_edges": {
+            "index_row": edges,
+            "actual_file_signature": path_signature(edges_path),
+        },
+        "sidecars": sidecar_sources,
+    }
 
 
 def _indexed_sidecar_records(
@@ -209,6 +296,20 @@ def _indexed_snapshot(root: Path, node_id: str, index: dict[str, Any]) -> RootSn
         loaded_node_ids=frozenset(loaded_node_ids),
     )
 
+
+def load_indexed_root_snapshot(
+    root: Path,
+    *,
+    node_id: str,
+    validation_index: dict[str, Any] | None = None,
+) -> RootSnapshot:
+    index = validation_index if validation_index is not None else load_validation_index(root)
+    if not is_index_schema_compatible(index):
+        raise RuntimeError("validation_index_missing_or_incompatible")
+    assert index is not None
+    return _indexed_snapshot(root, node_id, index)
+
+
 def load_root_snapshot(root: Path, *, node_id: str, compact: bool) -> RootSnapshot:
     if compact:
         index = load_validation_index(root)
@@ -216,7 +317,11 @@ def load_root_snapshot(root: Path, *, node_id: str, compact: bool) -> RootSnapsh
             fallback_reason = "validation_index_unreadable"
         elif is_index_schema_compatible(index):
             try:
-                return _indexed_snapshot(root, node_id, index)
+                return load_indexed_root_snapshot(
+                    root,
+                    node_id=node_id,
+                    validation_index=index,
+                )
             except RuntimeError as exc:
                 fallback_reason = str(exc)
         else:

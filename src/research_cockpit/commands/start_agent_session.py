@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import hashlib
 from pathlib import Path
 import re
 import secrets
@@ -20,6 +21,7 @@ from research_cockpit.agent_sessions import (
     worktree_label,
 )
 from research_cockpit.commands._runtime import (
+    CommandState,
     dry_run_preflight_result,
     emit_json,
     finish_mutation,
@@ -43,7 +45,7 @@ from research_cockpit.model import (
 )
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.paths import default_data_root
-from research_cockpit.storage import find_node_file
+from research_cockpit.storage import find_node_file, save_text
 
 ROOT = default_data_root()
 IDENTITY_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
@@ -91,6 +93,99 @@ def _run_git_worktree_add(command: list[str]) -> None:
     if completed.returncode != 0:
         message = completed.stderr.strip() or completed.stdout.strip() or "git worktree add failed"
         raise RuntimeError(message)
+
+
+def _existing_worktree_matches(repo_root: Path, worktree: Path, branch: str) -> bool:
+    try:
+        completed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "worktree",
+                "list",
+                "--porcelain",
+                "-z",
+            ],
+            text=True,
+            capture_output=True,
+        )
+    except OSError:
+        return False
+    if completed.returncode != 0:
+        return False
+    expected_path = worktree.resolve(strict=False)
+    expected_branch = branch if branch.startswith("refs/") else f"refs/heads/{branch}"
+    row: dict[str, str] = {}
+    for field in completed.stdout.split("\0"):
+        if not field:
+            if row:
+                candidate = row.get("worktree")
+                if candidate and Path(candidate).resolve(strict=False) == expected_path:
+                    return row.get("branch") == expected_branch
+                row = {}
+            continue
+        key, _, value = field.partition(" ")
+        row[key] = value
+    if row:
+        candidate = row.get("worktree")
+        if candidate and Path(candidate).resolve(strict=False) == expected_path:
+            return row.get("branch") == expected_branch
+    return False
+
+
+def _worktree_recovery_marker(
+    root: Path,
+    operation_request: dict[str, Any] | None,
+    *,
+    assignment_id: str,
+    branch: str,
+    worktree: Path,
+) -> tuple[Path, dict[str, str]] | None:
+    if not isinstance(operation_request, dict):
+        return None
+    required = {
+        "scope": operation_request.get("scope"),
+        "operation_id": operation_request.get("operation_id"),
+        "request_hash": operation_request.get("request_hash"),
+        "operation": operation_request.get("operation"),
+    }
+    if (
+        required["scope"] != "coordinator"
+        or required["operation"] != "coord assign"
+        or not all(isinstance(value, str) and value for value in required.values())
+    ):
+        return None
+    marker_key = hashlib.sha256(
+        f"{required['scope']}\0{required['operation_id']}".encode("utf-8")
+    ).hexdigest()
+    payload = {
+        "schema_version": "worktree_recovery_v1",
+        **required,
+        "assignment_id": assignment_id,
+        "branch": branch,
+        "worktree": str(worktree.resolve(strict=False)),
+    }
+    path = root / "dashboards" / "pending_operations" / f"{marker_key}.json"
+    return path, payload
+
+
+def _recovery_marker_matches(marker: tuple[Path, dict[str, str]] | None) -> bool:
+    if marker is None:
+        return False
+    path, expected = marker
+    try:
+        stored = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return False
+    return stored == expected
+
+
+def _remove_recovery_marker(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _command_plan_entry(command: list[str], *, stdin: str | None = None) -> dict[str, Any]:
@@ -233,7 +328,8 @@ def _load_existing_record(path: Path) -> dict[str, Any] | None:
 def _startup_command_args(root: Path, assignment_id: str) -> list[str]:
     return [
         "research-cockpit",
-        "agent-session-context",
+        "work",
+        "open",
         "--root",
         str(root.resolve()),
         "--assignment",
@@ -311,19 +407,33 @@ def _build_assignment_data(
     today_text: str,
 ) -> dict[str, Any]:
     assignment_data = dict(before_assignment or {})
+    allowed_subtree = (
+        dict(assignment_data["allowed_subtree"])
+        if isinstance(assignment_data.get("allowed_subtree"), dict)
+        else {}
+    )
+    allowed_subtree.update({"root": option_id, "policy": "descendants_only"})
+    worktree = (
+        dict(assignment_data["worktree"])
+        if isinstance(assignment_data.get("worktree"), dict)
+        else {}
+    )
+    worktree.update(
+        {
+            "branch": branch,
+            "label": worktree_label(resolved_worktree),
+            "session_id": session_id,
+        }
+    )
     assignment_data.update({
         "assignment_id": assignment_id,
         "agent_id": agent_id,
         "status": "active",
         "root_node": option_id,
         "current_node": assignment_data.get("current_node") or option_id,
-        "allowed_subtree": {"root": option_id, "policy": "descendants_only"},
+        "allowed_subtree": allowed_subtree,
         "objective": objective,
-        "worktree": {
-            "branch": branch,
-            "label": worktree_label(resolved_worktree),
-            "session_id": session_id,
-        },
+        "worktree": worktree,
         "created_at": assignment_data.get("created_at") or today_text,
         "updated_at": today_text,
     })
@@ -418,11 +528,16 @@ def start_agent_session(
     show_diff: bool = False,
     sparse: bool = False,
     sparse_profile: str | None = None,
+    interaction_override: dict[str, Any] | None = None,
+    operation_request: dict[str, Any] | None = None,
+    assignment_overrides: dict[str, Any] | None = None,
+    preloaded_state: CommandState | None = None,
+    claim_option_workstream: bool = True,
 ) -> dict[str, Any]:
     requested_agent_id = agent_id
     requested_assignment_id = assignment_id
     reused_assignment_id = False
-    state = load_validated_state(root)
+    state = preloaded_state or load_validated_state(root)
     nodes = state.nodes
     if option_id not in nodes:
         raise ValueError(f"Option node does not exist: {option_id}")
@@ -437,8 +552,6 @@ def start_agent_session(
         raise ValueError("--sparse-profile requires --sparse")
     if sparse and not dry_run:
         raise ValueError("--sparse currently provides dry-run command planning only; pass --dry-run --json")
-    if create_worktree and resolved_worktree.exists():
-        raise ValueError(f"Worktree path already exists: {resolved_worktree}")
 
     option_path = find_node_file(root, option_id)
     data = load_yaml(option_path)
@@ -467,30 +580,54 @@ def start_agent_session(
         agent_id=agent_id,
         assignment_id=assignment_id,
     )
-    if existing_owner and existing_owner != agent_id and existing_status in ACTIVE_WORKSTREAM_STATUSES and not force:
+    if claim_option_workstream and existing_owner and existing_owner != agent_id and existing_status in ACTIVE_WORKSTREAM_STATUSES and not force:
         raise ValueError(
             f"{option_id} is already claimed by {existing_owner} with status {existing_status}; use --force to override"
         )
 
     today_text = today()
-    session_id = existing.get("session_id") if existing_owner == agent_id else None
-    report_to_problem = existing.get("report_to_problem") or nearest_problem_id(nodes, option_id)
-    data["agent_workstream"] = {
-        key: value
-        for key, value in {
-            "session_id": session_id or stable_session_id(agent_id, option_id),
-            "owner": agent_id,
-            "status": "in_progress",
-            "objective": objective,
-            "git_branch": branch,
-            "worktree_label": worktree_label(resolved_worktree),
-            "report_to_problem": report_to_problem,
-            "started_at": existing.get("started_at") if existing_owner == agent_id else today_text,
-            "updated_at": today_text,
-        }.items()
-        if value not in (None, "")
-    }
-    data["updated_at"] = today_text
+    if claim_option_workstream:
+        session_id = existing.get("session_id") if existing_owner == agent_id else None
+        report_to_problem = existing.get("report_to_problem") or nearest_problem_id(nodes, option_id)
+        workstream_data = copy.deepcopy(existing)
+        workstream_data.update({
+            key: value
+            for key, value in {
+                "session_id": session_id or stable_session_id(agent_id, option_id),
+                "owner": agent_id,
+                "status": "in_progress",
+                "objective": objective,
+                "git_branch": branch,
+                "worktree_label": worktree_label(resolved_worktree),
+                "report_to_problem": report_to_problem,
+                "started_at": existing.get("started_at") if existing_owner == agent_id else today_text,
+                "updated_at": today_text,
+            }.items()
+            if value not in (None, "")
+        })
+        data["agent_workstream"] = workstream_data
+        data["updated_at"] = today_text
+    else:
+        session_id = stable_session_id(agent_id, option_id)
+        workstream_data = copy.deepcopy(existing)
+        workstream_data["session_id"] = session_id
+        data["agent_workstream"] = workstream_data
+
+    marker = _worktree_recovery_marker(
+        root,
+        operation_request,
+        assignment_id=assignment_id,
+        branch=branch,
+        worktree=resolved_worktree,
+    )
+    resume_existing_worktree = False
+    if create_worktree and resolved_worktree.exists():
+        if not (
+            _recovery_marker_matches(marker)
+            and _existing_worktree_matches(repo_root, resolved_worktree, branch)
+        ):
+            raise ValueError(f"Worktree path already exists: {resolved_worktree}")
+        resume_existing_worktree = True
 
     agent_path = _agent_path(root, agent_id)
     before_agent = _load_existing_record(agent_path)
@@ -528,6 +665,8 @@ def start_agent_session(
         session_id=session_id,
         today_text=today_text,
     )
+    if assignment_overrides:
+        assignment_data.update(assignment_overrides)
 
     candidate = dict(nodes)
     candidate[option_id] = ResearchNode.from_dict(data)
@@ -563,11 +702,13 @@ def start_agent_session(
         if sparse_worktree is not None
         else _git_worktree_command(repo_root, branch, resolved_worktree, base)
     )
-    changes = [
-        (option_path, before_data, data),
+    changes = []
+    if claim_option_workstream:
+        changes.append((option_path, before_data, data))
+    changes.extend([
         (agent_path, before_agent, agent_data),
         (assignment_path, before_assignment, assignment_data),
-    ]
+    ])
     if previous_agent_path and previous_agent_data and before_previous_agent is not None:
         changes.append((previous_agent_path, before_previous_agent, previous_agent_data))
     result = _build_start_session_result(
@@ -612,14 +753,26 @@ def start_agent_session(
 
     if create_worktree:
         preflight_mutation(root)
-        _run_git_worktree_add(git_command)
-        result["created_worktree"] = True
+        if marker is not None:
+            save_text(
+                marker[0],
+                json.dumps(marker[1], ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            )
+        try:
+            if not resume_existing_worktree:
+                _run_git_worktree_add(git_command)
+        except BaseException:
+            if marker is not None:
+                _remove_recovery_marker(marker[0])
+            raise
+        result["created_worktree"] = not resume_existing_worktree
+        result["reused_worktree"] = resume_existing_worktree
 
     try:
-        finish_mutation(
+        transaction = finish_mutation(
             root,
             changes,
-            interaction={
+            interaction=interaction_override or {
                 "kind": "start_agent_session",
                 "actor": agent_id,
                 "node_id": option_id,
@@ -643,42 +796,34 @@ def start_agent_session(
                     "session_id": data["agent_workstream"]["session_id"],
                     "git_branch": branch,
                     "worktree_label": worktree_label(resolved_worktree),
-                    "created_worktree": create_worktree,
+                    "created_worktree": result["created_worktree"],
                 },
             },
             rebuild_dashboard=rebuild_dashboard,
+            operation_request=operation_request,
         )
     except MutationError as exc:
-        if result["created_worktree"]:
+        if create_worktree:
             payload = dict(exc.payload)
-            payload["created_worktree"] = True
+            payload["created_worktree"] = result["created_worktree"]
+            payload["reused_worktree"] = resume_existing_worktree
             payload["worktree"] = str(resolved_worktree)
             payload["git_command"] = git_command
             recovery = list(payload.get("recovery_commands", []))
             recovery.insert(
                 0,
-                script_command(
-                    "start_agent_session.py",
-                    "--root",
-                    str(root),
-                    "--option",
-                    option_id,
-                    "--agent",
-                    agent_id,
-                    "--assignment",
-                    assignment_id,
-                    "--objective",
-                    objective,
-                    "--branch",
-                    branch,
-                    "--worktree",
-                    str(resolved_worktree),
-                    "--no-build",
+                (
+                    "research-cockpit coord assign --root <data-root> "
+                    "--file <coord_assign.yaml> --json --compact"
                 ),
             )
             payload["recovery_commands"] = recovery
             raise MutationError(str(exc), payload) from exc
         raise
+    if operation_request is not None:
+        result["_operation_transaction"] = transaction
+    if marker is not None:
+        _remove_recovery_marker(marker[0])
     return result
 
 

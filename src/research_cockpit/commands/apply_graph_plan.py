@@ -113,7 +113,7 @@ class GraphPlanBuilder:
         validate_status(node_type, status)
         if node_type == "decision" and status == "accepted":
             raise ValueError(
-                "Use `research-cockpit accept-decision` to accept a decision so option/problem state stays synchronized."
+                "Use `research-cockpit coord decide --file <coord_decide.yaml>` so decision, option, and problem state stay synchronized."
             )
         if alias_from:
             self.normalized_statuses.append({
@@ -167,6 +167,7 @@ class GraphPlanBuilder:
                 updates["scalar_updates"],
                 updates["list_appends"],
                 updates["bool_updates"],
+                updates["metadata_updates"],
             ]
         ):
             raise ValueError(f"{owner}.fields must include at least one supported field")
@@ -180,6 +181,7 @@ class GraphPlanBuilder:
             scalar_updates=updates["scalar_updates"],
             list_appends=updates["list_appends"],
             bool_updates=updates["bool_updates"],
+            metadata_updates=updates["metadata_updates"],
         )
         data["updated_at"] = str(date.today())
         self.candidate[node_id] = ResearchNode.from_dict(data)
@@ -195,7 +197,7 @@ class GraphPlanBuilder:
         validate_status(node.type, status)
         if node.type == "decision" and status == "accepted":
             raise ValueError(
-                "Use `research-cockpit accept-decision` to accept a decision so option/problem state stays synchronized."
+                "Use `research-cockpit coord decide --file <coord_decide.yaml>` so decision, option, and problem state stay synchronized."
             )
         if alias_from:
             self.normalized_statuses.append({
@@ -257,6 +259,8 @@ def apply_graph_plan(
     show_diff: bool = False,
     assignment_id: str | None = None,
     coordinator: bool = False,
+    interaction_override: dict[str, Any] | None = None,
+    operation_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("Graph plan must be a mapping")
@@ -342,13 +346,13 @@ def apply_graph_plan(
         result["diff"] = yaml_change_diff([(path, before, after) for _, path, before, after in changes])
     if dry_run:
         return dry_run_preflight_result(root, result)
-    if not changed:
+    if not changed and operation_request is None:
         return result
 
-    finish_mutation(
+    transaction = finish_mutation(
         root,
         yaml_changes,
-        interaction={
+        interaction=interaction_override or {
             "kind": "apply_graph_plan",
             "actor": "researcher",
             "command": script_command("apply_graph_plan.py"),
@@ -359,7 +363,10 @@ def apply_graph_plan(
             },
         },
         rebuild_dashboard=rebuild_dashboard,
+        operation_request=operation_request,
     )
+    if operation_request is not None:
+        result["_operation_transaction"] = transaction
     return result
 
 

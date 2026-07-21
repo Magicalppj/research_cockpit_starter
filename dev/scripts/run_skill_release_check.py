@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from typing import Any
 
@@ -22,26 +23,48 @@ REQUIRED_MODULES = {
 }
 REQUIRED_PACKAGE_PATHS = (
     "SKILL.md",
-    "templates/launcher/README.md",
-    "templates/launcher/manual_run_checklist.md",
     "AGENTS.md",
     "README.md",
     "pyproject.toml",
     "requirements.txt",
+    "docs/command-interface.md",
+    "docs/migrations/0.3.0-cli-cutover.md",
+    "templates/launcher/README.md",
+    "templates/launcher/manual_run_checklist.md",
     "src/research_cockpit/model.py",
     "src/research_cockpit/execution_context.py",
     "src/research_cockpit/paths.py",
     "src/research_cockpit/command_registry.py",
+    "src/research_cockpit/role_contracts.py",
+    "src/research_cockpit/work_packets.py",
+    "src/research_cockpit/assignment_records.py",
+    "src/research_cockpit/coordinator_operations.py",
+    "src/research_cockpit/coordinator_decisions.py",
+    "src/research_cockpit/maintenance_actions.py",
     "src/research_cockpit/ui/app.py",
-    "src/research_cockpit/commands/agent_bootstrap.py",
     "src/research_cockpit/commands/skill_smoke_test.py",
     "src/research_cockpit/commands/list_agent_commands.py",
-    "src/research_cockpit/commands/claim_option.py",
-    "src/research_cockpit/commands/option_workstream_context.py",
-    "src/research_cockpit/commands/report_option_workstream.py",
-    "src/research_cockpit/commands/update_decision_checklist.py",
+    "src/research_cockpit/commands/work_open.py",
+    "src/research_cockpit/commands/work_start.py",
+    "src/research_cockpit/commands/work_record.py",
+    "src/research_cockpit/commands/work_close.py",
+    "src/research_cockpit/commands/review_open.py",
+    "src/research_cockpit/commands/review_report.py",
+    "src/research_cockpit/commands/coord_overview.py",
+    "src/research_cockpit/commands/coord_assign.py",
+    "src/research_cockpit/commands/coord_review.py",
+    "src/research_cockpit/commands/coord_decide.py",
+    "src/research_cockpit/commands/coord_handoff.py",
+    "src/research_cockpit/commands/maintenance_role_audit.py",
+    "src/research_cockpit/commands/maintenance_role_repair.py",
+    "src/research_cockpit/commands/maintenance_role_migrate.py",
+    "src/research_cockpit/commands/maintenance_role_compact.py",
     "examples/demo_research_cockpit/current_state.yaml",
     "templates/minimal_research_cockpit/current_state.yaml",
+    "capabilities/worker-loop.md",
+    "capabilities/reviewer-loop.md",
+    "capabilities/coordinator-loop.md",
+    "capabilities/maintainer-loop.md",
     "capabilities/graph-state.md",
     "capabilities/focus-context.md",
     "capabilities/maintenance.md",
@@ -145,6 +168,7 @@ def _run_command(
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     allowed = allowed_returncodes or {0}
+    started_at = time.perf_counter()
     try:
         command_env = (env or os.environ).copy()
         command_env["PYTHONIOENCODING"] = "utf-8"
@@ -168,6 +192,7 @@ def _run_command(
             "stdout_bytes": 0,
             "stderr_bytes": len(str(exc).encode("utf-8")),
             "json": None,
+            "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
         }
 
     stdout_raw = result.stdout or ""
@@ -187,6 +212,7 @@ def _run_command(
         "stdout_bytes": len(stdout_raw.encode("utf-8")),
         "stderr_bytes": len(stderr_raw.encode("utf-8")),
         "json": _try_json(stdout_raw),
+        "duration_ms": round((time.perf_counter() - started_at) * 1000, 3),
     }
 
 def _try_json(text: str | None) -> Any:
@@ -292,68 +318,153 @@ def public_scan_track(skill_path: Path) -> dict[str, Any]:
 
 
 def instruction_surface_track(skill_path: Path) -> dict[str, Any]:
-    skill_file = skill_path / "SKILL.md"
-    if not skill_file.is_file():
-        return _track(
-            "instruction_surface",
-            False,
-            summary={"missing": "SKILL.md"},
-        )
-
-    text = skill_file.read_text(encoding="utf-8", errors="replace")
-    required_routes = (
-        "graph-state.md",
-        "focus-context.md",
-        "node-management.md",
-        "experiment-cycle.md",
-        "experiment-tracking.md",
-        "decision-adr.md",
-        "ui-dashboard.md",
-        "integrations.md",
-        "maintenance.md",
-        "troubleshooting.md",
-    )
-    required_terms = (
-        "--view execution",
-        "--since <revision>",
-        "--start-experiment",
-        "internal_verify",
-        "worker_verify",
-        "run_closeout",
-        "existing_record_id",
-        "next_experiment",
-        "milestone_handoff",
-        "assignments/*.yaml",
-        "sequential",
-    )
-    line_count = len(text.splitlines())
-    byte_count = len(text.encode("utf-8"))
-    command_mentions = text.count("research-cockpit ")
-    missing_routes = [item for item in required_routes if item not in text]
-    missing_terms = [item for item in required_terms if item not in text]
-    incomplete_lines = [
-        {"line": index, "text": line}
-        for index, line in enumerate(text.splitlines(), start=1)
-        if line.strip() in {"-", "Use", "3. Read compact mutation fields"}
+    relative_paths = {
+        "root": "SKILL.md",
+        "worker": "capabilities/worker-loop.md",
+        "reviewer": "capabilities/reviewer-loop.md",
+        "coordinator": "capabilities/coordinator-loop.md",
+        "maintainer": "capabilities/maintainer-loop.md",
+    }
+    missing_playbooks = [
+        relative_path
+        for relative_path in relative_paths.values()
+        if not (skill_path / relative_path).is_file()
     ]
+    texts = {
+        role: (
+            (skill_path / relative_path).read_text(encoding="utf-8", errors="replace")
+            if (skill_path / relative_path).is_file()
+            else ""
+        )
+        for role, relative_path in relative_paths.items()
+    }
+
+    required_routes = (
+        "capabilities/worker-loop.md",
+        "capabilities/reviewer-loop.md",
+        "capabilities/coordinator-loop.md",
+        "capabilities/maintainer-loop.md",
+    )
+    required_terms = {
+        "root": (
+            "research-cockpit work open",
+            "commands --role <role> --name <command>",
+            "0.3.0 canonical role surface",
+        ),
+        "worker": (
+            "--since <revision>",
+            "internally_verified",
+            "evidence_inputs",
+        ),
+        "reviewer": (
+            "producer result revision",
+            "不重写 producer Evidence Bundle",
+        ),
+        "coordinator": (
+            "coord handoff",
+            "captured revision",
+        ),
+        "maintainer": (
+            "execute: false",
+            "bounded verification",
+        ),
+    }
+    missing_routes = [item for item in required_routes if item not in texts["root"]]
+    missing_terms = [
+        f"{role}:{term}"
+        for role, terms in required_terms.items()
+        for term in terms
+        if term not in texts[role]
+    ]
+
+    forbidden_by_role = {
+        "root": ("commands --json --compact --summary-only",),
+        "worker": (
+            "research-cockpit bootstrap",
+            "research-cockpit build",
+            "research-cockpit complete-run",
+            "research-cockpit ingest-artifact",
+            "research-cockpit set-cursor",
+            "commands --json --compact --summary-only",
+        ),
+        "reviewer": (
+            "research-cockpit create-run",
+            "research-cockpit complete-run",
+            "research-cockpit maintenance",
+            "commands --json --compact --summary-only",
+        ),
+        "coordinator": (
+            "research-cockpit start-agent-session",
+            "research-cockpit set-focus",
+            "research-cockpit promote-decision",
+            "commands --json --compact --summary-only",
+        ),
+        "maintainer": (
+            "research-cockpit compact-artifacts",
+            "research-cockpit maintenance-audit",
+        ),
+    }
+    forbidden_role_routes = [
+        f"{role}:{token}"
+        for role, tokens in forbidden_by_role.items()
+        for token in tokens
+        if token in texts[role]
+    ]
+    incomplete_lines = [
+        {"file": relative_paths[role], "line": index, "text": line}
+        for role, text_value in texts.items()
+        for index, line in enumerate(text_value.splitlines(), start=1)
+        if line.strip() == "-"
+    ]
+
+    role_bytes = {role: len(text_value.encode("utf-8")) for role, text_value in texts.items()}
+    role_estimated_tokens = {
+        role: (byte_count + 3) // 4
+        for role, byte_count in role_bytes.items()
+    }
+    root_role_bytes = {
+        role: role_bytes["root"] + role_bytes[role]
+        for role in ("worker", "reviewer", "coordinator", "maintainer")
+    }
+    root_worker_bytes = root_role_bytes["worker"]
+    root_lines = len(texts["root"].splitlines())
+    root_command_mentions = texts["root"].count("research-cockpit ")
     passed = (
-        line_count <= 120
-        and byte_count <= 16 * 1024
-        and command_mentions <= 15
+        not missing_playbooks
+        and role_bytes["root"] < 6 * 1024
+        and role_bytes["worker"] < 6 * 1024
+        and role_bytes["reviewer"] < 5 * 1024
+        and role_bytes["coordinator"] < 5 * 1024
+        and role_bytes["maintainer"] < 5 * 1024
+        and all(byte_count < 12 * 1024 for byte_count in root_role_bytes.values())
+        and root_lines <= 90
+        and root_command_mentions <= 5
         and not missing_routes
         and not missing_terms
+        and not forbidden_role_routes
         and not incomplete_lines
     )
     return _track(
         "instruction_surface",
         passed,
         summary={
-            "line_count": line_count,
-            "line_budget": 120,
-            "byte_count": byte_count,
-            "byte_budget": 16 * 1024,
-            "command_mentions": command_mentions,
-            "command_mention_budget": 15,
+            "root_bytes": role_bytes["root"],
+            "root_byte_budget": 6 * 1024,
+            "root_worker_bytes": root_worker_bytes,
+            "root_worker_estimated_tokens": (root_worker_bytes + 3) // 4,
+            "combined_byte_budget": 12 * 1024,
+            "combined_estimated_token_budget": 3 * 1024,
+            "root_role_bytes": root_role_bytes,
+            "role_bytes": role_bytes,
+            "role_estimated_tokens": role_estimated_tokens,
+            "missing_playbooks": missing_playbooks,
+            "forbidden_role_routes": forbidden_role_routes,
+            "line_count": root_lines,
+            "line_budget": 90,
+            "byte_count": role_bytes["root"],
+            "byte_budget": 6 * 1024,
+            "command_mentions": root_command_mentions,
+            "command_mention_budget": 5,
             "missing_routes": missing_routes,
             "missing_terms": missing_terms,
             "incomplete_lines": incomplete_lines,
@@ -422,7 +533,6 @@ def read_only_startup_track(skill_path: Path, python: str) -> dict[str, Any]:
     node_id = _current_option_id(skill_path) or "option_demo_prompt_refinement"
     commands = [
         _cli(python, "context", "--root", root, "--id", node_id, "--view", "execution", "--compact", "--json"),
-        _cli(python, "commands", "--json", "--compact", "--summary-only"),
     ]
     env = _package_env(skill_path)
     checks = [_run_command(command, cwd=skill_path, env=env) for command in commands]
@@ -448,53 +558,117 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
     root = _data_root(skill_path)
     node_id = _current_option_id(skill_path) or "option_demo_prompt_refinement"
     env = _package_env(skill_path)
-    checks = [
-        _run_command(
-            _cli(python, "commands", "--json", "--compact", "--name", "ingest-artifact"),
-            cwd=skill_path,
-            env=env,
-        ),
-        _run_command(
-            _cli(python, "commands", "--json", "--compact", "--name", "promote-artifact-record"),
-            cwd=skill_path,
-            env=env,
-        ),
+    manifest_names = (
+        ("worker", "work open"),
+        ("worker", "work record"),
+        ("worker", "work close"),
+        ("coordinator", "coord assign"),
+        ("coordinator", "coord decide"),
+        ("maintainer", "maintenance compact"),
+    )
+    manifest_checks = [
         _run_command(
             _cli(
                 python,
-                "context",
-                "--root",
-                root,
-                "--id",
-                node_id,
-                "--view",
-                "execution",
-                "--compact",
+                "commands",
+                "--role",
+                role,
+                "--name",
+                name,
                 "--json",
+                "--compact",
             ),
             cwd=skill_path,
             env=env,
+        )
+        for role, name in manifest_names
+    ]
+    context_check = _run_command(
+        _cli(
+            python,
+            "context",
+            "--root",
+            root,
+            "--id",
+            node_id,
+            "--view",
+            "execution",
+            "--compact",
+            "--json",
         ),
-        _run_command(_cli(python, "complete-run", "--print-schema"), cwd=skill_path, env=env),
-        _run_command(_cli(python, "ingest-artifact", "--help"), cwd=skill_path, env=env),
-        _run_command(_cli(python, "promote-artifact-record", "--help"), cwd=skill_path, env=env),
+        cwd=skill_path,
+        env=env,
+    )
+    schema_commands = (
+        ("work record", _cli(python, "work", "record", "--print-schema", "--compact")),
+        ("coord assign", _cli(python, "coord", "assign", "--print-schema", "--compact")),
+        ("coord decide", _cli(python, "coord", "decide", "--print-schema", "--compact")),
+        (
+            "maintenance compact",
+            _cli(python, "maintenance", "compact", "--print-schema", "--compact"),
+        ),
+        ("coord handoff", _cli(python, "coord", "handoff", "--print-schema", "--compact")),
+    )
+    schema_checks = [
+        _run_command(command, cwd=skill_path, env=env)
+        for _name, command in schema_commands
+    ]
+    removed_check = _run_command(
+        _cli(python, "ingest-artifact", "--help"),
+        cwd=skill_path,
+        env=env,
+        allowed_returncodes={2},
+    )
+    checks = [*manifest_checks, context_check, *schema_checks, removed_check]
+
+    rows: dict[str, dict[str, Any]] = {}
+    for (_role, name), check in zip(manifest_names, manifest_checks):
+        payload = check.get("json") if isinstance(check.get("json"), dict) else {}
+        command_rows = payload.get("commands", []) if isinstance(payload, dict) else []
+        rows[name] = (
+            command_rows[0]
+            if len(command_rows) == 1 and isinstance(command_rows[0], dict)
+            else {}
+        )
+    canonical_rows_present = all(
+        rows.get(name, {}).get("name") == name
+        and rows[name].get("surface") == "core"
+        and str(rows[name].get("command") or "").startswith("research-cockpit ")
+        for _role, name in manifest_names
+    )
+    manifest_help_missing = [
+        name
+        for _role, name in manifest_names
+        if not rows.get(name, {}).get("command")
+        or not isinstance(rows[name].get("supported_flags"), list)
+        or not rows[name].get("input_schema_version")
+        or not rows[name].get("output_schema_version")
     ]
 
-    ingest_payload = checks[0].get("json") if isinstance(checks[0].get("json"), dict) else {}
-    promote_payload = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
-    context_payload = checks[2].get("json") if isinstance(checks[2].get("json"), dict) else {}
-    ingest_rows = ingest_payload.get("commands", []) if isinstance(ingest_payload, dict) else []
-    promote_rows = promote_payload.get("commands", []) if isinstance(promote_payload, dict) else []
-    ingest_row = ingest_rows[0] if ingest_rows and isinstance(ingest_rows[0], dict) else {}
-    promote_row = promote_rows[0] if promote_rows and isinstance(promote_rows[0], dict) else {}
-
-    ingest_flags = set(ingest_row.get("supported_flags", []) or [])
-    promote_flags = set(promote_row.get("supported_flags", []) or [])
-    required_ingest_flags = {"--record-only", "--promote", "--promotion-reason"}
-    required_promote_flags = {"--promotion-reason"}
-    missing_flags = sorted(
-        {f"ingest-artifact:{flag}" for flag in required_ingest_flags - ingest_flags}
-        | {f"promote-artifact-record:{flag}" for flag in required_promote_flags - promote_flags}
+    context_payload = (
+        context_check.get("json")
+        if isinstance(context_check.get("json"), dict)
+        else {}
+    )
+    context_stdout_bytes = int(context_check.get("stdout_bytes", 0))
+    command_stdout_bytes = max(
+        (int(check.get("stdout_bytes", 0)) for check in manifest_checks),
+        default=0,
+    )
+    schema_text = "\n".join(check.get("stdout", "") for check in schema_checks)
+    schema_ok = all(
+        token in schema_text
+        for token in (
+            "work_record_v1",
+            "coord_assign_v1",
+            "coord_decide_v1",
+            "maintenance_action_v1",
+            "coord_handoff_v1",
+        )
+    )
+    removed_routes_rejected = (
+        removed_check.get("returncode") == 2
+        and "invalid choice" in removed_check.get("stderr", "")
     )
 
     public_paths = [
@@ -503,51 +677,34 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
         skill_path / "README.md",
         skill_path / "capabilities" / "experiment-cycle.md",
         skill_path / "capabilities" / "experiment-tracking.md",
+        skill_path / "docs" / "command-interface.md",
     ]
-    public_text = "\n".join(path.read_text(encoding="utf-8", errors="ignore") for path in public_paths)
-    structured_closeout_documented = (
-        "complete-run --root" in public_text
-        and "--file closeout.yaml" in public_text
-        and "existing_record_id" in public_text
-        and "next_experiment" in public_text
-        and "--start-experiment" in public_text
+    public_text = "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in public_paths
+        if path.is_file()
     )
-    promotion_examples_missing_reason: list[str] = []
-    for path in public_paths:
-        for line_number, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
-            if line.lstrip().startswith("research-cockpit promote-artifact-record") and "--promotion-reason" not in line:
-                promotion_examples_missing_reason.append(f"{path.name}:{line_number}")
-
-    context_stdout_bytes = int(checks[2].get("stdout_bytes", 0))
-    command_stdout_bytes = int(checks[0].get("stdout_bytes", 0))
-    context_schema_version = context_payload.get("schema_version")
-    artifact_default_mode = (
-        "record"
-        if "by default" in str(ingest_row.get("purpose") or "").lower()
-        else None
-    )
-    ingest_verification_mode = ingest_row.get("verification_mode")
-    ingest_worker_verify_commands = (
-        ingest_row.get("batch_policy", {}).get("worker_verify_commands", [])
-        if isinstance(ingest_row.get("batch_policy"), dict)
-        else []
-    )
-    schema_text = checks[3].get("stdout", "")
-    schema_ok = all(
-        token in schema_text
-        for token in ("run_closeout_v1", "existing_record_id", "experiment:", "next_experiment:")
+    structured_closeout_documented = all(
+        token in public_text
+        for token in (
+            "work start",
+            "work record",
+            "work close",
+            "work_close_v1",
+            "evidence_inputs",
+            "next_experiment",
+            "additional_verification_required",
+        )
     )
     budgets_ok = context_stdout_bytes <= 4 * 1024 and command_stdout_bytes <= 20 * 1024
     passed = (
         all(check["passed"] for check in checks)
-        and not missing_flags
-        and not promotion_examples_missing_reason
+        and canonical_rows_present
+        and not manifest_help_missing
         and structured_closeout_documented
-        and context_schema_version == "execution_context_v1"
-        and artifact_default_mode == "record"
-        and ingest_verification_mode == "internal_non_dry_run"
-        and ingest_worker_verify_commands == []
+        and context_payload.get("schema_version") == "execution_context_v1"
         and schema_ok
+        and removed_routes_rejected
         and budgets_ok
     )
     return _track(
@@ -555,18 +712,17 @@ def workflow_contract_track(skill_path: Path, python: str) -> dict[str, Any]:
         passed,
         checks=checks,
         summary={
-            "context_schema_version": context_schema_version,
+            "context_schema_version": context_payload.get("schema_version"),
             "context_stdout_bytes": context_stdout_bytes,
             "context_stdout_budget": 4 * 1024,
             "command_summary_stdout_bytes": command_stdout_bytes,
             "command_summary_stdout_budget": 20 * 1024,
-            "artifact_default_mode": artifact_default_mode,
-            "ingest_verification_mode": ingest_verification_mode,
-            "ingest_worker_verify_commands": ingest_worker_verify_commands,
-            "missing_flags": missing_flags,
+            "canonical_rows_present": canonical_rows_present,
+            "manifest_rows_present": canonical_rows_present,
+            "manifest_help_missing": manifest_help_missing,
             "structured_closeout_documented": structured_closeout_documented,
-            "closeout_schema_ok": schema_ok,
-            "promotion_examples_missing_reason": promotion_examples_missing_reason,
+            "canonical_schema_contracts": schema_ok,
+            "removed_routes_rejected": removed_routes_rejected,
         },
     )
 
@@ -591,49 +747,84 @@ def portable_copy_track(skill_path: Path, python: str, destination: Path) -> dic
 def isolated_mutation_track(skill_path: Path, python: str, destination: Path) -> dict[str, Any]:
     dependency = runtime_dependency_track(python)
     if not dependency["passed"]:
-        return _track("isolated_mutation", False, checks=[dependency], summary=dependency["summary"], stdout=dependency["stdout"])
+        return _track(
+            "isolated_mutation",
+            False,
+            checks=[dependency],
+            summary=dependency["summary"],
+            stdout=dependency["stdout"],
+        )
 
     source_before = _file_manifest(skill_path)
     copy_path = destination / "rc"
     _copy_skill_package(skill_path, copy_path)
     copy_before = _file_manifest(copy_path)
-    root = _data_root(copy_path)
-    commands = [
+    root = Path(_data_root(copy_path))
+    plan_path = destination / "coord_assign.json"
+    summary_text = "Canonical release check mutation."
+    plan_path.write_text(
+        json.dumps(
+            {
+                "schema_version": "coord_assign_v1",
+                "operation_id": f"op_release_check_{uuid.uuid4().hex}",
+                "action": "graph_plan",
+                "graph_plan": {
+                    "nodes": [],
+                    "updates": [
+                        {
+                            "id": "experiment_demo_prompt_refinement",
+                            "fields": {"summary": summary_text},
+                        }
+                    ],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    check = _run_command(
         _cli(
             python,
-            "record-finding",
+            "coord",
+            "assign",
             "--root",
-            root,
-            "--experiment",
-            "experiment_demo_prompt_refinement",
-            "--statement",
-            "Release check synthetic finding.",
-            "--confidence",
-            "medium",
-            "--outcome",
-            "mixed",
-            "--summary",
-            "Release check synthetic finding recorded in isolated copy.",
+            str(root),
+            "--file",
+            str(plan_path),
+            "--json",
+            "--compact",
         ),
-        _cli(python, "update-decision-evidence", "--root", root, "--id", "decision_demo_prompt_refinement"),
-        _cli(python, "validate", "--root", root),
-        _cli(python, "build", "--root", root),
-    ]
-    env = _package_env(copy_path)
-    checks = [_run_command(command, cwd=copy_path, env=env) for command in commands]
-    source_after = _file_manifest(skill_path)
-    copy_after = _file_manifest(copy_path)
-    copy_changed = _changed_files(copy_before, copy_after)
-    source_changed = source_before != source_after
+        cwd=copy_path,
+        env=_package_env(copy_path),
+    )
+    import yaml
+
+    node_path = root / "graph" / "nodes" / "experiment_demo_prompt_refinement.yaml"
+    node = yaml.safe_load(node_path.read_text(encoding="utf-8")) or {}
+    source_changed = source_before != _file_manifest(skill_path)
+    copy_changed = _changed_files(copy_before, _file_manifest(copy_path))
+    payload = check.get("json") if isinstance(check.get("json"), dict) else {}
+    internally_verified = (
+        payload.get("verification", {}).get("status") == "internally_verified"
+        and payload.get("verification", {}).get("additional_verification_required") is False
+    )
     return _track(
         "isolated_mutation",
-        all(check["passed"] for check in checks) and not source_changed and bool(copy_changed),
-        checks=checks,
+        (
+            check["passed"]
+            and not source_changed
+            and bool(copy_changed)
+            and node.get("summary") == summary_text
+            and internally_verified
+        ),
+        checks=[check],
         summary={
             "copy_path": str(copy_path),
             "source_changed": source_changed,
             "copy_changed_files": copy_changed[:40],
             "copy_changed_count": len(copy_changed),
+            "canonical_route": "coord assign",
+            "internally_verified": internally_verified,
         },
     )
 
@@ -641,30 +832,52 @@ def isolated_mutation_track(skill_path: Path, python: str, destination: Path) ->
 def decision_gate_track(skill_path: Path, python: str) -> dict[str, Any]:
     dependency = runtime_dependency_track(python)
     if not dependency["passed"]:
-        return _track("decision_gate", False, checks=[dependency], summary=dependency["summary"], stdout=dependency["stdout"])
+        return _track(
+            "decision_gate",
+            False,
+            checks=[dependency],
+            summary=dependency["summary"],
+            stdout=dependency["stdout"],
+        )
 
-    command = _cli(
-        python,
-        "check-decision-acceptance",
-        "--root",
-        _data_root(skill_path),
-        "--id",
-        "decision_demo_prompt_refinement",
-        "--json",
+    expected = (
+        "promote",
+        "refresh_evidence",
+        "update_checklist",
+        "accept",
+        "set_baseline",
     )
-    check = _run_command(command, cwd=skill_path, allowed_returncodes={0, 1}, env=_package_env(skill_path))
-    payload = check.get("json") if isinstance(check.get("json"), dict) else {}
-    valid_payload = isinstance(payload.get("ready"), bool)
-    expected_returncode = 0 if payload.get("ready") else 1
-    passed = check["passed"] and valid_payload and check["returncode"] == expected_returncode
+    checks: list[dict[str, Any]] = []
+    returned_actions: list[str] = []
+    schema_versions: set[str] = set()
+    for action in expected:
+        check = _run_command(
+            _cli(
+                python,
+                "coord",
+                "decide",
+                "--print-schema",
+                "--action",
+                action,
+                "--compact",
+            ),
+            cwd=skill_path,
+            env=_package_env(skill_path),
+        )
+        checks.append(check)
+        payload = check.get("json") if isinstance(check.get("json"), dict) else {}
+        if check["passed"] and payload.get("action") == action:
+            returned_actions.append(action)
+        if isinstance(payload.get("schema_version"), str):
+            schema_versions.add(payload["schema_version"])
+    passed = returned_actions == list(expected) and schema_versions == {"coord_decide_v1"}
     return _track(
         "decision_gate",
         passed,
-        checks=[check],
+        checks=checks,
         summary={
-            "ready": payload.get("ready"),
-            "blocking_failures": payload.get("blocking_failures", []),
-            "warnings": payload.get("warnings", []),
+            "schema_version": "coord_decide_v1" if schema_versions == {"coord_decide_v1"} else None,
+            "allowed_actions": returned_actions,
         },
     )
 

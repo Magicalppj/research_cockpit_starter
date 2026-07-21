@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shlex
 from typing import Any
 
 from research_cockpit.graph_core import (
@@ -98,6 +97,39 @@ def empty_effective_baseline() -> dict[str, Any]:
         "decision": None,
         "artifacts": [],
         "reason": "",
+    }
+
+
+def compact_effective_baseline(
+    effective: dict[str, Any],
+    *,
+    text_limit: int = 200,
+) -> dict[str, Any]:
+    """Return the stable baseline projection shared by indexes and Work Packets."""
+
+    def ref(value: Any) -> dict[str, Any] | None:
+        if not isinstance(value, dict) or not value.get("id"):
+            return None
+        return {
+            key: value[key]
+            for key in ("id", "type", "status")
+            if value.get(key) not in (None, "")
+        }
+
+    reason = str(effective.get("reason") or "").strip()
+    if len(reason) > text_limit:
+        reason = reason[: max(1, text_limit - 3)] + "..."
+    return {
+        "source_node_id": str(effective.get("source_node_id") or ""),
+        "source_kind": str(effective.get("source_kind") or "none"),
+        "option": ref(effective.get("option")),
+        "decision": ref(effective.get("decision")),
+        "artifacts": [
+            item
+            for item in (ref(value) for value in effective.get("artifacts", []) or [])
+            if item is not None
+        ][:20],
+        "reason": reason,
     }
 
 
@@ -408,10 +440,6 @@ def build_accepted_decision_rows(nodes: dict[str, ResearchNode]) -> list[dict[st
     return rows
 
 
-def _quote_command_value(value: str) -> str:
-    return shlex.quote(str(value))
-
-
 def build_set_baseline_command(
     node_id: str,
     option_id: str = "",
@@ -421,16 +449,8 @@ def build_set_baseline_command(
     reason: str = "",
     clear: bool = False,
 ) -> str:
-    parts = ["research-cockpit", "set-baseline", "--node", _quote_command_value(node_id)]
-    if clear:
-        parts.append("--clear")
-        return " ".join(parts)
-    if option_id:
-        parts.extend(["--option", _quote_command_value(option_id)])
-    if decision_id:
-        parts.extend(["--decision", _quote_command_value(decision_id)])
-    for artifact_id in artifacts or []:
-        parts.extend(["--artifact", _quote_command_value(artifact_id)])
-    if reason:
-        parts.extend(["--reason", _quote_command_value(reason)])
-    return " ".join(parts)
+    del node_id, option_id, decision_id, artifacts, reason, clear
+    return (
+        "research-cockpit coord decide --file <coord_decide.yaml> "
+        "--json --compact"
+    )

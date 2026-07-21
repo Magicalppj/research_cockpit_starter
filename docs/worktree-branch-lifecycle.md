@@ -1,75 +1,62 @@
 # Worktree And Branch Lifecycle
 
-Git worktrees are execution sandboxes for parallel agents. They are not long-term knowledge stores. Research Cockpit should preserve the research state and evidence needed to remove a worktree safely.
+Git worktrees isolate parallel code and experiment execution. They are disposable execution environments, while the canonical Research Cockpit root preserves assignment state, provenance, and selected evidence.
 
 ## Branch Classes
 
 | Branch class | Purpose | Lifecycle |
 | --- | --- | --- |
-| `main` | Stable baseline | Receives verified, general changes |
-| `codex/*` | Temporary task or experiment branch | Candidate for deletion after closeout, merge, or extraction |
-| `agent/*` | Assignment-scoped parallel agent work | Close when assignment ends |
-| `research/*` | Long-lived research direction | Keep when useful but not ready for main |
-| `archive/*` | Rare read-only branch preservation | Prefer git history and RC evidence first |
+| `main` | Stable baseline | Receives reviewed general changes |
+| `codex/*` | Temporary task or experiment | Delete after merge, extraction, or recorded discard |
+| `agent/*` | Assignment-scoped parallel work | Close when the assignment ends |
+| `research/*` | Deliberately retained research direction | Keep while the direction remains active |
+| `archive/*` | Exceptional read-only preservation | Prefer Git history and durable evidence first |
 
-## Worktree Closeout
+## Session Creation
 
-Before deleting a worktree:
-
-1. Identify the associated assignment, option, experiment, run, branch, and worktree label.
-2. Generate a read-only closeout plan:
+The coordinator creates the assignment/session record through one canonical request:
 
 ```sh
-research-cockpit worktree-closeout --root research_cockpit --repo . --worktree ../worktrees/<label> --classification discard_after_recording --dry-run --json
+research-cockpit coord assign --print-schema --action session
+research-cockpit coord assign --root <absolute-data-root> --file <session.yaml> --json --compact
 ```
 
-3. Read scoped context through `bootstrap --assignment`, `agent-session-context`, or `option-workstream-context`.
-4. Check active assignments and queued/running runs.
-5. Check active resource declarations.
-6. Check outer and nested repo dirty state.
-7. Classify the code changes:
-   - `merge_to_main`
-   - `preserve_as_research_branch`
-   - `extract_partial`
-   - `discard_after_recording`
-8. Ingest or link useful evidence.
-9. Record findings, decisions, baseline updates, or follow-up work.
-10. Move assignment cursors away from terminal nodes.
-11. Remove the worktree and temporary branch only after review.
+Use `session.create_worktree: true` for runtime-managed worktree creation. For a manually created sparse worktree, use `false` and pass its path. All agents still use the canonical main-checkout data root through absolute `--root` or `RESEARCH_COCKPIT_ROOT`.
 
-`worktree-closeout` is a planner only. It reports blockers, Research Cockpit updates still needed, and shell command drafts for human review; it does not delete worktrees, delete branches, merge branches, or edit YAML.
+## Assignment Closeout
+
+Before removing a worktree:
+
+1. Open the assignment with `work open` and verify its current lease, run, and required deliverables.
+2. Preserve final evidence through one `work close`; use `work record` only if evidence had to become durable earlier.
+3. Complete required review through `review open`, `review report`, and `coord review`.
+4. Record coordinator decisions or baselines through `coord decide` when applicable.
+5. Run `maintenance audit` to inspect worktree, branch, active-run, resource, nested-repository, and artifact blockers.
+6. Classify code as merge, retain as research, extract partially, or discard after recording.
+7. Perform Git merge, extraction, worktree removal, and branch deletion explicitly after review.
+
+```sh
+research-cockpit maintenance audit --root <absolute-data-root> --repo <repo-root> --json --compact
+```
+
+Research Cockpit reports state and cleanup candidates. It does not implicitly merge branches or delete worktrees, branches, or payload files.
 
 ## Branch Cleanup Rules
 
 - Do not delete a checked-out branch.
-- Do not delete an unmerged branch unless evidence and reusable code have been reviewed.
-- Do not force-delete by default. Prefer `git branch -d` for merged inactive branches.
-- Promote useful but unstable work from `codex/*` or `agent/*` to `research/*` rather than leaving it as an accidental temporary branch.
-- After batch branch cleanup, `git pack-refs --all --prune` can reduce local ref overhead.
+- Do not delete an unmerged branch until evidence and reusable code have been reviewed.
+- Prefer normal merged-branch deletion; force deletion requires explicit human judgment.
+- Move useful but intentionally unfinished work to `research/*` instead of retaining accidental temporary branches.
+- Treat repository maintenance such as ref packing as a separate operator action.
 
 ## Failed Experiments
 
-A negative result can still contain reusable work:
-
-- dataset builders
-- evaluation scripts
-- launcher fixes
-- visualization or review bundles
-- bug fixes
-- config improvements
-
-Record the negative finding first, then decide whether any code should be merged, extracted, or preserved on a `research/*` branch.
+A negative result can still produce reusable dataset builders, evaluators, launcher fixes, review bundles, configuration improvements, or bug fixes. Record the evidence-backed negative finding before deciding whether code should be merged, extracted, retained, or discarded.
 
 ## Nested Repositories
 
-Nested repositories must be audited explicitly. Do not assume the outer repository dirty state tells the full story. For nested repos, check:
+Audit nested repositories explicitly. Check their branch, dirty and untracked files, purpose alignment, and generated outputs; the outer repository state is not sufficient evidence.
 
-- current branch
-- dirty files
-- untracked files
-- whether the nested branch matches the outer worktree purpose
-- whether generated outputs are inside the nested repo
+## Data Boundary
 
-## Research Cockpit Boundary
-
-The canonical `research_cockpit/` root remains in the main checkout. Downstream agents should write to that root with `--root` or `RESEARCH_COCKPIT_ROOT`; they should not initialize or mutate a worktree-local cockpit root.
+Never initialize a worktree-local cockpit root for normal parallel work. Shared structured state belongs to the canonical root; worktree-local recovery data may enter it only through an explicit `maintenance migrate` action and a reviewed dry-run.

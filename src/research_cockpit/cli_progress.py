@@ -49,16 +49,27 @@ def emit_progress_event(
         payload["duration_ms"] = round(duration_ms, 3)
     if status:
         payload["status"] = status
-    print(
-        PROGRESS_PREFIX + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-        file=sys.stderr,
-        flush=True,
-    )
+    try:
+        print(
+            PROGRESS_PREFIX + json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            file=sys.stderr,
+            flush=True,
+        )
+    except Exception:
+        # Progress is observational and must never change command semantics.
+        return
+
+
+def _progress_stream_is_tty() -> bool:
+    try:
+        return bool(getattr(sys.stderr, "isatty", lambda: False)())
+    except Exception:
+        return False
 
 
 @contextmanager
 def progress_session(command: str, *, explicit: bool = False) -> Iterator[None]:
-    enabled = explicit or bool(getattr(sys.stderr, "isatty", lambda: False)())
+    enabled = explicit or _progress_stream_is_tty()
     state = ProgressState(enabled=enabled, command=command, started_at=time.perf_counter())
     token = _STATE.set(state)
     emit_progress_event("command", event="phase_start")

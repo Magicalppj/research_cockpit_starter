@@ -10,7 +10,9 @@ from research_cockpit.agent_state import (
     AgentRecord,
     AssignmentRecord,
     CoordinatorState,
+    assignment_contract_errors,
     load_agents,
+    load_assignment,
     load_assignments,
     load_coordinator_state,
 )
@@ -802,6 +804,52 @@ def _node_inside_assignment_scope(
     return node_id in topology.descendant_ids(root_node)
 
 
+def _assignment_dependency_errors(
+    assignments: dict[str, AssignmentRecord],
+) -> list[str]:
+    errors: list[str] = []
+    adjacency: dict[str, list[str]] = {}
+    for assignment_id, assignment in sorted(assignments.items()):
+        dependency_ids: list[str] = []
+        for dependency in assignment.dependencies:
+            dependency_id = str(dependency.get("assignment_id") or "")
+            if not dependency_id:
+                continue
+            if dependency_id not in assignments:
+                errors.append(
+                    f"{assignment_id}: dependency references missing assignment {dependency_id!r}"
+                )
+                continue
+            dependency_ids.append(dependency_id)
+        adjacency[assignment_id] = dependency_ids
+
+    state: dict[str, int] = {}
+    stack: list[str] = []
+    cycles: set[tuple[str, ...]] = set()
+
+    def visit(assignment_id: str) -> None:
+        state[assignment_id] = 1
+        stack.append(assignment_id)
+        for dependency_id in adjacency.get(assignment_id, []):
+            if state.get(dependency_id, 0) == 0:
+                visit(dependency_id)
+            elif state.get(dependency_id) == 1:
+                start = stack.index(dependency_id)
+                members = stack[start:]
+                first = min(range(len(members)), key=lambda index: members[index])
+                canonical = tuple([*members[first:], *members[:first]])
+                cycles.add(canonical)
+        stack.pop()
+        state[assignment_id] = 2
+
+    for assignment_id in sorted(adjacency):
+        if state.get(assignment_id, 0) == 0:
+            visit(assignment_id)
+    for cycle in sorted(cycles):
+        errors.append(f"dependency cycle detected: {' -> '.join([*cycle, cycle[0]])}")
+    return errors
+
+
 def validate_assignments(
     assignments: dict[str, AssignmentRecord],
     agents: dict[str, AgentRecord],
@@ -814,6 +862,7 @@ def validate_assignments(
     active_by_root: dict[str, list[str]] = {}
 
     for assignment in assignments.values():
+        errors.extend(assignment_contract_errors(assignment))
         if not assignment.assignment_id:
             errors.append("assignment has empty assignment_id")
         if assignment.status not in VALID_ASSIGNMENT_STATUSES:
@@ -821,9 +870,9 @@ def validate_assignments(
             errors.append(
                 f"{assignment.assignment_id}: invalid assignment status {assignment.status!r}; allowed: {allowed}"
             )
-        if not assignment.agent_id:
+        if not assignment.agent_id and assignment.status in {"active", "blocked"}:
             errors.append(f"{assignment.assignment_id}: agent_id is required")
-        elif assignment.agent_id not in agents:
+        elif assignment.agent_id and assignment.agent_id not in agents:
             errors.append(
                 f"{assignment.assignment_id}: agent_id references missing agent {assignment.agent_id!r}"
             )
@@ -891,6 +940,7 @@ def validate_assignments(
         errors.append(
             f"multiple active assignments claim root_node {root_node!r}: {', '.join(sorted(assignment_ids))}"
         )
+    errors.extend(_assignment_dependency_errors(assignments))
     return errors
 
 

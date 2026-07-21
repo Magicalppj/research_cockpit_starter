@@ -11,7 +11,7 @@ from research_cockpit.assignment_scope import AssignmentScopeError, resolve_assi
 from research_cockpit.commands._assignment_scope_cli import add_assignment_scope_args, emit_assignment_scope_error
 from research_cockpit.commands._runtime import compact_mutation_result, dry_run_preflight_result, emit_json, finish_mutation, load_validated_state, yaml_change_diff
 from research_cockpit.commands.record_finding import find_node_file
-from research_cockpit.model import ResearchNode, ValidationError, derive_focus_fields, load_yaml, script_command, validate_cockpit
+from research_cockpit.model import ResearchNode, ValidationError, derive_focus_fields, load_yaml, validate_cockpit
 from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
@@ -36,19 +36,28 @@ def _actions(value: Any) -> list[str]:
     return [str(item) for item in value if str(item).strip()]
 
 
-def _assignment_flag(assignment_id: str | None) -> str:
-    return f" --assignment {assignment_id}" if assignment_id else ""
-
-
-def _workstream_guidance(root: Path, node_id: str, *, assignment_id: str | None = None) -> dict[str, str]:
-    assignment_flag = _assignment_flag(assignment_id)
-    return {
-        "create_workstream": (
-            f"research-cockpit create-workstream --root {root}{assignment_flag} "
-            "--file workstream.yaml --dry-run --json --show-diff"
+def _workstream_guidance(
+    root: Path,
+    node_id: str,
+    *,
+    assignment_id: str | None = None,
+) -> dict[str, str]:
+    commands = {
+        "plan_graph": (
+            f"research-cockpit coord assign --root {root} "
+            "--file <coord_assign.yaml> --json --compact"
         ),
-        "inspect_node": f"research-cockpit node-context --root {root} --id {node_id} --json",
+        "inspect_node": (
+            f"research-cockpit context --root {root} --id {node_id} "
+            "--view execution --json --compact"
+        ),
     }
+    if assignment_id:
+        commands["close_assignment"] = (
+            f"research-cockpit work close --root {root} "
+            f"--assignment {assignment_id} --file <closeout.yaml> --json --compact"
+        )
+    return commands
 
 
 def _base_result(
@@ -141,10 +150,10 @@ def migrate_terminal_next_actions(
             node=node,
             actions=actions,
             dry_run=dry_run,
-            strategy="create_workstream_guidance",
+            strategy="coord_assign_guidance",
             guidance=(
-                "Use create-workstream for multi-step work, non-experiment nodes, "
-                "or terminal experiments that are not done."
+                "Use a coordinator graph plan for multi-step work, non-experiment "
+                "nodes, or terminal experiments that are not done."
             ),
             assignment_id=scope.assignment_id,
         )
@@ -162,9 +171,8 @@ def migrate_terminal_next_actions(
             assignment_id=scope.assignment_id,
         )
         result["recommended_commands"]["migrate_single_followup"] = (
-            f"research-cockpit migrate-terminal-next-actions --root {root}{_assignment_flag(scope.assignment_id)} --id {node.id} "
-            "--followup-id <followup_experiment_id> --title \"<follow-up title>\" "
-            "--dry-run --json --show-diff"
+            f"research-cockpit maintenance migrate --root {root} "
+            "--file <terminal_next_actions.yaml> --json --compact"
         )
         return result
 
@@ -239,11 +247,6 @@ def migrate_terminal_next_actions(
         },
         "recommended_commands": _workstream_guidance(root, node.id, assignment_id=scope.assignment_id),
     }
-    if scope.assignment_id:
-        result["recommended_commands"]["set_cursor"] = (
-            f"research-cockpit set-cursor --root {root} --assignment {scope.assignment_id} "
-            f"--node {followup_id} --no-build"
-        )
     if show_diff:
         result["diff"] = yaml_change_diff(changes)
     if dry_run:
@@ -256,7 +259,7 @@ def migrate_terminal_next_actions(
             "kind": "migrate_terminal_next_actions",
             "actor": "researcher",
             "node_id": node.id,
-            "command": f"{script_command('migrate_terminal_next_actions.py')} --id {node.id}",
+            "command": "research-cockpit maintenance migrate",
             "before": {"next_actions": actions},
             "after": {"followup_id": followup_id, "source_next_actions": []},
             "extra": {"set_focus": set_focus_to_created},

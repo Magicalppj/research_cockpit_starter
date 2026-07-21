@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+import stat
 import tempfile
 from typing import Any
 import yaml
@@ -17,6 +19,12 @@ from research_cockpit.interaction_log import (
     validate_interaction_append_target,
 )
 from research_cockpit.mutation_lock import MutationError, mutation_lock
+from research_cockpit.operation_receipts import (
+    OperationIdConflict,
+    operation_source_signature,
+    patch_operation_index,
+    replay_or_conflict,
+)
 from research_cockpit.storage import load_yaml, save_text
 
 
@@ -35,6 +43,7 @@ YamlChange = tuple[Path, dict[str, Any] | None, dict[str, Any]]
 TextChange = tuple[Path, str | None, str]
 ReadDependency = tuple[Path, bytes | None]
 ReadBefore = Callable[[Path], Any]
+CommitValidator = Callable[[], None]
 
 
 def patch_validation_index(root: Path, changed_paths: list[Path]) -> dict[str, Any]:
@@ -440,6 +449,77 @@ def _remove_staged_path(path: Path) -> None:
     else:
         path.unlink(missing_ok=True)
 
+
+def _lexists(path: Path) -> bool:
+    return os.path.lexists(path)
+
+
+def _is_link_like(path: Path, info: os.stat_result | None = None) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return stat.S_ISLNK((info or os.lstat(path)).st_mode) or bool(
+        is_junction and is_junction()
+    )
+
+
+def _staged_path_issues(root: Path, path: Path) -> list[str]:
+    root_path = root.resolve(strict=True)
+    candidate = path.absolute()
+    try:
+        relative = candidate.relative_to(root_path)
+    except ValueError:
+        return [f"staged move path escapes data root: {candidate}"]
+    issues: list[str] = []
+    current = root_path
+    for part in relative.parts:
+        current = current / part
+        if not _lexists(current):
+            continue
+        info = os.lstat(current)
+        if _is_link_like(current, info):
+            issues.append(f"staged move path contains a symlink or junction: {current}")
+            break
+    return issues
+
+
+def _staged_move_conflicts(
+    root: Path,
+    source: Path,
+    target: Path,
+    target_existed: bool,
+) -> list[str]:
+    conflicts = [
+        *_staged_path_issues(root, source),
+        *_staged_path_issues(root, target),
+    ]
+    if not _lexists(source):
+        conflicts.append(str(source))
+    else:
+        source_info = os.lstat(source)
+        if not stat.S_ISDIR(source_info.st_mode) or _is_link_like(source, source_info):
+            conflicts.append(f"staged move source is not a directory: {source}")
+    if _lexists(target) != target_existed:
+        conflicts.append(str(target))
+    return conflicts
+
+
+def _commit_staged_move(
+    root: Path,
+    source: Path,
+    target: Path,
+    target_existed: bool,
+) -> None:
+    conflicts = _staged_move_conflicts(root, source, target, target_existed)
+    if conflicts:
+        raise OSError("Unsafe staged move: " + "; ".join(conflicts))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    conflicts = _staged_move_conflicts(root, source, target, target_existed)
+    if conflicts:
+        raise OSError(
+            "Unsafe staged move after parent creation: " + "; ".join(conflicts)
+        )
+    source.replace(target)
+
+
 @progress_traced("apply_transaction")
 def execute_mutation_transaction(
     root: Path,
@@ -450,16 +530,47 @@ def execute_mutation_transaction(
     text_changes: list[tuple] | None = None,
     staged_moves: list[tuple[Path, Path]] | None = None,
     read_dependencies: list[tuple[Path, bytes | None]] | None = None,
+    operation_request: dict[str, Any] | None = None,
+    commit_validators: list[CommitValidator] | None = None,
 ) -> dict[str, Any]:
     if not interactions:
         raise ValueError("mutation transaction requires at least one interaction event")
     planned_yaml = _coerce_yaml_changes(yaml_changes)
     planned_text = _coerce_text_changes(text_changes)
     planned_reads = _coerce_read_dependencies(read_dependencies)
+    planned_commit_validators = list(commit_validators or [])
     planned_moves = [
-        (Path(source), Path(target), Path(target).exists())
+        (Path(source), Path(target), _lexists(Path(target)))
         for source, target in staged_moves or []
     ]
+    planned_interactions = deepcopy(interactions)
+    if operation_request is not None:
+        required = {
+            "scope",
+            "operation_id",
+            "request_hash",
+            "receipt",
+            "operation",
+            "assignment_id",
+        }
+        missing = sorted(required - set(operation_request))
+        if missing:
+            raise ValueError(
+                "operation_request is missing fields: " + ", ".join(missing)
+            )
+        if not isinstance(operation_request["receipt"], dict):
+            raise ValueError("operation_request.receipt must be a mapping")
+        first = planned_interactions[0]
+        extra = dict(first.get("extra") or {})
+        extra.update(
+            {
+                "operation_scope": str(operation_request["scope"]),
+                "operation_id": str(operation_request["operation_id"]),
+                "operation_request_hash": str(operation_request["request_hash"]),
+                "operation_receipt": deepcopy(operation_request["receipt"]),
+            }
+        )
+        first["extra"] = extra
     existing_move_targets = [str(target) for _, target, existed in planned_moves if existed]
     if existing_move_targets:
         raise ValueError(
@@ -473,9 +584,46 @@ def execute_mutation_transaction(
     ])
     written_files: list[str] = []
     backups: dict[Path, bytes | None] = {}
+    operation_event: dict[str, Any] | None = None
+    operation_signature_before: str | None = None
+    operation_signature_after: str | None = None
 
     with mutation_lock(root):
         ensure_interaction_log_valid(root)
+
+        if operation_request is not None:
+            try:
+                replay = replay_or_conflict(
+                    root,
+                    scope=str(operation_request["scope"]),
+                    operation_id=str(operation_request["operation_id"]),
+                    request_hash=str(operation_request["request_hash"]),
+                    operation=str(operation_request["operation"]),
+                    assignment_id=operation_request["assignment_id"],
+                )
+            except OperationIdConflict as exc:
+                raise MutationError(
+                    str(exc),
+                    {
+                        "ok": False,
+                        "status": "idempotency_conflict",
+                        "partial_success": False,
+                        "rolled_back": False,
+                        "written_files": [],
+                        "operation_receipt": exc.receipt,
+                    },
+                ) from exc
+            if replay is not None:
+                return {
+                    "ok": True,
+                    "status": "replayed",
+                    "partial_success": False,
+                    "rolled_back": False,
+                    "written_files": [],
+                    "interaction_count": 0,
+                    "replayed": True,
+                    "operation_receipt": replay,
+                }
 
         conflict_files = [
             *_conflicting_files(planned_yaml, _read_yaml_before),
@@ -483,10 +631,9 @@ def execute_mutation_transaction(
             *_conflicting_read_dependencies(planned_reads),
         ]
         for source, target, existed in planned_moves:
-            if not source.exists():
-                conflict_files.append(str(source))
-            if target.exists() != existed:
-                conflict_files.append(str(target))
+            conflict_files.extend(
+                _staged_move_conflicts(root, source, target, existed)
+            )
         if conflict_files:
             error = "Mutation conflict: truth-source file changed after command planning"
             raise MutationError(
@@ -506,22 +653,30 @@ def execute_mutation_transaction(
                 },
             )
 
+        for validator in planned_commit_validators:
+            validator()
+
         for path, _, _ in [*planned_yaml, *planned_text]:
             backups[path] = path.read_bytes() if path.exists() else None
         event_checkpoint = interaction_append_checkpoint(root)
+        if operation_request is not None:
+            operation_signature_before = operation_source_signature(root)
         try:
-            for path, _, after in planned_yaml:
-                _atomic_save_yaml(path, after)
-                written_files.append(str(path))
-            for path, _, after_text in planned_text:
-                save_text(path, after_text)
-                written_files.append(str(path))
-            for source, target, _ in planned_moves:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                source.replace(target)
-                written_files.append(str(target))
-            for interaction in interactions:
-                _append_interaction_log_unlocked(root, prevalidated=True, **interaction)
+            with progress_phase("commit"):
+                for path, _, after in planned_yaml:
+                    _atomic_save_yaml(path, after)
+                    written_files.append(str(path))
+                for path, _, after_text in planned_text:
+                    save_text(path, after_text)
+                    written_files.append(str(path))
+                for source, target, existed in planned_moves:
+                    _commit_staged_move(root, source, target, existed)
+                    written_files.append(str(target))
+                for interaction in planned_interactions:
+                    appended = _append_interaction_log_unlocked(
+                        root, prevalidated=True, **interaction
+                    )
+                    operation_event = operation_event or appended
         except Exception as exc:
             rollback_errors = restore_interaction_append_checkpoint(root, event_checkpoint)
             rollback_errors.extend(_restore_files(backups))
@@ -549,6 +704,8 @@ def execute_mutation_transaction(
                 payload["rollback_errors"] = rollback_errors
             raise MutationError(f"Mutation transaction failed; status={status}: {exc}", payload) from exc
 
+        if operation_request is not None:
+            operation_signature_after = operation_source_signature(root)
         if rebuild_dashboard:
             try:
                 from research_cockpit.commands.build_dashboard import build_dashboard
@@ -567,6 +724,24 @@ def execute_mutation_transaction(
                         "recovery_commands": [f"research-cockpit build --root {root}"],
                     },
                 ) from exc
+
+    operation_index_warning = ""
+    if operation_request is not None:
+        try:
+            if (
+                operation_event is None
+                or operation_signature_before is None
+                or operation_signature_after is None
+            ):
+                raise RuntimeError("operation index patch metadata was not captured")
+            patch_operation_index(
+                root,
+                event=operation_event,
+                source_signature_before=operation_signature_before,
+                source_signature_after=operation_signature_after,
+            )
+        except Exception as exc:
+            operation_index_warning = str(exc)
 
     if not rebuild_dashboard:
         changed_paths = [path for path, _, _ in [*planned_yaml, *planned_text]]
@@ -597,14 +772,20 @@ def execute_mutation_transaction(
                 },
             ) from exc
 
-    return {
+    result = {
         "ok": True,
         "status": "changed",
         "partial_success": False,
         "rolled_back": False,
         "written_files": written_files,
-        "interaction_count": len(interactions),
+        "interaction_count": len(planned_interactions),
     }
+    if operation_request is not None:
+        result["replayed"] = False
+        result["operation_receipt"] = deepcopy(operation_request["receipt"])
+    if operation_index_warning:
+        result["operation_index_warning"] = operation_index_warning
+    return result
 
 
 def finish_mutation(
@@ -614,11 +795,16 @@ def finish_mutation(
     interaction: dict[str, Any],
     rebuild_dashboard: bool,
     text_changes: list[tuple] | None = None,
-) -> None:
-    execute_mutation_transaction(
+    operation_request: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    event = deepcopy(interaction)
+    if operation_request is not None and operation_request.get("command"):
+        event["command"] = str(operation_request["command"])
+    return execute_mutation_transaction(
         root,
         yaml_changes,
-        interactions=[interaction],
+        interactions=[event],
         rebuild_dashboard=rebuild_dashboard,
         text_changes=text_changes,
+        operation_request=operation_request,
     )

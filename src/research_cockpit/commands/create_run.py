@@ -14,7 +14,6 @@ from research_cockpit.commands._runtime import (
     compact_mutation_result,
     dry_run_preflight_result,
     emit_json,
-    finish_mutation,
     load_targeted_state,
     safe_print,
     validate_mutation_candidate,
@@ -25,6 +24,7 @@ from research_cockpit.commands._runs import RUN_OPTIONAL_FIELDS, build_run_data,
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
 from research_cockpit.retention import load_mapping_argument
+from research_cockpit.mutation_runtime import execute_mutation_transaction
 from research_cockpit.model import (
     ResearchNode,
     RunRecord,
@@ -62,6 +62,10 @@ def create_run(
     show_diff: bool = False,
     assignment_id: str | None = None,
     coordinator: bool = False,
+    additional_yaml_changes: list[tuple] | None = None,
+    interaction_override: dict[str, Any] | None = None,
+    operation_request: dict[str, Any] | None = None,
+    run_extra_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     state = load_targeted_state(root, node_ids=[experiment_id])
     ensure_assignment_scope(
@@ -101,6 +105,15 @@ def create_run(
         resources=resources,
         output_retention=output_retention,
     )
+    if run_extra_fields:
+        protected = {"run_id", "status", "experiment_id", *RUN_OPTIONAL_FIELDS}
+        collisions = sorted(set(run_extra_fields) & protected)
+        if collisions:
+            raise ValueError(
+                "run_extra_fields cannot override run contract fields: "
+                + ", ".join(collisions)
+            )
+        data.update(copy.deepcopy(run_extra_fields))
     candidate_runs = dict(runs)
     candidate_runs[normalized_id] = RunRecord.from_dict(data)
     candidate_nodes = dict(state.nodes)
@@ -125,6 +138,7 @@ def create_run(
             candidate_nodes[experiment_id] = ResearchNode.from_dict(experiment_after)
             changes.append((experiment_path, experiment_before, experiment_after))
             experiment_status_changed = True
+    changes.extend(additional_yaml_changes or [])
 
     validate_mutation_candidate(
         root,
@@ -153,22 +167,29 @@ def create_run(
     if dry_run:
         return dry_run_preflight_result(root, result)
 
-    finish_mutation(
+    interaction = interaction_override or {
+        "kind": "create_run",
+        "actor": "researcher",
+        "node_id": data["experiment_id"],
+        "command": f"{script_command('create_run.py')} --id {normalized_id} --experiment {data['experiment_id']}",
+        "after": {
+            key: data.get(key)
+            for key in ("run_id", "status", "experiment_id", *RUN_OPTIONAL_FIELDS)
+        },
+        "extra": {
+            "started_experiment": start_experiment,
+            "experiment_status_changed": experiment_status_changed,
+        },
+    }
+    transaction = execute_mutation_transaction(
         root,
         changes,
-        interaction={
-            "kind": "create_run",
-            "actor": "researcher",
-            "node_id": data["experiment_id"],
-            "command": f"{script_command('create_run.py')} --id {normalized_id} --experiment {data['experiment_id']}",
-            "after": {key: data.get(key) for key in ("run_id", "status", "experiment_id", *RUN_OPTIONAL_FIELDS)},
-            "extra": {
-                "started_experiment": start_experiment,
-                "experiment_status_changed": experiment_status_changed,
-            },
-        },
+        interactions=[interaction],
         rebuild_dashboard=rebuild_dashboard,
+        operation_request=operation_request,
     )
+    if operation_request is not None:
+        result["_operation_transaction"] = transaction
     return result
 
 

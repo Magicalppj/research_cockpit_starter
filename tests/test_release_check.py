@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 import unittest
@@ -26,11 +27,16 @@ from run_subagent_forward_check import subagent_forward_check_payload
 from run_agent_usability_check import agent_usability_check_payload
 
 
+EXTERNAL_RELEASE_CHECK = (
+    os.environ.get("RESEARCH_COCKPIT_EXTERNAL_RELEASE_CHECK") == "1"
+)
+
+
 class SkillReleaseCheckTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp_parent = ROOT_DIR / ".test_tmp"
         self.tmp_parent.mkdir(exist_ok=True)
-        self.tmp_root = self.tmp_parent / f"release_check_tests_{uuid.uuid4().hex}"
+        self.tmp_root = self.tmp_parent / f"rc_{uuid.uuid4().hex[:8]}"
         self.tmp_root.mkdir()
 
     def tearDown(self) -> None:
@@ -50,26 +56,31 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertEqual(track["summary"]["context_schema_version"], "execution_context_v1")
         self.assertLessEqual(track["summary"]["context_stdout_bytes"], 4 * 1024)
         self.assertLessEqual(track["summary"]["command_summary_stdout_bytes"], 20 * 1024)
-        self.assertEqual(track["summary"]["artifact_default_mode"], "record")
-        self.assertEqual(track["summary"]["ingest_verification_mode"], "internal_non_dry_run")
-        self.assertEqual(track["summary"]["ingest_worker_verify_commands"], [])
+        self.assertTrue(track["summary"]["canonical_rows_present"])
+        self.assertEqual(track["summary"]["manifest_help_missing"], [])
+        self.assertTrue(track["summary"]["canonical_schema_contracts"])
+        self.assertTrue(track["summary"]["removed_routes_rejected"])
         self.assertTrue(track["summary"]["structured_closeout_documented"])
 
     def test_instruction_surface_track_enforces_router_budget(self) -> None:
         track = instruction_surface_track(SKILL_ROOT)
 
         self.assertTrue(track["passed"], track)
-        self.assertLessEqual(track["summary"]["line_count"], 120)
-        self.assertLessEqual(track["summary"]["byte_count"], 16 * 1024)
-        self.assertLessEqual(track["summary"]["command_mentions"], 15)
+        self.assertLessEqual(track["summary"]["line_count"], 90)
+        self.assertLess(track["summary"]["root_bytes"], 6 * 1024)
+        self.assertLess(track["summary"]["root_worker_bytes"], 12 * 1024)
+        self.assertLessEqual(track["summary"]["command_mentions"], 5)
+        self.assertEqual(track["summary"]["missing_playbooks"], [])
+        self.assertEqual(track["summary"]["forbidden_role_routes"], [])
         self.assertEqual(track["summary"]["incomplete_lines"], [])
 
     def test_instruction_surface_track_rejects_truncated_instruction_lines(self) -> None:
         package = self.tmp_root / "truncated-skill"
         package.mkdir()
+        shutil.copytree(SKILL_ROOT / "capabilities", package / "capabilities")
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         skill = skill.replace(
-            "- Generated `dashboards/*` files are rebuilt, never hand-authored.",
+            "- Worker: 读取 `capabilities/worker-loop.md`。",
             "-",
         )
         (package / "SKILL.md").write_text(skill, encoding="utf-8")
@@ -82,10 +93,10 @@ class SkillReleaseCheckTests(unittest.TestCase):
         track = read_only_startup_track(SKILL_ROOT, sys.executable)
 
         self.assertTrue(track["passed"], track)
-        self.assertEqual(track["summary"]["command_count"], 2)
+        self.assertEqual(track["summary"]["command_count"], 1)
         commands = [" ".join(check["command"]) for check in track["checks"]]
         self.assertTrue(any("--view execution" in command for command in commands), commands)
-        self.assertTrue(any("--summary-only" in command for command in commands), commands)
+        self.assertFalse(any("--summary-only" in command for command in commands), commands)
 
     def test_public_scan_reports_private_path_like_content(self) -> None:
         package = self.tmp_root / "research-cockpit"
@@ -164,6 +175,10 @@ class SkillReleaseCheckTests(unittest.TestCase):
         self.assertEqual(by_name["portable_copy"]["skipped"], True)
         self.assertNotIn("Traceback", str(payload))
 
+    @unittest.skipIf(
+        EXTERNAL_RELEASE_CHECK,
+        "full release check runs as the next verification-profile stage",
+    )
     def test_release_check_mutating_track_only_changes_temp_copy(self) -> None:
         payload = release_check_payload(
             SKILL_ROOT,
@@ -191,11 +206,20 @@ class SkillReleaseCheckTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"], payload)
         self.assertFalse(payload["original_package_changed"])
-        self.assertTrue(by_name["track_a_read_only_agent"]["passed"], by_name["track_a_read_only_agent"])
-        self.assertTrue(by_name["track_e_portable_skill_agent"]["passed"], by_name["track_e_portable_skill_agent"])
-        self.assertEqual(by_name["track_b_prompt_refinement_workstream"]["skipped"], True)
-        self.assertIn("metrics", by_name["track_a_read_only_agent"])
-        self.assertGreaterEqual(by_name["track_a_read_only_agent"]["metrics"]["context_read_count"], 1)
+        self.assertTrue(
+            by_name["track_a_known_node_reader"]["passed"],
+            by_name["track_a_known_node_reader"],
+        )
+        self.assertTrue(
+            by_name["track_d_portable_install"]["passed"],
+            by_name["track_d_portable_install"],
+        )
+        self.assertTrue(by_name["track_b_assigned_worker"]["skipped"])
+        self.assertTrue(by_name["track_c_reviewer"]["skipped"])
+        self.assertGreaterEqual(
+            by_name["track_a_known_node_reader"]["metrics"]["context_read_count"],
+            1,
+        )
 
     def test_subagent_forward_check_mutating_tracks_only_change_copies(self) -> None:
         payload = subagent_forward_check_payload(
@@ -209,12 +233,18 @@ class SkillReleaseCheckTests(unittest.TestCase):
 
         self.assertTrue(payload["ok"], payload)
         self.assertFalse(payload["original_package_changed"])
-        self.assertTrue(by_name["track_b_prompt_refinement_workstream"]["passed"], by_name["track_b_prompt_refinement_workstream"])
-        self.assertTrue(by_name["track_c_retrieval_branch_agent"]["passed"], by_name["track_c_retrieval_branch_agent"])
-        self.assertTrue(by_name["track_d_decision_gate_agent"]["passed"], by_name["track_d_decision_gate_agent"])
-        self.assertGreater(by_name["track_d_decision_gate_agent"]["summary"]["copy_changed_count"], 0)
-        self.assertGreater(by_name["track_d_decision_gate_agent"]["metrics"]["mutating_count"], 0)
-        self.assertGreaterEqual(by_name["track_d_decision_gate_agent"]["metrics"]["validate_count"], 1)
+        worker = by_name["track_b_assigned_worker"]
+        reviewer = by_name["track_c_reviewer"]
+        self.assertTrue(worker["passed"], worker)
+        self.assertTrue(reviewer["passed"], reviewer)
+        self.assertGreater(len(worker["summary"]["copy_changed_files"]), 0)
+        self.assertGreater(len(reviewer["summary"]["copy_changed_files"]), 0)
+        self.assertEqual(worker["metrics"]["command_count"], 3)
+        self.assertEqual(reviewer["metrics"]["command_count"], 2)
+        self.assertEqual(worker["metrics"]["validate_count"], 0)
+        self.assertEqual(worker["metrics"]["build_count"], 0)
+        self.assertTrue(worker["summary"]["workflow_contract"]["ok"])
+        self.assertTrue(reviewer["summary"]["workflow_contract"]["ok"])
 
     def test_agent_usability_check_exercises_vendored_research_repo(self) -> None:
         payload = agent_usability_check_payload(
@@ -230,11 +260,11 @@ class SkillReleaseCheckTests(unittest.TestCase):
             sorted(by_case),
             [
                 "agent_a_cold_start_install",
-                "agent_b_read_only_context",
-                "agent_c_safe_option_workstream",
-                "agent_d_decision_suggestion_dry_run",
-                "agent_e_ui_collaboration_docs",
-                "agent_f_worker_closeout",
+                "agent_b_known_node_context",
+                "agent_c_assigned_worker_round_trip",
+                "agent_d_reviewer_round_trip",
+                "agent_e_coordinator_overview",
+                "agent_f_legacy_data_round_trip",
             ],
         )
         for case in by_case.values():
@@ -242,11 +272,27 @@ class SkillReleaseCheckTests(unittest.TestCase):
             self.assertEqual(case["unexpected_writes"], [], case)
             self.assertIn("metrics", case)
             self.assertIn("command_count", case["metrics"])
-        self.assertTrue(by_case["agent_c_safe_option_workstream"]["agent_observations"]["dry_run_preserved_files"])
-        self.assertIn("claim_option", by_case["agent_c_safe_option_workstream"]["agent_observations"]["interaction_kinds"])
-        self.assertGreater(by_case["agent_c_safe_option_workstream"]["metrics"]["dry_run_count"], 0)
-        self.assertTrue(by_case["agent_f_worker_closeout"]["agent_observations"]["default_ingest_created_record"])
-        self.assertTrue(by_case["agent_f_worker_closeout"]["agent_observations"]["structured_closeout_linked_record"])
+
+        worker = by_case["agent_c_assigned_worker_round_trip"]
+        self.assertTrue(worker["agent_observations"]["packet_ready"])
+        self.assertTrue(worker["agent_observations"]["close_internally_verified"])
+        self.assertTrue(worker["agent_observations"]["final_evidence_preserved"])
+        self.assertEqual(worker["agent_observations"]["agent_command_count"], 3)
+        self.assertTrue(worker["workflow_contract"]["ok"])
+
+        reviewer = by_case["agent_d_reviewer_round_trip"]
+        self.assertTrue(reviewer["agent_observations"]["producer_truth_unchanged"])
+        self.assertEqual(reviewer["agent_observations"]["agent_command_count"], 2)
+        self.assertTrue(reviewer["workflow_contract"]["ok"])
+
+        legacy = by_case["agent_f_legacy_data_round_trip"]
+        self.assertTrue(legacy["agent_observations"]["unknown_node_fields_preserved"])
+        self.assertTrue(legacy["agent_observations"]["artifact_payload_bytes_preserved"])
+        self.assertTrue(
+            legacy["agent_observations"][
+                "artifact_manifest_unknown_fields_preserved"
+            ]
+        )
 
 
 if __name__ == "__main__":
