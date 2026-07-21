@@ -15,7 +15,7 @@ from research_cockpit.commands.list_agent_commands import agent_command_manifest
 
 ROLES = {"worker", "reviewer", "coordinator", "maintainer"}
 SURFACES = {"core", "advanced", "maintenance"}
-INTENTS = {"open", "claim", "renew", "release", "start", "record", "close", "review", "decide", "assign", "handoff", "discover", "maintain"}
+INTENTS = {"open", "claim", "renew", "release", "start", "record", "close", "review", "decide", "assign", "handoff", "discover", "maintain", "validate", "build", "smoke", "search", "context"}
 IDEMPOTENCY = {"unsupported", "optional", "required"}
 VERIFICATION = {"internal", "changed-scope", "milestone", "conditional"}
 
@@ -25,7 +25,7 @@ class RoleDiscoveryTests(unittest.TestCase):
         manifest = agent_command_manifest()
         by_name = {str(row["name"]): row for row in manifest}
 
-        self.assertEqual(len(manifest), 81)
+        self.assertEqual(len(manifest), 26)
         self.assertIn("work open", by_name)
         for name, row in by_name.items():
             with self.subTest(command=name):
@@ -78,10 +78,9 @@ class RoleDiscoveryTests(unittest.TestCase):
         self.assertEqual(by_name["coord handoff"]["input_schema_version"], "coord_handoff_v1")
         self.assertEqual(by_name["coord handoff"]["output_schema_version"], "milestone_handoff_v1")
         self.assertIn("--progress", by_name["coord handoff"]["supported_flags"])
-        self.assertEqual(by_name["create-run"]["surface"], "advanced")
-        self.assertEqual(by_name["complete-run"]["surface"], "advanced")
-        self.assertEqual(by_name["ingest-artifact"]["surface"], "advanced")
-        self.assertEqual(by_name["add-node"]["intent"], "assign")
+        self.assertEqual(by_name["work record"]["surface"], "core")
+        self.assertEqual(by_name["coord assign"]["intent"], "assign")
+        self.assertEqual(by_name["maintenance compact"]["surface"], "core")
         self.assertEqual(by_name["build"]["audiences"], ["coordinator", "maintainer"])
 
     def test_default_worker_discovery_is_core_bounded_and_compact(self) -> None:
@@ -128,18 +127,17 @@ class RoleDiscoveryTests(unittest.TestCase):
         )
 
 
-    def test_name_lookup_can_reveal_an_advanced_role_command(self) -> None:
-        rows = agent_command_manifest(
-            role="worker",
-            name="update-run",
-            compact=True,
+    def test_name_lookup_reveals_only_exact_canonical_routes(self) -> None:
+        context_rows = agent_command_manifest(
+            role="worker", name="context", compact=True
         )
-
-        self.assertEqual([row["name"] for row in rows], ["update-run"])
-        self.assertEqual(rows[0]["surface"], "advanced")
-
-        context_rows = agent_command_manifest(role="worker", name="context", compact=True)
+        self.assertEqual([row["name"] for row in context_rows], ["context"])
         self.assertEqual(context_rows[0]["surface"], "advanced")
+
+        maintenance_rows = agent_command_manifest(
+            role="maintainer", name="maintenance compact", compact=True
+        )
+        self.assertEqual([row["name"] for row in maintenance_rows], ["maintenance compact"])
 
     def test_commands_cli_role_filter_matches_manifest_budget(self) -> None:
         out = subprocess.run(

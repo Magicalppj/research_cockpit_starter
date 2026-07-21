@@ -97,11 +97,11 @@ def _missing_run_retention_warnings(root: Path) -> list[dict[str, Any]]:
         warnings.append(_warning(
             "run_completed_without_retention_policy",
             f"completed run {run.run_id!r} has output_root but no output_retention policy.",
-            command=(
-                f"research-cockpit complete-run --root {root} --id {run.run_id} "
-                "--status completed --output-retention-file output_retention.yaml --no-build"
-            ),
             extra={
+                "resolution": (
+                    "Existing legacy runs require a reviewed data repair; include "
+                    "output_retention in future work close payloads."
+                ),
                 "run_id": run.run_id,
                 "experiment_id": run.experiment_id,
                 "output_root": run.output_root,
@@ -130,8 +130,8 @@ def _missing_artifact_retention_warnings(
             f"artifact {artifact_id!r} is large but has no retention policy.",
             node_id=artifact_id,
             command=(
-                f"research-cockpit update-node-fields --root {root} --id {artifact_id} "
-                "--metadata-file retention.yaml --no-build"
+                f"research-cockpit coord assign --root {root} "
+                "--file <coord_assign.yaml> --json --compact"
             ),
             extra={
                 "path": artifact.get("path"),
@@ -161,7 +161,10 @@ def semantic_lint(
                 "current_focus_terminal",
                 f"current_focus_node {focus.id!r} has terminal status {focus.status!r}.",
                 node_id=focus.id,
-                command=f"research-cockpit set-focus --root {root} --focus-node <next_node>",
+                command=(
+                    f"research-cockpit coord assign --root {root} "
+                    "--file <coord_assign.yaml> --json --compact"
+                ),
             ))
 
     agent_focuses = current.get("agent_focuses")
@@ -179,8 +182,8 @@ def semantic_lint(
                         node_id=node.id,
                         agent_id=str(agent_id),
                         command=(
-                            f"research-cockpit set-agent-focus --root {root} "
-                            f"--agent {agent_id} --node <next_node>"
+                            f"research-cockpit coord assign --root {root} "
+                            "--file <coord_assign.yaml> --json --compact"
                         ),
                     ))
 
@@ -224,7 +227,10 @@ def semantic_lint(
                     "dashboard Current Next Actions reads current_state.yaml."
                 ),
                 node_id=node_id,
-                command=f"research-cockpit sync-focus-actions --root {root} --from-node {node_id}",
+                command=(
+                    f"research-cockpit coord assign --root {root} "
+                    "--file <coord_assign.yaml> --json --compact"
+                ),
             ))
             break
 
@@ -240,8 +246,8 @@ def semantic_lint(
                     ),
                     node_id=node.id,
                     command=(
-                        f"research-cockpit close-branch --root {root} --id {node.id} "
-                        "--downstream-status parked --dry-run --json --show-diff"
+                        f"research-cockpit coord assign --root {root} "
+                        "--file <coord_assign.yaml> --json --compact"
                     ),
                     extra={
                         "parent_type": node.type,
@@ -253,9 +259,8 @@ def semantic_lint(
             command = ""
             if node.type == "experiment" and node.status == "done":
                 command = (
-                    f"research-cockpit migrate-terminal-next-actions --root {root} "
-                    f"--id {node.id} --followup-id <followup_experiment_id> "
-                    f"--title \"<follow-up title>\" --dry-run --json --show-diff"
+                    f"research-cockpit maintenance migrate --root {root} "
+                    "--file <terminal_next_actions.yaml> --json --compact"
                 )
             warnings.append(_warning(
                 "terminal_node_has_next_actions",

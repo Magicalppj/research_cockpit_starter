@@ -2,7 +2,7 @@
 
 ## Status
 
-已实施。本文档记录 terminal parent lifecycle guard 的设计、拆解任务和验收方式，后续维护应以已勾选任务和当前代码行为为准。
+历史设计记录，已实施。本文中的独立 mutation 命令示例属于 0.2.x 接口，0.3.0 起以 `coord assign`、`coord decide` 和 `coord handoff` 为 public workflow；当前用法以 `docs/command-interface.md` 为准。
 
 ## Date
 

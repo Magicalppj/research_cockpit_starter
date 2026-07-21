@@ -75,7 +75,9 @@ def main() -> None:
         emit_json(payload, compact=args.compact)
     else:
         _print_human(payload)
-    raise SystemExit(0 if payload.get("ok") else 1)
+    if payload.get("ok"):
+        return
+    raise SystemExit(1)
 
 
 if __name__ == "__main__":

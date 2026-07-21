@@ -39,10 +39,10 @@ The shell template uses environment variables so it can be copied into a tmux pa
 
 ## Manual Template
 
-Use `manual_run_checklist.md` when no script owns the run. Fill the same fields by hand, then use the ingestion commands from `docs/launcher-output-conventions.md`.
+Use `manual_run_checklist.md` when no script owns the run. Fill the same fields by hand, then use the role-facade closeout flow from `docs/launcher-output-conventions.md`.
 
 ## Handoff Order
 
-Use `work_close.example.yaml` for the terminal handoff. A final launcher output directory belongs in `evidence_inputs`; `work close` stages it into the canonical artifact store and records the result atomically. Use standalone `ingest-artifact --no-build` only when evidence must be durable before the run closes.
+Use `work_close.example.yaml` for the terminal handoff. A final launcher output directory belongs in `evidence_inputs`; `work close` stages it into the canonical artifact store and records the result atomically. Use standalone `work record --file <record.yaml>` only when evidence must be durable before the run closes.
 
-1. Fill `work_start.example.yaml` from the packet and run `work start`; keep its generated run id. 2. Run the experiment. 3. Fill `work_close.example.yaml` and run `work close`; include final `evidence_inputs` or an earlier `artifact_record.existing_record_id`, never both. 4. Trust an internally verified receipt without repeated validate/context. 5. At coordinator merge, release, or research-stage closeout, run one `coord handoff`; do not precede it with standalone full gates.
+1. Fill `work_start.example.yaml` from the packet, including `input_revision` and `experiment_id: <packet.cursor.current_node>`, then run `work start` and keep its generated run id. 2. Run the experiment. 3. Fill `work_close.example.yaml` and run `work close`; include final `evidence_inputs` or an earlier `artifact_record.existing_record_id`, never both. 4. Trust an internally verified receipt without repeated validate/context. 5. At coordinator merge, release, or research-stage closeout, run one `coord handoff`; do not precede it with standalone full gates.

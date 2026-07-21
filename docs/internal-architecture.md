@@ -27,11 +27,15 @@ Workflow/domain layer
   assignment_scope.py
   assignment_leases.py
   assignment_runs.py
+  assignment_records.py
   work_packets.py
   coordination.py
   synthesis.py
+  coordinator_operations.py
+  coordinator_decisions.py
   assignment_results.py
   assignment_reviews.py
+  maintenance_actions.py
   evidence_bundles.py
   evidence_staging.py
   run_closeout.py
@@ -70,11 +74,12 @@ Dependency direction should generally flow downward. For example, `commands/*` m
 
 ### Public Entry Points
 
-- `cli.py`: maps `research-cockpit <subcommand>` to command modules.
+- `cli.py`: exposes canonical role groups plus the retained diagnostic/read surface.
 - `command_registry.py`: owns CLI routing and re-exports the role contract choices used by discovery.
 - `role_contracts.py`: is the single source for command audiences, surfaces, intents, scope, verification, canonical replacement, and cutover disposition.
 - `commands/list_agent_commands.py`: projects the route and role contract into full, compact, role-filtered, and name-filtered manifests.
 - `commands/*.py`: command-specific argument parsing and workflow orchestration.
+- `commands/work_*.py`, `review_*.py`, `coord_*.py`, and `maintenance_role_*.py`: public role facade argument parsing.
 - `commands/_runtime.py`: shared command helpers for `load_validated_state(...)` and `finish_mutation(...)`.
 - `commands/_assignment_scope_cli.py`: shared `--assignment` / `--coordinator` CLI flags and structured assignment-scope error output.
 - `ui/`: researcher-facing Streamlit app, graph rendering wrappers, text labels, and view formatting helpers. The Coordination page delegates to `coordination.py` and must not duplicate assignment readiness or overlap semantics.
@@ -88,7 +93,11 @@ The root `SKILL.md` is only a role router. Default agent instructions live in `w
 - `agent_sessions.py`: assignment-scoped handoff payloads, canonical root boundaries, and worker startup command templates.
 - `assignment_scope.py`: assignment mutation boundaries, out-of-scope write checks, and coordinator override handling.
 - `assignment_leases.py`: claim, renew, release, owner/epoch checks, lease renewal planning, heartbeat hooks, and expired-lease reassignment guards.
-- `assignment_runs.py`: composes lease renewal with the existing create-run domain transaction for `work start`.
+- `assignment_runs.py`: composes lease renewal with the existing run-creation domain transaction for `work start`.
+- `assignment_records.py`: stages and hashes incremental evidence, renews leases, and writes idempotent record receipts.
+- `coordinator_operations.py`: validates and executes `coord_assign_v1` graph/session operations.
+- `coordinator_decisions.py`: dispatches strict `coord_decide_v1` decision/baseline actions.
+- `maintenance_actions.py`: validates and dispatches bounded maintenance plans.
 - `work_packets.py`: bounded assignment projections, dependency/input readiness, lease state, stable revisions, and unchanged polling.
 - `assignment_results.py`: validates `work_close_v1`, performs operation replay checks, stages optional final evidence, and delegates one atomic assignment closeout.
 - `coordination.py`: builds the indexed, revisioned, paginated Coordination Snapshot and its shared internal state projection without loading the full graph on a fresh index.
@@ -102,12 +111,12 @@ The root `SKILL.md` is only a role router. Default agent instructions live in `w
 - `milestone_handoffs.py`: captures a root truth revision, reuses one full validation state across build and compact smoke, evaluates coordination blockers, and commits an immutable operation-id-scoped handoff report.
 - `root_snapshot.py`: targeted graph snapshots. `load_indexed_root_snapshot(...)` is the no-full-fallback entry point for latency-bounded reads.
 - `validation_index.py`: generated graph/sidecar signatures and targeted lookup maps used by incremental validation and read models.
-- `node_onboarding.py`: builds read-only node handoff payloads for `node-context`.
+- `node_onboarding.py`: builds legacy-compatible node handoff data used by bounded context projections.
 - `context_packs.py`: builds agent context, focus context, current-state payloads, context metadata, and dashboard Markdown.
 - `search_index.py`: indexes nodes, notes, and linked local resources.
 - `decisions.py`: decision evidence summaries, acceptance checklists, traces, and decision rows.
 - `option_workstreams.py`: option subtree, workstream context, branch comparison, and workstream rows.
-- `run_summaries.py`: run/job summaries attached to experiments, bootstrap, and option workstream context.
+- `run_summaries.py`: run/job summaries attached to experiments and bounded execution/coordination projections.
 - `progress.py`: standard `progress.json` heartbeat parsing and stale heartbeat warnings.
 - `gate_results.py`: standard `gate_result.json` validation, blocking semantics, and preflight resource normalization.
 - `gate_result_records.py`: sidecar metadata records that link gate files to experiments, runs, and artifacts.
@@ -171,7 +180,7 @@ Truth-source data lives in:
 - <data-root>/graph/interaction_events/** for the active append-only JSONL audit backend
 - `<data-root>/runs/*.yaml` for concrete experiment executions
 - `<data-root>/gate_results/*.yaml` for gate metadata records
-- `<data-root>/gate_results/*.json` for gate payloads written by `record-gate-result`
+- `<data-root>/gate_results/*.json` for structured gate payloads
 - `<data-root>/artifact_records/*.yaml` for lightweight evidence metadata created by record-only artifact ingest
 - `<data-root>/artifact_migrations/*.yaml` for artifact demotion audit reports
 - `<data-root>/artifacts/**` for long-lived evidence payloads and ingest manifests

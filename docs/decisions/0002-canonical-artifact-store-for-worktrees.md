@@ -1,44 +1,56 @@
 # ADR-0002: Use Canonical Artifact Store For Worktree Outputs
 
 ## Status
-Accepted; amended on 2026-07-01 by the artifact record policy in `docs/artifact-retention-policy.md`. The canonical store decision still stands, but ordinary run output should use record-only ingest instead of creating graph artifact nodes by default.
+
+Accepted. Amended by the record-first policy on 2026-07-01 and by the 0.3.0 role-facade cutover on 2026-07-21. The storage decision remains active; the old standalone ingest and promotion commands are historical interfaces.
 
 ## Date
+
 2026-05-09
 
 ## Context
-Research Cockpit supports parallel agents working in separate git worktrees. Worktrees are useful for isolating code changes and temporary experiment outputs, but they are also intentionally disposable. If findings or artifact paths point into a deleted worktree, later users can still see the YAML record but cannot inspect the evidence.
 
-We need a default rule that lets users delete worktrees without losing the evidence behind findings, decisions, and baselines.
+Parallel agents work in disposable Git worktrees. Evidence that remains only inside a deleted worktree cannot support later review, decisions, or baselines even when its YAML reference survives.
 
 ## Decision
-Use the canonical data root as the long-lived artifact store:
+
+Use the canonical data root as the long-lived local artifact store:
 
 ```text
-research_cockpit/artifacts/<node_id>/<run_id>/
+research_cockpit/artifacts/<experiment_id>/<run_id>/
 ```
 
-Agents must copy useful worktree outputs into this store with `research-cockpit ingest-artifact` before deleting a worktree or using those outputs as evidence. Ordinary experiment run output uses record mode by default (`--record-only` remains explicit), which writes `_research_cockpit_ingest.json` beside the copied files and records lightweight metadata under `artifact_records/*.yaml` without creating a graph artifact node. Promotion requires a recorded reason. Promote the record to an `artifact` node only when the evidence needs durable navigation or must support a decision, baseline, strong finding, portable review bundle, or final checkpoint. Findings should never refer to the original worktree path.
+Ordinary final output is staged through `work_close_v1.evidence_inputs`. Evidence that must be durable earlier is staged through `work record`. Both paths copy selected output to the canonical store, create lightweight artifact-record metadata and provenance, reject linked filesystem objects, and avoid creating a graph artifact node by default.
+
+Agents must not leave findings, decisions, or baselines dependent on an original worktree path. Large evidence may remain in a stable external store when canonical metadata, hashes, summaries, and links are sufficient.
+
+The 0.3.0 CLI does not expose the former standalone ingest or record-promotion routes. Existing 0.2.x artifact records, graph artifact nodes, manifests, payload bytes, retention metadata, and provenance remain readable and writable by current role and maintenance workflows.
 
 ## Alternatives Considered
 
 ### Keep Worktrees Long Term
-- Pros: No copy step.
-- Cons: Worktrees accumulate local branches, build outputs, caches, and machine-specific paths.
-- Rejected: It makes repository cleanup conflict with evidence preservation.
+
+- Pros: no staging step.
+- Cons: worktrees accumulate branches, outputs, caches, and machine-specific paths.
+- Rejected: cleanup would conflict with evidence preservation.
 
 ### Use Worktree-Local Research Cockpit Roots
-- Pros: Each agent can mutate independently.
-- Cons: Merging YAML truth sources is harder than merging code, and `import-worktree-findings` must reject many unsafe changes.
-- Rejected: This remains a recovery path, not the default workflow.
+
+- Pros: each agent can mutate independently.
+- Cons: merging shared truth is harder than merging code and weakens assignment concurrency controls.
+- Rejected: explicit maintenance migration remains a recovery path, not the normal workflow.
 
 ### Store Only External URIs
-- Pros: Works well for large artifacts.
-- Cons: New users and demos need a local path that works without extra infrastructure.
-- Rejected as the default. External URIs can still be recorded as artifact links when needed.
+
+- Pros: suitable for very large artifacts.
+- Cons: local review and portable demonstrations require a self-contained option.
+- Rejected as the only default; stable external references remain supported where appropriate.
 
 ## Consequences
-- Deleting a worktree is safe only after useful outputs are ingested into the canonical store and any required findings/decisions/baselines reference canonical artifact records or promoted artifact nodes.
-- Small durable artifacts can be tracked in Git; large or ordinary run outputs should use artifact records, Git LFS, or an external store while keeping stable metadata in Research Cockpit.
-- Ingested run directories are copied as regular files and directories; symlinked files or directories are rejected to avoid pulling in data outside the run bundle.
-- Agent handoffs include `stable_artifact_root` and a record-only `ingest-artifact` command template for ordinary run output.
+
+- A worktree is removable only after useful evidence is staged or linked durably and the assignment is closed.
+- Final evidence adds no extra CLI invocation to the three-call worker fast path.
+- `work record` is exceptional because it adds a control-plane round trip and an intermediate durable record.
+- New run output defaults to artifact records with `reproducible_output` retention.
+- Symlinked files, junctions, and unsupported file types are rejected to prevent copying data outside the intended bundle.
+- Destructive cleanup remains an explicit operator action after `maintenance audit` or artifact compaction dry-run.

@@ -8,7 +8,11 @@ from research_cockpit.assignment_leases import (
     AssignmentLeaseError,
     renew_assignment,
 )
-from research_cockpit.commands._work_lease_cli import emit_work_result, handle_work_error
+from research_cockpit.commands._work_lease_cli import (
+    emit_work_result,
+    handle_role_cli_input_error,
+    handle_work_error,
+)
 from research_cockpit.paths import default_data_root
 from research_cockpit.types import ValidationError
 
@@ -40,7 +44,14 @@ def main() -> None:
         handle_work_error(args, exc)
         raise SystemExit(1) from None
     except (ValidationError, ValueError, FileNotFoundError) as exc:
-        parser.error(str(exc))
+        handle_role_cli_input_error(
+            args,
+            parser,
+            exc,
+            operation="work renew",
+            assignment_id=args.assignment_id,
+            operation_id=args.operation_id,
+        )
     emit_work_result(args, payload)
 
 

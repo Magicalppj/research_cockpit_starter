@@ -28,7 +28,9 @@ class RolePlaybookTests(unittest.TestCase):
         self.assertNotIn("research-cockpit build", worker)
         self.assertNotIn("research-cockpit maintenance", worker)
         self.assertIn("additional_verification_required", worker)
-        self.assertIn("do not run another", worker.lower())
+        self.assertIn("不追加查询", worker)
+        self.assertIn("cursor.current_node", worker)
+        self.assertIn("experiment_id", worker)
 
     def test_role_playbooks_do_not_leak_other_roles_default_routes(self) -> None:
         reviewer = (ROOT_DIR / "capabilities" / "reviewer-loop.md").read_text(encoding="utf-8")
@@ -38,7 +40,21 @@ class RolePlaybookTests(unittest.TestCase):
         self.assertNotIn("research-cockpit create-run", reviewer)
         self.assertNotIn("research-cockpit maintenance", reviewer)
         self.assertIn("coordinator", coordinator.lower())
-        self.assertIn("milestone_handoff", coordinator)
+        self.assertIn("coord handoff", coordinator)
+    def test_review_assignment_creation_and_graph_contracts_are_discoverable(self) -> None:
+        coordinator = (ROOT_DIR / "capabilities" / "coordinator-loop.md").read_text(
+            encoding="utf-8"
+        )
+        reviewer = (ROOT_DIR / "capabilities" / "reviewer-loop.md").read_text(
+            encoding="utf-8"
+        )
+        graph = (ROOT_DIR / "capabilities" / "graph-state.md").read_text(encoding="utf-8")
+
+        self.assertIn("--action review_session", coordinator)
+        self.assertIn("producer_assignment_id", reviewer)
+        self.assertIn("queued", graph)
+        self.assertIn("cancelled", graph)
+
         self.assertNotIn("research-cockpit commands --json --compact --summary-only", coordinator)
 
     def test_agent_default_prompt_routes_to_work_packet(self) -> None:

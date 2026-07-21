@@ -4,7 +4,7 @@ from collections.abc import MutableMapping
 from typing import Any
 
 from research_cockpit.baselines import empty_effective_baseline, resolve_effective_baseline
-from research_cockpit.model import script_command, search_knowledge
+from research_cockpit.model import search_knowledge
 
 
 PRIMARY_GRAPH_NODE_TYPES = ("stage", "problem", "option", "experiment", "decision")
@@ -149,120 +149,41 @@ def build_node_overview(
     }
 
 
-def build_set_focus_command(current: dict, focus_node_id: str) -> str:
-    parts = [script_command("set_focus.py")]
-    for field, flag in (
-        ("current_stage", "--stage"),
-        ("current_problem", "--problem"),
-        ("current_option", "--option"),
-    ):
-        value = current.get(field)
-        if value:
-            parts.extend([flag, str(value)])
-    parts.extend(["--focus-node", focus_node_id])
-    return " ".join(parts)
-
-
-def build_record_finding_command(experiment_id: str) -> str:
-    return (
-        f"{script_command('record_finding.py')}"
-        f" --experiment {experiment_id}"
-        ' --statement "Describe the finding"'
-        " --confidence medium"
-        " --outcome inconclusive"
-    )
+def _canonical_file_command(route: str, filename: str, *, assignment: bool = False) -> str:
+    assignment_arg = " --assignment <assignment_id>" if assignment else ""
+    return f"research-cockpit {route}{assignment_arg} --file <{filename}> --json --compact"
 
 
 def build_promote_decision_command(option_id: str) -> str:
-    return (
-        f"{script_command('promote_decision.py')}"
-        " --id decision_new"
-        f" --option {option_id}"
-        ' --title "Decision title"'
-        ' --summary "Decision summary"'
-        " --status proposed"
-    )
+    return _canonical_file_command("coord decide", f"coord_decide_promote_{option_id}.yaml")
 
 
 def build_check_decision_acceptance_command(decision_id: str) -> str:
-    return (
-        f"{script_command('check_decision_acceptance.py')}"
-        f" --id {decision_id}"
-    )
+    return f"research-cockpit context --id {decision_id} --json --compact"
 
 
 def build_accept_decision_command(decision_id: str) -> str:
-    return (
-        f"{script_command('accept_decision.py')}"
-        f" --id {decision_id}"
-    )
+    return _canonical_file_command("coord decide", f"coord_decide_accept_{decision_id}.yaml")
 
 
 def build_update_decision_checklist_command(decision_id: str) -> str:
-    return (
-        f"{script_command('update_decision_checklist.py')}"
-        f" --id {decision_id}"
-        " --alternative <option_id>"
-        ' --consequence "Describe downstream impact"'
-        ' --next-required-action "Describe required follow-up"'
-    )
+    return _canonical_file_command("coord decide", f"coord_decide_checklist_{decision_id}.yaml")
 
 
 def build_update_decision_evidence_command(decision_id: str) -> str:
-    return (
-        f"{script_command('update_decision_evidence.py')}"
-        f" --id {decision_id}"
-    )
-
-
-def build_create_note_command(node_id: str) -> str:
-    return (
-        f"{script_command('create_note.py')}"
-        f" --node {node_id}"
-    )
+    return _canonical_file_command("coord decide", f"coord_decide_evidence_{decision_id}.yaml")
 
 
 def build_claim_option_command(option_id: str) -> str:
-    return (
-        f"{script_command('claim_option.py')}"
-        f" --option {option_id}"
-        " --agent <agent_id>"
-        ' --objective "Describe objective"'
-    )
+    return _canonical_file_command("coord assign", f"coord_assign_{option_id}.yaml")
 
 
 def build_option_workstream_context_command(option_id: str) -> str:
-    return (
-        f"{script_command('option_workstream_context.py')}"
-        f" --option {option_id}"
-        " --json"
-    )
+    return f"research-cockpit context --id {option_id} --view execution --json --compact"
 
 
 def build_report_option_workstream_command(option_id: str) -> str:
-    return (
-        f"{script_command('report_option_workstream.py')}"
-        f" --option {option_id}"
-        " --agent <agent_id>"
-        " --recommend continue"
-        ' --summary "Summarize evidence and recommendation"'
-    )
-
-
-def build_apply_suggestion_command(suggestion_id: str, target: str = "current") -> str:
-    return (
-        f"{script_command('apply_suggestion.py')}"
-        f" --id {suggestion_id}"
-        f" --target {target}"
-    )
-
-
-def build_update_suggestion_state_command(suggestion_id: str, state: str) -> str:
-    return (
-        f"{script_command('update_suggestion_state.py')}"
-        f" --id {suggestion_id}"
-        f" --state {state}"
-    )
+    return _canonical_file_command("work close", f"closeout_{option_id}.yaml", assignment=True)
 
 
 def build_cleanup_suggestion_lifecycle_command(
@@ -271,13 +192,9 @@ def build_cleanup_suggestion_lifecycle_command(
     state: str = "all",
     older_than_days: int | None = None,
 ) -> str:
-    command = script_command("cleanup_suggestion_lifecycle.py")
-    if dry_run:
-        command += " --dry-run"
-    command += f" --state {state}"
-    if older_than_days is not None:
-        command += f" --older-than-days {older_than_days}"
-    return command
+    mode = "dry_run" if dry_run else "execute"
+    age = "any_age" if older_than_days is None else f"older_{older_than_days}_days"
+    return _canonical_file_command("maintenance repair", f"repair_suggestions_{state}_{age}_{mode}.yaml")
 
 
 def edge_style_for_type(edge_type: str | None) -> dict[str, object]:
@@ -756,11 +673,14 @@ def format_decision_repair_hints(checklist: dict) -> list[dict]:
                 item,
                 "command",
                 suggested_command=(
-                    f"{build_record_finding_command(experiment_id)}\n"
+                    f"{_canonical_file_command('work close', f'closeout_{experiment_id}.yaml', assignment=True)}\n"
                     f"{build_update_decision_evidence_command(decision_id)}"
                 ),
                 target_field="findings",
-                details="Record evidence on a supporting experiment, then refresh decision evidence.",
+                details=(
+                    "Close the supporting experiment assignment with its finding in the final payload, "
+                    "then refresh decision evidence."
+                ),
             )
         elif check_id == "evidence_strength":
             append_row(
@@ -774,12 +694,7 @@ def format_decision_repair_hints(checklist: dict) -> list[dict]:
             append_row(
                 item,
                 "command",
-                suggested_command=(
-                    f"{build_update_decision_evidence_command(decision_id)}\n"
-                    f"{script_command('update_decision_checklist.py')}"
-                    f" --id {decision_id}"
-                    ' --evidence-summary "Summarize supporting evidence"'
-                ),
+                suggested_command=build_update_decision_evidence_command(decision_id),
                 target_field="evidence_summary",
                 details="Refresh derived evidence, or write a manual evidence summary when needed.",
             )
@@ -787,11 +702,7 @@ def format_decision_repair_hints(checklist: dict) -> list[dict]:
             append_row(
                 item,
                 "command",
-                suggested_command=(
-                    f"{script_command('update_decision_checklist.py')}"
-                    f" --id {decision_id}"
-                    " --alternative <option_id>"
-                ),
+                suggested_command=build_update_decision_checklist_command(decision_id),
                 target_field="alternatives_considered",
                 details="Add at least one alternative option id considered before accepting the decision.",
             )
@@ -799,11 +710,7 @@ def format_decision_repair_hints(checklist: dict) -> list[dict]:
             append_row(
                 item,
                 "command",
-                suggested_command=(
-                    f"{script_command('update_decision_checklist.py')}"
-                    f" --id {decision_id}"
-                    ' --consequence "Describe downstream impact"'
-                ),
+                suggested_command=build_update_decision_checklist_command(decision_id),
                 target_field="consequences",
                 details="Record the downstream impact of accepting the decision.",
             )
@@ -811,11 +718,7 @@ def format_decision_repair_hints(checklist: dict) -> list[dict]:
             append_row(
                 item,
                 "command",
-                suggested_command=(
-                    f"{script_command('update_decision_checklist.py')}"
-                    f" --id {decision_id}"
-                    ' --next-required-action "Describe required follow-up"'
-                ),
+                suggested_command=build_update_decision_checklist_command(decision_id),
                 target_field="next_required_actions",
                 details="Record the immediate follow-up action required after acceptance.",
             )

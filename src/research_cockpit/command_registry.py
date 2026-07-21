@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from research_cockpit.role_contracts import (
+    LEGACY_COMMAND_REPLACEMENTS,
     ROLE_CHOICES,
     SURFACE_CHOICES,
     command_role_contract,
@@ -8,7 +9,7 @@ from research_cockpit.role_contracts import (
 )
 
 
-COMMAND_MODULES: dict[str, str] = {
+LEGACY_COMMAND_MODULES: dict[str, str] = {
     "bootstrap": "agent_bootstrap",
     "validate": "validate_cockpit",
     "lint": "lint_semantic",
@@ -79,27 +80,23 @@ COMMAND_MODULES: dict[str, str] = {
     "create-note": "create_note",
 }
 
-GROUPED_COMMAND_ALIASES: dict[str, dict[str, str]] = {
-    "artifact": {
-        "create": "create-artifact",
-        "ingest": "ingest-artifact",
-        "records": "artifact-records",
-        "promote-record": "promote-artifact-record",
-        "compact": "compact-artifacts",
-        "link": "link-artifact",
-    },
-    "run": {
-        "create": "create-run",
-        "update": "update-run",
-        "complete": "complete-run",
-        "list": "list-runs",
-        "context": "run-context",
-    },
+COMMAND_MODULES: dict[str, str] = {
+    name: LEGACY_COMMAND_MODULES[name]
+    for name in (
+        "validate",
+        "build",
+        "commands",
+        "smoke",
+        "search",
+        "context",
+    )
 }
+
+GROUPED_COMMAND_ALIASES: dict[str, dict[str, str]] = {}
 
 COMMAND_STATUS_CHOICES = ("active", "compatibility", "deprecated")
 
-COMMAND_GROUP_BY_COMMAND = {
+LEGACY_COMMAND_GROUP_BY_COMMAND = {
     "init": "maintenance",
     "ui": "ui",
     "bootstrap": "context",
@@ -172,22 +169,42 @@ COMMAND_GROUP_BY_COMMAND = {
     "create-note": "graph",
 }
 
+
+COMMAND_GROUP_BY_COMMAND = {
+    "init": "maintenance",
+    "ui": "ui",
+    "validate": "maintenance",
+    "build": "build",
+    "commands": "maintenance",
+    "smoke": "maintenance",
+    "search": "context",
+    "context": "context",
+    "work claim": "context",
+    "work open": "context",
+    "work release": "context",
+    "work renew": "context",
+    "work start": "run",
+    "work record": "run",
+    "work close": "run",
+    "review open": "context",
+    "review report": "context",
+    "coord overview": "context",
+    "coord assign": "graph",
+    "coord review": "context",
+    "coord decide": "decision",
+    "coord handoff": "maintenance",
+    "maintenance audit": "maintenance",
+    "maintenance repair": "maintenance",
+    "maintenance migrate": "maintenance",
+    "maintenance compact": "maintenance",
+}
 COMMAND_GROUP_CHOICES = tuple(sorted(set(COMMAND_GROUP_BY_COMMAND.values())))
 
-AUDIT_COMMANDS = {
-    "active-resources",
-    "artifact-retention-audit",
-    "branch-audit",
-    "check-decision-acceptance",
-    "maintenance-audit",
-    "suggest-next-actions",
-    "worktree-audit",
-    "worktree-closeout",
-}
+AUDIT_COMMANDS = {"maintenance audit", "validate"}
 
 SCRIPT_TO_SUBCOMMAND = {
     f"{module_name}.py": command_name
-    for command_name, module_name in COMMAND_MODULES.items()
+    for command_name, module_name in LEGACY_COMMAND_MODULES.items()
 }
 
 GROUPED_ALIASES_BY_COMMAND: dict[str, list[str]] = {}
@@ -233,6 +250,7 @@ ROLE_COMMAND_MODULES: dict[str, dict[str, str]] = {
     "work": {
         "claim": "work_claim",
         "open": "work_open",
+        "record": "work_record",
         "release": "work_release",
         "renew": "work_renew",
         "start": "work_start",
@@ -243,8 +261,16 @@ ROLE_COMMAND_MODULES: dict[str, dict[str, str]] = {
         "report": "review_report",
     },
     "coord": {
+        "assign": "coord_assign",
+        "decide": "coord_decide",
         "handoff": "coord_handoff",
         "overview": "coord_overview",
         "review": "coord_review",
+    },
+    "maintenance": {
+        "audit": "maintenance_role_audit",
+        "compact": "maintenance_role_compact",
+        "migrate": "maintenance_role_migrate",
+        "repair": "maintenance_role_repair",
     },
 }

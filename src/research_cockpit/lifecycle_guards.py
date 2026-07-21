@@ -162,8 +162,8 @@ def lifecycle_guard_payload(root: Path, failures: list[dict[str, Any]]) -> dict[
         "lifecycle_errors": failures,
         "suggested_commands": [
             (
-                f"research-cockpit close-branch --root {root} --id {failure['node_id']} "
-                "--downstream-status parked --dry-run --json --show-diff"
+                f"research-cockpit coord assign --root {root} "
+                f"--file <coord_assign_{failure['node_id']}.yaml> --json --compact"
             )
             for failure in failures
         ],

@@ -1,76 +1,60 @@
 # Worker Loop
 
-Load this playbook only when acting on one assignment. The assignment is the concurrency and write-scope boundary; do not infer a worker cursor from global focus or Markdown notes.
-
 ## Open Once
 
 ```sh
 research-cockpit work open --root <data-root> --assignment <assignment_id> --json --compact
 ```
 
-The Work Packet is the default execution context. Check `readiness`, `scope`, `dependencies`, `lease`, `allowed_operations`, `success_criteria`, `deliverables`, and `revision`. Do not add bootstrap, dashboard packs, or global search when this packet is sufficient.
+Work Packet 是本 assignment 的完整控制面上下文。使用其中的 `objective`、`scope`、`success_criteria`、`deliverables`、`lease`、`input_revision` 和 `allowed_operations`；不要再读取 coordinator context 或完整 graph。
 
-For resume or polling, reuse the opaque revision:
+Unchanged polling：
 
 ```sh
 research-cockpit work open --root <data-root> --assignment <assignment_id> --since <revision> --json --compact
 ```
 
-Stop when the receipt says `changed: false`. A revision is a freshness token, not an ordered business version.
+收到 `changed: false` 后停止，不追加查询。
 
-## Default Experiment Path
+## Claim
 
-When `allowed_operations` contains `claim`, claim once and continue from the returned packet; do not add another `work open`:
+Packet 未被领取时只调用一次：
 
 ```sh
 research-cockpit work claim --root <data-root> --assignment <assignment_id> --agent <agent_id> --operation-id <operation_id> --return-packet --json --compact
 ```
 
-Create `start.yaml` once from the packet lease. Add entries under `run` only when launcher metadata exists:
+直接复用返回 packet，不立即 reopen。
 
-```yaml
-schema_version: work_start_v1
-agent_id: agent_x
-lease_id: lease_x
-lease_epoch: 1
-operation_id: op_start_x
-slug: trial
-run:
-  launcher: shell
-  command: python train.py
-  progress_file: artifacts/{experiment_id}/{run_id}/progress.json
-```
-
-Strings under `run` may use `{run_id}`, `{experiment_id}`, and `{assignment_id}`; the transaction expands them after generating the runtime id.
-
-Then start and close; the start receipt supplies the generated `entities.run_id` used by closeout:
+## Start And Close
 
 ```sh
-research-cockpit work start --root <data-root> --assignment <assignment_id> --file <start.yaml> --json --compact
-research-cockpit work close --root <data-root> --assignment <assignment_id> --file <closeout.yaml> --json --compact
+research-cockpit work start --root <data-root> --assignment <assignment_id> --file start.yaml --json --compact
+research-cockpit work close --root <data-root> --assignment <assignment_id> --file closeout.yaml --json --compact
 ```
 
-Create `closeout.yaml` from `templates/launcher/work_close.example.yaml`. Its `work_close_v1` control fields bind the agent, lease epoch, operation id, and packet `input_revision`; its `run`, `experiment`, `finding`, and `assignment_result` blocks close all related truth in one transaction. A `next_experiment` is a same-scope continuation. Put cross-scope or portfolio follow-ups under `assignment_result.proposals` with `kind: new_branch`; close never creates an assignment for that proposal.
+`work_start_v1` 使用 packet 中的 agent、lease、epoch 与 `input_revision`，并显式设置 `experiment_id: <packet.cursor.current_node>`；run id 由 runtime 生成。若 `cursor.current_node` 不是 experiment，不要搜索或猜测目标，停止并让 coordinator 修正 assignment。只有缺少 contract 时才运行 `work start --print-schema --json --compact`。
 
-This is three agent-visible CLI calls including open, or three calls starting with claim for initially unowned work. `work start` creates the run, starts the experiment, and renews the lease. `work close` persists the run terminal state, finding, bounded Evidence Bundle, optional follow-up cursor, assignment result, and lease transition atomically. Reuse an operation id only for an exact retry of the unchanged file; use a new id when its request changes. Normal mutations renew the lease, and a long-running launcher should call the runtime heartbeat hook outside model turns. Do not add `work renew` to the normal recipe.
+`work_close_v1` 一次提交 run status、experiment result、finding、assignment result、cursor、review requirement、proposal 与 optional `evidence_inputs`。只有缺少 closeout contract 时才运行 `work close --print-schema --json --compact`；返回示例包含 `review_required`，其默认 `false` 继承 assignment policy，设为 `true` 只用于追加 review，不能用 `false` 取消 coordinator 已要求的 review。`finding.confidence` 只接受 `weak`、`medium` 或 `strong`。
 
-When final payload files become available only at close, add `evidence_inputs.source` and source-relative `links` to `work_close_v1`; staging, hashing, artifact-record creation, and closeout remain one CLI call. Use one additional `ingest-artifact --json --compact --no-build` only when incremental or streaming evidence must be durable before close, then reference its `record_id` through `artifact_record.existing_record_id`. Do not repeat experiment completion, follow-up creation, or cursor movement after `work close`.
+Final payload 优先通过 closeout 提交。只有 crash recovery、共享消费或超大 streaming output 要求 close 前 durable 时才使用：
 
-Use assignment-scoped mutations. Do not mutate coordinator focus, accept decisions, or run lifecycle cleanup unless the assignment explicitly delegates that authority.
+```sh
+research-cockpit work record --root <data-root> --assignment <assignment_id> --file record.yaml --json --compact
+```
 
-## Verification
+通过 `work record --print-schema` 获取 `work_record_v1`。`source_dir` 相对 input file 解析；payload staging、内容哈希、record 写入、lease renewal 和 operation receipt 属于一个事务。
 
-Read the mutation receipt. When `verification.status` is `internally_verified` with `additional_verification_required: false`, or a compatibility receipt reports `verified: true` with the same flag false, do not run another validate, context reread, build, or smoke command.
+## Stop Conditions
 
-When additional verification is required, run only the reported changed scope. A normal worker turn is not `milestone_handoff`; the coordinator runs its full gate through one `coord handoff` invocation.
+- `internally_verified: true` 且 `additional_verification_required: false`：立即停止当前控制面步骤。
+- `stale_inputs`：reopen packet，不继续提交旧结果。
+- lease owner/epoch mismatch：停止写入，交还 coordinator。
+- scope conflict：不要扩大 scope 或手改 YAML。
+- `new_branch` proposal：只记录 proposal，不能自行创建 assignment。
 
-## Conditional Recovery
+`work renew` 与 `work release` 仅用于恢复或显式交还；正常 mutation 和 launcher heartbeat 自动续租。
 
-- `waiting_dependencies`: stop and report the bounded blockers.
-- `stale_inputs`: reopen from the latest packet before producing a result.
-- `unknown_inputs`: continue only for explicitly supported legacy work; otherwise ask the coordinator to refresh the index or assignment inputs.
-- expired lease with no active run or heartbeat: ask the coordinator to evaluate explicit reassignment.
-- lease mismatch, idempotency conflict, or rejected scope: reopen the packet; do not change parameters and retry under the same operation id.
-- missing operation details: query one command with `research-cockpit commands --role worker --name <command> --json --compact`; do not request broad discovery.
+## Detail On Demand
 
-Read a deeper capability only when the packet requires it: `experiment-cycle.md` for current run closeout, `experiment-tracking.md` for advanced evidence, `integrations.md` for external payload ingestion, `node-management.md` for an explicitly delegated graph mutation, and `troubleshooting.md` for a reported recovery condition.
+只有 packet 无法解释 experiment closeout 字段时才读取 `capabilities/experiment-cycle.md`；只有需要 legacy run、gate 或 artifact-record truth 语义时才继续读取 `capabilities/experiment-tracking.md`。

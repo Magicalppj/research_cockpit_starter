@@ -795,11 +795,16 @@ def finish_mutation(
     interaction: dict[str, Any],
     rebuild_dashboard: bool,
     text_changes: list[tuple] | None = None,
-) -> None:
-    execute_mutation_transaction(
+    operation_request: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    event = deepcopy(interaction)
+    if operation_request is not None and operation_request.get("command"):
+        event["command"] = str(operation_request["command"])
+    return execute_mutation_transaction(
         root,
         yaml_changes,
-        interactions=[interaction],
+        interactions=[event],
         rebuild_dashboard=rebuild_dashboard,
         text_changes=text_changes,
+        operation_request=operation_request,
     )

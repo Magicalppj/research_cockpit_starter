@@ -54,20 +54,15 @@ from research_cockpit.ui.view_helpers import (
     DEFAULT_GRAPH_VIEW_MODE,
     DEFAULT_HIDE_INACTIVE_OPTION_BRANCHES,
     baseline_command_problem_ids,
-    build_apply_suggestion_command,
     build_accept_decision_command,
     build_check_decision_acceptance_command,
     build_claim_option_command,
     build_cleanup_suggestion_lifecycle_command,
-    build_create_note_command,
     build_node_overview,
     build_option_workstream_context_command,
     build_promote_decision_command,
-    build_record_finding_command,
     build_report_option_workstream_command,
-    build_set_focus_command,
     build_update_decision_checklist_command,
-    build_update_suggestion_state_command,
     context_rows,
     build_graph_component_base_payload,
     build_graph_component_payload_from_base,
@@ -342,8 +337,8 @@ def render_effective_baseline(node: object, effective_baseline: dict, text: dict
     if not option:
         st.caption(text["no_effective_baseline"])
         st.code(
-            f"research-cockpit set-baseline --node {getattr(node, 'id', '')} "
-            "--option <option_id> --dry-run --json --show-diff",
+            "research-cockpit coord decide --file <coord_decide.yaml> "
+            "--json --compact",
             language=COMMAND_LANGUAGE,
         )
         st.code(
@@ -517,12 +512,6 @@ def render_node_detail(
                     st.rerun()
                 except Exception as exc:
                     st.error(f"{text['focus_update_failed']} {exc}")
-            st.write(text["set_focus_command"])
-            st.code(build_set_focus_command(current, node_id), language=COMMAND_LANGUAGE)
-            st.caption(text["set_focus_command_hint"])
-        if node.type == "experiment":
-            st.write(text["record_finding_command"])
-            st.code(build_record_finding_command(node_id), language=COMMAND_LANGUAGE)
         if node.type == "option":
             st.write(text["promote_decision_command"])
             st.code(build_promote_decision_command(node_id), language=COMMAND_LANGUAGE)
@@ -539,9 +528,6 @@ def render_node_detail(
             st.code(build_update_decision_checklist_command(node_id), language=COMMAND_LANGUAGE)
             st.write(text["accept_decision_command"])
             st.code(build_accept_decision_command(node_id), language=COMMAND_LANGUAGE)
-        if node.type in {"problem", "option", "experiment", "decision"}:
-            st.write(text["create_note_command"])
-            st.code(build_create_note_command(node_id), language=COMMAND_LANGUAGE)
         blockers = node.raw.get("blockers", [])
         if blockers:
             st.write(text["blockers"])
@@ -829,7 +815,7 @@ def render_baselines(nodes: dict, current: dict, text: dict[str, str]) -> None:
                 if decision_id:
                     st.write(text["inspect_decision"])
                     st.code(
-                        f"research-cockpit node-context --id {decision_id} --compact --json",
+                        f"research-cockpit context --id {decision_id} --view execution --compact --json",
                         language=COMMAND_LANGUAGE,
                     )
             else:
@@ -1405,7 +1391,6 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
     reason = st.text_input(text["suggestion_reason"], value="", key=f"reason_{selected_key}")
     lifecycle_cols = st.columns(3)
     with lifecycle_cols[0]:
-        st.code(build_update_suggestion_state_command(str(selected_key), "dismissed"), language=COMMAND_LANGUAGE)
         if st.button(
             text["dismiss_suggestion"],
             key=f"dismiss_{selected_key}",
@@ -1423,7 +1408,6 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
             except Exception as exc:
                 st.error(f"{text['suggestion_state_failed']} {exc}")
     with lifecycle_cols[1]:
-        st.code(build_update_suggestion_state_command(str(selected_key), "completed"), language=COMMAND_LANGUAGE)
         if st.button(
             text["complete_suggestion"],
             key=f"complete_{selected_key}",
@@ -1441,7 +1425,6 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
             except Exception as exc:
                 st.error(f"{text['suggestion_state_failed']} {exc}")
     with lifecycle_cols[2]:
-        st.code(build_update_suggestion_state_command(str(selected_key), "active"), language=COMMAND_LANGUAGE)
         if st.button(
             text["restore_suggestion"],
             key=f"restore_{selected_key}",
@@ -1459,7 +1442,6 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
         st.caption(text["inactive_queue_disabled"])
     current_col, node_col = st.columns(2)
     with current_col:
-        st.code(build_apply_suggestion_command(selected_suggestion["id"], "current"), language=COMMAND_LANGUAGE)
         if selected_suggestion.get("queued_in_current"):
             st.caption(text["queued_current"])
         if st.button(
@@ -1474,7 +1456,6 @@ def render_action_guidance(action_suggestions: list[dict], text: dict[str, str])
             except Exception as exc:
                 st.error(f"{text['queue_failed']} {exc}")
     with node_col:
-        st.code(build_apply_suggestion_command(selected_suggestion["id"], "node"), language=COMMAND_LANGUAGE)
         if selected_suggestion.get("queued_in_node"):
             st.caption(text["queued_node"])
         if st.button(

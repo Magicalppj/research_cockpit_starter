@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import errno
+import hashlib
 from datetime import date, datetime, timezone
 import json
 from pathlib import Path
@@ -39,6 +40,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.mutation_lock import MutationError
+from research_cockpit.mutation_runtime import execute_mutation_transaction
 from research_cockpit.paths import default_data_root
 from research_cockpit.runtime_ids import generate_runtime_id
 
@@ -119,10 +121,19 @@ def _stable_links(source_dir: Path, stable_base: str, links: dict[str, str]) -> 
     return out
 
 
-def _target_artifact_dir(root: Path, node_id: str, run_id: str, source_dir: Path) -> Path:
+def _target_artifact_dir(
+    root: Path,
+    node_id: str,
+    run_id: str,
+    source_dir: Path,
+    *,
+    storage_id: str | None = None,
+) -> Path:
     _validate_path_segment("node_id", node_id)
     artifact_root = (root / "artifacts").resolve()
     target_dir = artifact_root / node_id / run_id
+    if storage_id is not None:
+        target_dir /= storage_id
     target_resolved = target_dir.resolve(strict=False)
     try:
         target_resolved.relative_to(artifact_root)
@@ -137,6 +148,60 @@ def _target_artifact_dir(root: Path, node_id: str, run_id: str, source_dir: Path
 
 def _source_file_count(source_dir: Path) -> int:
     return sum(1 for path in source_dir.rglob("*") if path.is_file())
+
+def _directory_content_digest(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*"), key=lambda item: item.relative_to(root).as_posix()):
+        if path.is_symlink():
+            raise ValueError(f"Artifact payload must not contain symbolic links: {path}")
+        if not path.is_file():
+            continue
+        relative_text = path.relative_to(root).as_posix()
+        if relative_text == MANIFEST_NAME:
+            continue
+        relative = relative_text.encode("utf-8")
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return f"evidence-v1:{digest.hexdigest()}"
+
+
+def _operation_identity(
+    operation_request: dict[str, Any] | None,
+) -> dict[str, str] | None:
+    if not isinstance(operation_request, dict):
+        return None
+    identity = {
+        key: operation_request.get(key)
+        for key in ("scope", "operation_id", "request_hash", "operation")
+    }
+    if not all(isinstance(value, str) and value for value in identity.values()):
+        return None
+    return identity
+
+
+def _recoverable_payload(
+    target_dir: Path,
+    *,
+    operation_identity: dict[str, str] | None,
+    source_content_hash: str | None,
+    artifact_id: str,
+) -> bool:
+    if operation_identity is None or not source_content_hash:
+        return False
+    try:
+        stored = json.loads((target_dir / MANIFEST_NAME).read_text(encoding="utf-8"))
+        actual_hash = _directory_content_digest(target_dir)
+    except (FileNotFoundError, OSError, ValueError, json.JSONDecodeError):
+        return False
+    return (
+        stored.get("operation") == operation_identity
+        and stored.get("artifact_id") == artifact_id
+        and stored.get("source_content_hash") == source_content_hash
+        and actual_hash == source_content_hash
+    )
 
 
 def _git_output(source_dir: Path, *args: str) -> str | None:
@@ -175,6 +240,8 @@ def _manifest(
     root: Path,
     node_id: str,
     run_id: str,
+    source_content_hash: str | None,
+    operation_identity: dict[str, str] | None,
     artifact_id: str,
     agent_id: str | None,
     source_dir: Path,
@@ -200,6 +267,10 @@ def _manifest(
         "links": links,
         "source_git": _source_git(source_dir),
     }
+    if source_content_hash:
+        manifest["source_content_hash"] = source_content_hash
+    if operation_identity:
+        manifest["operation"] = operation_identity
     if promotion_reason:
         manifest["promotion_reason"] = promotion_reason
     return manifest
@@ -258,6 +329,10 @@ def ingest_artifact(
     record_only: bool | None = None,
     promote: bool = False,
     promotion_reason: str | None = None,
+    additional_yaml_changes: list[tuple] | None = None,
+    interaction_override: dict[str, Any] | None = None,
+    operation_request: dict[str, Any] | None = None,
+    source_content_hash: str | None = None,
 ) -> dict[str, Any]:
     reason = str(promotion_reason or "").strip() or None
     if promote and record_only is True:
@@ -314,10 +389,19 @@ def ingest_artifact(
     if artifact_id in nodes:
         raise FileExistsError(root / "graph" / "nodes" / f"{artifact_id}.yaml")
 
-    stable_path = _stable_path("artifacts", node_id, run_id)
-    target_dir = _target_artifact_dir(root, node_id, run_id, source_resolved)
-    if target_dir.exists():
-        raise FileExistsError(target_dir)
+    operation_identity = _operation_identity(operation_request)
+    operation_bound_record = bool(
+        is_record
+        and operation_identity
+        and operation_identity.get("operation") == "work record"
+    )
+    if operation_bound_record and not source_content_hash:
+        raise ValueError("work record ingest requires a source content hash")
+    storage_id = artifact_id if operation_bound_record else None
+    stable_path = _stable_path("artifacts", node_id, run_id, storage_id or "")
+    target_dir = _target_artifact_dir(
+        root, node_id, run_id, source_resolved, storage_id=storage_id
+    )
     stable_links = _stable_links(source_resolved, stable_path, links)
     file_count = _source_file_count(source_resolved)
     manifest = _manifest(
@@ -332,7 +416,19 @@ def ingest_artifact(
         links=stable_links,
         mode=mode,
         promotion_reason=reason,
+        source_content_hash=source_content_hash,
+        operation_identity=operation_identity,
     )
+    reused_payload = False
+    if target_dir.exists():
+        if not _recoverable_payload(
+            target_dir,
+            operation_identity=operation_identity,
+            source_content_hash=source_content_hash,
+            artifact_id=artifact_id,
+        ):
+            raise FileExistsError(target_dir)
+        reused_payload = True
 
     today = str(date.today())
     artifact_data: dict[str, Any] = {
@@ -413,6 +509,7 @@ def ingest_artifact(
             (artifact_path, None, artifact_data),
             (node_path, node_before, node_after),
         ]
+    changes = [*list(additional_yaml_changes or []), *changes]
     result: dict[str, Any] = {
         "ok": True,
         "artifact_id": artifact_id,
@@ -424,6 +521,7 @@ def ingest_artifact(
         "node_id": node_id,
         "run_id": run_id,
         "dry_run": dry_run,
+        "reused_payload": reused_payload,
         "changed": not dry_run,
         "would_change": True,
         "verified": not dry_run,
@@ -458,16 +556,28 @@ def ingest_artifact(
 
     preflight_mutation(root)
     copied = False
-    _copy_to_stable_store(source_resolved, target_dir, manifest)
-    copied = True
+    if not reused_payload:
+        try:
+            _copy_to_stable_store(source_resolved, target_dir, manifest)
+            copied = True
+        except FileExistsError:
+            if not _recoverable_payload(
+                target_dir,
+                operation_identity=operation_identity,
+                source_content_hash=source_content_hash,
+                artifact_id=artifact_id,
+            ):
+                raise
+            reused_payload = True
+    result["reused_payload"] = reused_payload
     interaction_args = ["--node", node_id, "--run-id", run_id]
     if promote:
         interaction_args.append("--promote")
     try:
-        finish_mutation(
+        transaction = execute_mutation_transaction(
             root,
             changes,
-            interaction={
+            interactions=[interaction_override or {
                 "kind": "ingest_artifact",
                 "actor": agent_id or "researcher",
                 "node_id": node_id,
@@ -484,13 +594,16 @@ def ingest_artifact(
                     "links": sorted(stable_links),
                     "agent_id": agent_id,
                 },
-            },
+            }],
             rebuild_dashboard=rebuild_dashboard,
+            operation_request=operation_request,
         )
     except MutationError as exc:
         if copied and not exc.payload.get("partial_success"):
             shutil.rmtree(target_dir, ignore_errors=True)
         raise
+    if operation_request is not None:
+        result["_operation_transaction"] = transaction
     result["resource_rows"] = linked_resource_rows(root, candidate, [artifact_id, node_id]) if promote else []
     return result
 

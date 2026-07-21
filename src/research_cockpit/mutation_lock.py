@@ -206,7 +206,9 @@ class mutation_lock:
                     except OSError:
                         pass
                     raise
-            except FileExistsError as exc:
+            except (FileExistsError, PermissionError) as exc:
+                if isinstance(exc, PermissionError) and not self.path.exists():
+                    raise
                 owner = self._owner_state()
                 if self._recover_stale_lock(owner):
                     continue

@@ -181,50 +181,46 @@ def _experiment_context(
         "gate_results": build_experiment_gate_context(root, experiment.id, records=gate_records),
         "hierarchy_policy": hierarchy_policy(parent_option_id=option_id, source_experiment_id=experiment.id),
         "suggested_commands": {
-            "mark_running": _rooted_cli_command(
+            "start": _rooted_cli_command(
                 root,
-                "update-status",
-                "--id",
-                experiment.id,
-                "--status",
-                "running",
+                "work start",
+                "--assignment",
+                "<assignment_id>",
+                "--file",
+                "<start.yaml>",
+                "--json",
+                "--compact",
                 command_style=command_style,
             ),
-            "record_finding": _rooted_cli_command(
+            "record_evidence": _rooted_cli_command(
                 root,
-                "record-finding",
-                "--experiment",
-                experiment.id,
-                "--statement",
-                "Describe the finding",
-                "--confidence",
-                "medium",
-                "--outcome",
-                "inconclusive",
+                "work record",
+                "--assignment",
+                "<assignment_id>",
+                "--file",
+                "<record.yaml>",
+                "--json",
+                "--compact",
+                command_style=command_style,
+            ),
+            "close_assignment": _rooted_cli_command(
+                root,
+                "work close",
+                "--assignment",
+                "<assignment_id>",
+                "--file",
+                "<closeout.yaml>",
+                "--json",
+                "--compact",
                 command_style=command_style,
             ),
             "create_child_workstream": _rooted_cli_command(
                 root,
-                "create-workstream",
+                "coord assign",
                 "--file",
-                "workstream.yaml",
-                "--dry-run",
+                "<coord_assign.yaml>",
                 "--json",
-                "--show-diff",
-                command_style=command_style,
-            ),
-            "create_single_followup": _rooted_cli_command(
-                root,
-                "create-followup-experiment",
-                "--from",
-                experiment.id,
-                "--id",
-                "<followup_experiment_id>",
-                "--title",
-                "Follow-up gate",
-                "--dry-run",
-                "--json",
-                "--show-diff",
+                "--compact",
                 command_style=command_style,
             ),
         },
@@ -250,84 +246,40 @@ def _decision_repair_hints(
     *,
     command_style: str = "console",
 ) -> list[dict[str, str]]:
+    del nodes, decision
     hints: list[dict[str, str]] = []
-    alternative_id = _alternative_option_for_decision(nodes, decision)
     for item in checklist.get("blocking_failures", []) or []:
         check_id = str(item.get("id") or "")
-        related = [str(node_id) for node_id in item.get("related_node_ids", []) or []]
-        command = ""
         if check_id == "supporting_evidence":
-            experiment_id = related[0] if related else "<experiment_id>"
             command = _rooted_cli_command(
                 root,
-                "record-finding",
-                "--experiment",
-                experiment_id,
-                "--statement",
-                "Describe the finding",
-                "--confidence",
-                "medium",
-                "--outcome",
-                "inconclusive",
+                "work record",
+                "--assignment",
+                "<assignment_id>",
+                "--file",
+                "<record.yaml>",
+                "--json",
+                "--compact",
                 command_style=command_style,
             )
-        elif check_id in {"supporting_experiments", "evidence_strength", "evidence_summary"}:
+        else:
             command = _rooted_cli_command(
                 root,
-                "update-decision-evidence",
-                "--id",
-                decision.id,
+                "coord decide",
+                "--file",
+                "<coord_decide.yaml>",
+                "--json",
+                "--compact",
                 command_style=command_style,
             )
-        elif check_id == "alternatives_considered":
-            command = _rooted_cli_command(
-                root,
-                "update-decision-checklist",
-                "--id",
-                decision.id,
-                "--alternative",
-                alternative_id,
-                command_style=command_style,
-            )
-        elif check_id == "consequences":
-            command = _rooted_cli_command(
-                root,
-                "update-decision-checklist",
-                "--id",
-                decision.id,
-                "--consequence",
-                "Describe downstream impact",
-                command_style=command_style,
-            )
-        elif check_id == "next_required_actions":
-            command = _rooted_cli_command(
-                root,
-                "update-decision-checklist",
-                "--id",
-                decision.id,
-                "--next-required-action",
-                "Describe required follow-up",
-                command_style=command_style,
-            )
-        hints.append({
-            "check_id": check_id,
-            "reason": str(item.get("reason") or ""),
-            "command": command,
-        })
-    if any(item.get("check_id") == "supporting_evidence" for item in hints):
-        hints.append({
-            "check_id": "refresh_evidence",
-            "reason": "Refresh decision evidence after recording experiment findings.",
-            "command": _rooted_cli_command(
-                root,
-                "update-decision-evidence",
-                "--id",
-                decision.id,
-                command_style=command_style,
-            ),
-        })
+        hints.append(
+            {
+                "check_id": check_id,
+                "reason": str(item.get("reason") or ""),
+                "command": command,
+            }
+        )
     return hints
-
 
 def _decision_context(
     root: Path,
@@ -346,21 +298,24 @@ def _decision_context(
         "acceptance": checklist,
         "repair_hints": _decision_repair_hints(root, nodes, decision, checklist, command_style=command_style),
         "suggested_commands": {
-            "check_acceptance": _rooted_cli_command(
+            "inspect_decision": _rooted_cli_command(
                 root,
-                "check-decision-acceptance",
+                "context",
                 "--id",
                 decision.id,
+                "--view",
+                "execution",
                 "--json",
+                "--compact",
                 command_style=command_style,
             ),
-            "accept_dry_run": _rooted_cli_command(
+            "decide": _rooted_cli_command(
                 root,
-                "accept-decision",
-                "--id",
-                decision.id,
-                "--dry-run",
+                "coord decide",
+                "--file",
+                "<coord_decide.yaml>",
                 "--json",
+                "--compact",
                 command_style=command_style,
             ),
         },
@@ -380,46 +335,49 @@ def _option_onboarding_context(
     workstream = build_option_workstream_context(root, nodes, current, option.id)
     workstream["hierarchy_policy"] = hierarchy_policy(parent_option_id=option.id)
     workstream["suggested_commands"] = {
-        "claim": _rooted_cli_command(
+        "claim_assignment": _rooted_cli_command(
             root,
-            "claim-option",
-            "--option",
-            option.id,
+            "work claim",
+            "--assignment",
+            "<assignment_id>",
             "--agent",
             "<agent_id>",
-            "--objective",
-            "Describe objective",
+            "--operation-id",
+            "<operation_id>",
+            "--return-packet",
+            "--json",
+            "--compact",
             command_style=command_style,
         ),
-        "context": _rooted_cli_command(
+        "open_context": _rooted_cli_command(
             root,
-            "option-workstream-context",
-            "--option",
+            "context",
+            "--id",
             option.id,
+            "--view",
+            "execution",
             "--json",
+            "--compact",
             command_style=command_style,
         ),
         "create_child_workstream": _rooted_cli_command(
             root,
-            "create-workstream",
+            "coord assign",
             "--file",
-            "workstream.yaml",
-            "--dry-run",
+            "<coord_assign.yaml>",
             "--json",
-            "--show-diff",
+            "--compact",
             command_style=command_style,
         ),
-        "report": _rooted_cli_command(
+        "close_assignment": _rooted_cli_command(
             root,
-            "report-option-workstream",
-            "--option",
-            option.id,
-            "--agent",
-            "<agent_id>",
-            "--recommend",
-            "continue",
-            "--summary",
-            "Summarize evidence and recommendation",
+            "work close",
+            "--assignment",
+            "<assignment_id>",
+            "--file",
+            "<closeout.yaml>",
+            "--json",
+            "--compact",
             command_style=command_style,
         ),
     }
@@ -437,8 +395,8 @@ def _node_worker_verify_commands(root: Path, node: ResearchNode, *, command_styl
             "context",
             "--id",
             node.id,
-            "--with-bootstrap",
-            "--with-artifacts",
+            "--view",
+            "execution",
             "--compact",
             "--json",
             command_style=command_style,
@@ -468,18 +426,20 @@ def _compact_command_drafts(command_drafts: dict[str, str]) -> dict[str, str]:
         "context_changed",
         "smoke_changed",
         "search_node",
-        "claim_option",
-        "option_workstream_context",
-        "report_option_workstream",
-        "mark_running",
-        "record_finding",
+        "claim_assignment",
+        "open_context",
+        "close_assignment",
+        "start",
+        "record_evidence",
         "create_child_workstream",
-        "create_single_followup",
-        "check_acceptance",
-        "accept_decision",
+        "inspect_decision",
+        "decide",
     ]
-    return {key: command_drafts[key] for key in compact_keys if command_drafts.get(key)}
-
+    return {
+        key: command_drafts[key]
+        for key in compact_keys
+        if command_drafts.get(key)
+    }
 
 def _node_command_drafts(
     root: Path,
@@ -498,44 +458,7 @@ def _node_command_drafts(
         "search_node": _rooted_cli_command(root, "search", "--query", node.id, "--json", command_style=command_style),
     }
     if node.type == "option":
-        drafts.update({
-            "claim_option": _rooted_cli_command(
-                root,
-                "claim-option",
-                "--option",
-                node.id,
-                "--agent",
-                "<agent_id>",
-                "--objective",
-                "Describe objective",
-                "--dry-run",
-                "--json",
-                command_style=command_style,
-            ),
-            "option_workstream_context": _rooted_cli_command(
-                root,
-                "option-workstream-context",
-                "--option",
-                node.id,
-                "--json",
-                command_style=command_style,
-            ),
-            "report_option_workstream": _rooted_cli_command(
-                root,
-                "report-option-workstream",
-                "--option",
-                node.id,
-                "--agent",
-                "<agent_id>",
-                "--recommend",
-                "continue",
-                "--summary",
-                "Summarize evidence and recommendation",
-                "--dry-run",
-                "--json",
-                command_style=command_style,
-            ),
-        })
+        drafts.update(type_context.get("workstream", {}).get("suggested_commands", {}))
     elif node.type == "experiment":
         drafts.update(type_context.get("suggested_commands", {}))
     elif node.type == "decision":
@@ -547,14 +470,14 @@ def _recommended_next_steps(node: ResearchNode, type_context: dict[str, Any], dr
     if node.type == "experiment" and type_context.get("missing_evidence"):
         return [{
             "action": "Run or complete the experiment, then record one structured finding.",
-            "command": drafts.get("record_finding", ""),
+            "command": drafts.get("record_evidence", ""),
             "reason": "This experiment has no findings, result_summary, or outcome yet.",
         }]
     if node.type == "decision" and not type_context.get("acceptance", {}).get("ready", False):
         first_repair = next((item for item in type_context.get("repair_hints", []) if item.get("command")), {})
         return [{
             "action": "Repair blocking decision acceptance failures before accepting the decision.",
-            "command": str(first_repair.get("command") or drafts.get("check_acceptance") or ""),
+            "command": str(first_repair.get("command") or drafts.get("inspect_decision") or ""),
             "reason": "Decision acceptance checklist is not ready.",
         }]
     if node.type == "option":
@@ -570,7 +493,7 @@ def _recommended_next_steps(node: ResearchNode, type_context: dict[str, Any], dr
             return []
         return [{
             "action": "Claim the option workstream before starting agent work.",
-            "command": drafts.get("claim_option", ""),
+            "command": drafts.get("claim_assignment", ""),
             "reason": "Option work should be coordinated through an agent workstream.",
         }]
     for action in node.raw.get("next_actions", []) or []:

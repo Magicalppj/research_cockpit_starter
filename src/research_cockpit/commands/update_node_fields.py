@@ -165,6 +165,7 @@ def field_updates_from_mapping(fields: dict[str, Any] | None) -> dict[str, Any]:
     scalar_updates: dict[str, str] = {}
     list_appends: dict[str, list[str]] = {}
     bool_updates: dict[str, bool] = {}
+    metadata_updates: dict[str, Any] = {}
     current_best_option: str | None = None
     replace_next_actions: list[str] | None = None
 
@@ -176,6 +177,9 @@ def field_updates_from_mapping(fields: dict[str, Any] | None) -> dict[str, Any]:
             continue
         if field_name == "replace_next_actions":
             replace_next_actions = _as_str_list(value, field_name=field_name)
+            continue
+        if field_name in METADATA_FIELDS:
+            metadata_updates[field_name] = value
             continue
         if field_name in SCALAR_FIELDS:
             scalar_updates[field_name] = "" if value is None else str(value)
@@ -195,6 +199,7 @@ def field_updates_from_mapping(fields: dict[str, Any] | None) -> dict[str, Any]:
         "scalar_updates": scalar_updates,
         "list_appends": list_appends,
         "bool_updates": bool_updates,
+        "metadata_updates": metadata_updates,
     }
 
 

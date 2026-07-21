@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented historical plan. Maintenance audits, resource declarations, worktree closeout planning, retention metadata, and artifact cleanup controls are now implemented. Current operational guidance: `capabilities/maintenance.md`, `capabilities/experiment-tracking.md`, and `docs/artifact-retention-policy.md`; the remaining sections preserve the original proposal.
+Implemented historical plan, superseded operationally by the 0.3.0 role facade. Removed command examples below are design history, not current instructions. Current operational guidance: `capabilities/maintenance.md`, `docs/worktree-branch-lifecycle.md`, `docs/artifact-retention-policy.md`, and `docs/migrations/0.3.0-cli-cutover.md`.
 
 ## Date
 

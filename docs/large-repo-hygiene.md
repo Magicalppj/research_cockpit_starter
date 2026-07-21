@@ -1,8 +1,6 @@
 # Large Repository Hygiene
 
-Large research repositories can become slow because generated files, checkpoints, datasets, artifacts, and temporary worktrees are watched or scanned as if they were source files.
-
-Repository hygiene is part of Research Cockpit usability. If the dashboard, IDE, git status, or file watchers slow down, agents make worse decisions and cleanup becomes riskier.
+Large research repositories slow down when generated outputs, checkpoints, datasets, artifacts, and temporary worktrees are scanned as source files. Keep Research Cockpit truth small and keep bulk payloads outside normal source and watcher paths.
 
 ## Recommended Layout
 
@@ -14,59 +12,34 @@ research-repo/
   tests/
   research_cockpit/
     graph/
+    assignments/
     runs/
     gate_results/
-    artifacts/          # long-lived summaries and review bundles, not every raw output
-  outputs/              # git-ignored generated outputs
-  data/                 # git-ignored or externally managed datasets/caches
+    artifact_records/
+    artifacts/          # durable summaries and review bundles
+  outputs/              # ignored generated outputs
+  data/                 # ignored or externally managed data
   .worktrees/           # temporary agent worktrees
 ```
 
-For very large payloads, use an external stable artifact root and store only summaries, manifests, and portable review bundles in or near `research_cockpit/artifacts/`.
+For large payloads, use an external stable artifact root and store bounded summaries, manifests, and portable review bundles under `research_cockpit/artifacts/`.
 
-## Sparse Or Minimal Worktrees
+## Minimal Worktrees
 
-Temporary worktrees usually need:
+Temporary worktrees usually need source, configs, scripts, tests, minimal docs, and any required nested repository. They usually do not need the canonical `research_cockpit/`, bulk outputs, logs, datasets, artifact payloads, or virtual environments.
 
-- source code
-- configs
-- scripts
-- tests
-- minimal docs
-- any required nested repo path
-
-Temporary worktrees usually do not need:
-
-- `research_cockpit/`
-- `outputs/`
-- `logs/`
-- large `data/` trees
-- generated dataset artifacts
-- virtual environments
-- bulk artifact payloads
-
-The canonical cockpit root should still be passed as an absolute `--root` pointing at the main checkout.
-
-Research Cockpit can generate a sparse worktree command plan:
+Create sparse or minimal worktrees with Git tooling appropriate to the host platform. Then register the session through a `coord_assign_v1` session request using the canonical data root and the resulting worktree path:
 
 ```sh
-research-cockpit start-agent-session --root D:/main_repo/research_cockpit --option option_x --label cache_probe --objective "Run cache probe" --branch agent/option_x-cache_probe --worktree ../worktrees/cache_probe --base main --dry-run --json --sparse --sparse-profile ml-experiment
+research-cockpit coord assign --print-schema --action session
+research-cockpit coord assign --root <absolute-data-root> --file <session.yaml> --json --compact
 ```
 
-The `ml-experiment` profile is plan-only. It recommends `git worktree add --no-checkout`, `git sparse-checkout init --no-cone`, a pattern-based `sparse-checkout set`, and `git checkout`. The profile starts from the repository root and excludes:
-
-- `/research_cockpit/`
-- `/outputs/`
-- `/logs/`
-- `/data/`
-- `/datasets/**/artifacts/`
-- `/.venv/`, `/.venvs/`, and `/venv/`
-
-Run the generated command sequence manually after review. Then launch or record the agent session with the canonical main-checkout `research_cockpit/` root; do not initialize or mutate a worktree-local cockpit root.
+Set `session.create_worktree: false` when the worktree already exists. A worktree must not initialize or mutate a second cockpit root.
 
 ## Watcher Excludes
 
-Recommended excludes for IDEs, file watchers, and repo-wide developer scanners:
+Exclude generated and local-only paths from IDEs, file watchers, and repository-wide scanners:
 
 ```text
 .worktrees/
@@ -79,59 +52,35 @@ research_cockpit/artifacts/**
 .venvs/
 ```
 
-Do not exclude truth-source YAML directories such as `research_cockpit/graph/`, `research_cockpit/runs/`, `research_cockpit/gate_results/`, `research_cockpit/assignments/`, or `research_cockpit/agents/`.
+Do not exclude truth directories such as `research_cockpit/graph/`, `assignments/`, `agents/`, `runs/`, `gate_results/`, or `artifact_records/`.
 
-## Dashboard Build Hygiene
+## Dashboard Diagnostics
 
-Use profiling before guessing:
-
-```sh
-research-cockpit build --root research_cockpit --json --profile
-research-cockpit build --root research_cockpit --json --profile --profile-output dashboards/build_profile.json
-```
-
-The `build_profile_v1` payload includes stage timings, output file sizes, search index counts, `resource_scan_settings`, and resource-scan warnings. Persisting it under `dashboards/build_profile.json` lets `maintenance-audit` surface dashboard performance warnings alongside worktree, branch, and artifact cleanup checks.
-
-If local linked resource full-text indexing dominates the build, use:
+Normal worker mutations do not build dashboards. Profile a standalone diagnostic build only when dashboard generation itself is under investigation:
 
 ```sh
-research-cockpit build --root research_cockpit --json --profile --skip-resource-search
+research-cockpit build --root <data-root> --json --profile
+research-cockpit build --root <data-root> --json --profile --profile-output <profile.json>
 ```
 
-This keeps node and note search while marking local linked resource text as disabled for that build.
+The profile reports stage timings, output sizes, search index counts, resource scan settings, and warnings. If linked resource full-text indexing dominates, diagnose with:
 
-Default resource scans are bounded for large repositories. Generated payloads matching configured skip patterns are indexed as skipped resources instead of reading their bytes, directory resources prefer configured summary files such as `summary.md`, and profile warnings can report `resource_scan_skipped_payload`, `resource_directory_without_summary`, or `resource_scan_truncated`.
+```sh
+research-cockpit build --root <data-root> --json --profile --skip-resource-search
+```
+
+This keeps node and note search but disables local linked-resource text for that diagnostic build. Do not turn a profiling workaround into a default without reviewing search requirements.
 
 ## Evidence Shape
 
-Prefer small, durable evidence:
-
-- `metrics_summary.json`
-- `report.md`
-- `README.md`
-- `artifact_manifest.json`
-- `bundle_check.json`
-- portable `index.html` review bundles with relative links
-
-Avoid treating these as permanent evidence by default:
-
-- raw generated samples
-- every intermediate checkpoint
-- optimizer and scheduler state
-- precomputed dataset caches
-- temporary model export directories
-- local absolute paths
+Prefer small durable files such as `metrics_summary.json`, `report.md`, `artifact_manifest.json`, `bundle_check.json`, and portable `index.html` bundles with relative links. Treat raw samples, intermediate checkpoints, optimizer state, caches, temporary exports, and machine-local absolute paths as disposable unless an explicit retention decision says otherwise.
 
 ## Cleanup Safety
 
-Before cleanup, check:
+Use a bounded maintenance audit before cleanup:
 
-- active assignments
-- queued/running runs
-- active resource declarations
-- worktree dirty state
-- nested repo dirty state
-- artifact retention metadata
-- whether findings and decisions already link stable evidence
+```sh
+research-cockpit maintenance audit --root <data-root> --repo <repo-root> --json --compact
+```
 
-Research Cockpit can make these checks easier, but cleanup still needs explicit human approval for destructive operations.
+Review active assignments and runs, resource declarations, outer and nested repository state, retention metadata, and stable evidence links. The audit reports candidates; destructive filesystem, worktree, and branch operations remain explicit human actions.

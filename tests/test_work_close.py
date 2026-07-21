@@ -104,6 +104,7 @@ class WorkCloseTests(unittest.TestCase):
             lease_id=self.lease["lease_id"],
             lease_epoch=self.lease["lease_epoch"],
             operation_id="op_start_close",
+            input_revision="input-v1:seed",
             slug_hint="close",
             now=NOW + timedelta(seconds=30),
         )
@@ -198,6 +199,21 @@ class WorkCloseTests(unittest.TestCase):
         self.assertEqual(assignment.review["status"], "pending")
         self.assertNotIn("assign_x", agent.active_assignment_ids)
         self.assertEqual(len(list((self.root / "assignments").glob("*.yaml"))), 1)
+
+    def test_invalid_finding_confidence_lists_allowed_values(self) -> None:
+        plan = self._plan(operation_id="op_close_invalid_confidence")
+        plan["finding"]["confidence"] = "high"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "allowed: medium, strong, weak",
+        ):
+            close_assignment_work(
+                self.root,
+                assignment_id="assign_x",
+                plan=plan,
+                now=NOW + timedelta(minutes=2),
+            )
 
     def test_close_payload_mismatch_rejects_without_second_write(self) -> None:
         self.close = close_assignment_work(

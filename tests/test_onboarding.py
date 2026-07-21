@@ -106,7 +106,7 @@ class NodeOnboardingTests(unittest.TestCase):
         self.assertEqual(payload["core_problem"]["id"], "problem_text")
         self.assertIn("next_actions", payload)
         self.assertIn("evidence_summary", payload)
-        self.assertIn("claim_option", payload["command_drafts"])
+        self.assertIn("claim_assignment", payload["command_drafts"])
         self.assertIn("context_freshness", payload)
         self.assertNotIn("relations", payload)
         self.assertNotIn("recent_interactions", payload)
@@ -195,15 +195,15 @@ class NodeOnboardingTests(unittest.TestCase):
             command_style="python",
         )
 
-        command = payload["command_drafts"]["claim_option"]
+        command = payload["command_drafts"]["claim_assignment"]
         self.assertNotIn("research-cockpit", command)
-        self.assertIn("-m research_cockpit.cli claim-option", command)
+        self.assertIn("-m research_cockpit.cli work claim", command)
         self.assertIn("--root", command)
         self.assertEqual(payload["recommended_next_steps"][0]["command"], command)
 
     def test_node_context_cli_outputs_compact_json(self) -> None:
         result = subprocess.run(
-            [*cli_command("node-context"), "--root", str(self.root), "--id", "option_t5", "--json", "--compact"],
+            [*cli_command("context"), "--root", str(self.root), "--id", "option_t5", "--json", "--compact"],
             capture_output=True,
             text=True,
             check=False,
@@ -211,20 +211,20 @@ class NodeOnboardingTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["schema_version"], "node_context_compact_v2")
+        self.assertEqual(payload["schema_version"], "context_compact_v3")
         self.assertEqual(payload["node"]["id"], "option_t5")
+        self.assertEqual(payload["node_context"]["schema_version"], "node_context_nested_compact_v3")
         self.assertNotIn("relations", payload)
 
     def test_node_context_cli_python_command_style_outputs_module_commands(self) -> None:
         result = subprocess.run(
             [
-                *cli_command("node-context"),
+                *cli_command("context"),
                 "--root",
                 str(self.root),
                 "--id",
                 "option_t5",
                 "--json",
-                "--compact",
                 "--command-style",
                 "python",
             ],
@@ -235,9 +235,9 @@ class NodeOnboardingTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
-        command = payload["command_drafts"]["claim_option"]
+        command = payload["node_context"]["command_drafts"]["claim_assignment"]
         self.assertNotIn("research-cockpit", command)
-        self.assertIn("-m research_cockpit.cli claim-option", command)
+        self.assertIn("-m research_cockpit.cli work claim", command)
 
     def test_commands_manifest_includes_python_module_command(self) -> None:
         manifest = agent_command_manifest()

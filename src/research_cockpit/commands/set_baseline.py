@@ -53,6 +53,7 @@ def set_baseline(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    operation_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if clear and any([option_id, decision_id, artifacts, reason]):
         raise ValueError("--clear cannot be combined with baseline fields")
@@ -100,7 +101,7 @@ def set_baseline(
         result["diff"] = yaml_change_diff([(path, before_data, data)]) if changed else ""
     if dry_run:
         return dry_run_preflight_result(root, result)
-    if not changed:
+    if not changed and operation_request is None:
         return result
 
     finish_mutation(
@@ -115,6 +116,7 @@ def set_baseline(
             "after": after,
         },
         rebuild_dashboard=rebuild_dashboard,
+        operation_request=operation_request,
     )
     return result
 

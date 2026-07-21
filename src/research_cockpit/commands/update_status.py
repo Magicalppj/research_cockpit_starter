@@ -79,7 +79,7 @@ def update_status_result(
     node = nodes[node_id]
     validate_status(node.type, status)
     if node.type == "decision" and status == "accepted":
-        raise ValueError("Use `research-cockpit accept-decision` to accept a decision so option/problem state stays synchronized.")
+        raise ValueError("Use `research-cockpit coord decide --file <coord_decide.yaml>` so decision, option, and problem state stay synchronized.")
     if result_summary is not None and node.type != "experiment":
         raise ValueError("--result-summary can only be used with experiment nodes")
     ensure_assignment_scope(

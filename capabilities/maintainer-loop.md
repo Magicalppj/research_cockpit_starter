@@ -1,26 +1,23 @@
 # Maintainer Loop
 
-Load this playbook only for migration, repair, retention, release packaging, or repository hygiene. Maintainer authority is root-scoped and must not be inferred by workers or reviewers.
+Maintainer 处理 repository/data-root health，不参与普通 assignment execution。
 
-## Inspect Before Mutation
-
-Use the narrow audit that matches the task. Prefer dry-run for repair, migration, compaction, and worktree cleanup. Do not run dashboard build or full smoke merely because structured truth changed.
-
-Query one missing contract with:
+## Audit First
 
 ```sh
-research-cockpit commands --role maintainer --name <command> --json --compact
+research-cockpit maintenance audit --root <data-root> --repo <repo-root> --json --compact
 ```
 
-Do not request broad discovery at startup. Read `capabilities/maintenance.md` only after the audit identifies a specific retention, worktree, interaction-log, or migration procedure.
+Audit 汇总 active assignments/runs、worktree/branch candidates、large artifact candidates 与 dashboard performance warnings。只选择一个具体问题继续，不在一个 mutation 中混合多类维护。
 
-## Invariants
+## Execute One Action
 
-- Preserve legacy structured data, unknown fields, artifact payload bytes, provenance refs, and append-only history.
-- Never delete payloads as part of metadata compaction.
-- Run artifact compaction as dry-run, then execute one eligible artifact at a time.
-- Keep generated dashboards and validation indexes rebuildable; do not treat them as truth.
-- Verify resolved paths before recursive worktree or temporary-fixture cleanup.
-- A repair or migration receipt must identify changed files and recovery actions.
+```sh
+research-cockpit maintenance repair --print-schema
+research-cockpit maintenance migrate --print-schema
+research-cockpit maintenance compact --print-schema
+```
 
-Release or `milestone_handoff` runs once through coordinator `coord handoff`; do not precede it with standalone full gates. Ordinary maintenance audits and dry-runs do not trigger that orchestrator.
+结构化输入统一为 `maintenance_action_v1`，默认 `execute: false`。先检查 dry-run result 与 diff，再将同一计划改为 `execute: true`。具体 action 和 safety boundary 见 `capabilities/maintenance.md`。
+
+Maintenance route 不承诺 operation-id idempotency；因此执行前必须确认 root、target 和 plan 未变化。执行后只运行 result 指定的 bounded verification。

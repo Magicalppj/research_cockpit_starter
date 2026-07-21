@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shlex
 from typing import Any
 
 from research_cockpit.graph_core import (
@@ -441,10 +440,6 @@ def build_accepted_decision_rows(nodes: dict[str, ResearchNode]) -> list[dict[st
     return rows
 
 
-def _quote_command_value(value: str) -> str:
-    return shlex.quote(str(value))
-
-
 def build_set_baseline_command(
     node_id: str,
     option_id: str = "",
@@ -454,16 +449,8 @@ def build_set_baseline_command(
     reason: str = "",
     clear: bool = False,
 ) -> str:
-    parts = ["research-cockpit", "set-baseline", "--node", _quote_command_value(node_id)]
-    if clear:
-        parts.append("--clear")
-        return " ".join(parts)
-    if option_id:
-        parts.extend(["--option", _quote_command_value(option_id)])
-    if decision_id:
-        parts.extend(["--decision", _quote_command_value(decision_id)])
-    for artifact_id in artifacts or []:
-        parts.extend(["--artifact", _quote_command_value(artifact_id)])
-    if reason:
-        parts.extend(["--reason", _quote_command_value(reason)])
-    return " ".join(parts)
+    del node_id, option_id, decision_id, artifacts, reason, clear
+    return (
+        "research-cockpit coord decide --file <coord_decide.yaml> "
+        "--json --compact"
+    )

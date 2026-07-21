@@ -1,52 +1,33 @@
 # Reviewer Loop
 
-Load this playbook only for an explicit review assignment. Review is read-only with respect to the producer assignment and its evidence.
+## Open
 
-## Open The Review Packet
+Reviewer 不创建自己的 assignment。Coordinator 在 producer close 且 review 状态为 pending 后，使用 `research-cockpit coord assign --print-schema --action review_session` 获取 input，并以 `producer_assignment_id` 创建 review session。
+
+Reviewer 收到 `review_assignment_id` 后只执行：
 
 ```sh
 research-cockpit review open --root <data-root> --assignment <review_assignment_id> --json --compact
 ```
 
-The response contains the review assignment Work Packet, the exact producer Evidence Bundle and result revision, and bounded artifact-record links. Confirm `assignment.kind: review`, `scope.write_policy: review_read_only`, and `allowed_operations: [review]`. Do not separately open producer context or scan all accepted history/artifacts.
+Review Packet 已包含 producer result revision、bounded Evidence Bundle、acceptance criteria、changed files 与验证摘要。不要再打开 producer worker packet，也不要修改 producer assignment、run、node 或 artifact record。
 
-## Review Invariants
+## Review
 
-- Bind findings to the producer result revision that was actually inspected.
-- Order findings by severity and identify the affected file, node, or evidence ref.
-- Do not change producer results, runs, findings, or artifact payloads.
-- A negative or inconclusive producer result is reviewable; outcome polarity is not a validity failure.
-- If producer inputs changed, return a stale-review result instead of silently reviewing mixed revisions.
+检查：
 
-Write one `review_report_v1` file using the lease and revisions from `review open`:
+- result 是否满足 objective、success criteria 和 input revision。
+- evidence refs、artifact provenance、tests 与 changed files 是否一致。
+- conclusion 是否超出 evidence strength。
+- proposal 是否属于 same-scope follow-up 或 new branch。
+- 是否存在 correctness、scope、rollback 或 data compatibility 风险。
 
-```yaml
-schema_version: review_report_v1
-agent_id: reviewer_x
-lease_id: lease_x
-lease_epoch: 1
-operation_id: op_review_x
-input_revision: input-v1:review
-producer_result_revision: result-v1:producer
-verdict: approved
-summary: The result is reproducible within the assigned scope.
-findings: []
-evidence_inspected:
-  - artifact_record_x
-validation_performed:
-  - Targeted producer tests
-```
-
-Valid verdicts are `approved`, `changes_requested`, and `inconclusive`. Findings use `P0` through `P3`; the persisted result is severity ordered and bound to `producer_result_revision`.
+## Report
 
 ```sh
-research-cockpit review report --root <data-root> --assignment <review_assignment_id> --file <review.yaml> --json --compact
+research-cockpit review report --root <data-root> --assignment <review_assignment_id> --file review.yaml --json --compact
 ```
 
-The transaction writes only the reviewer assignment result, releases its lease, and returns an internally verified receipt. It never updates producer truth. On `stale_producer_result` or `stale_inputs`, reopen the review packet and submit a new request with a new operation id.
+`review_report_v1` 写入 reviewer assignment 自己的 verdict、summary、findings、inspected evidence 和 validation performed。每次请求使用稳定 `operation_id`，并绑定 packet 的 producer/result revisions。
 
-Use `check-decision-acceptance` only for an explicitly delegated legacy decision acceptance review. Query `research-cockpit commands --role reviewer --name <command> --json --compact` only when one operation contract is missing.
-
-Do not start experiments/runs, mutate producer results, apply the verdict to producer review state, change coordinator focus, or invoke maintenance workflows.
-
-Read `decision-adr.md` only for acceptance criteria, `experiment-tracking.md` only for referenced run evidence, and `graph-state.md` only for a scoped structural invariant. These are conditional reads, not a startup bundle.
+Reviewer report 不重写 producer Evidence Bundle。Coordinator 通过 `coord review` 的 `assignment_result` action 将 verdict metadata 应用到 producer assignment；artifact promotion 使用独立的 `promote_artifact` action，decision 或 baseline 仍由 `coord decide` 独立处理。

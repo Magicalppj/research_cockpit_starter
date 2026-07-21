@@ -65,6 +65,7 @@ def promote_decision(
     force_accept: bool = False,
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
+    operation_request: dict[str, Any] | None = None,
 ) -> Path | dict[str, Any]:
     nodes = load_nodes(root)
     if decision_id in nodes:
@@ -219,6 +220,7 @@ def promote_decision(
             },
         },
         rebuild_dashboard=rebuild_dashboard,
+        operation_request=operation_request,
     )
     return out
 

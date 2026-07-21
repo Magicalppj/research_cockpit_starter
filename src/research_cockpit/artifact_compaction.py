@@ -116,7 +116,7 @@ def classify_artifact_node(node: ResearchNode, references: list[dict[str, str]])
 def _recommended_command(artifact_id: str, classification: str) -> str | None:
     if classification != "can_demote":
         return None
-    return f"research-cockpit compact-artifacts --root <root> --id {artifact_id} --execute --json --show-diff"
+    return "research-cockpit maintenance compact --root <root> --file <compact.yaml> --json --compact"
 
 
 def artifact_compaction_plan(root: Path, *, artifact_id: str | None = None) -> dict[str, Any]:

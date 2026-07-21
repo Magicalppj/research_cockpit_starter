@@ -505,6 +505,7 @@ class LegacyDataCompatibilityTests(unittest.TestCase):
             lease_id=lease["lease_id"],
             lease_epoch=lease["lease_epoch"],
             operation_id="op_start_legacy_facade",
+            input_revision=claimed["packet"]["input_revision"],
             slug_hint="legacy",
             now=now + timedelta(seconds=30),
         )

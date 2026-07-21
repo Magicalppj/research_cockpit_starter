@@ -7,6 +7,7 @@ import shutil
 import sys
 import time
 import unittest
+from unittest.mock import patch
 import uuid
 
 
@@ -72,6 +73,32 @@ class MutationLockHardeningTests(unittest.TestCase):
         self.assertTrue(acquired)
         self.assertEqual(caught.exception.payload["recovery"], "retry_same_operation")
         self.assertTrue(caught.exception.payload["retryable"])
+
+    def test_existing_windows_lock_permission_error_is_treated_as_contention(self) -> None:
+        lock_path = self.root / "graph" / ".mutation.lock"
+        lock_path.write_text(
+            f"pid: {os.getpid()}\ncreated_at: {time.time()}\n",
+            encoding="utf-8",
+        )
+        real_open = os.open
+        attempts = 0
+
+        def open_lock(path: str, flags: int) -> int:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise PermissionError("simulated Windows sharing violation")
+            return real_open(path, flags)
+
+        def release_lock(_seconds: float) -> None:
+            lock_path.unlink(missing_ok=True)
+
+        with (
+            patch("research_cockpit.mutation_lock.os.open", side_effect=open_lock),
+            patch("research_cockpit.mutation_lock.time.sleep", side_effect=release_lock),
+            mutation_lock(self.root, timeout_seconds=0.5),
+        ):
+            self.assertTrue(lock_path.exists())
 
     def test_waiters_make_bounded_progress_without_fifo_guarantee(self) -> None:
         worker_count = 8

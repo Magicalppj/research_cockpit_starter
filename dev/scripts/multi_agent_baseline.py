@@ -44,7 +44,7 @@ from research_cockpit.validation_index import (
 )
 
 
-SCHEMA_VERSION = "multi_agent_baseline_v1"
+SCHEMA_VERSION = "multi_agent_baseline_v2"
 DEFAULT_AGENT_COUNTS = (1, 4, 8, 16)
 STAGE_FIELDS = (
     "prepare_ms",
@@ -91,7 +91,7 @@ WORKFLOW_BASELINES: dict[str, dict[str, Any]] = {
         "commands": (
             "work open",
             "work start",
-            "ingest-artifact",
+            "work record",
             "work close",
         ),
         "cli_invocations": 4,
@@ -156,7 +156,7 @@ WORKFLOW_BASELINE_EVIDENCE = {
 }
 
 
-def legacy_command_inventory(
+def canonical_command_inventory(
     manifest: list[dict[str, object]] | None = None,
 ) -> list[dict[str, Any]]:
     rows = manifest if manifest is not None else agent_command_manifest()
@@ -166,15 +166,14 @@ def legacy_command_inventory(
             "audiences": tuple(str(item) for item in row.get("audiences", [])),
             "surface": str(row["surface"]),
             "intent": str(row["intent"]),
-            "canonical_replacement": str(row["canonical_replacement"]),
-            "removal_disposition": str(row["removal_disposition"]),
             "group": str(row["group"]),
+            "lifecycle": str(row["lifecycle"]),
+            "route_kind": str(row["route_kind"]),
+            "status": str(row["status"]),
             "mutating": bool(row.get("mutating")),
         }
         for row in rows
-        if row.get("route_kind") != "facade"
     ]
-
 
 def parse_progress_events(stderr: str) -> dict[str, float | None]:
     phases: dict[str, float] = {}
@@ -894,9 +893,9 @@ def main() -> None:
         "ok": True,
     }
     if args.inventory or not selected:
-        inventory = legacy_command_inventory()
-        payload["legacy_command_count"] = len(inventory)
-        payload["legacy_command_inventory"] = inventory
+        inventory = canonical_command_inventory()
+        payload["command_count"] = len(inventory)
+        payload["command_inventory"] = inventory
     if args.workflow_baselines or not selected:
         payload["workflow_baseline_evidence"] = WORKFLOW_BASELINE_EVIDENCE
         payload["workflow_baselines"] = WORKFLOW_BASELINES
@@ -929,7 +928,7 @@ def main() -> None:
     if args.json:
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        print(f"legacy commands: {payload.get('legacy_command_count', 'not requested')}")
+        print(f"commands: {payload.get('command_count', 'not requested')}")
         if "workflow_baselines" in payload:
             print(f"workflow baselines: {len(payload['workflow_baselines'])}")
         if "artifact_record_layout_profile" in payload:

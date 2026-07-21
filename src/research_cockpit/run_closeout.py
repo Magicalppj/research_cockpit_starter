@@ -409,9 +409,13 @@ def complete_run_closeout(
         if not statement:
             raise ValueError("finding.statement is required")
         if confidence not in VALID_FINDING_CONFIDENCES:
-            raise ValueError(f"Invalid finding confidence {confidence!r}")
+            allowed = ", ".join(sorted(VALID_FINDING_CONFIDENCES))
+            raise ValueError(
+                f"Invalid finding confidence {confidence!r}; allowed: {allowed}"
+            )
         if outcome is not None and outcome not in VALID_FINDING_OUTCOMES:
-            raise ValueError(f"Invalid finding outcome {outcome!r}")
+            allowed = ", ".join(sorted(VALID_FINDING_OUTCOMES))
+            raise ValueError(f"Invalid finding outcome {outcome!r}; allowed: {allowed}")
         artifact_ids = _string_list(finding_spec.get("artifact_ids"), "finding.artifact_ids")
         validate_artifact_ids(state.nodes, artifact_ids)
         findings = experiment_after.get("findings", []) or []
@@ -620,7 +624,7 @@ def complete_run_closeout(
         "kind": "complete_run_closeout",
         "actor": "researcher",
         "node_id": experiment_id,
-        "command": "research-cockpit complete-run --file <closeout.yaml>",
+        "command": "research-cockpit work close --assignment <assignment_id> --file <closeout.yaml> --json --compact",
         "after": {
             "run_id": run_id,
             "status": status,

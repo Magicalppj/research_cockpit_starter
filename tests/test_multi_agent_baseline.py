@@ -15,7 +15,7 @@ from multi_agent_baseline import (
     WORKFLOW_BASELINES,
     benchmark_concurrency,
     concurrency_round_passed,
-    legacy_command_inventory,
+    canonical_command_inventory,
     parse_progress_events,
     summarize_concurrency_samples,
 )
@@ -30,31 +30,28 @@ from workflow_metrics import (
 
 
 class MultiAgentBaselineTests(unittest.TestCase):
-    def test_legacy_inventory_covers_the_current_manifest_once(self) -> None:
+    def test_canonical_inventory_matches_public_manifest(self) -> None:
         manifest = agent_command_manifest()
-        inventory = legacy_command_inventory(manifest)
-        facade_names = {row["name"] for row in manifest if row.get("route_kind") == "facade"}
+        inventory = canonical_command_inventory(manifest)
 
-        self.assertEqual(len(manifest), len(inventory) + len(facade_names))
-        self.assertEqual(len(inventory), 70)
+        self.assertEqual(len(inventory), len(manifest))
+        self.assertEqual(len(inventory), 26)
         self.assertEqual(
             {row["name"] for row in inventory},
-            {row["name"] for row in manifest} - facade_names,
+            {row["name"] for row in manifest},
         )
         for row in inventory:
             with self.subTest(command=row["name"]):
                 self.assertTrue(row["audiences"])
                 self.assertIn(row["surface"], {"core", "advanced", "maintenance"})
                 self.assertTrue(row["intent"])
-                self.assertTrue(row["canonical_replacement"])
-                self.assertIn(
-                    row["removal_disposition"],
-                    {"retain_unique", "move_to_role_group", "remove_after_facade"},
-                )
+                self.assertIn(row["route_kind"], {"canonical", "facade"})
+                self.assertEqual(row["status"], "active")
 
-        by_name = {row["name"]: row for row in inventory}
-        self.assertIn("reviewer", by_name["option-workstream-context"]["audiences"])
-        self.assertIn("reviewer", by_name["check-decision-acceptance"]["audiences"])
+        names = {row["name"] for row in inventory}
+        self.assertIn("work open", names)
+        self.assertIn("coord assign", names)
+        self.assertNotIn("ingest-artifact", names)
 
     def test_workflow_baselines_cover_current_role_facade_traces(self) -> None:
         self.assertEqual(
@@ -76,11 +73,9 @@ class MultiAgentBaselineTests(unittest.TestCase):
             WORKFLOW_BASELINES["assigned_worker_final_payload"]["cli_invocations"],
             3,
         )
-        self.assertGreater(
-            WORKFLOW_BASELINES["assigned_worker_incremental_evidence"][
-                "cli_invocations"
-            ],
-            WORKFLOW_BASELINES["assigned_worker_final_payload"]["cli_invocations"],
+        self.assertEqual(
+            WORKFLOW_BASELINES["assigned_worker_incremental_evidence"]["commands"],
+            ("work open", "work start", "work record", "work close"),
         )
         self.assertNotIn("known_gap", WORKFLOW_BASELINES["reviewer"])
         self.assertEqual(
@@ -368,7 +363,7 @@ class MultiAgentBaselineTests(unittest.TestCase):
                 "nested_subprocess_count": 0,
             },
             {
-                "command": ["research-cockpit", "create-run"],
+                "command": ["research-cockpit", "work", "start"],
                 "passed": True,
                 "stdout_bytes": 800,
                 "stderr_bytes": 50,
@@ -408,13 +403,13 @@ class MultiAgentBaselineTests(unittest.TestCase):
         metrics = workflow_metrics(
             [
                 {
-                    "command": ["research-cockpit", "agent-session-context"],
+                    "command": ["research-cockpit", "context"],
                     "passed": True,
                     "stdout_bytes": 100,
                     "stderr_bytes": 0,
                 },
                 {
-                    "command": ["research-cockpit", "create-run"],
+                    "command": ["research-cockpit", "work", "start"],
                     "passed": True,
                     "stdout_bytes": 100,
                     "stderr_bytes": 0,

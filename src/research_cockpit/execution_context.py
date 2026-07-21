@@ -76,12 +76,21 @@ def _assignment_boundary(root: Path, node_id: str) -> dict[str, Any] | None:
     }
 
 
-def _node_payload(node: Any) -> dict[str, Any]:
+def _node_payload(node: Any, nodes: dict[str, Any]) -> dict[str, Any]:
+    parent = nodes.get(str(node.parent)) if node.parent else None
+    parent_ref = None
+    if parent is not None:
+        parent_ref = {
+            "id": parent.id,
+            "type": parent.type,
+            "status": parent.status,
+        }
     return {
         "id": node.id,
         "type": node.type,
         "title": _text(node.title),
         "status": node.status,
+        "parent": parent_ref,
         "next_action": _first_action(node.raw.get("next_actions")),
     }
 
@@ -249,7 +258,7 @@ def execution_context_payload(
     active_run = _compact_run((run_context.get("current") or [None])[0])
     blocking_gate = _compact_gate((gate_context.get("blocking") or [None])[0])
     latest_gate = _compact_gate(gate_context.get("latest"))
-    node_projection = _node_payload(node)
+    node_projection = _node_payload(node, snapshot.nodes)
     warnings = _bounded_strings(
         [*list(run_context.get("warnings") or []), *list(gate_context.get("warnings") or [])]
     )

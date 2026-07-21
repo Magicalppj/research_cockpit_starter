@@ -242,7 +242,7 @@ def _collect_blockers(state: dict[str, Any], allow: dict[str, bool]) -> dict[str
     unresolved = [
         str(row.get("assignment_id") or "")
         for row in rows
-        if row.get("status") == "blocked"
+        if row.get("status") in {"queued", "active", "blocked"}
         or row.get("readiness") in {"waiting_dependencies", "unknown_inputs"}
         or row.get("lease_state") == "expired"
     ]

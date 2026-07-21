@@ -76,7 +76,7 @@ class AssignmentScopeContext:
             return
         raise AssignmentScopeError(
             "assignment_set_focus_forbidden",
-            "Assignment-scoped workers should use set-cursor instead of --set-focus.",
+            "Assignment-scoped workers update their cursor through work close; global focus is coordinator-owned.",
             assignment_id=self.assignment_id,
             node_id=node_id,
         )

@@ -9,20 +9,32 @@ _ROLE_FACADE_COMMANDS = {
     "work claim",
     "work close",
     "work open",
+    "work record",
     "work release",
     "work renew",
     "work start",
     "review open",
     "review report",
+    "coord assign",
+    "coord decide",
     "coord review",
     "coord overview",
     "coord handoff",
+    "maintenance audit",
+    "maintenance compact",
+    "maintenance migrate",
+    "maintenance repair",
 }
 
 _RETAINED_REPLACEMENTS = {
     "init": "init",
     "ui": "ui",
-    "commands": "commands --role <role>",
+    "build": "build",
+    "commands": "commands",
+    "context": "context",
+    "search": "search",
+    "smoke": "smoke",
+    "validate": "validate",
 }
 _MAINTENANCE_REPLACEMENTS = {
     "lint": "maintenance audit",
@@ -39,14 +51,13 @@ _MAINTENANCE_REPLACEMENTS = {
     "migrate-terminal-next-actions": "maintenance migrate",
     "cleanup-suggestion-lifecycle": "maintenance repair",
 }
-_HANDOFF_COMMANDS = {"validate", "build", "smoke"}
 _WORK_OPEN_COMMANDS = {
-    "context",
     "node-context",
     "agent-session-context",
     "option-workstream-context",
     "run-context",
     "artifact-records",
+    "list-runs",
 }
 _WORK_CLAIM_COMMANDS = {"claim-option", "claim-workstream"}
 _WORK_START_COMMANDS = {"create-run"}
@@ -75,7 +86,6 @@ _WORK_CLOSE_COMMANDS = {
 }
 _COORD_OVERVIEW_COMMANDS = {
     "bootstrap",
-    "search",
     "suggest-next-actions",
     "assignment-view",
 }
@@ -85,16 +95,18 @@ _COORD_ASSIGN_COMMANDS = {
     "create-workstream",
     "close-branch",
     "update-status",
-    "set-focus",
     "set-agent-focus",
     "sync-focus-actions",
     "start-agent-session",
-    "apply-suggestion",
-    "update-suggestion-state",
 }
 _COORD_REVIEW_COMMANDS = {
-    "check-decision-acceptance",
     "promote-artifact-record",
+}
+_CONTEXT_COMMANDS = {"check-decision-acceptance"}
+_UI_COMMANDS = {
+    "set-focus",
+    "apply-suggestion",
+    "update-suggestion-state",
 }
 _COORD_DECIDE_COMMANDS = {
     "promote-decision",
@@ -102,6 +114,24 @@ _COORD_DECIDE_COMMANDS = {
     "update-decision-checklist",
     "accept-decision",
     "set-baseline",
+}
+
+LEGACY_COMMAND_REPLACEMENTS = {
+    **{name: "maintenance audit" for name in _MAINTENANCE_REPLACEMENTS if _MAINTENANCE_REPLACEMENTS[name] == "maintenance audit"},
+    **{name: "maintenance repair" for name in _MAINTENANCE_REPLACEMENTS if _MAINTENANCE_REPLACEMENTS[name] == "maintenance repair"},
+    **{name: "maintenance migrate" for name in _MAINTENANCE_REPLACEMENTS if _MAINTENANCE_REPLACEMENTS[name] == "maintenance migrate"},
+    **{name: "maintenance compact" for name in _MAINTENANCE_REPLACEMENTS if _MAINTENANCE_REPLACEMENTS[name] == "maintenance compact"},
+    **{name: "work open" for name in _WORK_OPEN_COMMANDS},
+    **{name: "work claim" for name in _WORK_CLAIM_COMMANDS},
+    **{name: "work start" for name in _WORK_START_COMMANDS},
+    **{name: "work record" for name in _WORK_RECORD_COMMANDS},
+    **{name: "work close" for name in _WORK_CLOSE_COMMANDS},
+    **{name: "coord overview" for name in _COORD_OVERVIEW_COMMANDS},
+    **{name: "coord assign" for name in _COORD_ASSIGN_COMMANDS},
+    **{name: "coord review" for name in _COORD_REVIEW_COMMANDS},
+    **{name: "coord decide" for name in _COORD_DECIDE_COMMANDS},
+    **{name: "context" for name in _CONTEXT_COMMANDS},
+    **{name: "ui" for name in _UI_COMMANDS},
 }
 
 _AUDIENCE_OVERRIDES = {
@@ -115,10 +145,8 @@ _AUDIENCE_OVERRIDES = {
     "smoke": ("worker", "coordinator", "maintainer"),
     "search": ("worker", "reviewer", "coordinator"),
     "context": ("worker", "reviewer", "coordinator"),
-    "node-context": ("worker", "reviewer", "coordinator"),
-    "agent-session-context": ("worker", "reviewer", "coordinator"),
-    "option-workstream-context": ("worker", "reviewer", "coordinator"),
-    "check-decision-acceptance": ("reviewer", "coordinator"),
+    "commands": ROLE_CHOICES,
+    "ui": ("coordinator",),
 }
 
 _CORE_COMMANDS_BY_ROLE = {
@@ -126,6 +154,7 @@ _CORE_COMMANDS_BY_ROLE = {
         "work open",
         "work claim",
         "work start",
+        "work record",
         "work close",
         "validate",
         "smoke",
@@ -139,27 +168,22 @@ _CORE_COMMANDS_BY_ROLE = {
     },
     "coordinator": {
         "coord overview",
+        "coord assign",
+        "coord decide",
         "coord handoff",
         "search",
-        "suggest-next-actions",
-        "start-agent-session",
-        "set-focus",
-        "check-decision-acceptance",
         "coord review",
-        "promote-decision",
-        "accept-decision",
         "commands",
     },
     "maintainer": {
         "init",
         "validate",
-        "lint",
-        "repair-interaction-log",
-        "migrate-interaction-log",
         "build",
         "smoke",
-        "maintenance-audit",
-        "compact-artifacts",
+        "maintenance audit",
+        "maintenance repair",
+        "maintenance migrate",
+        "maintenance compact",
         "commands",
     },
 }
@@ -170,28 +194,8 @@ def canonical_replacement_for_command(name: str, group: str) -> str:
         return name
     if name in _RETAINED_REPLACEMENTS:
         return _RETAINED_REPLACEMENTS[name]
-    if name in _MAINTENANCE_REPLACEMENTS:
-        return _MAINTENANCE_REPLACEMENTS[name]
-    if name in _HANDOFF_COMMANDS:
-        return "coord handoff"
-    if name in _WORK_OPEN_COMMANDS:
-        return "work open"
-    if name in _WORK_CLAIM_COMMANDS:
-        return "work claim"
-    if name in _WORK_START_COMMANDS:
-        return "work start"
-    if name in _WORK_RECORD_COMMANDS:
-        return "work record"
-    if name in _WORK_CLOSE_COMMANDS:
-        return "work close"
-    if name in _COORD_OVERVIEW_COMMANDS:
-        return "coord overview"
-    if name in _COORD_ASSIGN_COMMANDS:
-        return "coord assign"
-    if name in _COORD_REVIEW_COMMANDS:
-        return "coord review"
-    if name in _COORD_DECIDE_COMMANDS:
-        return "coord decide"
+    if name in LEGACY_COMMAND_REPLACEMENTS:
+        return LEGACY_COMMAND_REPLACEMENTS[name]
     fallback = {
         "artifact": "work record",
         "build": "coord handoff",
@@ -277,6 +281,8 @@ def command_role_contract(
         scope_policy = "read_only"
     elif replacement.startswith("coord "):
         scope_policy = "coordinator"
+    elif replacement == "ui":
+        scope_policy = "coordinator"
     else:
         scope_policy = "root"
 
@@ -294,8 +300,13 @@ def command_role_contract(
     else:
         verification_policy = "conditional"
 
-    route_kind = "facade" if name in _ROLE_FACADE_COMMANDS else "legacy"
-    if route_kind == "facade" or name in _RETAINED_REPLACEMENTS:
+    if name in _ROLE_FACADE_COMMANDS:
+        route_kind = "facade"
+    elif name in _RETAINED_REPLACEMENTS:
+        route_kind = "canonical"
+    else:
+        route_kind = "legacy"
+    if route_kind != "legacy":
         disposition = "retain_unique"
     elif replacement.startswith("maintenance "):
         disposition = "move_to_role_group"
@@ -305,6 +316,9 @@ def command_role_contract(
     if name == "work open":
         input_schema_version = "work_open_v1"
         output_schema_version = "work_packet_v1"
+    elif name == "work record":
+        input_schema_version = "work_record_v1"
+        output_schema_version = "work_operation_v1"
     elif name == "work start":
         input_schema_version = "work_start_v1"
         output_schema_version = "work_operation_v1"
@@ -323,9 +337,18 @@ def command_role_contract(
     elif name == "coord handoff":
         input_schema_version = "coord_handoff_v1"
         output_schema_version = "milestone_handoff_v1"
+    elif name == "coord assign":
+        input_schema_version = "coord_assign_v1"
+        output_schema_version = "work_operation_v1"
+    elif name == "coord decide":
+        input_schema_version = "coord_decide_v1"
+        output_schema_version = "work_operation_v1"
     elif name == "coord overview":
         input_schema_version = "coord_overview_v1"
         output_schema_version = "coordination_snapshot_v1"
+    elif name.startswith("maintenance "):
+        input_schema_version = "maintenance_action_v1"
+        output_schema_version = "maintenance_result_v1"
     elif route_kind == "facade":
         input_schema_version = "work_operation_input_v1"
         output_schema_version = "work_operation_v1"
@@ -344,7 +367,7 @@ def command_role_contract(
             else (["*"] if {"worker", "reviewer"} & set(audiences) else [])
         ),
         "scope_policy": scope_policy,
-        "idempotency": "required" if route_kind == "facade" and mutating else "unsupported",
+        "idempotency": "required" if route_kind == "facade" and mutating and not name.startswith("maintenance ") else "unsupported",
         "verification_policy": verification_policy,
         "input_schema_version": input_schema_version,
         "output_schema_version": output_schema_version,

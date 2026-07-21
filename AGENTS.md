@@ -2,88 +2,74 @@
 
 ## Source Of Truth
 
-- Treat the project data root `research_cockpit/agents/*.yaml`, `research_cockpit/assignments/*.yaml`, `research_cockpit/coordinator_state.yaml`, `research_cockpit/current_state.yaml`, `research_cockpit/graph/nodes/*.yaml`, `research_cockpit/graph/interaction_events/**`, `research_cockpit/runs/*.yaml`, `research_cockpit/gate_results/*.yaml`, `research_cockpit/gate_results/*.json`, `research_cockpit/artifact_records/*.yaml`, and `research_cockpit/handoffs/*.yaml` as the truth source for structured state and append-only interaction history.
-- Treat `research_cockpit/assignments/*.yaml` as the worker-local cursor and next-action source in multi-agent sessions.
-- Treat `research_cockpit/coordinator_state.yaml` as coordinator/UI selection state.
-- Treat `research_cockpit/current_state.yaml` as legacy/coordinator compatibility state, not the default worker cursor.
-- Treat `research_cockpit/artifacts/*` as long-lived evidence payloads, not generated dashboard context.
-- Treat `research_cockpit/artifact_records/*.yaml` as lightweight structured evidence metadata, not generated dashboard context.
-- Treat `research_cockpit/artifact_migrations/*.yaml` as artifact demotion audit reports written by `compact-artifacts`.
-- Treat `research_cockpit/handoffs/*.yaml` as immutable operation-id-scoped milestone reports. Retry the same request with the same operation id; use a new operation id after truth or blocker state changes.
-- Treat `graph/interaction_log.yaml` as the immutable legacy interaction prefix after `graph/interaction_events/manifest.json` exists. New events append under `graph/interaction_events/`; use `migrate-interaction-log` instead of editing either backend.
-- Treat `research_cockpit/dashboards/*` as generated context. Regenerate it only when a consumer explicitly needs fresh dashboard context; `coord handoff` performs its own single build and ordinary worker verification does not require `build`.
-- Do not infer current state from Markdown notes. Notes are long-form supporting records.
+- `research_cockpit/agents/*.yaml`、`assignments/*.yaml`、`coordinator_state.yaml`、`current_state.yaml`、`graph/nodes/*.yaml`、`graph/interaction_events/**`、`runs/*.yaml`、`gate_results/*`、`artifact_records/*.yaml` 和 `handoffs/*.yaml` 是结构化 truth/audit state。
+- `assignments/*.yaml` 是 worker-local cursor 与 next-action source；`coordinator_state.yaml` 是 coordinator/UI selection state；`current_state.yaml` 仅用于 legacy/coordinator compatibility。
+- `artifacts/*` 是长期 evidence payload；`artifact_records/*.yaml` 是轻量 metadata/provenance。
+- `graph/interaction_log.yaml` 在 segmented manifest 存在后是 immutable legacy prefix；只能通过 `maintenance migrate` 或 `maintenance repair` 处理 interaction backend。
+- `dashboards/*` 是 generated projection。普通 worker verification 不需要 build。
+- Markdown notes 只是 supporting records，不能作为 current state truth。
 
 ## Plugin Boundary
 
-- This repository is the reusable Research Cockpit plugin.
-- Runtime code lives in `src/research_cockpit/`.
-- Public workflow commands live in the `research-cockpit` CLI.
-- Agent-facing details are split under `capabilities/`.
-- Project-specific research state belongs in the caller repository's `research_cockpit/`, not inside the plugin directory.
-- For internal module boundaries, read `docs/internal-architecture.md`; for the rationale behind the layered layout, read `docs/decisions/0001-layered-plugin-architecture.md`.
+- Runtime code 位于 `src/research_cockpit/`，public workflow 只通过 `research-cockpit` CLI。
+- 项目研究状态属于调用仓库的 `research_cockpit/`，不能写入 plugin package。
+- 内部模块边界见 `docs/internal-architecture.md`；0.3.0 cutover 见 `docs/migrations/0.3.0-cli-cutover.md`。
 
 ## Read Order
 
-Load exactly one role playbook, then choose one startup path instead of chaining context commands.
+只选择一条 startup path：
 
-1. If explicitly assigned a review assignment, run `research-cockpit review open --root <data-root> --assignment <review_id> --compact --json`; do not separately open producer context.
-2. If assigned worker execution, run `research-cockpit work open --root <data-root> --assignment <assignment_id> --compact --json`; reuse `--since <revision>` for polling.
-3. If assigned a specific node id without an assignment id, run `research-cockpit context --root <data-root> --id <node_id> --view execution --compact --json`.
-4. If the target is unknown or the task is global assignment triage, run `research-cockpit coord overview --root <data-root> --json --compact --limit 20`; use its filters, `next_page`, and `--since` revision instead of full bootstrap.
-5. If continuing an older minimal handoff, use `research-cockpit node-context --root <data-root> --id <node_id> --compact --json`.
-6. Read `<data-root>/dashboards/agent_context_pack.json` and `<data-root>/dashboards/focus_context_pack.json` only when generated dashboard context or a broad focus scan is needed.
-7. Use bounded search such as `research-cockpit search --root <data-root> --query "..." --json --limit 5 --source node` when more context is needed.
-8. If one operation is missing, use `research-cockpit commands --role <role> --json --compact --name <command>`; do not run broad discovery during normal startup.
+1. Review assignment: `research-cockpit review open --root <data-root> --assignment <review_id> --json --compact`。
+2. Worker assignment: `research-cockpit work open --root <data-root> --assignment <assignment_id> --json --compact`；polling 复用 `--since <revision>`。
+3. Known node without assignment: `research-cockpit context --root <data-root> --id <node_id> --view execution --json --compact`。
+4. Global triage: `research-cockpit coord overview --root <data-root> --json --compact --limit 20`。
+5. Additional context: bounded `search --limit 5 --source node`。
+6. Missing operation only: `research-cockpit commands --role <role> --name <command> --json --compact`。
 
-Use `--since <revision>` for repeated known-node polling. Do not run both `bootstrap` and a wider context view for normal known-node work. If the working directory is unreliable, use absolute `--root` paths.
+`execution` view 的 `node.parent` 是 graph 结构父级；目标为 experiment 时，创建 session 所需的 `option_id` 取 `node.parent.id`。`effective_baseline.option` 只是比较基线，可能不是该 experiment 的父 option。
+
+不要在普通 startup 中组合多条 context 命令或 broad discovery。工作目录不可靠时使用 absolute `--root`。
 
 ## Write Rules
 
-- Prefer `research-cockpit` commands over manual YAML edits for all supported operations.
-- Use assignment-scoped mutating CLI commands with `--assignment <assignment_id>` when working as a downstream agent.
-- If an opened packet is unclaimed, use one `work claim --return-packet` call and continue from its returned packet; do not reopen it immediately.
-- Use coordinator/global mutating commands for focus, baseline, suggestions, and lifecycle cleanup only when explicitly acting as coordinator.
-- Use `review open` for review assignments and `work open` for worker assignments; use `research-cockpit context --id <node_id> --view execution --compact --json` only for a known node without an assignment.
-- Use `effective_baseline` from `context`/`node-context` as the default inherited option, decision, and artifact bundle; do not scan all accepted history unless asked.
-- Do not directly set a decision to `accepted`; use `research-cockpit accept-decision --root <data-root> --id <decision_id>`.
-- Do not execute a suggested command just because it appears in Action Guidance. Queue, dismiss, or complete suggestions only when asked.
-- Give every mutating role-facade call a stable operation id in its flags or structured input; reuse it only for an exact retry of the same request.
-- Treat `work renew` as recovery/diagnostic only. Normal mutations and launcher heartbeat renew the lease without another model-visible command.
-- Start a claimed assignment with `work start`; it generates the run id and atomically starts the experiment while renewing the lease.
-- Use `create-run --status running --start-experiment` only as a compatibility route for legacy data without an active lease.
-- Close assigned work with one `work close --file <closeout.yaml> --json --compact` transaction. It records run/finding/result, optional same-scope `next_experiment`, assignment cursor, and lease transition. Do not repeat `complete-run`, `complete-experiment`, `create-followup-experiment`, or `set-cursor` for that closeout.
-- Put a final payload directory in `work_close_v1.evidence_inputs` so staging, hash, artifact record, and closeout remain one invocation. Use standalone `ingest-artifact --json --compact --no-build` only for incremental/streaming evidence that must be durable before close; reference its record with `artifact_record.existing_record_id`.
-- Create a graph artifact only with `--promote --promotion-reason "..."`, or promote an existing record with `promote-artifact-record --promotion-reason "..."`.
-- A `new_branch` closeout proposal never creates an assignment automatically; only the coordinator evaluates and assigns it.
-- Reviewers use `review open` then `review report`; report writes only the reviewer assignment. Coordinators use `coord review` to update producer review metadata without rewriting either Evidence Bundle.
-- Use `compact-artifacts --dry-run` before artifact demotion. Execute only one `can_demote` artifact with `--execute --id <artifact_id>`; this writes an artifact record and migration report but must not delete payload files.
+- 优先使用 canonical role facade；不要调用内部 command modules。
+- Coordinator 创建 experiment session 时必须显式绑定该 option 下的 `experiment_id`；创建 review session 时必须绑定已完成且待审的 `producer_assignment_id`。
+- Unclaimed packet 使用一次 `work claim --return-packet`，直接复用返回 packet。
+- `work_start_v1` 从 packet 复制 agent、lease、`input_revision`，并将 `cursor.current_node` 作为显式 `experiment_id`；若该节点不是 experiment，停止并让 coordinator 修正 assignment。
+- Claimed assignment 以 `work start` 开始；正常 mutation 与 launcher heartbeat 自动续租，`work renew` 仅用于 recovery。
+- Closeout 使用一次 `work close --file <closeout.yaml>`；不要拆成多个 run/experiment/cursor 操作。
+- 仅在缺少 closeout contract 时运行 `work close --print-schema --json --compact`；`finding.confidence` 只接受 `weak`、`medium` 或 `strong`。
+- Final payload 放入 `work_close_v1.evidence_inputs`。仅在 close 前必须 durable 时使用 `work record`。
+- Coordinator 用 `coord assign` 创建/更新 graph 或 assignment session，用 `coord decide` 处理 decision/baseline，用 `coord review` 应用 review metadata。
+- 每个 mutating role request 必须有稳定 `operation_id`；只有 exact retry 才能复用。
+- 新 branch proposal 不会自动创建 assignment；由 coordinator 评估后再 assign。
+- Maintenance action 默认 dry-run；显式执行需 `execute: true`，compaction 每次只处理一个 eligible artifact。
 
 ## Verification
 
-After a manual known-node YAML edit, or when a compact mutation reports additional verification is required, run changed-scope verification:
+修改本仓库代码时只选择一层开发验证：`python dev/scripts/run_test_profile.py <fast|precommit|full> --json --compact --progress`。普通编辑使用 `fast` 并以 `--extra-test <test_id>` 加入受影响测试；提交前使用 `precommit`；merge/release 才使用 `full`。高层 profile 已包含低层覆盖，不要串行重复运行。详细边界见 `docs/testing-strategy.md`。
+
+以下规则针对调用仓库中的 research state 验证，与上述 plugin 代码测试 profile 不混用。
+
+Role-facade receipt 若报告 `internally_verified` 且 `additional_verification_required: false`，不要追加验证。
+
+只有 manual known-node YAML edit 或 receipt 明确要求时才运行 changed scope：
 
 ```sh
 research-cockpit validate --root <data-root> --changed-node <node_id> --json
-research-cockpit context --root <data-root> --id <node_id> --view execution --compact --json
+research-cockpit context --root <data-root> --id <node_id> --view execution --json --compact
 ```
 
-For role-facade mutations, accept `verification.status: internally_verified` with `additional_verification_required: false`; compatibility mutations may report `verified: true` with the same flag false. Do not run another validate/context cycle after either receipt. Otherwise use only the reported changed scope.
-
-Before coordinator merge, release, or research-stage closeout, create one `coord_handoff_v1` input and run the single milestone entry point:
+Coordinator merge、release 或 stage closeout 只运行：
 
 ```sh
-research-cockpit coord handoff --print-schema
 research-cockpit coord handoff --root <data-root> --file <handoff.yaml> --json --compact --progress
 ```
 
-`coord handoff` captures one root revision, reuses one full validation state for build and compact smoke, checks lifecycle blockers, and writes one revision-bound report. Do not run standalone full `validate`, `build`, or `smoke` before it. A blocked report is durable; resolve blockers and retry with a new operation id. An exact transport retry reuses the original operation id and receipt.
-
-Standalone full `validate`, `build`, and `smoke` remain diagnostic commands. Default root `smoke` is compact for large roots. Use `smoke --scope changed --id <node_id> --json --progress` for one-node diagnostics, and use `--full` only when explicitly diagnosing the older full subprocess workflow. `--progress` emits JSON lines to stderr; stdout remains a single machine-readable JSON payload.
+不要在 handoff 前重复 standalone full validate/build/smoke。Standalone 命令只用于诊断；single-node smoke 使用 `--scope changed --id <node_id>`。
 
 ## Environment
 
-- Set `RESEARCH_COCKPIT_ROOT` when commands should default to a specific data root.
-- If `research-cockpit bootstrap` reports missing modules, run `python -m pip install -e .` from the plugin root or use an interpreter with the listed requirements installed.
-- Markdown files are UTF-8. In Windows PowerShell, use `Get-Content -Encoding UTF8 -Path <file>` if Chinese text appears garbled.
-- Do not commit local absolute paths, usernames, virtual environment paths, or machine-specific interpreter paths.
+- 可设置 `RESEARCH_COCKPIT_ROOT` 作为默认 data root。
+- 若入口缺少依赖，从 plugin root 运行 `python -m pip install -e .`。
+- Markdown 使用 UTF-8；不要提交本机用户名、absolute worktree path、virtualenv path 或 machine-specific interpreter path。

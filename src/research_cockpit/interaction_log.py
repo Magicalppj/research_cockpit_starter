@@ -281,7 +281,7 @@ def _validate_prefix_signature(root: Path, manifest: dict[str, Any]) -> None:
     if _legacy_signature(_legacy_path(root)) != expected:
         raise InteractionLogError(
             "graph/interaction_log.yaml changed after the JSONL backend was activated; "
-            "run full validate and migrate-interaction-log before appending"
+            "run full validate, then use maintenance migrate with an interaction_log action before appending"
         )
 
 

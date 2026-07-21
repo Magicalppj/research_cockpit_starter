@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted / Implementing。2026-07-19 已确认目标架构和 review gate；CLI 采用 one-version breaking cutover，legacy structured data 与 artifact 保持读写兼容。
+Implemented。2026-07-21 已完成 Phase 0-7、one-version CLI cutover、legacy data/artifact compatibility、独立 review 与 release verification。
 
 ## Accepted Decisions
 
@@ -1343,6 +1343,22 @@ python -m unittest tests.test_concurrency_hardening.MultiAgentStressTests
 - 新 CLI 可以读取和修改 0.2.x nodes、assignments、runs、gates、artifact records/manifests 和 interaction history。
 - legacy unknown fields、artifact payload bytes 和 provenance refs 在 round-trip 后不丢失。
 - package version 升为 `0.3.0`，release notes 明确 breaking CLI boundary。
+
+Implementation record (2026-07-21):
+
+- Public CLI 收敛为 26 个唯一 route：8 个 retained direct commands，以及 `work`、`review`、`coord`、`maintenance` 四组 role facade。被替代的 top-level/grouped names 不再进入 parser、help 或 manifest，package version 升为 `0.3.0`。
+- `work record`、`coord assign`、`coord review`、`coord decide` 和 maintenance facade 补齐 evidence、graph/session、review/artifact promotion、decision/baseline、audit/repair/migrate/compact intents；每个 mutation 使用稳定 `operation_id`、统一 receipt 和现有 transaction boundary。
+- `coord assign`、`coord review` 与 `coord decide` 可按 action 输出 parser-valid schema；`commands --role/--name --compact`、role playbooks、README/SKILL/AGENTS、launcher guidance、UI、onboarding/action suggestions 和 dev harness 全部改用真实可执行的 canonical routes。普通 worker startup 只走一个 bounded packet/read path。
+- 0.3 migration note 提供 old-to-new replacement table。Legacy nodes、assignments、runs、gates、artifact records/manifests、interaction prefix 和 payload bytes 保持可读写；未知字段/provenance round-trip 保留，legacy graph artifact 的 `artifact_kind`/`retention` 可经 `coord assign` 更新。
+- Compact smoke 不再执行 bootstrap、完整 suggestions 和 full node context；release、usability 与 context-free forward harness 使用 canonical facade，并验证 source package 无意外写入。
+- Exact retry 可恢复已复制的 evidence payload 和已创建的 Git worktree；成功后清理 recovery marker。Windows 对已存在 lock file 的 sharing violation 按 contention 处理，不把真实目录权限错误误判为竞争。
+
+Measured evidence:
+
+- `python -m unittest`: `Ran 824 tests`，结果 `OK (skipped=5)`，277.725 秒。
+- `run_skill_release_check.py --json`: `ok: true`，包含 public scan、instruction budget、portable copy、isolated canonical mutation 与五个 decision action schema gate。
+- Vendored usability 与 context-free forward harness 的 3 个独立 contract tests 全部通过，34.196 秒；original package unchanged。
+- `git diff --cached --check`: passed。Independent Phase 7 review 提出的 5 个 P1 与 2 个 P2 findings 已全部修复，并由 focused regressions 与 full suite 覆盖。
 
 ## Task Breakdown
 

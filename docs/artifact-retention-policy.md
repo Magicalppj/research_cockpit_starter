@@ -1,26 +1,24 @@
 # Artifact Retention Policy
 
-Research Cockpit records conclusions, evidence links, and small reviewable bundles. It should not become the default home for every raw generated file in a large experiment repository.
+Research Cockpit preserves conclusions, provenance, and bounded evidence bundles. It is not the default store for every generated file in a research repository.
 
 ## Goals
 
-- Keep findings, decisions, and baselines traceable.
-- Make later cleanup decisions mechanical instead of memory-based.
+- Keep findings, decisions, and baselines reviewable after a worktree is removed.
 - Preserve reusable evidence while allowing reproducible or disposable payloads to be cleaned.
-- Keep old Research Cockpit data roots valid without requiring migration.
+- Keep old nodes, artifact records, manifests, and payloads readable and writable.
+- Avoid creating a graph node for every run output.
 
 ## What Must Be Preserved
 
-A conclusion should remain reviewable after a worktree or output directory is removed. Preserve enough information to understand and reproduce the result:
+Preserve enough information to understand and reproduce a conclusion:
 
 - code commit, branch, or patch reference
-- config copy or config path
-- launcher command or regenerate command
-- metric summary
-- manifest path
-- key plots, reports, or tables
-- portable review/listening bundle when subjective review matters
-- linked finding, decision, option, or baseline ids
+- configuration and launch command
+- metric summary and relevant gates
+- manifest path and content hash
+- key plots, reports, tables, or portable review bundle
+- linked finding, decision, option, baseline, experiment, and run ids
 
 The full raw payload does not always need to remain in `research_cockpit/artifacts/**`.
 
@@ -29,91 +27,77 @@ The full raw payload does not always need to remain in `research_cockpit/artifac
 | Class | Meaning | Default action |
 | --- | --- | --- |
 | `evidence_critical` | Supports a finding, decision, or baseline | Preserve |
-| `portable_review_bundle` | Small review/listening bundle with relative links | Preserve or archive |
-| `final_checkpoint` | Best or final checkpoint needed for reproduction | Preserve |
-| `resume_state` | Optimizer/scheduler state for planned resume | Preserve only while resume is planned |
-| `reproducible_output` | Large output that can be regenerated | Keep summary and command; payload can be cleaned |
-| `disposable_cache` | Precompute/cache/intermediate data | Clean after conclusion is recorded |
-| `deprecated_payload` | Superseded by newer evidence | Archive or delete after review |
+| `portable_review_bundle` | Small self-contained review bundle | Preserve or archive |
+| `final_checkpoint` | Final checkpoint needed for reproduction | Preserve |
+| `resume_state` | State required by a planned resume | Preserve while needed |
+| `reproducible_output` | Output that can be regenerated | Keep summary and command; payload may be cleaned |
+| `disposable_cache` | Cache or intermediate data | Clean after review |
+| `deprecated_payload` | Superseded evidence | Archive or delete after review |
 
-## Suggested Metadata
+New evidence records default to `reproducible_output`. Existing 0.2.x retention metadata remains valid and is preserved on round-trip writes.
 
-For promoted graph artifact nodes, persist artifact retention metadata through `create-artifact --file` when creating the node, or `update-node-fields --metadata-file` when adding or changing retention later. For ordinary experiment run output, use default `ingest-artifact` record mode; the artifact record carries the same retention class without adding another `graph/nodes/artifact_*.yaml` file. The same information can also appear in launcher output, artifact manifests, portable review bundles, or notes for review, but graph artifact metadata and artifact record metadata are the structured sources used by audits and context payloads.
+## Canonical Evidence Intake
+
+Final output belongs in the assignment closeout. Put a source directory and only the useful relative links in `work_close_v1.evidence_inputs`:
 
 ```yaml
-retention:
-  class: evidence_critical
-  reason: "Contains metric summary and portable review bundle used by finding_x."
-  delete_after: null
-  reusable: true
-  regenerate_command: scripts/experiments/example/run_eval.sh
-  depends_on_for_future_training: false
-  keep_files:
-    - metrics_summary.json
-    - index.html
-    - comparison_data.json
-  disposable_patterns:
-    - raw_generations/**
-    - optimizer.bin
-    - scheduler.bin
+evidence_inputs:
+  source: ../outputs/run_x
+  title: Run x evidence
+  summary: Bounded result summary.
+  links:
+    metrics: metrics_summary.json
+    config: config.yaml
+    report: report.md
 ```
 
-This metadata is optional in older data roots. Audit and lint commands should treat missing metadata as a warning until a project opts into stricter rules.
+```sh
+research-cockpit work close --root <data-root> --assignment <assignment_id> --file <closeout.yaml> --json --compact
+```
 
-## Cleanup Decision Rules
+The runtime stages and hashes the directory outside the commit lock, then atomically writes the artifact record, provenance, result, and assignment state. It rejects symlinks, junctions, unsupported file types, links outside the source directory, and reuse of managed staging or artifact paths.
 
-Preserve:
+Use `work record` only when evidence must be durable before close because of crash recovery, shared consumption, or a long streaming run:
 
-- artifacts linked from accepted decisions, current baselines, or strong findings
-- portable review bundles used by a decision or report
-- final checkpoints needed for reproduction or downstream training
-- resume states while a follow-up run is planned
+```sh
+research-cockpit work record --root <data-root> --assignment <assignment_id> --file <record.yaml> --json --compact
+```
 
-Clean after review:
+Obtain the exact incremental schema with `work record --print-schema`. A later closeout may reference its returned record id through `artifact_record.existing_record_id`; it must not also provide `evidence_inputs`.
 
-- generated samples that can be recreated from a launcher command
-- precompute caches
+## Graph Artifacts And Compaction
+
+Artifact records are the normal representation for run outputs, logs, metrics, caches, and checkpoints. A graph artifact is reserved for durable portfolio navigation and is a coordinator-owned graph change, not an automatic consequence of recording evidence.
+
+Existing graph artifact nodes and their retention metadata remain supported. Audit before demotion:
+
+```yaml
+schema_version: maintenance_action_v1
+action: artifact
+execute: false
+parameters:
+  artifact_id: artifact_x
+  show_diff: true
+```
+
+```sh
+research-cockpit maintenance compact --root <data-root> --file <compaction.yaml> --json --compact
+```
+
+Only a single artifact classified as `can_demote` may be executed. Change `execute` to `true` only after reviewing the dry-run. Demotion writes an artifact record and migration report, updates safe references, and removes the graph node; it does not delete payload bytes.
+
+## Cleanup Rules
+
+Preserve evidence linked from accepted decisions, effective baselines, strong findings, or active follow-up work. Preserve final checkpoints and planned resume state.
+
+Clean only after review:
+
+- reproducible generated samples
+- precompute caches and temporary exports
 - intermediate checkpoints
-- optimizer/scheduler states after resume is no longer planned
+- optimizer or scheduler state after resume is no longer planned
 - payloads superseded by stronger evidence
 
-Do not clean:
+Do not clean paths referenced by active assignments, queued or running runs, active resources, or unresolved retention warnings. Use `maintenance audit` for bounded candidates, but keep destructive filesystem and Git actions under explicit human control.
 
-- paths referenced by queued or running runs
-- paths declared in active `resources`
-- paths whose retention class is unknown and whose linked finding/decision status has not been reviewed
-
-## Artifact Records, Promotion, And Demotion
-
-Use artifact records for ordinary run outputs, logs, metrics, reproducible outputs, disposable caches, and intermediate checkpoints:
-
-```sh
-research-cockpit ingest-artifact --root research_cockpit --node <experiment_id> --from <run_dir> --run-id <run_id> --json --compact --no-build
-research-cockpit artifact-records --root research_cockpit --experiment <experiment_id> --json --compact
-```
-
-Promote a record to a graph artifact node only when it needs durable navigation or must support a decision, baseline, strong finding, portable review bundle, or final checkpoint:
-
-```sh
-research-cockpit promote-artifact-record --root research_cockpit --id <record_id> --artifact-id <artifact_id> --link-to <node_id> --promotion-reason "Durable evidence for decision or baseline" --json --compact
-```
-
-Use graph artifact demotion as an audit-first maintenance workflow. Start with a dry-run:
-
-```sh
-research-cockpit compact-artifacts --root research_cockpit --dry-run --json --show-diff
-```
-
-Only rows classified as `can_demote` are automatic execution candidates. A safe execution command is explicit and single-artifact scoped:
-
-```sh
-research-cockpit compact-artifacts --root research_cockpit --id <artifact_id> --execute --no-build --json --show-diff
-research-cockpit validate --root research_cockpit --json
-```
-
-Demotion writes an artifact record, updates safe experiment `linked_artifacts` references to `linked_artifact_records`, removes the graph artifact node, and writes `artifact_migrations/<artifact_id>.yaml`. It does not delete payload files. Rows classified as `must_keep_node`, `needs_review`, or `cannot_demote` require human review or a different command path.
-## Relationship To `ingest-artifact`
-
-`ingest-artifact` defaults to lightweight record mode for experiment targets; `--record-only` remains an explicit compatibility flag. The old implicit graph-node path was removed in 0.2.0: immediate graph creation requires `--promote --promotion-reason "..."`, and later record promotion also requires a reason. Copying files into the artifact store does not mean every copied file must be kept forever; reproducible payloads can still be demoted, cleaned, or archived under this policy.
-
-For very large payloads, prefer a stable external or git-ignored artifact root plus small Research Cockpit artifact nodes that point to manifests, summaries, and review bundles.
+For very large payloads, use a stable external or ignored artifact root and keep only summaries, manifests, provenance, and portable review bundles in Research Cockpit.

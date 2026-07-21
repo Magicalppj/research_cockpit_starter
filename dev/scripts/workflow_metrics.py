@@ -5,114 +5,79 @@ from typing import Any
 from research_cockpit.public_contracts import WORKFLOW_BUDGETS
 
 
-ROLE_COMMAND_GROUPS = {"work", "review", "coord"}
+ROLE_COMMAND_GROUPS = {"work", "review", "coord", "maintenance"}
 ROLE_FACADE_COMMANDS = {
     "work open",
     "work claim",
     "work renew",
     "work release",
     "work start",
+    "work record",
     "work close",
     "review open",
     "review report",
     "coord overview",
+    "coord assign",
     "coord review",
+    "coord decide",
     "coord handoff",
+    "maintenance audit",
+    "maintenance repair",
+    "maintenance migrate",
+    "maintenance compact",
 }
 PACKET_OPEN_COMMANDS = {"work open", "work claim", "review open", "coord overview"}
-BROAD_DISCOVERY_COMMANDS = {"bootstrap", "commands", "search", "suggest-next-actions"}
+BROAD_DISCOVERY_COMMANDS = {"commands", "search"}
 
 CONTEXT_READ_COMMANDS = {
-    "agent-session-context",
-    "artifact-records",
-    "assignment-view",
-    "bootstrap",
-    "check-decision-acceptance",
     "commands",
     "context",
-    "node-context",
-    "option-workstream-context",
-    "run-context",
     "search",
     "smoke",
-    "suggest-next-actions",
     "work open",
     "work claim",
     "review open",
     "coord overview",
+    "maintenance audit",
 }
 
 HIGH_LEVEL_COMMANDS = {
     *ROLE_FACADE_COMMANDS,
-    "apply-graph-plan",
-    "complete-experiment",
-    "complete-experiments",
-    "complete-run",
-    "create-run",
     "context",
-    "create-artifact",
-    "create-workstream",
-    "finalize-workstream",
-    "ingest-artifact",
-    "link-artifact",
-    "option-workstream-context",
-    "update-finding",
 }
 
 MUTATING_COMMANDS = {
+    "init",
+    "build",
     "work claim",
     "work renew",
     "work release",
     "work start",
+    "work record",
     "work close",
     "review report",
+    "coord assign",
     "coord review",
+    "coord decide",
     "coord handoff",
-    "accept-decision",
-    "add-node",
-    "apply-graph-plan",
-    "apply-suggestion",
-    "build",
-    "claim-option",
-    "cleanup-suggestion-lifecycle",
-    "complete-experiment",
-    "complete-experiments",
-    "close-branch",
-    "compact-artifacts",
-    "complete-run",
-    "create-followup-experiment",
-    "create-run",
-    "ingest-artifact",
-    "ingest-gate-result",
-    "migrate-interaction-log",
-    "promote-artifact-record",
-    "record-gate-result",
-    "set-cursor",
-    "start-agent-session",
-    "update-run",
-    "create-artifact",
-    "create-note",
-    "create-workstream",
-    "finalize-workstream",
-    "init",
-    "link-artifact",
-    "promote-decision",
-    "record-finding",
-    "report-option-workstream",
-    "set-focus",
-    "sync-focus-actions",
-    "update-decision-checklist",
-    "update-decision-evidence",
-    "update-finding",
-    "update-node-fields",
-    "update-status",
-    "update-suggestion-state",
+    "maintenance repair",
+    "maintenance migrate",
+    "maintenance compact",
 }
 
-MUTATION_RECEIPT_COMMANDS = MUTATING_COMMANDS - {"work claim"}
-TRUTH_SOURCE_MUTATION_COMMANDS = MUTATING_COMMANDS - {
-    "build",
+MUTATION_RECEIPT_COMMANDS = {
+    "work renew",
+    "work release",
+    "work start",
+    "work record",
+    "work close",
+    "review report",
+    "coord assign",
+    "coord review",
+    "coord decide",
+    "coord handoff",
 }
+TRUTH_SOURCE_MUTATION_COMMANDS = MUTATING_COMMANDS - {"build"}
 
 TRUTH_SOURCE_SUFFIXES = (".yaml", ".yml", ".md")
 

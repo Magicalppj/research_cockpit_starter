@@ -1692,7 +1692,8 @@ class ModelValidationTests(unittest.TestCase):
         self.assertIn("review_decision", by_kind)
         self.assertIn("fix_resource", by_kind)
         self.assertEqual(by_kind["record_finding"]["source_node_id"], "exp_t5")
-        self.assertIn("research-cockpit record-finding", by_kind["record_finding"]["suggested_command"])
+        self.assertIn("research-cockpit work record", by_kind["record_finding"]["suggested_command"])
+        self.assertNotIn("research-cockpit record-finding", by_kind["record_finding"]["suggested_command"])
         self.assertEqual(by_kind["fix_resource"]["source_node_id"], "problem_text")
         self.assertNotIn("https://example.com/problem", by_kind["fix_resource"]["action"])
 
@@ -2154,15 +2155,15 @@ class ModelValidationTests(unittest.TestCase):
         self.assertIn("evidence_summary", context["type_context"]["workstream"])
         hierarchy = context["type_context"]["workstream"]["hierarchy_policy"]
         self.assertEqual(hierarchy["workstream_file_hint"]["problem.parent"], "option_t5")
-        self.assertIn("create-workstream", hierarchy["recommended_command"])
+        self.assertIn("coord assign", hierarchy["recommended_command"])
         self.assertIn("create_child_workstream", context["type_context"]["workstream"]["suggested_commands"])
         for command in context["type_context"]["workstream"]["suggested_commands"].values():
             self.assertIn("--root", command)
             self.assertIn(str(self.root), command)
-        self.assertIn("--root", context["command_drafts"]["claim_option"])
-        self.assertIn(str(self.root), context["command_drafts"]["claim_option"])
-        self.assertNotIn("python scripts", context["command_drafts"]["claim_option"])
-        self.assertNotIn(".py", context["command_drafts"]["claim_option"])
+        self.assertIn("--root", context["command_drafts"]["claim_assignment"])
+        self.assertIn(str(self.root), context["command_drafts"]["claim_assignment"])
+        self.assertNotIn("python scripts", context["command_drafts"]["claim_assignment"])
+        self.assertNotIn(".py", context["command_drafts"]["claim_assignment"])
 
     def test_node_onboarding_context_for_experiment_points_to_missing_evidence_and_record_command(self) -> None:
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
@@ -2212,9 +2213,11 @@ class ModelValidationTests(unittest.TestCase):
         self.assertEqual(hierarchy["workstream_file_hint"]["problem.parent"], "option_t5")
         self.assertEqual(hierarchy["source_experiment_id"], "exp_t5")
         self.assertIn("create_child_workstream", context["type_context"]["suggested_commands"])
-        self.assertIn("create_single_followup", context["type_context"]["suggested_commands"])
-        self.assertIn("record-finding", context["command_drafts"]["record_finding"])
-        self.assertIn("--root", context["command_drafts"]["record_finding"])
+        self.assertIn("start", context["type_context"]["suggested_commands"])
+        self.assertIn("record_evidence", context["type_context"]["suggested_commands"])
+        self.assertIn("close_assignment", context["type_context"]["suggested_commands"])
+        self.assertIn("work record", context["command_drafts"]["record_evidence"])
+        self.assertIn("--root", context["command_drafts"]["record_evidence"])
 
     def test_node_onboarding_context_for_decision_includes_acceptance_repairs(self) -> None:
         decision = load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")
@@ -2230,8 +2233,8 @@ class ModelValidationTests(unittest.TestCase):
         failed_ids = {item["id"] for item in context["type_context"]["acceptance"]["blocking_failures"]}
         self.assertIn("supporting_evidence", failed_ids)
         repair_commands = " ".join(item.get("command", "") for item in context["type_context"]["repair_hints"])
-        self.assertIn("record-finding", repair_commands)
-        self.assertIn("update-decision-evidence", repair_commands)
+        self.assertIn("work record", repair_commands)
+        self.assertIn("coord decide", repair_commands)
         self.assertIn("--root", repair_commands)
 
     def test_branch_comparison_summarizes_problem_options(self) -> None:
@@ -2528,8 +2531,8 @@ class ModelValidationTests(unittest.TestCase):
         suggestions = build_action_suggestions(self.root, nodes, current)
         review = [item for item in suggestions if item["kind"] == "review_decision"][0]
 
-        self.assertIn("research-cockpit update-decision-evidence", review["suggested_command"])
-        self.assertIn("--id decision_t5", review["suggested_command"])
+        self.assertIn("research-cockpit coord decide", review["suggested_command"])
+        self.assertIn("--file <coord_decide.yaml>", review["suggested_command"])
 
     def test_v2_statuses_and_current_focus_node_pass_validation(self) -> None:
         write_node(

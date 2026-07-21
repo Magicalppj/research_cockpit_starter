@@ -8,7 +8,7 @@ RUN_ID="${RUN_ID:-run_x}"
 MODE="${MODE:-smoke-gate}"
 LAUNCHER="${LAUNCHER:-shell}"
 COMMAND="${COMMAND:-}"
-MONITOR_COMMAND="${MONITOR_COMMAND:-tail -f logs/run.log}"
+MONITOR_COMMAND="${MONITOR_COMMAND:-}"
 STOP_COMMAND="${STOP_COMMAND:-}"
 TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 

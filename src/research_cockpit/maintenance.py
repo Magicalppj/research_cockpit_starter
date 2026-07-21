@@ -943,7 +943,7 @@ def build_maintenance_audit(
     if any(item.get("cleanup_candidate") for item in artifact_audit["artifacts"]):
         next_actions.append("Review cleanup candidates and preserve summaries before deleting payloads.")
     if artifact_compaction["counts"].get("can_demote"):
-        next_actions.append("Run compact-artifacts --dry-run before demoting ordinary run-output artifact nodes.")
+        next_actions.append("Run maintenance compact with execute: false before demoting a run-output artifact node.")
     if branch_candidates:
         next_actions.append("Review branch candidates; promote useful unmerged work to research/* before deletion.")
     return {
@@ -1031,40 +1031,40 @@ def _closeout_rc_updates(
         updates.append({
             "reason": "active_assignment",
             "command": (
-                f"research-cockpit set-cursor --root {root} --assignment {assignment_id} "
-                "--node <next_node> --no-build"
+                f"research-cockpit work close --root {root} --assignment {assignment_id} "
+                "--file <closeout.yaml> --json --compact"
             ),
         })
     for node_id in target_row.get("active_workstream_node_ids", []):
         updates.append({
             "reason": "active_workstream",
             "command": (
-                f"research-cockpit update-workstream-fields --root {root} --option {node_id} "
-                "--status reported --no-build"
+                f"research-cockpit coord assign --root {root} "
+                f"--file <coord_assign_{node_id}.yaml> --json --compact"
             ),
         })
     if not evidence_summary["finding_count"] or not evidence_summary["artifact_ids"]:
         updates.append({
             "reason": "missing_finding_or_evidence",
             "command": (
-                f"research-cockpit complete-experiment --root {root} --id <experiment_id> "
-                "--finding \"<finding>\" --confidence medium --artifact-id <artifact_id> --no-build"
+                f"research-cockpit work close --root {root} --assignment <assignment_id> "
+                "--file <closeout.yaml> --json --compact"
             ),
         })
     for run in missing_run_retention:
         updates.append({
             "reason": "missing_run_retention_policy",
             "command": (
-                f"research-cockpit complete-run --root {root} --id {run.run_id} --status completed "
-                "--output-retention-file output_retention.yaml --no-build"
+                f"research-cockpit work close --root {root} --assignment <assignment_id> "
+                f"--file <closeout_for_{run.run_id}.yaml> --json --compact"
             ),
         })
     for artifact_id in missing_artifact_retention:
         updates.append({
             "reason": "missing_artifact_retention_policy",
             "command": (
-                f"research-cockpit update-node-fields --root {root} --id {artifact_id} "
-                "--metadata-file retention.yaml --no-build"
+                f"research-cockpit coord assign --root {root} "
+                f"--file <coord_assign_{artifact_id}.yaml> --json --compact"
             ),
         })
     return updates

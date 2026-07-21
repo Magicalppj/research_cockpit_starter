@@ -5,6 +5,7 @@ import argparse
 from research_cockpit.commands._runtime import emit_json
 from research_cockpit.command_registry import (
     COMMAND_GROUP_CHOICES,
+    COMMAND_MODULES,
     COMMAND_STATUS_CHOICES,
     ROLE_CHOICES,
     SURFACE_CHOICES,
@@ -25,51 +26,19 @@ STATUS_ALIASES = {"option": {"planned": "open"}}
 CONFLICT_POLICY = "Truth-source mutation fails without writing if target files changed after command planning; reread context and retry."
 COMPACT_COMMAND_KEYS = {
     "name",
-    "canonical_name",
     "purpose",
     "command",
-    "group",
-    "lifecycle",
-    "status",
-    "aliases",
-    "replacement",
-    "input_modes",
-    "workflow_tags",
     "mutating",
-    "verification_mode",
-    "supports_json",
-    "supports_dry_run",
-    "supports_no_build",
-    "supports_compact",
-    "supports_build",
-    "supports_watch",
-    "supports_profile",
-    "supports_show_diff",
-    "supports_root",
     "supported_flags",
-    "unsupported_flags",
-    "can_batch",
-    "batch_policy",
-    "requires_serial_mutation",
-    "conflict_policy",
-    "verification_mode",
     "schema_command",
-    "primary_target",
-    "target_aliases",
-    "status_aliases",
     "audiences",
     "surface",
     "intent",
     "work_packet_kinds",
-    "scope_policy",
     "idempotency",
     "verification_policy",
     "input_schema_version",
     "output_schema_version",
-    "canonical_replacement",
-    "removal_disposition",
-    "route_kind",
-    "core_roles",
 }
 SUMMARY_COMMAND_KEYS = {
     "name",
@@ -101,12 +70,19 @@ WORKFLOW_TAGS_BY_COMMAND = {
     "work release": ["evidence"],
     "work renew": ["evidence"],
     "work start": ["evidence"],
+    "work record": ["evidence"],
     "work close": ["evidence"],
     "review open": ["read", "evidence"],
     "review report": ["evidence"],
     "coord review": ["evidence", "decision"],
     "coord overview": ["read", "focus"],
     "coord handoff": ["maintenance", "graph"],
+    "coord assign": ["graph", "evidence", "focus"],
+    "coord decide": ["decision", "evidence"],
+    "maintenance audit": ["read", "maintenance"],
+    "maintenance repair": ["maintenance"],
+    "maintenance migrate": ["maintenance"],
+    "maintenance compact": ["maintenance", "evidence"],
     "init": ["maintenance"],
     "ui": ["read"],
     "bootstrap": ["read", "focus"],
@@ -230,12 +206,19 @@ CAPABILITY_BY_COMMAND = {
     "work renew": "capabilities/worker-loop.md",
     "work start": "capabilities/worker-loop.md",
     "work close": "capabilities/worker-loop.md",
+    "work record": "capabilities/worker-loop.md",
     "review open": "capabilities/reviewer-loop.md",
     "review report": "capabilities/reviewer-loop.md",
-    "coord review": "capabilities/reviewer-loop.md",
+    "coord review": "capabilities/coordinator-loop.md",
     "coord overview": "capabilities/coordinator-loop.md",
     "coord handoff": "capabilities/coordinator-loop.md",
     "agent_bootstrap.py": "capabilities/focus-context.md",
+    "coord assign": "capabilities/coordinator-loop.md",
+    "coord decide": "capabilities/coordinator-loop.md",
+    "maintenance audit": "capabilities/maintainer-loop.md",
+    "maintenance repair": "capabilities/maintenance.md",
+    "maintenance migrate": "capabilities/maintenance.md",
+    "maintenance compact": "capabilities/maintenance.md",
     "validate_cockpit.py": "capabilities/troubleshooting.md",
     "lint_semantic.py": "capabilities/troubleshooting.md",
     "repair_interaction_log.py": "capabilities/troubleshooting.md",
@@ -1492,7 +1475,8 @@ ROLE_FACADE_COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": False,
         "supports_no_build": False,
         "required_flags": ["--assignment", "<assignment_id>", "--file", "<path>"],
-        "extra_supported_flags": ["--assignment", "--file"],
+        "extra_supported_flags": ["--assignment", "--file", "--print-schema"],
+        "schema_command": "research-cockpit work start --print-schema",
         "group": "run",
         "verification_mode": "internal_non_dry_run",
         "rebuild_default": False,
@@ -1507,7 +1491,8 @@ ROLE_FACADE_COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": False,
         "supports_no_build": False,
         "required_flags": ["--assignment", "<assignment_id>", "--file", "<path>"],
-        "extra_supported_flags": ["--assignment", "--file"],
+        "extra_supported_flags": ["--assignment", "--file", "--print-schema"],
+        "schema_command": "research-cockpit work close --print-schema",
         "group": "run",
         "verification_mode": "internal_non_dry_run",
         "rebuild_default": False,
@@ -1572,18 +1557,19 @@ ROLE_FACADE_COMMANDS: list[dict[str, object]] = [
     },
     {
         "name": "coord review",
-        "purpose": "Apply one completed reviewer verdict to producer review metadata without rewriting its Evidence Bundle.",
+        "purpose": "Apply a reviewer verdict or promote one artifact record without rewriting its Evidence Bundle.",
         "mutating": True,
         "supports_json": True,
         "supports_compact": True,
         "supports_dry_run": False,
         "supports_no_build": False,
-        "required_flags": ["--assignment", "<producer_assignment_id>", "--file", "<path>"],
-        "extra_supported_flags": ["--assignment", "--file"],
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--assignment", "--file", "--print-schema", "--action"],
+        "schema_command": "research-cockpit coord review --print-schema --action assignment_result",
         "group": "context",
         "verification_mode": "internal_non_dry_run",
         "rebuild_default": False,
-        "recommended_when": "Consume an exact completed review revision and update only producer review status.",
+        "recommended_when": "Apply an exact review revision, or promote reviewed evidence for cross-assignment reuse.",
     },
     {
         "name": "work renew",
@@ -1614,6 +1600,119 @@ ROLE_FACADE_COMMANDS: list[dict[str, object]] = [
         "verification_mode": "internal_non_dry_run",
         "rebuild_default": False,
         "recommended_when": "Explicitly return unfinished idle work to the coordinator queue.",
+    },
+]
+
+
+CUTOVER_FACADE_COMMANDS: list[dict[str, object]] = [
+    {
+        "name": "work record",
+        "purpose": "Persist incremental assignment evidence and renew its lease in one idempotent operation.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--assignment", "<assignment_id>", "--file", "<path>"],
+        "extra_supported_flags": ["--assignment", "--file", "--print-schema"],
+        "schema_command": "research-cockpit work record --print-schema",
+        "group": "run",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Persist streaming evidence that must be durable before work close.",
+    },
+    {
+        "name": "coord assign",
+        "purpose": "Apply one coordinator graph plan or create one assignment session from versioned input.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema", "--action"],
+        "schema_command": "research-cockpit coord assign --print-schema --action graph_plan",
+        "group": "graph",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Create or update research nodes, then assign one option to an isolated agent session.",
+    },
+    {
+        "name": "coord decide",
+        "purpose": "Promote, update, accept, or baseline one decision through a versioned coordinator operation.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema", "--action"],
+        "schema_command": "research-cockpit coord decide --print-schema --action set_baseline",
+        "group": "decision",
+        "verification_mode": "internal_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Change accepted research direction only after evidence and review are ready.",
+    },
+    {
+        "name": "maintenance audit",
+        "purpose": "Run one repository and data-root lifecycle audit without mutation.",
+        "mutating": False,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": [],
+        "extra_supported_flags": ["--repo", "--base", "--min-size-gb", "--max-files"],
+        "group": "maintenance",
+        "recommended_when": "Identify concrete maintenance work before loading a repair, migration, or compaction procedure.",
+    },
+    {
+        "name": "maintenance repair",
+        "purpose": "Repair one selected interaction-log or suggestion-lifecycle issue from versioned input.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema"],
+        "schema_command": "research-cockpit maintenance repair --print-schema",
+        "group": "maintenance",
+        "verification_mode": "structured_file_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Execute only the bounded repair selected by maintenance audit.",
+    },
+    {
+        "name": "maintenance migrate",
+        "purpose": "Plan or execute one explicit legacy-data migration while preserving source evidence.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema"],
+        "schema_command": "research-cockpit maintenance migrate --print-schema",
+        "group": "maintenance",
+        "verification_mode": "structured_file_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Run a reviewed migration plan with explicit execution intent.",
+    },
+    {
+        "name": "maintenance compact",
+        "purpose": "Plan or demote one eligible graph artifact without deleting payload files.",
+        "mutating": True,
+        "supports_json": True,
+        "supports_compact": True,
+        "supports_dry_run": False,
+        "supports_no_build": False,
+        "required_flags": ["--file", "<path>"],
+        "extra_supported_flags": ["--file", "--print-schema"],
+        "schema_command": "research-cockpit maintenance compact --print-schema",
+        "group": "maintenance",
+        "verification_mode": "structured_file_non_dry_run",
+        "rebuild_default": False,
+        "recommended_when": "Dry-run first, then demote one can_demote artifact per invocation.",
     },
 ]
 
@@ -1726,10 +1825,17 @@ def agent_command_manifest(
     if surface is not None and surface not in SURFACE_CHOICES:
         raise ValueError(f"Unknown command surface: {surface}")
     rows: list[dict[str, object]] = []
-    for command in [*COMMANDS, *ROLE_FACADE_COMMANDS]:
+    for command in [*COMMANDS, *ROLE_FACADE_COMMANDS, *CUTOVER_FACADE_COMMANDS]:
         command_name = str(command["name"])
         subcommand = subcommand_for_script(command_name) if command_name.endswith(".py") else command_name
-        if name and subcommand != name:
+        if command_name.endswith(".py") and subcommand not in COMMAND_MODULES:
+            continue
+        name_matches = (
+            not name
+            or subcommand == name
+            or (role is not None and " " not in name and subcommand.rsplit(" ", 1)[-1] == name)
+        )
+        if not name_matches:
             continue
         mutating = bool(command["mutating"])
         verification_mode = str(
@@ -1819,6 +1925,14 @@ def agent_command_manifest(
         elif compact:
             row = {key: value for key, value in row.items() if key in COMPACT_COMMAND_KEYS}
         rows.append(row)
+    if name and not rows:
+        raise ValueError(f"Unknown command name {name!r} for role {role or 'any'}")
+    if name and " " not in name and not any(row.get("name") == name for row in rows):
+        if len(rows) > 1:
+            choices = ", ".join(sorted(str(row["name"]) for row in rows))
+            raise ValueError(
+                f"Ambiguous command name {name!r}; use one canonical route: {choices}"
+            )
     return rows
 
 
@@ -1854,7 +1968,7 @@ def main() -> None:
         surface=args.surface,
     )
     if args.json:
-        emit_json({"commands": commands}, compact=args.summary_only)
+        emit_json({"commands": commands}, compact=args.compact or args.summary_only)
         return
 
     for command in commands:

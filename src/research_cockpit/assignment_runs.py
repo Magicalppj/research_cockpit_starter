@@ -50,6 +50,8 @@ def _lease_error(
     code: str,
     message: str,
     lease_id: str | None = None,
+    input_revision: str | None = None,
+    latest_packet_revision: str | None = None,
     conflict_files: list[str] | None = None,
 ) -> AssignmentLeaseError:
     return AssignmentLeaseError(
@@ -60,6 +62,8 @@ def _lease_error(
             code=code,
             message=message,
             lease_id=lease_id,
+            input_revision=input_revision,
+            latest_packet_revision=latest_packet_revision,
             conflict_files=conflict_files,
             retry_command=(
                 f"research-cockpit work open --root <data-root> "
@@ -121,6 +125,7 @@ def start_assignment_run(
     lease_id: str,
     lease_epoch: int,
     operation_id: str,
+    input_revision: str | None = None,
     experiment_id: str | None = None,
     slug_hint: str | None = None,
     run_fields: dict[str, Any] | None = None,
@@ -136,6 +141,7 @@ def start_assignment_run(
             "agent_id": agent_id,
             "lease_id": lease_id,
             "lease_epoch": lease_epoch,
+            "input_revision": input_revision,
             "experiment_id": experiment_id,
             "slug_hint": slug_hint,
             "run": normalized_run_fields,
@@ -183,6 +189,28 @@ def start_assignment_run(
                 f"Assignment readiness {packet.get('readiness')!r} does not allow work start."
             ),
             lease_id=lease_id,
+        )
+    expected_input_revision = packet.get("input_revision")
+    if expected_input_revision and not input_revision:
+        raise _lease_error(
+            assignment_id=assignment_id,
+            operation_id=operation_id,
+            code="input_revision_required",
+            message="work start must bind the current Work Packet input_revision.",
+            lease_id=lease_id,
+            latest_packet_revision=str(packet["revision"]),
+        )
+    if input_revision != expected_input_revision and (
+        input_revision is not None or expected_input_revision is not None
+    ):
+        raise _lease_error(
+            assignment_id=assignment_id,
+            operation_id=operation_id,
+            code="stale_inputs",
+            message="work start input_revision does not match the current Work Packet.",
+            lease_id=lease_id,
+            input_revision=input_revision,
+            latest_packet_revision=str(packet["revision"]),
         )
 
     target_experiment = str(experiment_id or candidate_assignment.current_node)

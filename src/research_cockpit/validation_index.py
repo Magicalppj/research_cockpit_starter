@@ -424,6 +424,40 @@ def is_index_schema_compatible(index: dict[str, Any] | None) -> bool:
     )
 
 
+def ensure_validation_index(root: Path) -> dict[str, Any]:
+    """Create the generated validation index only when no usable projection exists."""
+    from research_cockpit.agent_state import load_assignments
+    from research_cockpit.model import load_explicit_edges, load_nodes, load_runs
+    from research_cockpit.mutation_lock import mutation_lock
+
+    with mutation_lock(root):
+        existing = load_validation_index(root)
+        if is_index_schema_compatible(existing):
+            return {"status": "current", "rebuilt": False}
+        nodes = load_nodes(root)
+        explicit_edges = load_explicit_edges(root)
+        runs = load_runs(root)
+        assignments = load_assignments(root)
+        index = build_validation_index(
+            root,
+            nodes,
+            explicit_edges,
+            runs,
+            assignments,
+        )
+        save_text(
+            validation_index_path(root),
+            json.dumps(index, indent=2, ensure_ascii=False),
+        )
+        return {
+            "status": "rebuilt",
+            "rebuilt": True,
+            "nodes": len(nodes),
+            "runs": len(runs),
+            "assignments": len(assignments),
+        }
+
+
 def _mark_validation_index_stale_unlocked(root: Path, *, reason: str, detail: str = "") -> None:
     index = load_validation_index(root)
     if not isinstance(index, dict):

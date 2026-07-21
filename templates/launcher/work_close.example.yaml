@@ -12,8 +12,11 @@ experiment:
   result_summary: <bounded_result_summary>
 finding:
   statement: <evidence_backed_finding>
+  # Allowed confidence values: weak, medium, strong.
   confidence: medium
   outcome: positive
+# Set true only to request review in addition to the assignment policy.
+review_required: false
 assignment_result:
   outcome: positive
   summary: <bounded_assignment_summary>

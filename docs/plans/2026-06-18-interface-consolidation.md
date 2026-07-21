@@ -2,7 +2,7 @@
 
 ## Status
 
-In progress. 初始版本只定义总体设计和落地计划；2026-06-18 已开始落地 Phase 1 的 command discovery contract。
+Superseded historical plan. The 0.3.0 one-version role-facade design in `docs/plans/2026-07-19-multi-agent-research-management-framework.md` replaces its alias and compatibility strategy; command examples below are not current workflow guidance.
 
 ## Date
 

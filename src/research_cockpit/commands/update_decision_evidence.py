@@ -33,6 +33,7 @@ def update_decision_evidence(
     rebuild_dashboard: bool = True,
     dry_run: bool = False,
     show_diff: bool = False,
+    operation_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     nodes = load_nodes(root)
     if decision_id not in nodes:
@@ -64,7 +65,7 @@ def update_decision_evidence(
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, candidate, current, explicit_edges, raise_on_error=True)
     changed = before_data != decision_data
-    if changed and not dry_run:
+    if (changed or operation_request is not None) and not dry_run:
         finish_mutation(
             root,
             [(decision_path, before_data, decision_data)],
@@ -85,6 +86,7 @@ def update_decision_evidence(
                 },
             },
             rebuild_dashboard=rebuild_dashboard,
+            operation_request=operation_request,
         )
     result: dict[str, Any] = {
         "decision_id": decision_id,

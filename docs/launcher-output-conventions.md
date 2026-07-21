@@ -1,31 +1,25 @@
 # Launcher Output Conventions
 
-Use these conventions when a shell script, Python script, tmux session, notebook, scheduler job, or manual run writes outputs for a Research Cockpit experiment. They are recommendations, not a required runtime dependency. A launcher may stage files anywhere, but the stable copy should end up under:
+These conventions apply to shell scripts, Python launchers, notebooks, scheduler jobs, and manual runs. Launcher files are local execution state until `work record` or `work close` stages selected evidence into the canonical data root.
 
-```text
-research_cockpit/artifacts/<experiment_id>/<run_id>/
-```
-
-Starter templates live in `templates/launcher/`. Use them as copyable examples for dry runs, smoke gates, full runs, artifact capture, validate/build handoffs, and next action updates.
-
-Keep paths in launcher files relative to the run output directory whenever possible. Convert them to data-root relative paths, such as `artifacts/<experiment_id>/<run_id>/progress.json`, when recording runs, gates, or artifacts through `research-cockpit`.
+Starter templates live in `templates/launcher/`. Keep paths inside launcher files relative to one run output directory so the bundle remains portable across platforms and worktrees.
 
 ## Standard Files
 
-| File | Purpose | Ingest path |
+| File | Purpose | Research Cockpit boundary |
 | --- | --- | --- |
-| `run_record.txt` | Human-readable run handoff: ids, commands, process hints, and output paths. | Put initial metadata in `work start`; use `update-run` only when it changes and `work close` for terminal state. |
-| `progress.json` | Machine-readable heartbeat for long-running work. | Reference with `--progress-file artifacts/<experiment_id>/<run_id>/progress.json`. |
-| `gate_result.json` | Machine-readable gate outcome for preflight, dataset, cache, smoke, training, or evaluation gates. | Attach with `ingest-gate-result` or write with `record-gate-result`. |
-| `artifact_manifest.json` | Machine-readable summary of files worth preserving as evidence. | Use its relative paths as `work_close_v1.evidence_inputs.links`; use ingest links only for evidence that must be durable before close. |
+| `run_record.txt` | Human-readable ids, command, process hints, and paths | Summarize immutable run fields in `work start`; terminal state belongs in `work close`. |
+| `progress.json` | Launcher-owned heartbeat and progress | Keep local during execution; include it in evidence links only when useful for review. |
+| `gate_result.json` | Gate outcome and observations | Include required gate data in `work_close_v1.gates`; preserve the file as evidence when useful. |
+| `artifact_manifest.json` | Files worth preserving | Translate selected relative paths into `evidence_inputs.links`. |
 
-## `run_record.txt`
+## Run Record
 
-`run_record.txt` is intentionally line-oriented text so shell, Python, and manual launch flows can create it without a YAML or JSON library:
+`run_record.txt` is line-oriented so any launcher can write it:
 
 ```text
 schema_version: launcher_run_record_v1
-run_id: run_x
+run_id: <runtime_generated_after_work_start>
 experiment_id: experiment_x
 status: running
 launcher: shell
@@ -36,7 +30,7 @@ pid:
 tmux_session:
 log_root: logs
 output_root: outputs
-monitor_command: tail -f logs/run.log
+monitor_command:
 stop_command:
 progress_file: progress.json
 gate_result_file: gate_result.json
@@ -45,19 +39,19 @@ config_file: config.yaml
 notes:
 ```
 
-Only `run_id`, `experiment_id`, `status`, and `command` are expected for every launcher. Fill `pid`, `tmux_session`, `monitor_command`, and `stop_command` when they are known. Manual flows can leave process fields blank and still provide useful handoff context.
+`monitor_command` 与 `stop_command` 都是可选 launcher metadata。只有存在跨平台或明确限定平台、无副作用的命令时才填写；通用模板不假设 `tail`、tmux 或特定 shell。
 
-Typical run ingestion:
+Start through the assignment facade and retain the runtime-generated run id from its receipt:
 
 ```sh
-research-cockpit work start --root research_cockpit --assignment <assignment_id> --file work_start.yaml --json --compact
-research-cockpit update-run --root research_cockpit --assignment <assignment_id> --id run_x --status running --progress-file artifacts/experiment_x/run_x/progress.json --no-build
-research-cockpit work close --root research_cockpit --file work_close.yaml --assignment <assignment_id> --json --compact
+research-cockpit work start --root <data-root> --assignment <assignment_id> --file <work_start.yaml> --json --compact
 ```
 
-## `progress.json`
+Do not add a control-plane command for each progress update. The launcher owns `progress.json`; normal mutations and launcher heartbeat renew the lease outside model turns.
 
-`progress.json` follows the standard heartbeat schema used by run summaries:
+## Progress And Gates
+
+Recommended progress shape:
 
 ```json
 {
@@ -71,11 +65,7 @@ research-cockpit work close --root research_cockpit --file work_close.yaml --ass
 }
 ```
 
-`total_steps` may be omitted or null when the total is unknown. `last_update` should be an ISO-8601 timestamp. If the launcher stages this file outside the data root, copy or ingest it so the run record can reference the stable `artifacts/<experiment_id>/<run_id>/progress.json` path.
-
-## `gate_result.json`
-
-`gate_result.json` uses the standard gate result schema:
+Recommended gate shape:
 
 ```json
 {
@@ -91,92 +81,60 @@ research-cockpit work close --root research_cockpit --file work_close.yaml --ass
 }
 ```
 
-Failed gates should set `passed` to `false` and put blocking details in `fatal_failures`. Warning-only gates keep `passed: true` and list warnings. Preserve the run output directory first so the gate file path is stable, then attach the gate file. Add `--artifact <artifact_id>` only after promoting the run output to a graph artifact node:
+Failed gates set `passed: false` and record blockers in `fatal_failures`. Gate files do not mutate Research Cockpit by themselves; submit the structured gate result once through closeout.
 
-```sh
-research-cockpit ingest-gate-result --root research_cockpit --id gate_x --file artifacts/experiment_x/run_x/gate_result.json --run run_x --json --compact --no-build
-```
+## Artifact Manifest
 
-For long-run preflight checks, use `gate_type: "preflight"` and add a `preflight` object with disk, GPU, port, cache directory, and conflicting process observations. Failed preflight gates block `full_run` in context:
-
-```json
-{
-  "gate_type": "preflight",
-  "passed": false,
-  "preflight": {
-    "disk_available_gb": 120,
-    "estimated_required_gb": 800,
-    "gpu_ids": [0, 1],
-    "port_available": true,
-    "cache_dir": "cache/precompute",
-    "cache_dir_exists": true,
-    "conflicting_processes": ["python train.py"]
-  },
-  "fatal_failures": {
-    "disk": "insufficient"
-  },
-  "next_allowed_action": "full_run"
-}
-```
-
-## `artifact_manifest.json`
-
-`artifact_manifest.json` tells an agent which files in the run directory are evidence rather than scratch output:
+`artifact_manifest.json` identifies evidence rather than scratch output:
 
 ```json
 {
   "schema_version": "artifact_manifest_v1",
-  "artifact_id": "artifact_experiment_x_run_x",
   "title": "Run x output bundle",
   "experiment_id": "experiment_x",
   "run_id": "run_x",
   "summary": "Smoke run output and logs.",
-  "path": ".",
   "links": {
     "metrics": "outputs/metrics.json",
     "config": "config.yaml",
     "log": "logs/run.log",
-    "gate_result": "gate_result.json",
-    "progress": "progress.json"
+    "gate_result": "gate_result.json"
   },
   "warnings": []
 }
 ```
 
-Use link values relative to the run output directory. For final output in a disposable worktree, put the source and manifest-selected links directly in `work_close_v1`:
+Link values must be relative to the source directory. Final output is staged once through closeout:
 
 ```yaml
 evidence_inputs:
   source: <launcher_output_dir>
+  title: Run x output bundle
+  summary: Smoke run output and logs.
   links:
     metrics: outputs/metrics.json
     config: config.yaml
     gate_result: gate_result.json
 ```
 
-Use standalone ingest only when the output must be durable before close:
-
 ```sh
-research-cockpit ingest-artifact --root research_cockpit --node experiment_x --from <launcher_output_dir> --run-id run_x --agent agent_x --link metrics=outputs/metrics.json --link config=config.yaml --link gate_result=gate_result.json --json --compact --no-build
+research-cockpit work close --root <data-root> --assignment <assignment_id> --file <work_close.yaml> --json --compact
 ```
 
-`ingest-artifact` returns a runtime-generated record id in `target.artifact_id`. Reuse that exact value as `artifact_record.existing_record_id`; do not derive it from experiment or run ids. Keep output as a record and promote it with `promote-artifact-record --promotion-reason "..."` only when graph navigation requires it.
-
-If the run directory already lives at a stable path, create or link the artifact directly:
+Use `work record --file <record.yaml>` only when output must be durable before close. Reuse the returned id as `artifact_record.existing_record_id` in closeout; do not combine that field with `evidence_inputs`.
 
 ```sh
-research-cockpit create-artifact --root research_cockpit --id artifact_experiment_x_run_x --title "Run x output bundle" --path artifacts/experiment_x/run_x --link metrics=artifacts/experiment_x/run_x/outputs/metrics.json --link-to experiment_x --no-build
+research-cockpit work record --root <data-root> --assignment <assignment_id> --file <record.yaml> --json --compact
 ```
+
+
 
 ## Launcher-Neutral Flow
 
-Shell, Python, and manual launch flows should follow the same sequence:
+1. Open the assignment packet and start one run.
+2. Create one output directory and update launcher-local progress during execution.
+3. Write gate results and a bounded artifact manifest.
+4. Close once with terminal run, experiment, finding, assignment result, gates, and final evidence.
+5. Stop after an internally verified receipt; do not repeat validate, context, build, or smoke.
 
-1. Create one output directory for the run.
-2. Write `run_record.txt` before or immediately after launch.
-3. Update `progress.json` during long-running work.
-4. Write `gate_result.json` for each gate that should drive the next action.
-5. Write `artifact_manifest.json` before handoff so an agent can preserve only useful outputs.
-6. Use one `work close --file <work_close.yaml>` transaction. Put final output under `evidence_inputs`; use `artifact_record.existing_record_id` only for evidence ingested earlier. The same close attaches gates, records the finding/result, finishes or advances the assignment, and needs no repeated validate/context after an internally verified receipt.
-
-Do not store machine-local absolute paths in canonical Research Cockpit records. Keep those details in local launcher logs unless they are needed as short human hints in `run_record.txt`.
+Do not store machine-local absolute paths in canonical records. Relative input paths are resolved from the structured input file, and staged links remain data-root relative.
