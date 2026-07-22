@@ -19,6 +19,11 @@ def main() -> None:
     parser.add_argument("--base", default="main")
     parser.add_argument("--min-size-gb", type=float, default=10.0)
     parser.add_argument("--max-files", type=int, default=1000)
+    parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--cursor")
+    parser.add_argument("--classification")
+    parser.add_argument("--id", dest="candidate_id")
+    parser.add_argument("--deep-git", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--compact", action="store_true")
     args = parser.parse_args()
@@ -30,6 +35,11 @@ def main() -> None:
             base=args.base,
             min_size_gb=args.min_size_gb,
             max_files=args.max_files,
+            limit=args.limit,
+            cursor=args.cursor,
+            classification=args.classification,
+            candidate_id=args.candidate_id,
+            deep_git=args.deep_git,
         )
     except (ValidationError, ValueError, FileNotFoundError, OSError) as exc:
         if args.json:
@@ -47,12 +57,8 @@ def main() -> None:
     if args.json:
         emit_json(payload, compact=args.compact)
         return
-    safe_print(
-        "Maintenance candidates: "
-        f"{len(result.get('worktree_candidates', []))} worktrees, "
-        f"{len(result.get('branch_candidates', []))} branches, "
-        f"{len(result.get('large_artifact_candidates', []))} large artifacts."
-    )
+    candidates = result.get("summary", {}).get("candidate_counts", {})
+    safe_print(f"Maintenance candidates: {candidates.get('total', 0)}")
 
 
 if __name__ == "__main__":

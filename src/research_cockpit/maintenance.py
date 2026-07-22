@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
 from typing import Any
 from urllib.parse import urlparse
@@ -22,6 +26,25 @@ from research_cockpit.run_summaries import ACTIVE_RUN_STATUSES
 
 ACTIVE_WORKSTREAM_STATUSES = {"claimed", "in_progress", "blocked"}
 RETENTION_CLEANUP_CLASSES = {"disposable_cache", "reproducible_output", "deprecated_payload"}
+DEFAULT_GIT_STATUS_BYTES = 16 * 1024
+DEFAULT_AUDIT_CANDIDATE_LIMIT = 10
+MAX_AUDIT_CANDIDATE_LIMIT = 50
+COMPACT_AUDIT_RESULT_BYTES = 15 * 1024
+AUDIT_CANDIDATE_CLASSIFICATIONS = {
+    "must_keep",
+    "can_migrate",
+    "can_quarantine",
+    "needs_review",
+}
+_AUDIT_CLASSIFICATION_ORDER = {
+    "needs_review": 0,
+    "can_migrate": 1,
+    "must_keep": 2,
+    "can_quarantine": 3,
+}
+_MAX_AUDIT_TEXT_BYTES = 160
+_MAX_AUDIT_DIMENSIONS = 12
+_MAX_AUDIT_REASONS = 8
 WORKTREE_CLOSEOUT_CLASSIFICATIONS = {
     "merge_to_main",
     "preserve_as_research_branch",
@@ -41,6 +64,330 @@ def _git_output(repo: Path, *args: str) -> str:
         message = completed.stderr.strip() or completed.stdout.strip() or "git command failed"
         raise ValueError(f"git -C {repo} {' '.join(args)}: {message}")
     return completed.stdout
+
+
+def _git_limited_output(
+    repo: Path,
+    *args: str,
+    max_bytes: int,
+) -> tuple[bytes, bool]:
+    if max_bytes <= 0:
+        raise ValueError("max_bytes must be positive")
+    process = subprocess.Popen(
+        ["git", "-C", str(repo), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    output = process.stdout.read(max_bytes + 1)
+    truncated = len(output) > max_bytes
+    if truncated:
+        process.terminate()
+        process.communicate()
+        return output[:max_bytes], True
+    _stdout, stderr = process.communicate()
+    if process.returncode != 0:
+        message = stderr.decode("utf-8", errors="replace").strip() or "git command failed"
+        raise ValueError(f"git -C {repo} {' '.join(args)}: {message}")
+    return output, False
+
+
+def _git_pathspec(repo_root: Path, path: Path) -> str | None:
+    try:
+        relative = path.resolve(strict=False).relative_to(repo_root.resolve(strict=False))
+    except ValueError:
+        return None
+    return relative.as_posix() or "."
+
+
+def _containing_worktree(
+    path: Path,
+    worktrees: list[dict[str, Any]],
+) -> tuple[Path, str, str] | None:
+    matches: list[tuple[int, Path, str, str]] = []
+    for row in worktrees:
+        raw_path = row.get("path")
+        if not raw_path:
+            continue
+        worktree_path = Path(str(raw_path))
+        pathspec = _git_pathspec(worktree_path, path)
+        if pathspec is None:
+            continue
+        label = str(row.get("label") or worktree_path.name)
+        matches.append((len(worktree_path.resolve(strict=False).parts), worktree_path, label, pathspec))
+    if not matches:
+        return None
+    _depth, worktree_path, label, pathspec = max(matches, key=lambda item: item[0])
+    return worktree_path, label, pathspec
+
+
+def _git_check_ignore(repo: Path, pathspec: str) -> bool:
+    completed = subprocess.run(
+        ["git", "-C", str(repo), "check-ignore", "--no-index", "-q", "--", pathspec],
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode in {0, 1}:
+        return completed.returncode == 0
+    message = completed.stderr.decode("utf-8", errors="replace").strip() or "git command failed"
+    raise ValueError(f"git -C {repo} check-ignore: {message}")
+
+
+def _git_has_tracked_path(repo: Path, pathspec: str) -> bool:
+    output, _truncated = _git_limited_output(
+        repo,
+        "ls-files",
+        "-z",
+        "--",
+        pathspec,
+        max_bytes=1,
+    )
+    return bool(output)
+
+
+def _collapse_pathspecs(paths: list[str]) -> list[str]:
+    selected: list[str] = []
+    for pathspec in sorted(set(paths), key=lambda value: (value.count("/"), value)):
+        if pathspec == ".":
+            return [pathspec]
+        if any(pathspec == existing or pathspec.startswith(f"{existing.rstrip('/')}/") for existing in selected):
+            continue
+        selected.append(pathspec)
+    return selected
+
+
+def _status_count_payload(count: int, *, exact: bool) -> dict[str, Any]:
+    return {
+        "count": count,
+        "exact": exact,
+        "lower_bound": not exact,
+    }
+
+
+def _bounded_git_status(
+    repo: Path,
+    *,
+    pathspecs: list[str],
+    max_bytes: int,
+    deep: bool,
+) -> dict[str, Any]:
+    if not pathspecs:
+        empty = _status_count_payload(0, exact=True)
+        return {
+            "deep": deep,
+            "truncated": False,
+            "bytes_read": 0,
+            "byte_limit": None if deep else max_bytes,
+            "untracked": dict(empty),
+            "ignored": dict(empty),
+            "tracked_modified": dict(empty),
+        }
+    args = (
+        "-c",
+        "status.showUntrackedFiles=normal",
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--ignored=matching",
+        "--untracked-files=normal",
+        "--",
+        *pathspecs,
+    )
+    if deep:
+        completed = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            message = completed.stderr.decode("utf-8", errors="replace").strip() or "git command failed"
+            raise ValueError(f"git -C {repo} {' '.join(args)}: {message}")
+        output = completed.stdout
+        truncated = False
+    else:
+        output, truncated = _git_limited_output(repo, *args, max_bytes=max_bytes)
+    counts = {"untracked": 0, "ignored": 0, "tracked_modified": 0}
+    records = output.split(b"\0")
+    complete_records = records if output.endswith(b"\0") else records[:-1]
+    for record in complete_records:
+        if len(record) < 2:
+            continue
+        prefix = record[:2]
+        if prefix == b"??":
+            counts["untracked"] += 1
+        elif prefix == b"!!":
+            counts["ignored"] += 1
+        elif prefix[:1] not in {b"?", b"!"}:
+            counts["tracked_modified"] += 1
+    exact = not truncated
+    return {
+        "deep": deep,
+        "truncated": truncated,
+        "bytes_read": len(output),
+        "byte_limit": None if deep else max_bytes,
+        "untracked": _status_count_payload(counts["untracked"], exact=exact),
+        "ignored": _status_count_payload(counts["ignored"], exact=exact),
+        "tracked_modified": _status_count_payload(
+            counts["tracked_modified"],
+            exact=exact,
+        ),
+    }
+
+
+def _bounded_git_status_groups(
+    groups: dict[Path, list[str]],
+    *,
+    max_bytes: int,
+    deep: bool,
+) -> dict[str, Any]:
+    if not groups:
+        return _bounded_git_status(
+            Path("."),
+            pathspecs=[],
+            max_bytes=max_bytes,
+            deep=deep,
+        )
+    results: list[dict[str, Any]] = []
+    remaining = max_bytes
+    skipped_group_count = 0
+    grouped = sorted(groups.items(), key=lambda item: str(item[0]))
+    for index, (worktree, pathspecs) in enumerate(grouped):
+        if not deep and remaining <= 0:
+            skipped_group_count = len(grouped) - index
+            break
+        groups_left = len(grouped) - index
+        budget = max_bytes if deep else max(1, remaining // groups_left)
+        result = _bounded_git_status(
+            worktree,
+            pathspecs=_collapse_pathspecs(pathspecs),
+            max_bytes=budget,
+            deep=deep,
+        )
+        results.append(result)
+        if not deep:
+            remaining = max(0, remaining - int(result["bytes_read"]))
+    truncated = skipped_group_count > 0 or any(bool(row.get("truncated")) for row in results)
+    counts: dict[str, int] = {
+        name: sum(_non_negative_count(_mapping(row.get(name)).get("count")) for row in results)
+        for name in ("untracked", "ignored", "tracked_modified")
+    }
+    exact = not truncated and all(
+        bool(_mapping(row.get(name)).get("exact"))
+        for row in results
+        for name in ("untracked", "ignored", "tracked_modified")
+    )
+    return {
+        "deep": deep,
+        "truncated": truncated,
+        "bytes_read": sum(_non_negative_count(row.get("bytes_read")) for row in results),
+        "byte_limit": None if deep else max_bytes,
+        "worktree_group_count": len(grouped),
+        "skipped_worktree_group_count": skipped_group_count,
+        "untracked": _status_count_payload(counts["untracked"], exact=exact),
+        "ignored": _status_count_payload(counts["ignored"], exact=exact),
+        "tracked_modified": _status_count_payload(counts["tracked_modified"], exact=exact),
+    }
+
+
+def build_git_hygiene_summary(
+    root: Path,
+    *,
+    repo: Path,
+    max_status_bytes: int = DEFAULT_GIT_STATUS_BYTES,
+    deep: bool = False,
+) -> dict[str, Any]:
+    if max_status_bytes <= 0:
+        raise ValueError("max_status_bytes must be positive")
+    repo_root = Path(_git_output(repo, "rev-parse", "--show-toplevel").strip()).resolve()
+    worktrees = parse_worktree_porcelain(_git_output(repo, "worktree", "list", "--porcelain"))
+    if not any(_same_path(Path(str(row.get("path") or "")), repo_root) for row in worktrees):
+        worktrees.append({"path": str(repo_root), "label": repo_root.name})
+    from research_cockpit.storage_layout import resolve_storage_layout
+
+    layout = resolve_storage_layout(root)
+    configured_roots: list[tuple[str, Path]] = [
+        ("state", root.resolve()),
+        ("legacy_artifacts", layout.legacy_artifact_root),
+    ]
+    if layout.managed_artifact_root is not None:
+        configured_roots.append(("managed_artifacts", layout.managed_artifact_root))
+
+    storage_roots: list[dict[str, Any]] = []
+    status_groups: dict[Path, list[str]] = {}
+    for kind, path in configured_roots:
+        containing_worktree = _containing_worktree(path, worktrees)
+        inside_worktree = containing_worktree is not None
+        overlapping_worktrees = [
+            str(row.get("label") or Path(str(row.get("path") or "")).name)
+            for row in worktrees
+            if row.get("path") and _paths_overlap(path, Path(str(row["path"])))
+        ]
+        ignored: bool | None = None
+        tracked: bool | None = None
+        risks: list[str] = []
+        recommended_ignore = None
+        if inside_worktree:
+            assert containing_worktree is not None
+            inspection_repo, inspection_label, pathspec = containing_worktree
+            status_groups.setdefault(inspection_repo, []).append(pathspec)
+            ignored = _git_check_ignore(inspection_repo, pathspec)
+            tracked = _git_has_tracked_path(inspection_repo, pathspec)
+            risks.append("inside_git_worktree")
+            if tracked:
+                risks.append("tracked_storage_root")
+            if not ignored:
+                risks.append("unignored_storage_root")
+                if pathspec != ".":
+                    recommended_ignore = f"{pathspec.rstrip('/')}/"
+            if kind == "managed_artifacts":
+                risks.append("managed_payload_in_worktree")
+        if overlapping_worktrees:
+            risks.append("worktree_overlap")
+        storage_roots.append(
+            {
+                "kind": kind,
+                "path": str(path),
+                "inside_git_worktree": inside_worktree,
+                "git_worktree": inspection_label if inside_worktree else None,
+                "overlapping_worktrees": sorted(set(overlapping_worktrees)),
+                "ignore": {
+                    "checked": inside_worktree,
+                    "ignored": ignored,
+                    "tracked": tracked,
+                    "coverage": (
+                        "outside_worktree"
+                        if not inside_worktree
+                        else "tracked"
+                        if tracked
+                        else "ignored"
+                        if ignored
+                        else "unignored"
+                    ),
+                },
+                "risks": sorted(set(risks)),
+                "recommended_ignore": recommended_ignore,
+            }
+        )
+    status = _bounded_git_status_groups(
+        status_groups,
+        max_bytes=max_status_bytes,
+        deep=deep,
+    )
+    return {
+        "ok": True,
+        "schema_version": "git_hygiene_v1",
+        "repo": str(repo),
+        "repo_root": str(repo_root),
+        "storage_roots": storage_roots,
+        "status": status,
+        "risks": sorted(
+            {
+                risk
+                for item in storage_roots
+                for risk in item.get("risks", [])
+            }
+        ),
+    }
 
 
 def _short_branch(ref: str) -> str:
@@ -535,6 +882,123 @@ def _scan_path(path: Path, *, max_files: int) -> dict[str, Any]:
     }
 
 
+_STATE_YAML_DIRECTORIES = (
+    "agents",
+    "assignments",
+    "runs",
+    "artifact_records",
+    "artifact_migrations",
+    "handoffs",
+)
+
+
+def _bounded_state_statistics(root: Path, *, max_files: int) -> dict[str, Any]:
+    """Measure control-state bytes without traversing payload or dashboard roots."""
+
+    limit = max(1, max_files)
+    entry_limit = max(limit * 2, limit + 1)
+    file_count = 0
+    size_bytes = 0
+    truncated = False
+    unsafe_entry_count = 0
+    entries_scanned = 0
+
+    def add_file(path: Path) -> bool:
+        nonlocal file_count, size_bytes, truncated, unsafe_entry_count
+        try:
+            metadata = path.lstat()
+        except OSError:
+            unsafe_entry_count += 1
+            return True
+        if not stat.S_ISREG(metadata.st_mode):
+            unsafe_entry_count += 1
+            return True
+        if file_count >= limit:
+            truncated = True
+            return False
+        file_count += 1
+        size_bytes += int(metadata.st_size)
+        return True
+
+    for name in (
+        "current_state.yaml",
+        "coordinator_state.yaml",
+        "storage.yaml",
+        "graph/edges.yaml",
+        "graph/interaction_log.yaml",
+    ):
+        path = root / name
+        if path.is_symlink():
+            unsafe_entry_count += 1
+            continue
+        if path.is_file() and not add_file(path):
+            break
+
+    scopes: list[tuple[Path, set[str] | None]] = [
+        (root / name, {".yaml", ".yml"}) for name in _STATE_YAML_DIRECTORIES
+    ]
+    scopes.extend(
+        [
+            (root / "graph" / "nodes", {".yaml", ".yml"}),
+            (root / "graph" / "interaction_events", None),
+            (root / "gate_results", {".yaml", ".yml", ".json"}),
+        ]
+    )
+    for directory, suffixes in scopes:
+        if truncated:
+            continue
+        if directory.is_symlink():
+            unsafe_entry_count += 1
+            continue
+        if not directory.exists():
+            continue
+        if not directory.is_dir():
+            unsafe_entry_count += 1
+            continue
+        stack = [directory]
+        while stack and not truncated:
+            current = stack.pop()
+            try:
+                with os.scandir(current) as entries:
+                    for entry in entries:
+                        entries_scanned += 1
+                        if entries_scanned > entry_limit:
+                            truncated = True
+                            break
+                        try:
+                            if entry.is_symlink():
+                                unsafe_entry_count += 1
+                                continue
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append(Path(entry.path))
+                                continue
+                            if not entry.is_file(follow_symlinks=False):
+                                unsafe_entry_count += 1
+                                continue
+                        except OSError:
+                            unsafe_entry_count += 1
+                            continue
+                        if suffixes is not None and Path(entry.name).suffix.lower() not in suffixes:
+                            continue
+                        if not add_file(Path(entry.path)):
+                            break
+            except OSError:
+                unsafe_entry_count += 1
+                continue
+    exact = not truncated and unsafe_entry_count == 0
+    return {
+        "file_count": file_count,
+        "size_bytes": size_bytes,
+        "exact": exact,
+        "lower_bound": not exact,
+        "truncated": truncated,
+        "unsafe_entry_count": unsafe_entry_count,
+        "file_limit": limit,
+        "entries_scanned": entries_scanned,
+        "entry_limit": entry_limit,
+    }
+
+
 def _resource_strings(value: Any) -> list[str]:
     if value in (None, ""):
         return []
@@ -913,21 +1377,26 @@ def _dashboard_performance_warnings(root: Path) -> list[dict[str, Any]]:
     return warnings
 
 
-def build_maintenance_audit(
+def _build_maintenance_audit_detail(
     root: Path,
     *,
     repo: Path,
     base: str = "main",
     min_size_bytes: int,
     max_files: int = 1000,
+    deep_git: bool = False,
 ) -> dict[str, Any]:
     active_assignments = _active_assignment_rows(root)
     running_runs = _running_run_rows(root)
     worktree_audit = build_worktree_audit(root, repo=repo)
     branch_audit = build_branch_audit(root, repo=repo, base=base)
     artifact_audit = build_artifact_retention_audit(root, repo=repo, min_size_bytes=min_size_bytes, max_files=max_files)
+    git_hygiene = build_git_hygiene_summary(root, repo=repo, deep=deep_git)
+    from research_cockpit.artifact_inventory import ensure_artifact_inventory
     from research_cockpit.artifact_compaction import artifact_compaction_plan
 
+    inventory = ensure_artifact_inventory(root)["inventory"]
+    state_statistics = _bounded_state_statistics(root, max_files=max_files)
     artifact_compaction = artifact_compaction_plan(root)
     active_resources = [
         {
@@ -987,10 +1456,13 @@ def build_maintenance_audit(
         next_actions.append("Review branch candidates; promote useful unmerged work to research/* before deletion.")
     return {
         "ok": True,
-        "schema_version": "maintenance_audit_v1",
+        "schema_version": "maintenance_audit_detail_v1",
         "root": str(root),
         "repo": str(repo),
         "base": base,
+        "state_statistics": state_statistics,
+        "worktree_audit": worktree_audit,
+        "branch_audit": branch_audit,
         "active_assignments": active_assignments,
         "running_runs": running_runs,
         "active_resources": active_resources,
@@ -1001,6 +1473,7 @@ def build_maintenance_audit(
         "large_artifact_candidates": artifact_audit["large_artifact_candidates"],
         "large_output_candidates": _large_output_candidates(artifact_audit),
         "artifact_inventory": artifact_audit.get("artifact_inventory", {}),
+        "_artifact_inventory_records": inventory.get("records", {}),
         "artifact_compaction_counts": artifact_compaction["counts"],
         "record_only_candidates": [
             row["artifact_id"]
@@ -1008,11 +1481,638 @@ def build_maintenance_audit(
             if row.get("classification") == "can_demote"
         ],
         "dashboard_performance_warnings": _dashboard_performance_warnings(root),
+        "git_hygiene": git_hygiene,
         "unsafe_cleanup_blockers": unsafe_blockers,
         "recommended_next_actions": next_actions,
         "artifact_retention_audit": artifact_audit,
         "artifact_compaction_plan": artifact_compaction,
     }
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _non_negative_count(value: Any) -> int:
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _bounded_audit_text(value: Any, *, max_bytes: int = _MAX_AUDIT_TEXT_BYTES) -> str:
+    text = str(value or "")
+    encoded = text.encode("utf-8", errors="replace")
+    if len(encoded) <= max_bytes:
+        return text
+    clipped = encoded[: max(0, max_bytes - 3)].decode("utf-8", errors="ignore")
+    return f"{clipped}..."
+
+
+def _bounded_audit_strings(value: Any, *, limit: int = _MAX_AUDIT_REASONS) -> list[str]:
+    values = sorted(
+        {
+            _bounded_audit_text(item, max_bytes=96)
+            for item in _list(value)
+            if str(item or "").strip()
+        }
+    )
+    return values[:limit]
+
+
+def _compact_count_dimensions(value: Any) -> dict[str, Any]:
+    rows = _mapping(value)
+    ordered = sorted(
+        (
+            (_bounded_audit_text(key, max_bytes=96), _non_negative_count(count))
+            for key, count in rows.items()
+        ),
+        key=lambda item: (-item[1], item[0]),
+    )
+    selected = ordered[:_MAX_AUDIT_DIMENSIONS]
+    omitted = ordered[_MAX_AUDIT_DIMENSIONS:]
+    return {
+        "values": [{"value": key, "count": count} for key, count in selected],
+        "truncated": bool(omitted),
+        "omitted_value_count": len(omitted),
+        "omitted_record_count": sum(count for _key, count in omitted),
+    }
+
+
+def _compact_inventory_statistics(value: Any) -> dict[str, Any]:
+    statistics = _mapping(value)
+    lower_bound = bool(statistics.get("lower_bound"))
+    exact = bool(statistics.get("exact")) and not lower_bound
+    return {
+        "size_bytes": _non_negative_count(statistics.get("size_bytes")),
+        "file_count": _non_negative_count(statistics.get("file_count")),
+        "exact": exact,
+        "lower_bound": not exact,
+        "unknown_or_incomplete_count": _non_negative_count(
+            statistics.get("unknown_or_incomplete_count")
+        ),
+    }
+
+
+def _compact_state_statistics(value: Any) -> dict[str, Any]:
+    statistics = _mapping(value)
+    lower_bound = bool(statistics.get("lower_bound"))
+    exact = bool(statistics.get("exact")) and not lower_bound
+    return {
+        "size_bytes": _non_negative_count(statistics.get("size_bytes")),
+        "file_count": _non_negative_count(statistics.get("file_count")),
+        "exact": exact,
+        "lower_bound": not exact,
+        "truncated": bool(statistics.get("truncated")),
+        "unsafe_entry_count": _non_negative_count(statistics.get("unsafe_entry_count")),
+        "file_limit": _non_negative_count(statistics.get("file_limit")),
+        "entries_scanned": _non_negative_count(statistics.get("entries_scanned")),
+        "entry_limit": _non_negative_count(statistics.get("entry_limit")),
+    }
+
+
+def _compact_inventory_summary(value: Any) -> dict[str, Any]:
+    aggregates = _mapping(value)
+    records = _mapping(aggregates.get("records"))
+    graph_artifacts = _mapping(aggregates.get("graph_artifacts"))
+    managed_payloads = _mapping(aggregates.get("managed_payloads"))
+    managed_orphans = _mapping(aggregates.get("managed_orphans"))
+    return {
+        "records": {
+            "count": _non_negative_count(records.get("count")),
+            "statistics": _compact_inventory_statistics(records.get("statistics")),
+            "by_storage_mode": _compact_count_dimensions(records.get("by_storage_mode")),
+            "by_ownership": _compact_count_dimensions(records.get("by_ownership")),
+            "by_retention_class": _compact_count_dimensions(records.get("by_retention_class")),
+            "by_integrity_level": _compact_count_dimensions(records.get("by_integrity_level")),
+            "by_availability_status": _compact_count_dimensions(records.get("by_availability_status")),
+        },
+        "graph_artifacts": {
+            "count": _non_negative_count(graph_artifacts.get("count")),
+            "by_retention_class": _compact_count_dimensions(
+                graph_artifacts.get("by_retention_class")
+            ),
+        },
+        "managed_payloads": {
+            "count": _non_negative_count(managed_payloads.get("count")),
+            "count_exact": bool(managed_payloads.get("count_exact")),
+            "count_lower_bound": bool(managed_payloads.get("count_lower_bound")),
+            "statistics": _compact_inventory_statistics(managed_payloads.get("statistics")),
+        },
+        "managed_orphans": {
+            "count": _non_negative_count(managed_orphans.get("count")),
+            "count_exact": bool(managed_orphans.get("count_exact")),
+            "count_lower_bound": bool(managed_orphans.get("count_lower_bound")),
+            "statistics": _compact_inventory_statistics(managed_orphans.get("statistics")),
+        },
+    }
+
+
+def _compact_git_status_count(value: Any) -> dict[str, Any]:
+    row = _mapping(value)
+    lower_bound = bool(row.get("lower_bound"))
+    exact = bool(row.get("exact")) and not lower_bound
+    return {
+        "count": _non_negative_count(row.get("count")),
+        "exact": exact,
+        "lower_bound": not exact,
+    }
+
+
+def _compact_git_hygiene(value: Any) -> dict[str, Any]:
+    hygiene = _mapping(value)
+    roots: list[dict[str, Any]] = []
+    for raw in _list(hygiene.get("storage_roots"))[:3]:
+        row = _mapping(raw)
+        ignore = _mapping(row.get("ignore"))
+        roots.append(
+            {
+                "kind": _bounded_audit_text(row.get("kind"), max_bytes=48),
+                "path": _bounded_audit_text(row.get("path"), max_bytes=256),
+                "inside_git_worktree": bool(row.get("inside_git_worktree")),
+                "git_worktree": _bounded_audit_text(row.get("git_worktree"), max_bytes=96),
+                "overlapping_worktrees": _bounded_audit_strings(
+                    row.get("overlapping_worktrees"),
+                    limit=4,
+                ),
+                "ignore_coverage": _bounded_audit_text(
+                    ignore.get("coverage"),
+                    max_bytes=48,
+                ),
+                "risks": _bounded_audit_strings(row.get("risks"), limit=6),
+            }
+        )
+    status = _mapping(hygiene.get("status"))
+    return {
+        "schema_version": _bounded_audit_text(hygiene.get("schema_version"), max_bytes=48),
+        "roots": roots,
+        "status": {
+            "deep": bool(status.get("deep")),
+            "truncated": bool(status.get("truncated")),
+            "bytes_read": _non_negative_count(status.get("bytes_read")),
+            "byte_limit": (
+                _non_negative_count(status.get("byte_limit"))
+                if status.get("byte_limit") is not None
+                else None
+            ),
+            "worktree_group_count": _non_negative_count(status.get("worktree_group_count")),
+            "skipped_worktree_group_count": _non_negative_count(
+                status.get("skipped_worktree_group_count")
+            ),
+            "untracked": _compact_git_status_count(status.get("untracked")),
+            "ignored": _compact_git_status_count(status.get("ignored")),
+            "tracked_modified": _compact_git_status_count(status.get("tracked_modified")),
+        },
+        "risks": _bounded_audit_strings(hygiene.get("risks"), limit=8),
+    }
+
+
+def _audit_candidate(
+    *,
+    kind: str,
+    identifier: Any,
+    classification: str,
+    reasons: Any,
+    **fields: Any,
+) -> dict[str, Any]:
+    text_id = _bounded_audit_text(identifier, max_bytes=128)
+    row: dict[str, Any] = {
+        "key": f"{kind}:{text_id}",
+        "kind": kind,
+        "id": text_id,
+        "classification": classification,
+        "reasons": _bounded_audit_strings(reasons),
+    }
+    for key, value in fields.items():
+        if isinstance(value, bool):
+            row[key] = value
+        elif isinstance(value, int):
+            row[key] = _non_negative_count(value)
+        elif isinstance(value, list):
+            row[key] = _bounded_audit_strings(value)
+        else:
+            row[key] = _bounded_audit_text(value)
+    return row
+
+
+def _maintenance_candidates(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    artifact_audit = _mapping(detail.get("artifact_retention_audit"))
+    for raw in _list(artifact_audit.get("artifacts")):
+        artifact = _mapping(raw)
+        identifier = artifact.get("artifact_id")
+        if not identifier:
+            continue
+        blockers = _bounded_audit_strings(artifact.get("blockers"))
+        warnings = _bounded_audit_strings(artifact.get("warnings"))
+        retention_class = _bounded_audit_text(artifact.get("retention_class"), max_bytes=80)
+        if blockers or retention_class == "must_keep":
+            classification = "must_keep"
+            reasons = blockers or ["retention_must_keep"]
+        elif artifact.get("cleanup_candidate"):
+            classification = "can_quarantine"
+            reasons = ["requires_ownership_and_integrity_verification"]
+        else:
+            classification = "needs_review"
+            reasons = warnings
+            if not reasons:
+                reasons = ["retention_or_ownership_review"]
+        candidates.append(
+            _audit_candidate(
+                kind="artifact",
+                identifier=identifier,
+                classification=classification,
+                reasons=reasons,
+                retention_class=retention_class,
+                size_bytes=_non_negative_count(artifact.get("total_size_bytes")),
+                file_count=_non_negative_count(artifact.get("file_count")),
+                large=bool(artifact.get("large")),
+            )
+        )
+
+    records = _mapping(detail.get("_artifact_inventory_records"))
+    for record_id, raw in records.items():
+        record = _mapping(raw)
+        storage = _mapping(record.get("storage"))
+        mode = _bounded_audit_text(storage.get("mode"), max_bytes=48)
+        ownership = _bounded_audit_text(storage.get("ownership"), max_bytes=48)
+        availability = _bounded_audit_text(record.get("availability_status"), max_bytes=48)
+        if mode == "legacy":
+            classification = "can_migrate"
+            reasons = ["legacy_payload_requires_explicit_migration"]
+        elif mode == "reference" or ownership == "external":
+            classification = "must_keep"
+            reasons = ["external_payload_not_owned_by_cockpit"]
+        elif availability in {"missing", "quarantined", "deleted", "unknown"}:
+            classification = "needs_review"
+            reasons = [f"availability_{availability or 'unknown'}"]
+        else:
+            continue
+        inventory = _mapping(record.get("inventory"))
+        candidates.append(
+            _audit_candidate(
+                kind="artifact_record",
+                identifier=record_id,
+                classification=classification,
+                reasons=reasons,
+                storage_mode=mode,
+                ownership=ownership,
+                availability=availability,
+                size_bytes=_non_negative_count(inventory.get("size_bytes")),
+                file_count=_non_negative_count(inventory.get("file_count")),
+            )
+        )
+
+    worktree_audit = _mapping(detail.get("worktree_audit"))
+    for raw in _list(worktree_audit.get("worktrees")):
+        worktree = _mapping(raw)
+        identifier = worktree.get("label") or worktree.get("path")
+        if not identifier:
+            continue
+        blockers = _bounded_audit_strings(worktree.get("blockers"))
+        if worktree.get("safe_to_remove"):
+            classification = "needs_review"
+            reasons = ["safe_to_remove_requires_confirmation"]
+        elif blockers:
+            classification = "must_keep"
+            reasons = blockers
+        else:
+            continue
+        candidates.append(
+            _audit_candidate(
+                kind="worktree",
+                identifier=identifier,
+                classification=classification,
+                reasons=reasons,
+                branch=worktree.get("branch"),
+            )
+        )
+
+    branch_audit = _mapping(detail.get("branch_audit"))
+    base = str(detail.get("base") or "")
+    for raw in _list(branch_audit.get("branches")):
+        branch = _mapping(raw)
+        identifier = branch.get("name")
+        if not identifier or identifier == base:
+            continue
+        blockers = _bounded_audit_strings(branch.get("blockers"))
+        if branch.get("delete_candidate"):
+            classification = "needs_review"
+            reasons = ["delete_candidate_requires_confirmation"]
+        elif blockers:
+            classification = "must_keep"
+            reasons = blockers
+        else:
+            classification = "needs_review"
+            reasons = [branch.get("recommended_action") or "branch_review"]
+        candidates.append(
+            _audit_candidate(
+                kind="branch",
+                identifier=identifier,
+                classification=classification,
+                reasons=reasons,
+                branch_class=branch.get("branch_class"),
+                merged=bool(branch.get("merged")),
+            )
+        )
+
+    return sorted(
+        candidates,
+        key=lambda row: (
+            _AUDIT_CLASSIFICATION_ORDER.get(str(row.get("classification")), 99),
+            str(row.get("kind")),
+            str(row.get("key")),
+        ),
+    )
+
+
+def _cursor_fingerprint(candidates: list[dict[str, Any]]) -> str:
+    payload = [
+        [str(row.get("classification")), str(row.get("key"))]
+        for row in candidates
+    ]
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _encode_audit_cursor(
+    *,
+    classification: str,
+    candidate_id: str | None,
+    offset: int,
+    fingerprint: str,
+) -> str:
+    payload = {
+        "v": 1,
+        "classification": classification,
+        "id": candidate_id,
+        "offset": offset,
+        "fingerprint": fingerprint,
+    }
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_audit_cursor(cursor: str) -> dict[str, Any]:
+    if len(cursor) > 1024:
+        raise ValueError("invalid maintenance audit cursor")
+    try:
+        padding = "=" * (-len(cursor) % 4)
+        decoded = base64.urlsafe_b64decode(f"{cursor}{padding}".encode("ascii"))
+        payload = json.loads(decoded.decode("utf-8"))
+    except (UnicodeEncodeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid maintenance audit cursor") from exc
+    if not isinstance(payload, dict) or payload.get("v") != 1:
+        raise ValueError("invalid maintenance audit cursor")
+    classification = payload.get("classification")
+    candidate_id = payload.get("id")
+    offset = payload.get("offset")
+    fingerprint = payload.get("fingerprint")
+    if (
+        classification not in {"all", *AUDIT_CANDIDATE_CLASSIFICATIONS}
+        or candidate_id is not None and not isinstance(candidate_id, str)
+        or not isinstance(offset, int)
+        or isinstance(offset, bool)
+        or offset < 0
+        or not isinstance(fingerprint, str)
+    ):
+        raise ValueError("invalid maintenance audit cursor")
+    return payload
+
+
+def _validate_audit_page_request(
+    *,
+    limit: int,
+    classification: str | None,
+    candidate_id: str | None,
+    cursor: str | None,
+) -> tuple[str, str | None, int, str | None]:
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_AUDIT_CANDIDATE_LIMIT:
+        raise ValueError(
+            f"maintenance audit --limit must be between 1 and {MAX_AUDIT_CANDIDATE_LIMIT}"
+        )
+    requested_classification = classification or "all"
+    if requested_classification not in {"all", *AUDIT_CANDIDATE_CLASSIFICATIONS}:
+        allowed = ", ".join(["all", *sorted(AUDIT_CANDIDATE_CLASSIFICATIONS)])
+        raise ValueError(f"invalid maintenance audit classification; expected one of: {allowed}")
+    requested_id = str(candidate_id) if candidate_id not in (None, "") else None
+    if not cursor:
+        return requested_classification, requested_id, 0, None
+    parsed = _decode_audit_cursor(cursor)
+    cursor_classification = str(parsed["classification"])
+    cursor_id = parsed.get("id")
+    if classification is not None and requested_classification != cursor_classification:
+        raise ValueError("maintenance audit cursor classification does not match --classification")
+    if requested_id is not None and requested_id != cursor_id:
+        raise ValueError("maintenance audit cursor id does not match --id")
+    return cursor_classification, cursor_id, int(parsed["offset"]), str(parsed["fingerprint"])
+
+
+def _candidate_page(
+    candidates: list[dict[str, Any]],
+    *,
+    limit: int,
+    classification: str | None,
+    candidate_id: str | None,
+    cursor: str | None,
+) -> dict[str, Any]:
+    selected_classification, selected_id, offset, expected_fingerprint = _validate_audit_page_request(
+        limit=limit,
+        classification=classification,
+        candidate_id=candidate_id,
+        cursor=cursor,
+    )
+    filtered = [
+        row
+        for row in candidates
+        if (selected_classification == "all" or row.get("classification") == selected_classification)
+        and (
+            selected_id is None
+            or selected_id in {str(row.get("id") or ""), str(row.get("key") or "")}
+        )
+    ]
+    fingerprint = _cursor_fingerprint(filtered)
+    if expected_fingerprint is not None and expected_fingerprint != fingerprint:
+        raise ValueError("maintenance audit cursor is stale; rerun the summary")
+    if offset > len(filtered):
+        raise ValueError("maintenance audit cursor is outside the current candidate page")
+    items = filtered[offset : offset + limit]
+    page: dict[str, Any] = {
+        "classification": selected_classification,
+        "id": selected_id,
+        "offset": offset,
+        "limit": limit,
+        "total_count": len(filtered),
+        "items": items,
+        "next_cursor": None,
+        "_cursor_fingerprint": fingerprint,
+    }
+    _refresh_page_cursor(page)
+    return page
+
+
+def _refresh_page_cursor(page: dict[str, Any]) -> None:
+    next_offset = int(page.get("offset") or 0) + len(_list(page.get("items")))
+    total_count = int(page.get("total_count") or 0)
+    if next_offset >= total_count:
+        page["next_cursor"] = None
+        return
+    page["next_cursor"] = _encode_audit_cursor(
+        classification=str(page.get("classification") or "all"),
+        candidate_id=page.get("id") if isinstance(page.get("id"), str) else None,
+        offset=next_offset,
+        fingerprint=str(page.get("_cursor_fingerprint") or ""),
+    )
+
+
+def _compact_warning_counts(value: Any) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for raw in _list(value):
+        row = _mapping(raw)
+        code = _bounded_audit_text(row.get("code") or "unknown", max_bytes=96)
+        counts[code] = counts.get(code, 0) + 1
+    return _compact_count_dimensions(counts)
+
+
+def _summary_protected_path_count(value: Any) -> int:
+    paths = {
+        str(row.get(field) or "")
+        for raw in _list(value)
+        for row in [_mapping(raw)]
+        for field in ("output_root", "log_root", "progress_file", "config_file")
+        if row.get(field)
+    }
+    return len(paths)
+
+
+def _fit_compact_audit_result(payload: dict[str, Any]) -> None:
+    page = _mapping(payload.get("candidate_page"))
+    while (
+        len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        > COMPACT_AUDIT_RESULT_BYTES
+        and _list(page.get("items"))
+    ):
+        page["items"].pop()
+        page["truncated_to_fit"] = True
+        _refresh_page_cursor(page)
+    if len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > COMPACT_AUDIT_RESULT_BYTES:
+        raise ValueError("maintenance audit compact summary exceeded its fixed output budget")
+
+
+def _summarize_maintenance_audit(
+    detail: dict[str, Any],
+    *,
+    limit: int = DEFAULT_AUDIT_CANDIDATE_LIMIT,
+    cursor: str | None = None,
+    classification: str | None = None,
+    candidate_id: str | None = None,
+) -> dict[str, Any]:
+    candidates = _maintenance_candidates(detail)
+    counts = {name: 0 for name in AUDIT_CANDIDATE_CLASSIFICATIONS}
+    for candidate in candidates:
+        candidate_classification = str(candidate.get("classification") or "")
+        if candidate_classification in counts:
+            counts[candidate_classification] += 1
+    artifact_audit = _mapping(detail.get("artifact_retention_audit"))
+    inventory = _mapping(artifact_audit.get("artifact_inventory"))
+    managed_scan = _mapping(_mapping(inventory.get("scan")).get("managed_store"))
+    payload: dict[str, Any] = {
+        "ok": bool(detail.get("ok")),
+        "schema_version": "maintenance_audit_v2",
+        "root": _bounded_audit_text(detail.get("root"), max_bytes=256),
+        "repo": _bounded_audit_text(detail.get("repo"), max_bytes=256),
+        "base": _bounded_audit_text(detail.get("base"), max_bytes=96),
+        "summary": {
+            "state": _compact_state_statistics(detail.get("state_statistics")),
+            "active": {
+                "assignment_count": len(_list(detail.get("active_assignments"))),
+                "run_count": len(_list(detail.get("running_runs"))),
+                "protected_path_count": _summary_protected_path_count(
+                    detail.get("active_resources")
+                ),
+            },
+            "artifact_inventory": {
+                "status": _bounded_audit_text(inventory.get("status"), max_bytes=48),
+                "managed_scan_truncated": bool(managed_scan.get("truncated")),
+                "storage": _compact_inventory_summary(inventory.get("aggregates")),
+            },
+            "git_hygiene": _compact_git_hygiene(detail.get("git_hygiene")),
+            "candidate_counts": {
+                "total": len(candidates),
+                "by_classification": counts,
+                "worktree_removal_candidates": sum(
+                    1
+                    for row in candidates
+                    if row.get("kind") == "worktree"
+                    and "safe_to_remove_requires_confirmation" in row.get("reasons", [])
+                ),
+                "branch_removal_candidates": sum(
+                    1
+                    for row in candidates
+                    if row.get("kind") == "branch"
+                    and "delete_candidate_requires_confirmation" in row.get("reasons", [])
+                ),
+                "large_artifact_count": len(_list(detail.get("large_artifact_candidates"))),
+            },
+            "unsafe_cleanup_blockers": _compact_count_dimensions(
+                {
+                    value: 1
+                    for value in _bounded_audit_strings(
+                        detail.get("unsafe_cleanup_blockers"),
+                        limit=_MAX_AUDIT_DIMENSIONS,
+                    )
+                }
+            ),
+            "dashboard_warning_codes": _compact_warning_counts(
+                detail.get("dashboard_performance_warnings")
+            ),
+        },
+        "candidate_page": _candidate_page(
+            candidates,
+            limit=limit,
+            classification=classification,
+            candidate_id=candidate_id,
+            cursor=cursor,
+        ),
+        "recommended_next_actions": _bounded_audit_strings(
+            detail.get("recommended_next_actions"),
+            limit=6,
+        ),
+    }
+    _fit_compact_audit_result(payload)
+    _mapping(payload.get("candidate_page")).pop("_cursor_fingerprint", None)
+    return payload
+
+
+def build_maintenance_audit(
+    root: Path,
+    *,
+    repo: Path,
+    base: str = "main",
+    min_size_bytes: int,
+    max_files: int = 1000,
+    limit: int = DEFAULT_AUDIT_CANDIDATE_LIMIT,
+    cursor: str | None = None,
+    classification: str | None = None,
+    candidate_id: str | None = None,
+    deep_git: bool = False,
+) -> dict[str, Any]:
+    detail = _build_maintenance_audit_detail(
+        root,
+        repo=repo,
+        base=base,
+        min_size_bytes=min_size_bytes,
+        max_files=max_files,
+        deep_git=deep_git,
+    )
+    return _summarize_maintenance_audit(
+        detail,
+        limit=limit,
+        cursor=cursor,
+        classification=classification,
+        candidate_id=candidate_id,
+    )
 
 
 def _find_worktree_row(worktrees: list[dict[str, Any]], target: Path) -> dict[str, Any]:

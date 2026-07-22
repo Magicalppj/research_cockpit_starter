@@ -8328,29 +8328,32 @@ class ScriptBehaviorTests(unittest.TestCase):
                 return "main\n"
             raise AssertionError(f"unexpected git call: {git_repo} {args}")
 
-        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+        with (
+            patch("research_cockpit.maintenance._git_output", side_effect=fake_git),
+            patch(
+                "research_cockpit.maintenance.build_git_hygiene_summary",
+                return_value={
+                    "schema_version": "git_hygiene_v1",
+                    "storage_roots": [],
+                    "status": {"truncated": False},
+                    "risks": [],
+                },
+            ),
+        ):
             payload = maintenance_audit_payload(self.root, repo=repo, min_size_bytes=1)
 
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["schema_version"], "maintenance_audit_v1")
-        self.assertEqual(payload["active_assignments"][0]["assignment_id"], session["assignment_id"])
-        self.assertEqual(payload["running_runs"][0]["run_id"], "run_maintenance_active")
-        self.assertEqual(payload["active_resources"][0]["resources"]["cache"], "artifacts/maintenance_large/cache")
-        self.assertEqual(payload["active_resources"][0]["progress_file"], "artifacts/maintenance_large/progress.json")
-        self.assertFalse(payload["worktree_candidates"])
-        self.assertFalse(payload["branch_candidates"])
-        self.assertTrue(payload["blocked_worktrees"])
-        self.assertTrue(payload["blocked_branches"])
-        self.assertIn("artifact_maintenance_large", payload["large_artifact_candidates"])
-        self.assertIn("artifacts/maintenance_large", payload["large_output_candidates"])
-        self.assertIn("artifact_compaction_counts", payload)
-        self.assertIn("record_only_candidates", payload)
-        self.assertIn("artifact_compaction_plan", payload)
-        self.assertIn("artifact_inventory", payload)
-        self.assertIn("aggregates", payload["artifact_inventory"])
-        self.assertIn("graph_artifacts", payload["artifact_inventory"]["aggregates"])
-        self.assertIn("active_assignment", payload["unsafe_cleanup_blockers"])
-        self.assertIn("active_run", payload["unsafe_cleanup_blockers"])
+        self.assertEqual(payload["schema_version"], "maintenance_audit_v2")
+        summary = payload["summary"]
+        self.assertEqual(summary["active"]["assignment_count"], 1)
+        self.assertEqual(summary["active"]["run_count"], 1)
+        self.assertGreaterEqual(summary["active"]["protected_path_count"], 2)
+        self.assertIn("artifact_inventory", summary)
+        self.assertIn("graph_artifacts", summary["artifact_inventory"]["storage"])
+        self.assertIn("git_hygiene", summary)
+        self.assertGreaterEqual(summary["candidate_counts"]["large_artifact_count"], 1)
+        self.assertGreater(summary["candidate_counts"]["by_classification"]["must_keep"], 0)
+        self.assertNotIn("artifact_retention_audit", payload)
         self.assertTrue(payload["recommended_next_actions"])
 
     def test_maintenance_audit_reuses_dashboard_profile_warnings(self) -> None:
@@ -8383,11 +8386,23 @@ class ScriptBehaviorTests(unittest.TestCase):
                 return "main\n"
             raise AssertionError(f"unexpected git call: {git_repo} {args}")
 
-        with patch("research_cockpit.maintenance._git_output", side_effect=fake_git):
+        with (
+            patch("research_cockpit.maintenance._git_output", side_effect=fake_git),
+            patch(
+                "research_cockpit.maintenance.build_git_hygiene_summary",
+                return_value={
+                    "schema_version": "git_hygiene_v1",
+                    "storage_roots": [],
+                    "status": {"truncated": False},
+                    "risks": [],
+                },
+            ),
+        ):
             payload = maintenance_audit_payload(self.root, repo=repo, min_size_bytes=1)
 
-        self.assertEqual(payload["dashboard_performance_warnings"][0]["code"], "resource_scan_skipped_payload")
-        self.assertEqual(payload["dashboard_performance_warnings"][0]["source"], "build_profile")
+        warnings = payload["summary"]["dashboard_warning_codes"]["values"]
+        self.assertEqual(warnings[0]["value"], "resource_scan_skipped_payload")
+        self.assertEqual(warnings[0]["count"], 1)
 
     def test_retention_and_maintenance_audit_manifest_metadata(self) -> None:
         manifest = {item["name"]: item for item in agent_command_manifest()}
@@ -8398,6 +8413,11 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("--repo", audit["supported_flags"])
         self.assertIn("--base", audit["supported_flags"])
         self.assertIn("--min-size-gb", audit["supported_flags"])
+        self.assertIn("--limit", audit["supported_flags"])
+        self.assertIn("--cursor", audit["supported_flags"])
+        self.assertIn("--classification", audit["supported_flags"])
+        self.assertIn("--id", audit["supported_flags"])
+        self.assertIn("--deep-git", audit["supported_flags"])
         compact = manifest["maintenance compact"]
         self.assertTrue(compact["mutating"])
         self.assertIn("maintenance", compact["workflow_tags"])
