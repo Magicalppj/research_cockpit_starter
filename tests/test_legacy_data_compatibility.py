@@ -227,8 +227,9 @@ class LegacyDataCompatibilityTests(unittest.TestCase):
         node["linked_artifact_records"] = [record_id]
         save_yaml(node_path, node)
 
-        source = self.root / ".agent_runs" / "run_new"
+        source = self.root.parent / f"external_run_new_{uuid.uuid4().hex}"
         source.mkdir(parents=True)
+        self.addCleanup(shutil.rmtree, source, True)
         (source / "metrics.json").write_text('{"score": 0.9}', encoding="utf-8")
         try:
             ingest_artifact(

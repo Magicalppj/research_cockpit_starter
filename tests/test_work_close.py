@@ -391,6 +391,41 @@ class WorkCloseTests(unittest.TestCase):
         finally:
             shutil.rmtree(source, ignore_errors=True)
 
+    def test_managed_evidence_allows_empty_git_marker_ancestor(self) -> None:
+        container = Path(tempfile.mkdtemp(prefix="research-cockpit-empty-git-"))
+        managed_root = container / "managed"
+        source = self.root.parent / f"empty_git_source_{uuid.uuid4().hex}"
+        source.mkdir()
+        self.addCleanup(shutil.rmtree, container, True)
+        self.addCleanup(shutil.rmtree, source, True)
+        (container / ".git").mkdir()
+        save_yaml(
+            self.root / "storage.yaml",
+            {
+                "schema_version": "storage_layout_v1",
+                "project_id": "project_test",
+                "artifact_root": str(managed_root),
+            },
+        )
+        (source / "result.txt").write_text("bounded", encoding="utf-8")
+
+        staged = stage_final_evidence(
+            self.root,
+            assignment_id="assign_x",
+            experiment_id="experiment_x",
+            run_id=self.run_id,
+            agent_id="agent_a",
+            record_id="record_empty_git_marker",
+            spec={"mode": "managed", "source": str(source), "links": {}},
+        )
+        self.addCleanup(staged.cleanup)
+
+        self.assertEqual(
+            staged.target_dir,
+            managed_root / "experiment_x" / self.run_id / "record_empty_git_marker",
+        )
+        self.assertTrue(staged.staging_dir and staged.staging_dir.is_dir())
+
     def test_final_evidence_explicit_managed_mode_uses_external_store(self) -> None:
         managed_root = Path(tempfile.mkdtemp(prefix="research-cockpit-managed-"))
         source = self.root.parent / f"managed_source_{uuid.uuid4().hex}"

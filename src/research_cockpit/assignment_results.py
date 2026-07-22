@@ -7,7 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from research_cockpit.assignment_leases import AssignmentLeaseError
-from research_cockpit.evidence_staging import StagedEvidence, prepare_final_evidence
+from research_cockpit.evidence_bundles import preflight_work_result_transition
+from research_cockpit.evidence_staging import (
+    StagedEvidence,
+    evidence_source_locator,
+    prepare_final_evidence,
+)
 from research_cockpit.model import RunRecord, load_yaml
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.operation_receipts import (
@@ -84,13 +89,35 @@ def _parse_work_close(plan: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("work close review_required must be a boolean")
     if "evidence_inputs" in plan and not isinstance(plan["evidence_inputs"], dict):
         raise ValueError("work close evidence_inputs must be a mapping")
+    artifact_record = plan.get("artifact_record")
+    if artifact_record is not None and not isinstance(artifact_record, dict):
+        raise ValueError("work close artifact_record must be a mapping")
     if plan.get("evidence_inputs") and plan.get("artifact_record"):
         raise ValueError("work close cannot combine evidence_inputs with artifact_record")
+    if isinstance(artifact_record, dict):
+        storage = artifact_record.get("storage")
+        if (
+            isinstance(storage, dict)
+            and str(storage.get("mode") or "").strip() == "managed"
+        ):
+            raise ValueError(
+                "work close managed artifact_record requires evidence_inputs"
+            )
     return deepcopy(plan)
 
 
 def _operation_scope(assignment_id: str) -> str:
     return f"assignment:{assignment_id}"
+
+
+def _request_hash(plan: dict[str, Any]) -> str:
+    payload = deepcopy(plan)
+    evidence_inputs = payload.get("evidence_inputs")
+    if isinstance(evidence_inputs, dict) and "source" in evidence_inputs:
+        evidence_inputs["source_locator"] = evidence_source_locator(
+            evidence_inputs.pop("source")
+        )
+    return normalized_request_hash(payload)
 
 
 def _existing_operation(
@@ -164,8 +191,28 @@ def close_assignment_work(
 ) -> dict[str, Any]:
     parsed = _parse_work_close(plan)
     operation_id = validate_operation_id(str(parsed["operation_id"]))
+    request_hash = _request_hash(parsed)
+    replay = _existing_operation(
+        root,
+        assignment_id=assignment_id,
+        operation_id=operation_id,
+        request_hash=request_hash,
+    )
+    if replay is not None:
+        return replay
+
     run_id, experiment_id = _run_identity(root, parsed)
-    staged: StagedEvidence | None = None
+    current = _now(now)
+    preflight_work_result_transition(
+        root,
+        assignment_id=assignment_id,
+        agent_id=str(parsed["agent_id"]),
+        lease_id=str(parsed["lease_id"]),
+        lease_epoch=int(parsed["lease_epoch"]),
+        operation_id=operation_id,
+        input_revision=str(parsed["input_revision"]),
+        now=current,
+    )
     closeout_plan = {
         key: deepcopy(value)
         for key, value in parsed.items()
@@ -173,6 +220,7 @@ def close_assignment_work(
     }
     closeout_plan["schema_version"] = "run_closeout_v1"
     evidence_inputs = parsed.get("evidence_inputs")
+    staged: StagedEvidence | None = None
     if evidence_inputs:
         record_key = hashlib.sha256(
             f"{assignment_id}\0{operation_id}".encode("utf-8")
@@ -187,27 +235,6 @@ def close_assignment_work(
             record_id=f"record_{record_key}",
         )
         closeout_plan["artifact_record"] = staged.record_spec
-    request_hash = normalized_request_hash(
-        {
-            **parsed,
-            "evidence_snapshot_revision": staged.snapshot_revision if staged else None,
-        }
-    )
-    try:
-        replay = _existing_operation(
-            root,
-            assignment_id=assignment_id,
-            operation_id=operation_id,
-            request_hash=request_hash,
-        )
-    except Exception:
-        if staged is not None:
-            staged.cleanup()
-        raise
-    if replay is not None:
-        if staged is not None:
-            staged.cleanup()
-        return replay
     closeout_plan["assignment_result"] = deepcopy(parsed["assignment_result"])
     try:
         result = complete_run_closeout(
@@ -223,7 +250,7 @@ def close_assignment_work(
                 "request_hash": request_hash,
                 "input_revision": str(parsed["input_revision"]),
                 "review_required": parsed.get("review_required"),
-                "now": _now(now),
+                "now": current,
                 "refresh_commit_clock": now is None,
             },
             staged_moves=(

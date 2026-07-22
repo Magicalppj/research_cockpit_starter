@@ -54,7 +54,7 @@ def normalize_artifact_record(
         legacy = _is_legacy_stable_path(stable_path)
         storage = {
             "mode": "legacy" if legacy else "reference",
-            "ownership": "cockpit_managed" if legacy else "external",
+            "ownership": "historical" if legacy else "external",
             "uri": stable_path or None,
             "managed_key": None,
         }
@@ -67,10 +67,13 @@ def normalize_artifact_record(
         raise ValueError(
             f"artifact record storage.mode must be one of {sorted(STORAGE_MODES)}"
         )
-    storage.setdefault(
-        "ownership",
-        "cockpit_managed" if mode != "reference" else "external",
-    )
+    if mode == "legacy":
+        storage["ownership"] = "historical"
+    else:
+        storage.setdefault(
+            "ownership",
+            "cockpit_managed" if mode == "managed" else "external",
+        )
     storage.setdefault("uri", stable_path or None)
     storage.setdefault("managed_key", None)
     normalized["storage"] = storage

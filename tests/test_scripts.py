@@ -88,7 +88,7 @@ from research_cockpit.commands.create_note import create_note
 from research_cockpit.commands.complete_run import complete_run
 from research_cockpit.commands.compact_artifacts import compact_artifacts_payload
 from research_cockpit.commands.finalize_workstream import finalize_workstream
-from research_cockpit.commands.ingest_artifact import _rename_directory_with_retry, ingest_artifact
+from research_cockpit.commands.ingest_artifact import ingest_artifact
 from research_cockpit.commands.import_worktree_findings import import_worktree_findings
 from research_cockpit.commands.ingest_gate_result import ingest_gate_result
 from research_cockpit.commands.link_artifact import link_artifact
@@ -10833,30 +10833,6 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(experiment["linked_artifacts"], ["artifact_results"])
         self.assertEqual(option["linked_artifacts"], ["artifact_results"])
 
-    def test_ingest_artifact_directory_rename_retries_transient_file_busy_error(self) -> None:
-        source = self.tmp_root / "rename_retry_source"
-        target = self.tmp_root / "rename_retry_target"
-        source.mkdir()
-        (source / "payload.txt").write_text("payload", encoding="utf-8")
-        original_rename = Path.rename
-        attempts = 0
-
-        def flaky_rename(path: Path, destination: Path) -> Path:
-            nonlocal attempts
-            if path == source and attempts < 2:
-                attempts += 1
-                raise PermissionError(13, "temporarily busy", str(path))
-            return original_rename(path, destination)
-
-        with (
-            patch.object(Path, "rename", new=flaky_rename),
-            patch("research_cockpit.commands.ingest_artifact.time.sleep"),
-        ):
-            _rename_directory_with_retry(source, target)
-
-        self.assertEqual(attempts, 2)
-        self.assertFalse(source.exists())
-        self.assertEqual((target / "payload.txt").read_text(encoding="utf-8"), "payload")
     def test_ingest_artifact_default_for_experiment_is_record_only(self) -> None:
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_default_record"
         source.mkdir(parents=True)
@@ -10878,6 +10854,27 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertFalse((self.root / "graph" / "nodes" / f"{record_id}.yaml").exists())
         self.assertTrue((self.root / "artifact_records" / "exp_t5.yaml").exists())
 
+    def test_ingest_artifact_defaults_to_external_reference_without_payload_copy(self) -> None:
+        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_reference"
+        source.mkdir(parents=True)
+        (source / "metrics.json").write_text('{"score": 0.9}', encoding="utf-8")
+
+        result = ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_reference",
+            links={"metrics": "metrics.json"},
+            rebuild_dashboard=False,
+        )
+        record = load_yaml(self.root / "artifact_records" / "exp_t5.yaml")["records"][result["record_id"]]
+
+        self.assertEqual(record["storage"]["mode"], "reference")
+        self.assertEqual(record["storage"]["ownership"], "external")
+        self.assertEqual(record["stable_path"], source.resolve().as_uri())
+        self.assertEqual(record["links"]["metrics"], (source / "metrics.json").resolve().as_uri())
+        self.assertFalse((self.root / "artifacts").exists())
+
     def test_ingest_artifact_promote_requires_reason(self) -> None:
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_missing_reason"
         source.mkdir(parents=True)
@@ -10896,7 +10893,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("promotion reason", str(ctx.exception).lower())
         self.assertFalse((self.root / "artifacts" / "exp_t5" / "run_missing_reason").exists())
 
-    def test_ingest_artifact_copies_worktree_output_to_stable_store(self) -> None:
+    def test_ingest_artifact_promotes_external_reference_without_payload_copy(self) -> None:
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_001"
         (source / "figures").mkdir(parents=True)
         (source / "metrics.json").write_text('{"score": 0.91}', encoding="utf-8")
@@ -10913,44 +10910,33 @@ class ScriptBehaviorTests(unittest.TestCase):
             promote=True,
             promotion_reason="Durable result used for baseline comparison.",
         )
-        target = self.root / "artifacts" / "exp_t5" / "run_001"
         artifact_id = result["artifact_id"]
         artifact = load_yaml(self.root / "graph" / "nodes" / f"{artifact_id}.yaml")
         experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
-        manifest = json.loads((target / "_research_cockpit_ingest.json").read_text(encoding="utf-8"))
 
         self.assertTrue(result["changed"])
         self.assertRegex(artifact_id, r"^artifact_exp_t5_run_001_[a-f0-9]{12}$")
-        self.assertEqual(result["stable_path"], "artifacts/exp_t5/run_001")
+        self.assertEqual(result["stable_path"], source.resolve().as_uri())
         self.assertEqual(result["source_path_resolved"], str(source.resolve()))
-        self.assertEqual(result["resolved_inputs"]["manifest_source_path"], "worktrees/agent_t5/.agent_runs/run_001")
-        self.assertTrue((target / "metrics.json").exists())
-        self.assertTrue((target / "figures" / "curve.txt").exists())
+        self.assertEqual(result["resolved_inputs"]["manifest_source_path"], source.resolve().as_uri())
+        self.assertFalse((self.root / "artifacts").exists())
         self.assertEqual(artifact["title"], "Artifact for exp_t5 run_001")
         self.assertEqual(artifact["status"], "done")
-        self.assertEqual(artifact["path"], "artifacts/exp_t5/run_001")
-        self.assertEqual(artifact["links"]["metrics"], "artifacts/exp_t5/run_001/metrics.json")
+        self.assertEqual(artifact["path"], source.resolve().as_uri())
+        self.assertEqual(artifact["links"]["metrics"], (source / "metrics.json").resolve().as_uri())
         self.assertEqual(artifact["agent"], "agent_t5")
         self.assertEqual(artifact["promotion"]["reason"], "Durable result used for baseline comparison.")
         self.assertEqual(artifact["promotion"]["source"], "ingest_artifact")
         self.assertEqual(result["mode"], "promote")
         self.assertEqual(result["promotion_reason"], "Durable result used for baseline comparison.")
         self.assertEqual(experiment["linked_artifacts"], [artifact_id])
-        self.assertEqual(manifest["node_id"], "exp_t5")
-        self.assertEqual(manifest["run_id"], "run_001")
-        self.assertEqual(manifest["artifact_id"], artifact_id)
-        self.assertEqual(manifest["agent_id"], "agent_t5")
-        self.assertFalse(Path(manifest["source_path"]).is_absolute())
-        self.assertEqual(manifest["source_path"], "worktrees/agent_t5/.agent_runs/run_001")
-        self.assertEqual(manifest["source_file_count"], 2)
-        self.assertIn("source_git", manifest)
         self.assertTrue(any(
-            row.get("target") == "artifacts/exp_t5/run_001"
+            row.get("target") == source.resolve().as_uri()
             and row.get("exists") is True
             for row in result["resource_rows"]
         ))
         self.assertTrue(any(
-            row.get("target") == "artifacts/exp_t5/run_001/metrics.json"
+            row.get("target") == (source / "metrics.json").resolve().as_uri()
             and row.get("exists") is True
             for row in result["resource_rows"]
         ))
@@ -10997,12 +10983,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertTrue(result["record_only"])
         self.assertEqual(result["record_id"], record_id)
         self.assertFalse((self.root / "graph" / "nodes" / f"{record_id}.yaml").exists())
-        self.assertTrue((self.root / "artifacts" / "exp_t5" / "run_record" / "metrics.json").exists())
+        self.assertFalse((self.root / "artifacts").exists())
         self.assertEqual(records["schema_version"], "artifact_records_v1")
         self.assertEqual(records["experiment_id"], "exp_t5")
         self.assertEqual(record["run_id"], "run_record")
-        self.assertEqual(record["stable_path"], "artifacts/exp_t5/run_record")
-        self.assertEqual(record["links"]["metrics"], "artifacts/exp_t5/run_record/metrics.json")
+        self.assertEqual(record["storage"]["mode"], "reference")
+        self.assertEqual(record["stable_path"], source.resolve().as_uri())
+        self.assertEqual(record["links"]["metrics"], (source / "metrics.json").resolve().as_uri())
         self.assertEqual(experiment["linked_artifact_records"], [record_id])
         self.assertIn(str(record_path), result["changed_files"])
 
@@ -11119,7 +11106,7 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(full_payload["count"], 1)
         self.assertEqual(full_payload["records"][0]["record_id"], record_id)
         self.assertEqual(full_payload["records"][0]["title"], "Listable record")
-        self.assertEqual(full_payload["records"][0]["stable_path"], "artifacts/exp_t5/run_list_record")
+        self.assertEqual(full_payload["records"][0]["stable_path"], source.resolve().as_uri())
         self.assertEqual(full_payload["records"][0]["source_file"], "artifact_records/exp_t5.yaml")
         self.assertEqual(compact.returncode, 0, compact.stdout + compact.stderr)
         self.assertEqual(compact_payload["records"][0]["record_id"], record_id)
@@ -11156,13 +11143,13 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(linked_record_rows[0]["resolution_base"], "artifact_records")
         self.assertTrue(any(
             row.get("kind") == "artifact_record_path"
-            and row.get("target") == "artifacts/exp_t5/run_visible_record"
+            and row.get("target") == source.resolve().as_uri()
             and row.get("exists") is True
             for row in record_resource_rows
         ))
         self.assertTrue(any(
             row.get("kind") == "artifact_record_link"
-            and row.get("target") == "artifacts/exp_t5/run_visible_record/metrics.json"
+            and row.get("target") == (source / "metrics.json").resolve().as_uri()
             and row.get("exists") is True
             for row in record_resource_rows
         ))
@@ -11347,8 +11334,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(artifact["source_artifact_record"], record_id)
         self.assertEqual(artifact["promotion"]["reason"], "Durable evidence for the final decision.")
         self.assertEqual(artifact["promotion"]["source"], "promote_artifact_record")
-        self.assertEqual(artifact["path"], "artifacts/exp_t5/run_promote_record")
-        self.assertEqual(artifact["links"]["metrics"], "artifacts/exp_t5/run_promote_record/metrics.json")
+        self.assertEqual(artifact["path"], source.resolve().as_uri())
+        self.assertEqual(artifact["links"]["metrics"], (source / "metrics.json").resolve().as_uri())
         self.assertEqual(records["records"][record_id]["promoted_artifact_id"], artifact_id)
         self.assertEqual(records["records"][record_id]["promotion_reason"], "Durable evidence for the final decision.")
         self.assertIn(artifact_id, experiment["linked_artifacts"])
@@ -11493,8 +11480,8 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["changed_scope"]["records"], [f"artifact:{record_id}"])
         self.assertEqual(payload["target"]["mode"], "record")
         self.assertEqual(payload["resolved_inputs"]["source_path_resolved"], str(source.resolve()))
-        self.assertEqual(payload["resolved_inputs"]["manifest_source_path"], "worktrees/agent_t5/.agent_runs/run_002")
-        self.assertEqual(payload["resolved_inputs"]["stable_path"], "artifacts/exp_t5/run_002")
+        self.assertEqual(payload["resolved_inputs"]["manifest_source_path"], source.resolve().as_uri())
+        self.assertEqual(payload["resolved_inputs"]["stable_path"], source.resolve().as_uri())
         self.assertIn("diff", payload)
         self.assertFalse((self.root / "artifacts" / "exp_t5" / "run_002").exists())
         self.assertFalse((self.root / "graph" / "nodes" / "artifact_exp_t5_run_002.yaml").exists())
@@ -11512,14 +11499,12 @@ class ScriptBehaviorTests(unittest.TestCase):
                 "status": "done",
             },
         )
-        (self.root / "artifacts" / "exp_t5" / "run_exists").mkdir(parents=True)
         file_source = self.tmp_root / "file_source.txt"
         file_source.write_text("not a directory", encoding="utf-8")
 
         cases = [
             {"source_dir": self.tmp_root / "missing_source", "run_id": "run_missing_source"},
             {"source_dir": file_source, "run_id": "run_file_source"},
-            {"source_dir": source, "run_id": "run_exists"},
             {"source_dir": source, "run_id": "run_duplicate", "artifact_id": "artifact_existing"},
             {"source_dir": source, "run_id": "run_bad_artifact_id", "artifact_id": "../artifact_bad"},
             {"source_dir": source, "run_id": "run_bad_artifact_space", "artifact_id": "artifact bad"},
@@ -11546,89 +11531,47 @@ class ScriptBehaviorTests(unittest.TestCase):
                     )
         self.assertFalse((self.root / "graph" / "nodes" / "artifact_exp_t5_run_missing_link.yaml").exists())
 
-    def test_ingest_artifact_does_not_delete_existing_target_on_copy_race(self) -> None:
+    def test_ingest_artifact_reference_leaves_existing_legacy_target_untouched(self) -> None:
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_race"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text("{}", encoding="utf-8")
         target = self.root / "artifacts" / "exp_t5" / "run_race"
         marker = target / "winner.txt"
-        original_rename = Path.rename
+        target.mkdir(parents=True)
+        marker.write_text("legacy payload", encoding="utf-8")
 
-        def race_during_rename(self_path: Path, target_path: Path) -> Path:
-            if Path(target_path) == target:
-                target.mkdir(parents=True)
-                marker.write_text("already ingested", encoding="utf-8")
-                raise FileExistsError(str(target_path))
-            return original_rename(self_path, target_path)
-
-        with patch.object(Path, "rename", race_during_rename):
-            with self.assertRaises(FileExistsError):
-                ingest_artifact(
-                    self.root,
-                    node_id="exp_t5",
-                    source_dir=source,
-                    run_id="run_race",
-                    rebuild_dashboard=False,
-                )
+        result = ingest_artifact(
+            self.root,
+            node_id="exp_t5",
+            source_dir=source,
+            run_id="run_race",
+            rebuild_dashboard=False,
+        )
+        record = load_yaml(self.root / "artifact_records" / "exp_t5.yaml")["records"][result["record_id"]]
 
         self.assertTrue(marker.exists())
-        self.assertFalse((self.root / "graph" / "nodes" / "artifact_exp_t5_run_race.yaml").exists())
+        self.assertEqual(record["storage"]["mode"], "reference")
+        self.assertEqual(record["stable_path"], source.resolve().as_uri())
 
-    def test_ingest_artifact_removes_copied_target_on_stale_yaml_conflict(self) -> None:
-        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_conflict"
-        source.mkdir(parents=True)
-        (source / "metrics.json").write_text("{}", encoding="utf-8")
-        target = self.root / "artifacts" / "exp_t5" / "run_conflict"
-        experiment_path = self.root / "graph" / "nodes" / "exp_t5.yaml"
-
-        def copy_then_change_yaml(source_dir: Path, target_dir: Path, manifest: dict[str, object]) -> None:
-            target_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(source_dir, target_dir)
-            (target_dir / "_research_cockpit_ingest.json").write_text(
-                json.dumps(manifest, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            experiment = load_yaml(experiment_path)
-            experiment["summary"] = "Concurrent update."
-            save_yaml(experiment_path, experiment)
-
-        with patch("research_cockpit.commands.ingest_artifact._copy_to_stable_store", copy_then_change_yaml):
-            with self.assertRaises(MutationError) as ctx:
-                ingest_artifact(
-                    self.root,
-                    node_id="exp_t5",
-                    source_dir=source,
-                    run_id="run_conflict",
-                    rebuild_dashboard=False,
-                )
-
-        self.assertIn("Mutation conflict", str(ctx.exception))
-        self.assertFalse(target.exists())
-        self.assertFalse((self.root / "graph" / "nodes" / "artifact_exp_t5_run_conflict.yaml").exists())
-        self.assertEqual(load_yaml(experiment_path)["summary"], "Concurrent update.")
-
-    def test_ingest_artifact_manifest_uses_hint_for_external_source(self) -> None:
+    def test_ingest_artifact_external_source_stores_a_file_uri(self) -> None:
         external_parent = ROOT_DIR / ".test_tmp" / f"external_source_{uuid.uuid4().hex}"
         self.addCleanup(shutil.rmtree, external_parent, ignore_errors=True)
         source = external_parent / ".agent_runs" / "run_external"
         source.mkdir(parents=True)
         (source / "metrics.json").write_text("{}", encoding="utf-8")
 
-        ingest_artifact(
+        result = ingest_artifact(
             self.root,
             node_id="exp_t5",
             source_dir=source,
             run_id="run_external",
             rebuild_dashboard=False,
         )
-        manifest = json.loads(
-            (self.root / "artifacts" / "exp_t5" / "run_external" / "_research_cockpit_ingest.json")
-            .read_text(encoding="utf-8")
-        )
+        record = load_yaml(self.root / "artifact_records" / "exp_t5.yaml")["records"][result["record_id"]]
 
-        self.assertEqual(manifest["source_path"], "run_external")
-        self.assertEqual(manifest["source_path_base"], "external_hint")
-        self.assertNotIn("..", manifest["source_path"])
+        self.assertEqual(record["storage"]["mode"], "reference")
+        self.assertEqual(record["storage"]["uri"], source.resolve().as_uri())
+        self.assertEqual(record["stable_path"], source.resolve().as_uri())
 
     def test_ingest_artifact_rejects_symlinks_in_source_tree(self) -> None:
         source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_symlink"
@@ -11651,37 +11594,6 @@ class ScriptBehaviorTests(unittest.TestCase):
                 )
         self.assertFalse((self.root / "artifacts" / "exp_t5" / "run_symlink").exists())
         self.assertFalse((self.root / "graph" / "nodes" / "artifact_exp_t5_run_symlink.yaml").exists())
-
-    def test_ingest_artifact_rejects_symlink_created_during_copy(self) -> None:
-        source = self.tmp_root / "worktrees" / "agent_t5" / ".agent_runs" / "run_late_symlink"
-        source.mkdir(parents=True)
-        (source / "metrics.json").write_text("{}", encoding="utf-8")
-        target = self.root / "artifacts" / "exp_t5" / "run_late_symlink"
-        original_is_symlink = Path.is_symlink
-
-        def fake_copytree(source_dir: Path, target_dir: Path, *args: object, **kwargs: object) -> Path:
-            target_dir = Path(target_dir)
-            target_dir.mkdir(parents=True)
-            (target_dir / "late_symlink.txt").write_text("outside", encoding="utf-8")
-            return target_dir
-
-        def fake_is_symlink(path: Path) -> bool:
-            return Path(path).name == "late_symlink.txt" or original_is_symlink(path)
-
-        with patch("research_cockpit.commands.ingest_artifact.shutil.copytree", fake_copytree):
-            with patch.object(Path, "is_symlink", fake_is_symlink):
-                with self.assertRaises(ValueError) as ctx:
-                    ingest_artifact(
-                        self.root,
-                        node_id="exp_t5",
-                        source_dir=source,
-                        run_id="run_late_symlink",
-                        rebuild_dashboard=False,
-                    )
-
-        self.assertIn("symlinks", str(ctx.exception))
-        self.assertFalse(target.exists())
-        self.assertFalse((self.root / "graph" / "nodes" / "artifact_exp_t5_run_late_symlink.yaml").exists())
 
     def test_import_worktree_findings_imports_artifacts_and_experiment_evidence(self) -> None:
         start_agent_session(

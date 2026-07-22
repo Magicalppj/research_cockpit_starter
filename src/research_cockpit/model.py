@@ -1165,7 +1165,7 @@ def validate_artifact_records(
                 expected_ownership = {
                     "reference": "external",
                     "managed": "cockpit_managed",
-                    "legacy": "cockpit_managed",
+                    "legacy": "historical",
                 }.get(mode)
                 if expected_ownership is not None and ownership != expected_ownership:
                     errors.append(

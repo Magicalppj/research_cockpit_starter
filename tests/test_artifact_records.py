@@ -58,6 +58,7 @@ class ArtifactRecordCompatibilityTests(unittest.TestCase):
         record = data["records"]["record_legacy"]
 
         self.assertEqual(record["storage"]["mode"], "legacy")
+        self.assertEqual(record["storage"]["ownership"], "historical")
         self.assertEqual(record["storage"]["uri"], "artifacts/experiment_x/run_legacy")
         self.assertEqual(record["availability"]["status"], "unknown")
         self.assertEqual(record["unknown_legacy_field"], {"keep": True})
@@ -96,6 +97,7 @@ class ArtifactRecordCompatibilityTests(unittest.TestCase):
         persisted = load_yaml(path)["records"]["record_legacy"]
 
         self.assertEqual(persisted["storage"]["mode"], "legacy")
+        self.assertEqual(persisted["storage"]["ownership"], "historical")
         self.assertEqual(persisted["unknown_legacy_field"], {"keep": True})
         self.assertEqual((self.payload / "result.txt").read_bytes(), before)
 

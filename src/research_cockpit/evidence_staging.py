@@ -203,6 +203,12 @@ def _copy_source_tree(source: Path, target: Path) -> None:
             raise ValueError(
                 f"evidence_inputs contains a symlink: {source_path.relative_to(source)}"
             )
+        copy_context = _COPY_CONTEXT.get()
+        if copy_context is not None:
+            tree_entries = int(copy_context["tree_entries"]) + 1
+            copy_context["tree_entries"] = tree_entries
+            if tree_entries > MAX_MANAGED_TREE_ENTRIES:
+                raise ValueError("managed evidence exceeds hard directory entry limit")
         if stat.S_ISDIR(info.st_mode):
             _copy_source_tree(source_path, target_path)
         elif stat.S_ISREG(info.st_mode):
@@ -231,6 +237,7 @@ def _copy_source_tree_hashed(
         "file_count": 0,
         "enforce_admission_limits": enforce_admission_limits,
         "size_bytes": 0,
+        "tree_entries": 0,
     }
     token = _COPY_CONTEXT.set(context)
     try:
@@ -404,10 +411,7 @@ def _reference_evidence(
         raise ValueError(
             "truncated evidence inventory requires an explicit retention mapping"
         )
-    retention = validate_retention(
-        explicit_retention or {"class": "reproducible_output"},
-        "evidence_inputs.retention",
-    )
+    retention, _ = _retention_policy(explicit_retention)
     declared = _declared_integrity(spec.get("content_digest"))
     integrity = declared or {
         "level": "inventory",
@@ -515,6 +519,8 @@ def _hash_source_tree(
     source: Path,
     source_root: Path,
     digest: Any,
+    *,
+    excluded_paths: set[str] | None = None,
 ) -> tuple[int, int]:
     before = os.lstat(source)
     if _is_link_like(source) or not stat.S_ISDIR(before.st_mode):
@@ -525,11 +531,19 @@ def _hash_source_tree(
     size_bytes = 0
     for entry in rows:
         path = source / entry.name
+        relative = path.relative_to(source_root).as_posix()
+        if excluded_paths is not None and relative in excluded_paths:
+            continue
         info = os.lstat(path)
         if stat.S_ISLNK(info.st_mode) or _is_link_like(path):
             raise ValueError(f"evidence_inputs contains a symlink or junction: {path}")
         if stat.S_ISDIR(info.st_mode):
-            child_count, child_size = _hash_source_tree(path, source_root, digest)
+            child_count, child_size = _hash_source_tree(
+                path,
+                source_root,
+                digest,
+                excluded_paths=excluded_paths,
+            )
             file_count += child_count
             size_bytes += child_size
         elif stat.S_ISREG(info.st_mode):
@@ -546,10 +560,38 @@ def _hash_source_tree(
     return file_count, size_bytes
 
 
-def _content_digest(source: Path) -> tuple[str, int, int]:
+def _content_digest(
+    source: Path,
+    *,
+    excluded_paths: set[str] | None = None,
+) -> tuple[str, int, int]:
     digest = hashlib.sha256()
-    file_count, size_bytes = _hash_source_tree(source, source, digest)
+    file_count, size_bytes = _hash_source_tree(
+        source,
+        source,
+        digest,
+        excluded_paths=excluded_paths,
+    )
     return digest.hexdigest(), file_count, size_bytes
+
+
+def _has_git_worktree_marker(directory: Path) -> bool:
+    marker = directory / ".git"
+    if marker.is_dir():
+        return (marker / "HEAD").is_file()
+    if not marker.is_file():
+        return False
+    try:
+        first_line = marker.read_text(encoding="utf-8").splitlines()[0].strip()
+    except (OSError, UnicodeDecodeError, IndexError):
+        return False
+    prefix = "gitdir:"
+    if not first_line.startswith(prefix):
+        return False
+    git_dir = Path(first_line.removeprefix(prefix).strip()).expanduser()
+    if not git_dir.is_absolute():
+        git_dir = marker.parent / git_dir
+    return (git_dir / "HEAD").is_file()
 
 
 def _inside_git_worktree(path: Path) -> bool:
@@ -557,7 +599,7 @@ def _inside_git_worktree(path: Path) -> bool:
     while not current.exists() and current != current.parent:
         current = current.parent
     for candidate in (current, *current.parents):
-        if (candidate / ".git").exists():
+        if _has_git_worktree_marker(candidate):
             return True
     return False
 
@@ -624,10 +666,7 @@ def stage_final_evidence(
             "evidence_inputs.source must not contain or reuse managed staging/artifact paths"
         )
     relative_links = _normalized_links(spec)
-    retention = validate_retention(
-        spec.get("retention") or {"class": "reproducible_output"},
-        "evidence_inputs.retention",
-    )
+    retention, _ = _retention_policy(spec.get("retention"))
     staging_dir = staging_root / current_record_id
     stable_links = {
         key: target_dir.joinpath(*PurePosixPath(relative).parts).as_uri()
@@ -686,6 +725,22 @@ def stage_final_evidence(
         ):
             raise ValueError(
                 "managed evidence above admission limits requires explicit retention"
+            )
+        target_sha256, target_file_count, target_size_bytes = _content_digest(
+            target_dir,
+            excluded_paths={MANIFEST_NAME},
+        )
+        expected_digest = f"sha256:{target_sha256}"
+        if integrity.get("digest") != expected_digest:
+            raise FileExistsError(
+                f"managed evidence target content does not match manifest: {target_dir}"
+            )
+        if (
+            inventory.get("file_count") != target_file_count
+            or inventory.get("size_bytes") != target_size_bytes
+        ):
+            raise FileExistsError(
+                f"managed evidence target inventory does not match manifest: {target_dir}"
             )
         content_sha256, file_count, size_bytes = _content_digest(source)
         expected_digest = f"sha256:{content_sha256}"

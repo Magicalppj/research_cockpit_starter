@@ -92,23 +92,7 @@ def record_assignment_evidence(
         f"{assignment_id}\0{operation_id}".encode("utf-8")
     ).hexdigest()[:20]
     generated_record_id = record_id or f"record_{operation_record_key}"
-    staged = prepare_final_evidence(
-        root,
-        assignment_id=assignment_id,
-        experiment_id=target_node,
-        run_id=run_id,
-        agent_id=agent_id,
-        record_id=generated_record_id,
-        spec={
-            "source": str(source_dir),
-            "mode": mode,
-            "title": title,
-            "summary": summary,
-            "links": normalized_links,
-            "content_digest": content_digest,
-            "retention": retention,
-        },
-    )
+    source_locator = source_dir.expanduser().resolve(strict=False).as_uri()
     request_hash = normalized_request_hash(
         {
             "operation": "work record",
@@ -125,7 +109,7 @@ def record_assignment_evidence(
             "mode": mode,
             "content_digest": content_digest,
             "retention": retention,
-            "evidence_snapshot_revision": staged.snapshot_revision,
+            "source_locator": source_locator,
             "lease_seconds": lease_seconds,
         }
     )
@@ -139,10 +123,8 @@ def record_assignment_evidence(
             assignment_id=assignment_id,
         )
     except OperationIdConflict as exc:
-        staged.cleanup()
         raise AssignmentLeaseError(exc.receipt) from exc
     if replay is not None:
-        staged.cleanup()
         return replay
 
     current = _now(now)
@@ -167,6 +149,24 @@ def record_assignment_evidence(
             message=f"Assignment readiness {packet.get('readiness')!r} does not allow work record.",
             lease_id=lease_id,
         )
+
+    staged = prepare_final_evidence(
+        root,
+        assignment_id=assignment_id,
+        experiment_id=target_node,
+        run_id=run_id,
+        agent_id=agent_id,
+        record_id=generated_record_id,
+        spec={
+            "source": str(source_dir),
+            "mode": mode,
+            "title": title,
+            "summary": summary,
+            "links": normalized_links,
+            "content_digest": content_digest,
+            "retention": retention,
+        },
+    )
 
     receipt = success_receipt(
         operation="work record",
