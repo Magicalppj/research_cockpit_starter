@@ -185,6 +185,11 @@ def _artifact_record_plan(
         "agent",
         "source_file_count",
         "content_sha256",
+        "storage",
+        "integrity",
+        "inventory",
+        "availability",
+        "lifecycle",
     ):
         if spec.get(field_name) is not None:
             record[field_name] = spec[field_name]
@@ -251,6 +256,7 @@ def complete_run_closeout(
     coordinator: bool = False,
     operation_context: dict[str, Any] | None = None,
     staged_moves: list[tuple[Path, Path]] | None = None,
+    staged_move_roots: list[Path] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("Run closeout plan must be a mapping")
@@ -686,6 +692,7 @@ def complete_run_closeout(
         rebuild_dashboard=rebuild_dashboard,
         staged_moves=staged_moves,
         read_dependencies=read_dependencies,
+        staged_move_roots=staged_move_roots,
         commit_validators=(
             work_transition["commit_validators"] if work_transition is not None else None
         ),

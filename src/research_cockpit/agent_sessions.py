@@ -10,6 +10,7 @@ from typing import Any
 from research_cockpit.graph_core import derive_focus_path, node_id_by_type_in_path
 from research_cockpit.model import ACTIVE_ASSIGNMENT_STATUSES, AssignmentRecord, load_assignments
 from research_cockpit.option_workstreams import build_option_workstream_context
+from research_cockpit.storage_layout import StorageLayout, resolve_storage_layout
 from research_cockpit.types import ACTIVE_WORKSTREAM_STATUSES, ResearchNode
 
 
@@ -101,9 +102,11 @@ def session_handoff(
     option_id: str,
     assignment_id: str | None = None,
     worktree: Path | None = None,
+    storage_layout: StorageLayout | None = None,
 ) -> dict[str, Any]:
     root_text = str(root.resolve())
-    stable_artifact_root = str(root.resolve() / "artifacts")
+    layout = storage_layout or resolve_storage_layout(root)
+    storage_policy = layout.policy_payload()
     launch_env = {
         "RESEARCH_COCKPIT_ROOT": root_text,
         "RESEARCH_COCKPIT_AGENT_ID": agent_id,
@@ -170,15 +173,20 @@ def session_handoff(
                 ]
             ),
         }
+    if layout.managed_artifact_root is not None:
+        launch_env["RESEARCH_COCKPIT_ARTIFACT_ROOT"] = str(
+            layout.managed_artifact_root
+        )
     return {
         "launch_env": launch_env,
-        "stable_artifact_root": stable_artifact_root,
+        "storage_policy": storage_policy,
         "guardrails": [
             "Use the worktree only for code and experiment files.",
             "Do not run research-cockpit init in the worktree.",
             "Do not mutate a worktree-local research_cockpit directory.",
             "Write research state only through the canonical --root shown here.",
-            "Put final outputs in work close evidence_inputs; use work record only for evidence that must be durable earlier.",
+            "Keep final outputs reference-only by default and pass them through work close evidence_inputs.",
+            "Use work record only when evidence must be durable before closeout.",
         ],
         "commands": commands,
         "worktree": str(worktree.resolve()) if worktree else None,
@@ -289,6 +297,8 @@ def build_agent_session_context(
         focus = focuses.get(str(owner))
         agent_focus = focus if isinstance(focus, dict) else None
     context = build_option_workstream_context(root, nodes, current, selected_option_id)
+    storage_layout = resolve_storage_layout(root)
+    storage_policy = storage_layout.policy_payload()
     return {
         "agent_id": owner,
         "assignment_id": assignment.assignment_id if assignment else None,
@@ -298,7 +308,7 @@ def build_agent_session_context(
         "canonical_root": str(root.resolve()),
         "required_root": str(root.resolve()),
         "do_not_mutate_worktree_root": True,
-        "stable_artifact_root": str((root.resolve() / "artifacts")),
+        "storage_policy": storage_policy,
         "worktree_boundary": {
             "canonical_root": str(root.resolve()),
             "required_root": str(root.resolve()),
@@ -323,6 +333,7 @@ def build_agent_session_context(
             agent_id=str(owner or "<agent_id>"),
             assignment_id=assignment.assignment_id if assignment else assignment_id,
             option_id=selected_option_id,
+            storage_layout=storage_layout,
         ),
     }
 

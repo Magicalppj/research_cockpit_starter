@@ -41,6 +41,24 @@ class RolePlaybookTests(unittest.TestCase):
         self.assertNotIn("research-cockpit maintenance", reviewer)
         self.assertIn("coordinator", coordinator.lower())
         self.assertIn("coord handoff", coordinator)
+    def test_lightweight_tracking_rules_are_explicit_and_add_no_commands(self) -> None:
+        root_router = (ROOT_DIR / "SKILL.md").read_text(encoding="utf-8")
+        worker = (ROOT_DIR / "capabilities" / "worker-loop.md").read_text(
+            encoding="utf-8"
+        )
+        coordinator = (ROOT_DIR / "capabilities" / "coordinator-loop.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("stage workstream", root_router)
+        self.assertIn("同一 research contract", worker)
+        self.assertIn("不创建新的 assignment 或 graph node", worker)
+        self.assertIn("parallel_ownership", coordinator)
+        self.assertIn("documentation-only", coordinator.lower())
+        self.assertEqual(worker.count("research-cockpit work open --root"), 2)
+        self.assertEqual(worker.count("research-cockpit work start --root"), 1)
+        self.assertEqual(worker.count("research-cockpit work close --root"), 1)
+
     def test_review_assignment_creation_and_graph_contracts_are_discoverable(self) -> None:
         coordinator = (ROOT_DIR / "capabilities" / "coordinator-loop.md").read_text(
             encoding="utf-8"

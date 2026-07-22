@@ -52,7 +52,7 @@ def _bounded(values: list[str]) -> dict[str, Any]:
 
 def _truth_paths(root: Path) -> list[Path]:
     paths: set[Path] = set()
-    for name in ("current_state.yaml", "coordinator_state.yaml"):
+    for name in ("current_state.yaml", "coordinator_state.yaml", "storage.yaml"):
         path = root / name
         if path.is_file():
             paths.add(path)
@@ -87,9 +87,6 @@ def _truth_paths(root: Path) -> list[Path]:
         for suffix in ("*.yaml", "*.yml", "*.json"):
             paths.update(path for path in gate_root.rglob(suffix) if path.is_file())
 
-    artifact_root = root / "artifacts"
-    if artifact_root.is_dir():
-        paths.update(path for path in artifact_root.rglob("*") if path.is_file())
     return sorted(paths, key=lambda path: path.relative_to(root).as_posix())
 
 

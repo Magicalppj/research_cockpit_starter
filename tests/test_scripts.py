@@ -38,6 +38,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.assignment_scope import AssignmentScopeError
+from research_cockpit.storage_layout import resolve_storage_layout
 from research_cockpit.cli_progress import PROGRESS_PREFIX
 from research_cockpit.command_registry import (
     COMMAND_GROUP_BY_COMMAND,
@@ -2498,6 +2499,74 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(load_yaml(current_path), before)
         self.assertFalse(staging_dir.exists())
         self.assertFalse(target_dir.exists())
+    def test_mutation_transaction_rolls_back_staged_move_on_interrupt(self) -> None:
+        current_path = self.root / "current_state.yaml"
+        before = load_yaml(current_path)
+        after = {**before, "current_hypothesis": "interrupted candidate"}
+        staging_dir = self.root / ".staging" / "interrupted_payload"
+        target_dir = self.root / "artifacts" / "exp_t5" / "run_interrupted"
+        staging_dir.mkdir(parents=True)
+        (staging_dir / "metrics.json").write_text(
+            '{"score": 1}',
+            encoding="utf-8",
+        )
+
+        with patch(
+            "research_cockpit.mutation_runtime._append_interaction_log_unlocked",
+            side_effect=KeyboardInterrupt("simulated interrupt"),
+        ):
+            with self.assertRaises(KeyboardInterrupt):
+                execute_mutation_transaction(
+                    self.root,
+                    [(current_path, before, after)],
+                    interactions=[{"kind": "transaction_staged_interrupt"}],
+                    rebuild_dashboard=False,
+                    staged_moves=[(staging_dir, target_dir)],
+                )
+
+        self.assertEqual(load_yaml(current_path), before)
+        self.assertFalse(staging_dir.exists())
+        self.assertFalse(target_dir.exists())
+
+    def test_partial_truth_rollback_preserves_committed_managed_payload(self) -> None:
+        current_path = self.root / "current_state.yaml"
+        before = load_yaml(current_path)
+        after = {**before, "current_hypothesis": "partial rollback candidate"}
+        staging_dir = self.root / ".staging" / "partial_payload"
+        target_dir = self.root / "artifacts" / "exp_t5" / "run_partial"
+        staging_dir.mkdir(parents=True)
+        (staging_dir / "metrics.json").write_text(
+            '{"score": 1}',
+            encoding="utf-8",
+        )
+
+        with (
+            patch(
+                "research_cockpit.mutation_runtime._append_interaction_log_unlocked",
+                side_effect=OSError("event append failed"),
+            ),
+            patch(
+                "research_cockpit.mutation_runtime._restore_files",
+                return_value=["current_state.yaml: restore failed"],
+            ),
+        ):
+            with self.assertRaises(MutationError) as caught:
+                execute_mutation_transaction(
+                    self.root,
+                    [(current_path, before, after)],
+                    interactions=[{"kind": "transaction_partial_rollback"}],
+                    rebuild_dashboard=False,
+                    staged_moves=[(staging_dir, target_dir)],
+                )
+
+        self.assertEqual(caught.exception.payload["status"], "partial_success")
+        self.assertTrue(caught.exception.payload["partial_success"])
+        self.assertTrue((target_dir / "metrics.json").is_file())
+        self.assertIn(
+            str(target_dir),
+            caught.exception.payload["preserved_staged_paths"],
+        )
+
     def test_targeted_preflight_avoids_full_node_scan_for_node_and_run_mutations(self) -> None:
         save_yaml(
             self.root / "runs" / "run_targeted.yaml",
@@ -2891,7 +2960,18 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["root_boundary"]["required_root"], str(self.root.resolve()))
         self.assertTrue(payload["root_boundary"]["do_not_mutate_worktree_root"])
         self.assertEqual(payload["handoff"]["launch_env"]["RESEARCH_COCKPIT_ROOT"], str(self.root.resolve()))
-        self.assertEqual(payload["handoff"]["stable_artifact_root"], str((self.root / "artifacts").resolve()))
+        self.assertNotIn("stable_artifact_root", payload["handoff"])
+        self.assertNotIn("RESEARCH_COCKPIT_ARTIFACT_ROOT", payload["handoff"]["launch_env"])
+        self.assertEqual(
+            payload["handoff"]["storage_policy"]["default_evidence_mode"],
+            "reference",
+        )
+        self.assertIsNone(payload["handoff"]["storage_policy"]["managed_artifact_root"])
+        self.assertFalse(payload["handoff"]["storage_policy"]["managed_writes_enabled"])
+        self.assertEqual(
+            payload["handoff"]["storage_policy"]["legacy_artifact_root"],
+            str((self.root / "artifacts").resolve()),
+        )
         self.assertEqual(set(payload["handoff"]["commands"]), {"open", "record", "close"})
         self.assertIn("open", payload["handoff"]["commands"]["open"])
         self.assertIn("--assignment", payload["handoff"]["commands"]["open"])
@@ -3473,7 +3553,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(current["agent_focuses"]["agent_t5"]["current_option"], "option_t5")
         self.assertEqual(payload["required_root"], str(self.root.resolve()))
         self.assertTrue(payload["do_not_mutate_worktree_root"])
-        self.assertEqual(payload["stable_artifact_root"], str((self.root / "artifacts").resolve()))
+        self.assertNotIn("stable_artifact_root", payload)
+        self.assertEqual(payload["storage_policy"]["default_evidence_mode"], "reference")
+        self.assertIsNone(payload["storage_policy"]["managed_artifact_root"])
         self.assertIn("open", payload["handoff"]["commands"]["open"])
         self.assertIn("record", payload["handoff"]["commands"]["record"])
         self.assertIn("close", payload["handoff"]["commands"]["close"])
@@ -3482,6 +3564,50 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(payload["agent_focus"]["current_focus_node"], "option_t5")
         self.assertEqual(payload["option_context"]["hierarchy_policy"]["workstream_file_hint"]["problem.parent"], "option_t5")
         self.assertIn("create_child_workstream", payload["option_context"]["suggested_commands"])
+
+    def test_agent_session_propagates_configured_managed_artifact_root(self) -> None:
+        managed_root = self.tmp_root / "managed-artifacts"
+        save_yaml(
+            self.root / "storage.yaml",
+            {
+                "schema_version": "storage_layout_v1",
+                "project_id": "project_test",
+                "artifact_root": str(managed_root),
+            },
+        )
+        worktree = self.tmp_root / "worktrees" / "agent_t5"
+        worktree.mkdir(parents=True)
+        start_agent_session(
+            self.root,
+            option_id="option_t5",
+            agent_id="agent_t5",
+            objective="Run T5 branch",
+            branch="agent/option_t5",
+            worktree=worktree,
+            rebuild_dashboard=False,
+        )
+
+        with patch(
+            "research_cockpit.agent_sessions.resolve_storage_layout",
+            wraps=resolve_storage_layout,
+        ) as resolver:
+            payload = agent_session_context_payload(
+                self.root,
+                agent_id="agent_t5",
+                compact=True,
+            )
+
+        self.assertEqual(resolver.call_count, 1)
+        self.assertEqual(
+            payload["handoff"]["launch_env"]["RESEARCH_COCKPIT_ARTIFACT_ROOT"],
+            str(managed_root.resolve()),
+        )
+        self.assertEqual(
+            payload["storage_policy"]["managed_artifact_root"],
+            str(managed_root.resolve()),
+        )
+        self.assertTrue(payload["storage_policy"]["managed_writes_enabled"])
+        self.assertEqual(payload["storage_policy"]["project_id"], "project_test")
 
     def test_set_cursor_updates_assignment_record_and_assignment_context_reads_it(self) -> None:
         session = start_agent_session(

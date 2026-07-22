@@ -32,6 +32,7 @@ from research_cockpit.commands._assignment_scope_cli import add_assignment_scope
 from research_cockpit.commands.record_finding import find_node_file
 from research_cockpit.artifact_records import build_artifact_record, list_artifact_records, upsert_artifact_record
 from research_cockpit.assignment_scope import AssignmentScopeError, ensure_assignment_scope
+from research_cockpit.evidence_staging import StagedEvidence
 from research_cockpit.model import (
     ResearchNode,
     ValidationError,
@@ -333,6 +334,7 @@ def ingest_artifact(
     interaction_override: dict[str, Any] | None = None,
     operation_request: dict[str, Any] | None = None,
     source_content_hash: str | None = None,
+    prepared_evidence: StagedEvidence | None = None,
 ) -> dict[str, Any]:
     reason = str(promotion_reason or "").strip() or None
     if promote and record_only is True:
@@ -346,7 +348,8 @@ def ingest_artifact(
 
     _validate_run_id(run_id)
     source_resolved = _validate_source_directory(source_dir)
-    _validate_no_symlinks(source_resolved)
+    if prepared_evidence is None:
+        _validate_no_symlinks(source_resolved)
     links = links or {}
     state = (
         load_validated_state(root)
@@ -395,40 +398,58 @@ def ingest_artifact(
         and operation_identity
         and operation_identity.get("operation") == "work record"
     )
-    if operation_bound_record and not source_content_hash:
-        raise ValueError("work record ingest requires a source content hash")
-    storage_id = artifact_id if operation_bound_record else None
-    stable_path = _stable_path("artifacts", node_id, run_id, storage_id or "")
-    target_dir = _target_artifact_dir(
-        root, node_id, run_id, source_resolved, storage_id=storage_id
-    )
-    stable_links = _stable_links(source_resolved, stable_path, links)
-    file_count = _source_file_count(source_resolved)
-    manifest = _manifest(
-        root=root,
-        node_id=node_id,
-        run_id=run_id,
-        artifact_id=artifact_id,
-        agent_id=agent_id,
-        source_dir=source_resolved,
-        stable_path=stable_path,
-        file_count=file_count,
-        links=stable_links,
-        mode=mode,
-        promotion_reason=reason,
-        source_content_hash=source_content_hash,
-        operation_identity=operation_identity,
-    )
-    reused_payload = False
-    if target_dir.exists():
-        if not _recoverable_payload(
-            target_dir,
-            operation_identity=operation_identity,
-            source_content_hash=source_content_hash,
+    if prepared_evidence is not None:
+        if not operation_bound_record:
+            raise ValueError("prepared evidence is only valid for work record ingest")
+        if prepared_evidence.record_spec.get("record_id") != artifact_id:
+            raise ValueError("prepared evidence record_id does not match artifact_id")
+    elif operation_bound_record and not source_content_hash:
+        raise ValueError("work record ingest requires prepared evidence")
+
+    if prepared_evidence is not None:
+        prepared_spec = prepared_evidence.record_spec
+        stable_path = str(prepared_spec["stable_path"])
+        target_dir = prepared_evidence.target_dir or prepared_evidence.source
+        stable_links = dict(prepared_spec.get("links", {}))
+        file_count = int(prepared_spec.get("source_file_count") or 0)
+        manifest = prepared_evidence.manifest
+        reused_payload = (
+            prepared_evidence.mode == "managed"
+            and prepared_evidence.staged_move is None
+        )
+    else:
+        storage_id = artifact_id if operation_bound_record else None
+        stable_path = _stable_path("artifacts", node_id, run_id, storage_id or "")
+        target_dir = _target_artifact_dir(
+            root, node_id, run_id, source_resolved, storage_id=storage_id
+        )
+        stable_links = _stable_links(source_resolved, stable_path, links)
+        file_count = _source_file_count(source_resolved)
+        manifest = _manifest(
+            root=root,
+            node_id=node_id,
+            run_id=run_id,
             artifact_id=artifact_id,
-        ):
-            raise FileExistsError(target_dir)
-        reused_payload = True
+            agent_id=agent_id,
+            source_dir=source_resolved,
+            stable_path=stable_path,
+            file_count=file_count,
+            links=stable_links,
+            mode=mode,
+            promotion_reason=reason,
+            source_content_hash=source_content_hash,
+            operation_identity=operation_identity,
+        )
+        reused_payload = False
+        if target_dir.exists():
+            if not _recoverable_payload(
+                target_dir,
+                operation_identity=operation_identity,
+                source_content_hash=source_content_hash,
+                artifact_id=artifact_id,
+            ):
+                raise FileExistsError(target_dir)
+            reused_payload = True
 
     today = str(date.today())
     artifact_data: dict[str, Any] = {
@@ -465,10 +486,36 @@ def ingest_artifact(
             title=title or f"Artifact record for {node_id} {run_id}",
             summary=summary,
             stable_path=stable_path,
-            manifest_path=_stable_path(stable_path, MANIFEST_NAME),
+            manifest_path=(
+                str(prepared_spec.get("manifest_path") or "")
+                if prepared_evidence is not None
+                else _stable_path(stable_path, MANIFEST_NAME)
+            ),
             source_file_count=file_count,
             links=stable_links,
             agent_id=agent_id,
+            storage=(
+                prepared_spec.get("storage")
+                if prepared_evidence is not None
+                else None
+            ),
+            integrity=(
+                prepared_spec.get("integrity")
+                if prepared_evidence is not None
+                else None
+            ),
+            inventory=(
+                prepared_spec.get("inventory")
+                if prepared_evidence is not None
+                else None
+            ),
+            retention=(
+                prepared_spec.get("retention")
+                if prepared_evidence is not None
+                else None
+            ),
+            availability=(prepared_spec.get("availability") if prepared_evidence is not None else None),
+            lifecycle=(prepared_spec.get("lifecycle") if prepared_evidence is not None else None),
         )
         record_path, record_before, record_after = upsert_artifact_record(root, node_id, record)
         linked_records, _ = append_unique(
@@ -531,7 +578,11 @@ def ingest_artifact(
         "linked_to": [node_id],
         "stable_path": stable_path,
         "target_dir": str(target_dir),
-        "manifest_path": str(target_dir / MANIFEST_NAME),
+        "manifest_path": (
+            str(prepared_spec.get("manifest_path") or "")
+            if prepared_evidence is not None
+            else str(target_dir / MANIFEST_NAME)
+        ),
         "source_path_resolved": str(source_resolved),
         "source_file_count": file_count,
         "links": stable_links,
@@ -539,12 +590,21 @@ def ingest_artifact(
         "after": result_after,
         "resolved_inputs": {
             "source_path_resolved": str(source_resolved),
-            "manifest_source_path": manifest["source_path"],
-            "manifest_source_path_base": manifest["source_path_base"],
+            "manifest_source_path": manifest.get(
+                "source_path", str(source_resolved)
+            ),
+            "manifest_source_path_base": manifest.get(
+                "source_path_base",
+                "absolute",
+            ),
             "target_dir": str(target_dir),
             "stable_path": stable_path,
-            "manifest_path": str(target_dir / MANIFEST_NAME),
-            "source_git": manifest["source_git"],
+            "manifest_path": (
+                str(prepared_spec.get("manifest_path") or "")
+                if prepared_evidence is not None
+                else str(target_dir / MANIFEST_NAME)
+            ),
+            "source_git": manifest.get("source_git"),
         },
         "resource_rows": linked_resource_rows(root, candidate, [artifact_id, node_id]) if promote else [],
     }
@@ -556,7 +616,7 @@ def ingest_artifact(
 
     preflight_mutation(root)
     copied = False
-    if not reused_payload:
+    if prepared_evidence is None and not reused_payload:
         try:
             _copy_to_stable_store(source_resolved, target_dir, manifest)
             copied = True
@@ -597,6 +657,16 @@ def ingest_artifact(
             }],
             rebuild_dashboard=rebuild_dashboard,
             operation_request=operation_request,
+            staged_moves=(
+                [prepared_evidence.staged_move]
+                if prepared_evidence is not None and prepared_evidence.staged_move
+                else None
+            ),
+            staged_move_roots=(
+                [prepared_evidence.move_root]
+                if prepared_evidence is not None and prepared_evidence.move_root
+                else None
+            ),
         )
     except MutationError as exc:
         if copied and not exc.payload.get("partial_success"):

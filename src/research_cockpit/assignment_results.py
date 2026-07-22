@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import hashlib
 from pathlib import Path
 from typing import Any
 
 from research_cockpit.assignment_leases import AssignmentLeaseError
-from research_cockpit.evidence_staging import StagedEvidence, stage_final_evidence
+from research_cockpit.evidence_staging import StagedEvidence, prepare_final_evidence
 from research_cockpit.model import RunRecord, load_yaml
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.operation_receipts import (
@@ -173,19 +174,23 @@ def close_assignment_work(
     closeout_plan["schema_version"] = "run_closeout_v1"
     evidence_inputs = parsed.get("evidence_inputs")
     if evidence_inputs:
-        staged = stage_final_evidence(
+        record_key = hashlib.sha256(
+            f"{assignment_id}\0{operation_id}".encode("utf-8")
+        ).hexdigest()[:20]
+        staged = prepare_final_evidence(
             root,
             assignment_id=assignment_id,
             experiment_id=experiment_id,
             run_id=run_id,
             agent_id=str(parsed["agent_id"]),
             spec=evidence_inputs,
+            record_id=f"record_{record_key}",
         )
         closeout_plan["artifact_record"] = staged.record_spec
     request_hash = normalized_request_hash(
         {
             **parsed,
-            "evidence_snapshot_sha256": staged.content_sha256 if staged else None,
+            "evidence_snapshot_revision": staged.snapshot_revision if staged else None,
         }
     )
     try:
@@ -221,7 +226,10 @@ def close_assignment_work(
                 "now": _now(now),
                 "refresh_commit_clock": now is None,
             },
-            staged_moves=[staged.staged_move] if staged else None,
+            staged_moves=(
+                [staged.staged_move] if staged and staged.staged_move else None
+            ),
+            staged_move_roots=[staged.move_root] if staged and staged.move_root else None,
         )
     except MutationError as exc:
         raise _transaction_error(

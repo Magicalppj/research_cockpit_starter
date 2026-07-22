@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -112,6 +113,19 @@ class WorkCloseTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         shutil.rmtree(self.root, ignore_errors=True)
+
+    def _configure_managed_root(self) -> Path:
+        managed_root = Path(tempfile.mkdtemp(prefix="research-cockpit-close-"))
+        self.addCleanup(shutil.rmtree, managed_root, True)
+        save_yaml(
+            self.root / "storage.yaml",
+            {
+                "schema_version": "storage_layout_v1",
+                "project_id": "project_close",
+                "artifact_root": str(managed_root),
+            },
+        )
+        return managed_root
 
     def _plan(self, *, operation_id: str = "op_close", outcome: str = "negative") -> dict:
         return {
@@ -264,7 +278,7 @@ class WorkCloseTests(unittest.TestCase):
         self.assertEqual(followup["derived_from"], ["experiment_x"])
         self.assertEqual(len(list((self.root / "assignments").glob("*.yaml"))), 1)
 
-    def test_final_evidence_is_staged_and_recorded_in_close_transaction(self) -> None:
+    def test_final_evidence_defaults_to_reference_without_copy(self) -> None:
         source = self.root.parent / f"evidence_{uuid.uuid4().hex}"
         source.mkdir()
         try:
@@ -273,7 +287,7 @@ class WorkCloseTests(unittest.TestCase):
             plan["evidence_inputs"] = {
                 "source": str(source),
                 "title": "Final run evidence",
-                "summary": "Metrics preserved at close.",
+                "summary": "Metrics referenced at close.",
                 "links": {"metrics": "metrics.json"},
             }
 
@@ -286,30 +300,65 @@ class WorkCloseTests(unittest.TestCase):
 
             record_id = receipt["entities"]["artifact_record_id"]
             bundle = load_assignment(self.root, "assign_x").result
-            target = self.root / "artifacts" / "experiment_x" / self.run_id
-            manifest = json.loads(
-                (target / "_research_cockpit_ingest.json").read_text(encoding="utf-8")
-            )
             records = load_yaml(self.root / "artifact_records" / "experiment_x.yaml")
+            record = records["records"][record_id]
             self.assertEqual(bundle["artifact_records"]["items"], [record_id])
             self.assertIn(record_id, records["records"])
-            self.assertTrue((target / "metrics.json").exists())
-            self.assertRegex(manifest["content_sha256"], r"^[a-f0-9]{64}$")
+            self.assertEqual(record["storage"]["mode"], "reference")
+            self.assertEqual(record["storage"]["ownership"], "external")
+            self.assertEqual(record["storage"]["uri"], source.resolve().as_uri())
+            self.assertEqual(
+                record["links"]["metrics"],
+                (source / "metrics.json").resolve().as_uri(),
+            )
+            self.assertEqual(record["inventory"]["file_count"], 1)
+            self.assertTrue(record["inventory"]["complete"])
+            self.assertEqual(record["integrity"]["level"], "inventory")
+            self.assertRegex(record["integrity"]["digest"], r"^inventory-sha256:[a-f0-9]{64}$")
+            self.assertEqual(record["availability"]["status"], "available")
+            self.assertFalse((self.root / "artifacts").exists())
             staging = self.root / ".staging"
             self.assertFalse(staging.exists() and any(staging.iterdir()))
         finally:
             shutil.rmtree(source, ignore_errors=True)
 
-    def test_final_evidence_rejects_managed_root_without_staging(self) -> None:
-        plan = self._plan(operation_id="op_close_managed_source")
-        plan["evidence_inputs"] = {
-            "source": str(self.root),
-            "title": "Invalid source",
-            "summary": "Must not recursively stage the data root.",
+    def test_raw_artifact_record_cannot_claim_managed_ownership(self) -> None:
+        plan = self._plan(operation_id="op_close_forged_managed")
+        plan["artifact_record"] = {
+            "record_id": "record_forged_managed",
+            "stable_path": "file:///forged/payload",
             "links": {},
+            "storage": {
+                "mode": "managed",
+                "ownership": "cockpit_managed",
+                "uri": "file:///forged/payload",
+                "managed_key": "experiment_x/run_x/record_forged_managed",
+            },
+            "integrity": {
+                "level": "content",
+                "algorithm": "sha256",
+                "digest": f"sha256:{'0' * 64}",
+            },
+            "inventory": {
+                "size_bytes": 0,
+                "file_count": 0,
+                "complete": True,
+            },
+            "retention": {"class": "evidence_critical"},
+            "availability": {
+                "status": "available",
+                "last_verified_at": None,
+            },
+            "lifecycle": {
+                "supersedes": [],
+                "superseded_by": None,
+            },
         }
 
-        with self.assertRaisesRegex(ValueError, "managed staging/artifact paths"):
+        with self.assertRaisesRegex(
+            ValueError,
+            "managed.*evidence_inputs",
+        ):
             close_assignment_work(
                 self.root,
                 assignment_id="assign_x",
@@ -317,9 +366,233 @@ class WorkCloseTests(unittest.TestCase):
                 now=NOW + timedelta(minutes=2),
             )
 
-        self.assertEqual(load_runs(self.root)[self.run_id].status, "running")
-        staging = self.root / ".staging"
-        self.assertFalse(staging.exists() and any(staging.iterdir()))
+    def test_final_evidence_rejects_managed_root_without_staging(self) -> None:
+        source = self.root.parent / f"managed_unconfigured_{uuid.uuid4().hex}"
+        source.mkdir()
+        try:
+            (source / "result.txt").write_text("bounded", encoding="utf-8")
+            plan = self._plan(operation_id="op_close_managed_unconfigured")
+            plan["evidence_inputs"] = {
+                "mode": "managed",
+                "source": str(source),
+                "links": {},
+            }
+
+            with self.assertRaisesRegex(ValueError, "managed artifact root is not configured"):
+                close_assignment_work(
+                    self.root,
+                    assignment_id="assign_x",
+                    plan=plan,
+                    now=NOW + timedelta(minutes=2),
+                )
+
+            self.assertEqual(load_runs(self.root)[self.run_id].status, "running")
+            self.assertFalse((self.root / "artifacts").exists())
+        finally:
+            shutil.rmtree(source, ignore_errors=True)
+
+    def test_final_evidence_explicit_managed_mode_uses_external_store(self) -> None:
+        managed_root = Path(tempfile.mkdtemp(prefix="research-cockpit-managed-"))
+        source = self.root.parent / f"managed_source_{uuid.uuid4().hex}"
+        source.mkdir()
+        try:
+            save_yaml(
+                self.root / "storage.yaml",
+                {
+                    "schema_version": "storage_layout_v1",
+                    "project_id": "project_test",
+                    "artifact_root": str(managed_root),
+                },
+            )
+            (source / "metrics.json").write_text('{"score": 0.81}', encoding="utf-8")
+            plan = self._plan(operation_id="op_close_managed_external")
+            plan["evidence_inputs"] = {
+                "mode": "managed",
+                "source": str(source),
+                "links": {"metrics": "metrics.json"},
+                "retention": {"class": "portable_review_bundle"},
+            }
+
+            with patch.object(
+                evidence_staging_module,
+                "_copy_source_tree_hashed",
+                wraps=evidence_staging_module._copy_source_tree_hashed,
+            ) as copy_hashed:
+                receipt = close_assignment_work(
+                    self.root,
+                    assignment_id="assign_x",
+                    plan=plan,
+                    now=NOW + timedelta(minutes=2),
+                )
+                shutil.rmtree(source)
+                replay = close_assignment_work(
+                    self.root,
+                    assignment_id="assign_x",
+                    plan=plan,
+                    now=NOW + timedelta(minutes=2),
+                )
+            self.assertEqual(replay, receipt)
+            self.assertEqual(copy_hashed.call_count, 1)
+
+            record_id = receipt["entities"]["artifact_record_id"]
+            record = load_yaml(
+                self.root / "artifact_records" / "experiment_x.yaml"
+            )["records"][record_id]
+            target = managed_root / record["storage"]["managed_key"]
+            self.assertEqual(record["storage"]["mode"], "managed")
+            self.assertEqual(record["storage"]["ownership"], "cockpit_managed")
+            self.assertEqual(record["storage"]["uri"], target.resolve().as_uri())
+            self.assertTrue((target / "metrics.json").is_file())
+            self.assertEqual(record["integrity"]["level"], "content")
+            self.assertRegex(record["integrity"]["digest"], r"^sha256:[a-f0-9]{64}$")
+            self.assertTrue(record["inventory"]["complete"])
+            self.assertFalse((self.root / "artifacts").exists())
+            staging = managed_root / ".staging"
+            self.assertFalse(staging.exists() and any(staging.iterdir()))
+        finally:
+            shutil.rmtree(source, ignore_errors=True)
+            shutil.rmtree(managed_root, ignore_errors=True)
+
+    def test_invalid_close_lease_is_rejected_before_managed_copy(self) -> None:
+        managed_root = self._configure_managed_root()
+        source = self.root.parent / f"invalid_close_lease_{uuid.uuid4().hex}"
+        source.mkdir()
+        try:
+            (source / "result.txt").write_text("bounded", encoding="utf-8")
+            plan = self._plan(operation_id="op_close_invalid_lease")
+            plan["lease_id"] = "wrong-lease"
+            plan["evidence_inputs"] = {
+                "mode": "managed",
+                "source": str(source),
+                "links": {},
+            }
+
+            with patch.object(
+                evidence_staging_module,
+                "_copy_source_tree_hashed",
+            ) as copy_payload:
+                with self.assertRaises(AssignmentLeaseError):
+                    close_assignment_work(
+                        self.root,
+                        assignment_id="assign_x",
+                        plan=plan,
+                        now=NOW + timedelta(minutes=2),
+                    )
+
+            copy_payload.assert_not_called()
+            self.assertFalse((managed_root / ".staging").exists())
+        finally:
+            shutil.rmtree(source, ignore_errors=True)
+
+    def test_truncated_reference_inventory_requires_explicit_retention(self) -> None:
+        source = self.root.parent / f"bounded_reference_{uuid.uuid4().hex}"
+        source.mkdir()
+        try:
+            (source / "first.txt").write_text("first", encoding="utf-8")
+            (source / "second.txt").write_text("second", encoding="utf-8")
+            plan = self._plan(operation_id="op_close_reference_truncated")
+            plan["evidence_inputs"] = {
+                "source": str(source),
+                "links": {},
+            }
+
+            with patch.object(evidence_staging_module, "MAX_INVENTORY_FILES", 1):
+                with self.assertRaisesRegex(ValueError, "retention"):
+                    close_assignment_work(
+                        self.root,
+                        assignment_id="assign_x",
+                        plan=plan,
+                        now=NOW + timedelta(minutes=2),
+                    )
+                plan["evidence_inputs"]["retention"] = {}
+                with self.assertRaisesRegex(ValueError, "retention.*class"):
+                    close_assignment_work(
+                        self.root,
+                        assignment_id="assign_x",
+                        plan=plan,
+                        now=NOW + timedelta(minutes=2),
+                    )
+
+
+                plan["evidence_inputs"]["retention"] = {
+                    "class": "reproducible_output"
+                }
+                receipt = close_assignment_work(
+                    self.root,
+                    assignment_id="assign_x",
+                    plan=plan,
+                    now=NOW + timedelta(minutes=2),
+                )
+
+            record_id = receipt["entities"]["artifact_record_id"]
+            record = load_yaml(
+                self.root / "artifact_records" / "experiment_x.yaml"
+            )["records"][record_id]
+            self.assertFalse(record["inventory"]["complete"])
+            self.assertGreater(record["inventory"]["file_count"], 1)
+        finally:
+            shutil.rmtree(source, ignore_errors=True)
+
+    def test_managed_evidence_above_limit_requires_explicit_retention(self) -> None:
+        managed_root = self._configure_managed_root()
+        source = self.root.parent / f"managed_limit_{uuid.uuid4().hex}"
+        source.mkdir()
+        try:
+            (source / "result.txt").write_text("too large", encoding="utf-8")
+            plan = self._plan(operation_id="op_close_managed_limit")
+            plan["evidence_inputs"] = {
+                "mode": "managed",
+                "source": str(source),
+                "links": {},
+            }
+
+            with patch.object(evidence_staging_module, "MAX_INVENTORY_BYTES", 1):
+                with self.assertRaisesRegex(ValueError, "retention"):
+                    close_assignment_work(
+                        self.root,
+                        assignment_id="assign_x",
+                        plan=plan,
+                        now=NOW + timedelta(minutes=2),
+                    )
+
+            self.assertEqual(load_runs(self.root)[self.run_id].status, "running")
+            self.assertFalse(any(managed_root.rglob("result.txt")))
+            staging = managed_root / ".staging"
+            self.assertFalse(staging.exists() and any(staging.iterdir()))
+        finally:
+            shutil.rmtree(source, ignore_errors=True)
+
+    def test_managed_evidence_enforces_hard_directory_entry_limit(self) -> None:
+        managed_root = self._configure_managed_root()
+        source = self.root.parent / f"managed_entries_{uuid.uuid4().hex}"
+        source.mkdir()
+        try:
+            (source / "empty_a").mkdir()
+            (source / "empty_b").mkdir()
+            plan = self._plan(operation_id="op_close_managed_entries")
+            plan["evidence_inputs"] = {
+                "mode": "managed",
+                "source": str(source),
+                "links": {},
+                "retention": {"class": "reproducible_output"},
+            }
+
+            with patch.object(
+                evidence_staging_module,
+                "MAX_MANAGED_TREE_ENTRIES",
+                1,
+            ):
+                with self.assertRaisesRegex(ValueError, "entry limit"):
+                    close_assignment_work(
+                        self.root,
+                        assignment_id="assign_x",
+                        plan=plan,
+                        now=NOW + timedelta(minutes=2),
+                    )
+
+            self.assertFalse(any(managed_root.rglob("empty_a")))
+        finally:
+            shutil.rmtree(source, ignore_errors=True)
 
     def test_final_evidence_rejects_more_than_twenty_links(self) -> None:
         source = self.root.parent / f"evidence_links_{uuid.uuid4().hex}"
@@ -345,6 +618,7 @@ class WorkCloseTests(unittest.TestCase):
             shutil.rmtree(source, ignore_errors=True)
 
     def test_final_evidence_target_cannot_escape_artifact_store(self) -> None:
+        self._configure_managed_root()
         source = self.root.parent / f"evidence_escape_{uuid.uuid4().hex}"
         source.mkdir()
         try:
@@ -603,7 +877,7 @@ class WorkCloseTests(unittest.TestCase):
         )
         self.assertEqual(load_runs(self.root)[self.run_id].status, "running")
 
-    def test_changed_evidence_bytes_conflict_on_same_operation_id(self) -> None:
+    def test_exact_retry_does_not_reinspect_changed_evidence_bytes(self) -> None:
         source = self.root.parent / f"evidence_retry_{uuid.uuid4().hex}"
         source.mkdir()
         try:
@@ -614,7 +888,7 @@ class WorkCloseTests(unittest.TestCase):
                 "source": str(source),
                 "links": {"metrics": "metrics.json"},
             }
-            close_assignment_work(
+            first = close_assignment_work(
                 self.root,
                 assignment_id="assign_x",
                 plan=plan,
@@ -622,22 +896,24 @@ class WorkCloseTests(unittest.TestCase):
             )
             payload.write_text('{"score": 0.99}', encoding="utf-8")
 
-            with self.assertRaises(AssignmentLeaseError) as caught:
-                close_assignment_work(
+            with patch.object(
+                evidence_staging_module,
+                "_reference_inventory",
+                side_effect=AssertionError("exact retry scanned evidence"),
+            ):
+                replay = close_assignment_work(
                     self.root,
                     assignment_id="assign_x",
                     plan=plan,
                     now=NOW + timedelta(minutes=2),
                 )
 
-            self.assertEqual(
-                caught.exception.receipt["error"]["code"],
-                "idempotency_conflict",
-            )
+            self.assertEqual(replay, first)
         finally:
             shutil.rmtree(source, ignore_errors=True)
 
     def test_link_removed_from_staged_snapshot_is_rejected(self) -> None:
+        self._configure_managed_root()
         source = self.root.parent / f"evidence_link_race_{uuid.uuid4().hex}"
         source.mkdir()
         try:
@@ -669,6 +945,7 @@ class WorkCloseTests(unittest.TestCase):
             shutil.rmtree(source, ignore_errors=True)
 
     def test_file_swap_to_symlink_during_snapshot_is_rejected(self) -> None:
+        self._configure_managed_root()
         source = self.root.parent / f"evidence_swap_{uuid.uuid4().hex}"
         source.mkdir()
         outside = self.root.parent / f"evidence_outside_{uuid.uuid4().hex}.txt"
@@ -704,16 +981,70 @@ class WorkCloseTests(unittest.TestCase):
             source_file.unlink(missing_ok=True)
             shutil.rmtree(source, ignore_errors=True)
             outside.unlink(missing_ok=True)
+    def test_managed_orphan_recovery_rehashes_target_payload(self) -> None:
+        managed_root = self._configure_managed_root()
+        source = self.root.parent / f"evidence_orphan_{uuid.uuid4().hex}"
+        source.mkdir()
+        (source / "result.txt").write_text("trusted", encoding="utf-8")
+        plan = self._plan(operation_id="op_close_orphan_recovery")
+        plan["evidence_inputs"] = {
+            "mode": "managed",
+            "source": str(source),
+            "links": {},
+        }
+
+        def move_then_interrupt(*args: object, **kwargs: object) -> dict:
+            staged_moves = kwargs.get("staged_moves") or []
+            staging_dir, target_dir = staged_moves[0]
+            target_dir.parent.mkdir(parents=True, exist_ok=True)
+            staging_dir.replace(target_dir)
+            raise KeyboardInterrupt("simulated process interruption")
+
+        try:
+            with patch(
+                "research_cockpit.assignment_results.complete_run_closeout",
+                side_effect=move_then_interrupt,
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    close_assignment_work(
+                        self.root,
+                        assignment_id="assign_x",
+                        plan=plan,
+                        now=NOW + timedelta(minutes=2),
+                    )
+
+            manifest = next(
+                managed_root.rglob(evidence_staging_module.MANIFEST_NAME)
+            )
+            (manifest.parent / "result.txt").write_text(
+                "tampered",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(FileExistsError, "content"):
+                close_assignment_work(
+                    self.root,
+                    assignment_id="assign_x",
+                    plan=plan,
+                    now=NOW + timedelta(minutes=2),
+                )
+        finally:
+            shutil.rmtree(source, ignore_errors=True)
+
     def test_target_parent_symlink_before_commit_is_rejected(self) -> None:
+        managed_root = self._configure_managed_root()
         source = self.root.parent / f"evidence_target_race_{uuid.uuid4().hex}"
         outside = self.root.parent / f"evidence_target_outside_{uuid.uuid4().hex}"
         source.mkdir()
         outside.mkdir()
         (source / "result.txt").write_text("bounded", encoding="utf-8")
-        target_parent = self.root / "artifacts" / "experiment_x"
+        target_parent = managed_root / "experiment_x"
         original_transaction = run_closeout_module.execute_mutation_transaction
         plan = self._plan(operation_id="op_close_target_symlink")
-        plan["evidence_inputs"] = {"source": str(source), "links": {}}
+        plan["evidence_inputs"] = {
+            "mode": "managed",
+            "source": str(source),
+            "links": {},
+        }
 
         def inject_target_symlink(*args: object, **kwargs: object) -> dict:
             target_parent.parent.mkdir(parents=True, exist_ok=True)
@@ -745,11 +1076,16 @@ class WorkCloseTests(unittest.TestCase):
             shutil.rmtree(outside, ignore_errors=True)
 
     def test_work_close_rolls_back_when_staged_move_fails_and_can_retry(self) -> None:
+        managed_root = self._configure_managed_root()
         source = self.root.parent / f"evidence_move_failure_{uuid.uuid4().hex}"
         source.mkdir()
         (source / "result.txt").write_text("bounded", encoding="utf-8")
         plan = self._plan(operation_id="op_close_move_rollback")
-        plan["evidence_inputs"] = {"source": str(source), "links": {}}
+        plan["evidence_inputs"] = {
+            "mode": "managed",
+            "source": str(source),
+            "links": {},
+        }
         tracked_paths = [
             self.root / "runs" / f"{self.run_id}.yaml",
             self.root / "graph" / "nodes" / "experiment_x.yaml",
@@ -764,7 +1100,6 @@ class WorkCloseTests(unittest.TestCase):
         findings_before = sorted(
             path.name for path in (self.root / "graph" / "nodes").glob("finding_*.yaml")
         )
-        target = self.root / "artifacts" / "experiment_x" / self.run_id
         try:
             with patch.object(
                 mutation_runtime_module,
@@ -794,7 +1129,9 @@ class WorkCloseTests(unittest.TestCase):
                 ),
                 findings_before,
             )
-            self.assertFalse(target.exists())
+            self.assertFalse(
+                any(managed_root.rglob("result.txt"))
+            )
 
             retry = close_assignment_work(
                 self.root,
@@ -803,16 +1140,27 @@ class WorkCloseTests(unittest.TestCase):
                 now=NOW + timedelta(minutes=2),
             )
             self.assertTrue(retry["ok"])
+            record_id = retry["entities"]["artifact_record_id"]
+            record = load_yaml(
+                self.root / "artifact_records" / "experiment_x.yaml"
+            )["records"][record_id]
+            target = managed_root / record["storage"]["managed_key"]
             self.assertTrue(target.is_dir())
+            self.assertTrue((target / "result.txt").is_file())
         finally:
             shutil.rmtree(source, ignore_errors=True)
 
     def test_work_close_rolls_back_appended_event_and_can_retry(self) -> None:
+        managed_root = self._configure_managed_root()
         source = self.root.parent / f"evidence_event_failure_{uuid.uuid4().hex}"
         source.mkdir()
         (source / "result.txt").write_text("bounded", encoding="utf-8")
         plan = self._plan(operation_id="op_close_event_rollback")
-        plan["evidence_inputs"] = {"source": str(source), "links": {}}
+        plan["evidence_inputs"] = {
+            "mode": "managed",
+            "source": str(source),
+            "links": {},
+        }
         tracked_paths = [
             self.root / "runs" / f"{self.run_id}.yaml",
             self.root / "graph" / "nodes" / "experiment_x.yaml",
@@ -824,7 +1172,6 @@ class WorkCloseTests(unittest.TestCase):
             path: path.read_bytes() if path.exists() else None for path in tracked_paths
         }
         events_before = list(iter_interaction_events(self.root, strict=True))
-        target = self.root / "artifacts" / "experiment_x" / self.run_id
         real_append = mutation_runtime_module._append_interaction_log_unlocked
 
         def append_then_fail(*args: object, **kwargs: object) -> dict:
@@ -853,7 +1200,7 @@ class WorkCloseTests(unittest.TestCase):
                 list(iter_interaction_events(self.root, strict=True)),
                 events_before,
             )
-            self.assertFalse(target.exists())
+            self.assertFalse(any(managed_root.rglob("result.txt")))
 
             retry = close_assignment_work(
                 self.root,
@@ -862,7 +1209,13 @@ class WorkCloseTests(unittest.TestCase):
                 now=NOW + timedelta(minutes=2),
             )
             self.assertTrue(retry["ok"])
+            record_id = retry["entities"]["artifact_record_id"]
+            record = load_yaml(
+                self.root / "artifact_records" / "experiment_x.yaml"
+            )["records"][record_id]
+            target = managed_root / record["storage"]["managed_key"]
             self.assertTrue(target.is_dir())
+            self.assertTrue((target / "result.txt").is_file())
         finally:
             shutil.rmtree(source, ignore_errors=True)
 

@@ -1,8 +1,9 @@
 ﻿from __future__ import annotations
 
 from pathlib import Path
+import os
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.paths import plugin_root
@@ -72,6 +73,24 @@ def _is_external_target(target: str) -> bool:
     parsed = urlparse(target)
     return bool(parsed.scheme and parsed.scheme not in {"", "file"})
 
+def _file_uri_path(target: str) -> Path | None:
+    parsed = urlparse(target)
+    if parsed.scheme.casefold() != "file" or parsed.query or parsed.fragment:
+        return None
+    path_text = unquote(parsed.path)
+    netloc = unquote(parsed.netloc)
+    if netloc and netloc.casefold() != "localhost":
+        path_text = f"//{netloc}{path_text}"
+    elif os.name == "nt" and (
+        len(path_text) >= 3
+        and path_text[0] == "/"
+        and path_text[1].isalpha()
+        and path_text[2] == ":"
+    ):
+        path_text = path_text[1:]
+    return Path(path_text)
+
+
 
 def _unique_paths(paths: list[tuple[str, Path]]) -> list[tuple[str, Path]]:
     seen: set[str] = set()
@@ -133,6 +152,16 @@ def _target_resolution(
             "resolution_base": "artifact_records",
             "resolution_attempts": [target],
         }
+    file_uri = _file_uri_path(target)
+    if file_uri is not None:
+        resolved = file_uri.resolve(strict=False)
+        return {
+            "exists": resolved.exists(),
+            "resolved_target": resolved.as_posix(),
+            "resolution_base": "file_uri",
+            "resolution_attempts": [resolved.as_posix()],
+        }
+
     path = Path(target)
     if path.is_absolute():
         return {

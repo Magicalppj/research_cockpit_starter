@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT_DIR / "src"))
 from research_cockpit.commands.build_dashboard import build_dashboard_from_validated_state
 from research_cockpit.commands.skill_smoke_test import compact_root_smoke_from_validation
 from research_cockpit.commands.validate_cockpit import full_validation_snapshot
-from research_cockpit.milestone_handoffs import execute_milestone_handoff
+from research_cockpit.milestone_handoffs import execute_milestone_handoff, root_truth_revision
 from research_cockpit.model import validate_cockpit
 from research_cockpit.storage import load_yaml, save_yaml
 
@@ -99,6 +99,40 @@ class MilestoneHandoffTests(unittest.TestCase):
             "mode": "compact",
             "checks": [{"name": "validate_cockpit", "passed": True}],
         }
+
+    def test_truth_revision_tracks_control_state_but_not_artifact_payloads(self) -> None:
+        initial = root_truth_revision(self.root)
+        payload_path = self.root / "artifacts" / "large" / "result.bin"
+        payload_path.parent.mkdir(parents=True)
+        payload_path.write_bytes(b"first")
+
+        self.assertEqual(root_truth_revision(self.root), initial)
+
+        payload_path.write_bytes(b"second payload")
+        self.assertEqual(root_truth_revision(self.root), initial)
+
+        save_yaml(
+            self.root / "artifact_records" / "artifact_x.yaml",
+            {
+                "id": "artifact_x",
+                "schema_version": "artifact_record_v1",
+                "uri": "artifacts/large/result.bin",
+            },
+        )
+        self.assertNotEqual(root_truth_revision(self.root), initial)
+
+    def test_truth_revision_never_enumerates_artifact_payload_root(self) -> None:
+        artifact_root = self.root / "artifacts"
+        artifact_root.mkdir()
+        original_rglob = type(self.root).rglob
+
+        def reject_payload_scan(path: Path, pattern: str):
+            if path == artifact_root:
+                raise AssertionError("artifact payload root was enumerated")
+            return original_rglob(path, pattern)
+
+        with patch.object(type(self.root), "rglob", reject_payload_scan):
+            root_truth_revision(self.root)
 
     @staticmethod
     def _coordination_state(rows: list[dict] | None = None) -> dict:

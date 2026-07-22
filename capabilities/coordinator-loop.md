@@ -27,6 +27,14 @@ research-cockpit coord assign --root <data-root> --file assignment.yaml --json -
 
 Session 必须显式给出 stable `agent_id` 与 `assignment_id`，使 exact retry 不重复创建记录。Experiment session 不接受模糊 option-level target；review session 不占用 producer option 的 exclusive workstream ownership。`operation_id` 只对完全相同的请求复用。Graph node 的 canonical shape 与合法状态见 `capabilities/graph-state.md`。
 
+### Assignment Gate
+
+只有工作需要独立 owner，且至少符合 `stage_deliverable`、`durable_handoff`、`independent_review` 或 `parallel_ownership` 之一时才创建 assignment；用现有 objective/scope 说明理由，不增加一次准备命令。
+
+同一 research contract 内的 edit、retry、seed、parameter、preflight 与 local attempt 复用现有 assignment。Mechanical documentation-only micro edit、progress read、smoke、mechanical retry 和 format fix 不创建 assignment；独立负责、阶段性交付或 parallel ownership 的文档工作仍使用 assignment。
+
+`graph_plan` 同样按 research judgment 建图：只有新 research question、independently compared option、可能改变判断的 hypothesis/protocol/success criteria，或 formal decision 才创建 node；operational step 不建 node。
+
 ## Review And Decide
 
 ```sh

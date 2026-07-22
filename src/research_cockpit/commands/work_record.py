@@ -25,6 +25,9 @@ WORK_RECORD_SCHEMA = {
     "operation_id": "op_record_x",
     "run_id": "run_x",
     "source_dir": "relative/or/absolute/output-directory",
+    "mode": "reference",
+    "content_digest": None,
+    "retention": {"class": "reproducible_output"},
     "node_id": "experiment_x",
     "record_id": None,
     "title": "Incremental evidence",
@@ -68,6 +71,19 @@ def parse_record_input(payload: dict[str, Any], *, input_path: Path | None = Non
         for key, value in links.items()
     ):
         raise ValueError("work record input links must be a string-to-string mapping")
+    mode = str(payload.get("mode") or "reference").strip()
+    if mode not in {"reference", "managed"}:
+        raise ValueError("work record input mode must be reference or managed")
+    content_digest = payload.get("content_digest")
+    if content_digest is not None and (
+        not isinstance(content_digest, str) or not content_digest.strip()
+    ):
+        raise ValueError(
+            "work record input content_digest must be a non-empty string or null"
+        )
+    retention = payload.get("retention")
+    if retention is not None and not isinstance(retention, dict):
+        raise ValueError("work record input retention must be a mapping or null")
     source = Path(payload["source_dir"])
     if not source.is_absolute() and input_path is not None:
         source = input_path.parent / source
@@ -78,6 +94,9 @@ def parse_record_input(payload: dict[str, Any], *, input_path: Path | None = Non
         "operation_id": payload["operation_id"].strip(),
         "run_id": payload["run_id"].strip(),
         "source_dir": source,
+        "mode": mode,
+        "content_digest": content_digest.strip() if content_digest else None,
+        "retention": dict(retention) if retention is not None else None,
         "links": dict(links),
         "lease_seconds": lease_seconds,
     }

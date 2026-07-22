@@ -23,6 +23,7 @@ PROFILE_TARGET_SECONDS = {
 
 FAST_TESTS = (
     "tests.test_verification_profiles",
+    "tests.test_storage_layout",
     "tests.test_model",
     "tests.test_public_contracts",
     "tests.test_assignment_leases",

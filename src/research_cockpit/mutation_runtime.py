@@ -461,15 +461,28 @@ def _is_link_like(path: Path, info: os.stat_result | None = None) -> bool:
     )
 
 
-def _staged_path_issues(root: Path, path: Path) -> list[str]:
+def _staged_path_issues(
+    root: Path,
+    path: Path,
+    *,
+    allowed_roots: list[Path] | None = None,
+) -> list[str]:
     root_path = root.resolve(strict=True)
-    candidate = path.absolute()
-    try:
-        relative = candidate.relative_to(root_path)
-    except ValueError:
-        return [f"staged move path escapes data root: {candidate}"]
+    candidate = Path(os.path.abspath(path))
+    containment_roots = [root_path, *list(allowed_roots or [])]
+    matched_root = next(
+        (
+            candidate_root
+            for candidate_root in containment_roots
+            if candidate.is_relative_to(candidate_root)
+        ),
+        None,
+    )
+    if matched_root is None:
+        return [f"staged move path escapes approved roots: {candidate}"]
+    relative = candidate.relative_to(matched_root)
     issues: list[str] = []
-    current = root_path
+    current = matched_root
     for part in relative.parts:
         current = current / part
         if not _lexists(current):
@@ -486,10 +499,12 @@ def _staged_move_conflicts(
     source: Path,
     target: Path,
     target_existed: bool,
+    *,
+    allowed_roots: list[Path] | None = None,
 ) -> list[str]:
     conflicts = [
-        *_staged_path_issues(root, source),
-        *_staged_path_issues(root, target),
+        *_staged_path_issues(root, source, allowed_roots=allowed_roots),
+        *_staged_path_issues(root, target, allowed_roots=allowed_roots),
     ]
     if not _lexists(source):
         conflicts.append(str(source))
@@ -507,12 +522,26 @@ def _commit_staged_move(
     source: Path,
     target: Path,
     target_existed: bool,
+    *,
+    allowed_roots: list[Path] | None = None,
 ) -> None:
-    conflicts = _staged_move_conflicts(root, source, target, target_existed)
+    conflicts = _staged_move_conflicts(
+        root,
+        source,
+        target,
+        target_existed,
+        allowed_roots=allowed_roots,
+    )
     if conflicts:
         raise OSError("Unsafe staged move: " + "; ".join(conflicts))
     target.parent.mkdir(parents=True, exist_ok=True)
-    conflicts = _staged_move_conflicts(root, source, target, target_existed)
+    conflicts = _staged_move_conflicts(
+        root,
+        source,
+        target,
+        target_existed,
+        allowed_roots=allowed_roots,
+    )
     if conflicts:
         raise OSError(
             "Unsafe staged move after parent creation: " + "; ".join(conflicts)
@@ -529,6 +558,7 @@ def execute_mutation_transaction(
     rebuild_dashboard: bool,
     text_changes: list[tuple] | None = None,
     staged_moves: list[tuple[Path, Path]] | None = None,
+    staged_move_roots: list[Path] | None = None,
     read_dependencies: list[tuple[Path, bytes | None]] | None = None,
     operation_request: dict[str, Any] | None = None,
     commit_validators: list[CommitValidator] | None = None,
@@ -539,6 +569,21 @@ def execute_mutation_transaction(
     planned_text = _coerce_text_changes(text_changes)
     planned_reads = _coerce_read_dependencies(read_dependencies)
     planned_commit_validators = list(commit_validators or [])
+    state_root = root.resolve(strict=True)
+    planned_move_roots: list[Path] = []
+    for value in staged_move_roots or []:
+        candidate = Path(value)
+        if not candidate.exists() or not candidate.is_dir():
+            raise ValueError(f"staged move root must be an existing directory: {candidate}")
+        if _is_link_like(candidate):
+            raise ValueError(f"staged move root must not be a symlink or junction: {candidate}")
+        resolved = candidate.resolve(strict=True)
+        if resolved.is_relative_to(state_root) or state_root.is_relative_to(resolved):
+            raise ValueError(
+                "external staged move root must not overlap the canonical data root"
+            )
+        if resolved not in planned_move_roots:
+            planned_move_roots.append(resolved)
     planned_moves = [
         (Path(source), Path(target), _lexists(Path(target)))
         for source, target in staged_moves or []
@@ -632,7 +677,7 @@ def execute_mutation_transaction(
         ]
         for source, target, existed in planned_moves:
             conflict_files.extend(
-                _staged_move_conflicts(root, source, target, existed)
+                _staged_move_conflicts(root, source, target, existed, allowed_roots=planned_move_roots)
             )
         if conflict_files:
             error = "Mutation conflict: truth-source file changed after command planning"
@@ -670,14 +715,14 @@ def execute_mutation_transaction(
                     save_text(path, after_text)
                     written_files.append(str(path))
                 for source, target, existed in planned_moves:
-                    _commit_staged_move(root, source, target, existed)
+                    _commit_staged_move(root, source, target, existed, allowed_roots=planned_move_roots)
                     written_files.append(str(target))
                 for interaction in planned_interactions:
                     appended = _append_interaction_log_unlocked(
                         root, prevalidated=True, **interaction
                     )
                     operation_event = operation_event or appended
-        except Exception as exc:
+        except BaseException as exc:
             rollback_errors = restore_interaction_append_checkpoint(root, event_checkpoint)
             rollback_errors.extend(_restore_files(backups))
             for source, target, _ in planned_moves:
@@ -702,6 +747,8 @@ def execute_mutation_transaction(
             }
             if rollback_errors:
                 payload["rollback_errors"] = rollback_errors
+            if not isinstance(exc, Exception) and not rollback_errors:
+                raise
             raise MutationError(f"Mutation transaction failed; status={status}: {exc}", payload) from exc
 
         if operation_request is not None:

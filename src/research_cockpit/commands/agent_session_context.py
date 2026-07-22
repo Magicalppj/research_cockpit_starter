@@ -51,7 +51,7 @@ def agent_session_context_payload(
             "canonical_root": payload.get("canonical_root"),
             "required_root": payload.get("required_root"),
             "do_not_mutate_worktree_root": True,
-            "stable_artifact_root": payload.get("stable_artifact_root"),
+            "storage_policy": payload.get("storage_policy", {}),
             "worktree_boundary": payload.get("worktree_boundary", {}),
             "assignment": payload.get("assignment"),
             "assignment_cursor": payload.get("assignment_cursor"),

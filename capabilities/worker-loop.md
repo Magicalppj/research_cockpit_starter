@@ -37,6 +37,8 @@ research-cockpit work close --root <data-root> --assignment <assignment_id> --fi
 
 `work_close_v1` 一次提交 run status、experiment result、finding、assignment result、cursor、review requirement、proposal 与 optional `evidence_inputs`。只有缺少 closeout contract 时才运行 `work close --print-schema --json --compact`；返回示例包含 `review_required`，其默认 `false` 继承 assignment policy，设为 `true` 只用于追加 review，不能用 `false` 取消 coordinator 已要求的 review。`finding.confidence` 只接受 `weak`、`medium` 或 `strong`。
 
+同一 research contract 下的 code edit、retry、seed、parameter adjustment、preflight 与 repeated local attempt 都复用当前 assignment，不创建新的 assignment 或 graph node。只有 hypothesis、protocol 或 success criteria 的变化足以影响 research judgment 时，才在 closeout 中提出新 branch/node proposal，由 coordinator 决定是否建图和分派。
+
 Final payload 优先通过 closeout 提交。只有 crash recovery、共享消费或超大 streaming output 要求 close 前 durable 时才使用：
 
 ```sh

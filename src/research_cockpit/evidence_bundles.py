@@ -335,6 +335,76 @@ def _freshness_validator(
     return validate
 
 
+def preflight_work_result_transition(
+    root: Path,
+    *,
+    assignment_id: str,
+    agent_id: str,
+    lease_id: str,
+    lease_epoch: int,
+    operation_id: str,
+    input_revision: str,
+    now: datetime,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
+) -> tuple[list[tuple], AssignmentRecord, dict[str, Any]]:
+    lease_changes, candidate, _lease_before, _lease_after = (
+        plan_assignment_lease_renewal(
+            root,
+            assignment_id=assignment_id,
+            agent_id=agent_id,
+            lease_id=lease_id,
+            lease_epoch=lease_epoch,
+            operation="work close",
+            operation_id=operation_id,
+            now=now,
+            lease_seconds=lease_seconds,
+        )
+    )
+    if (
+        candidate.kind == "review"
+        or candidate.scope.get("write_policy") == "review_read_only"
+    ):
+        raise _transition_error(
+            assignment_id=assignment_id,
+            operation_id=operation_id,
+            code="review_scope_read_only",
+            message=(
+                "Review assignments must use review report and cannot close "
+                "producer work."
+            ),
+            lease_id=lease_id,
+        )
+    packet = build_work_packet_for_assignment(root, candidate, now=now)
+    if "close" not in packet.get("allowed_operations", {}).get("items", []):
+        raise _transition_error(
+            assignment_id=assignment_id,
+            operation_id=operation_id,
+            code="assignment_not_ready",
+            message=(
+                f"Assignment readiness {packet.get('readiness')!r} does not "
+                "allow work close."
+            ),
+            lease_id=lease_id,
+        )
+    expected_input_revision = (
+        candidate.input_revision
+        or packet.get("input_revision")
+        or packet.get("revision")
+    )
+    if input_revision != expected_input_revision:
+        raise _transition_error(
+            assignment_id=assignment_id,
+            operation_id=operation_id,
+            code="stale_inputs",
+            message=(
+                f"work close input_revision {input_revision!r} does not match "
+                f"{expected_input_revision!r}."
+            ),
+            lease_id=lease_id,
+        )
+    return lease_changes, candidate, packet
+
+
 def plan_work_result_transition(
     root: Path,
     *,
@@ -355,51 +425,17 @@ def plan_work_result_transition(
     lease_seconds: int = DEFAULT_LEASE_SECONDS,
     refresh_commit_clock: bool = False,
 ) -> dict[str, Any]:
-    lease_changes, candidate, _lease_before, _lease_after = plan_assignment_lease_renewal(
+    lease_changes, candidate, packet = preflight_work_result_transition(
         root,
         assignment_id=assignment_id,
         agent_id=agent_id,
         lease_id=lease_id,
         lease_epoch=lease_epoch,
-        operation="work close",
         operation_id=operation_id,
+        input_revision=input_revision,
         now=now,
         lease_seconds=lease_seconds,
     )
-    if candidate.kind == "review" or candidate.scope.get("write_policy") == "review_read_only":
-        raise _transition_error(
-            assignment_id=assignment_id,
-            operation_id=operation_id,
-            code="review_scope_read_only",
-            message="Review assignments must use review report and cannot close producer work.",
-            lease_id=lease_id,
-        )
-    packet = build_work_packet_for_assignment(root, candidate, now=now)
-    if "close" not in packet.get("allowed_operations", {}).get("items", []):
-        raise _transition_error(
-            assignment_id=assignment_id,
-            operation_id=operation_id,
-            code="assignment_not_ready",
-            message=f"Assignment readiness {packet.get('readiness')!r} does not allow work close.",
-            lease_id=lease_id,
-        )
-    expected_input_revision = (
-        candidate.input_revision
-        or packet.get("input_revision")
-        or packet.get("revision")
-    )
-    if input_revision != expected_input_revision:
-        raise _transition_error(
-            assignment_id=assignment_id,
-            operation_id=operation_id,
-            code="stale_inputs",
-            message=(
-                f"work close input_revision {input_revision!r} does not match "
-                f"{expected_input_revision!r}."
-            ),
-            lease_id=lease_id,
-        )
-
     local_proposals: list[dict[str, Any]] = []
     if next_experiment:
         local_proposals.append(

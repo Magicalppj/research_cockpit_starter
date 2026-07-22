@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 import networkx as nx
 import yaml
@@ -1111,7 +1111,12 @@ def validate_artifact_records(
     nodes: dict[str, ResearchNode],
     records: list[dict[str, Any]] | None = None,
 ) -> list[str]:
-    from research_cockpit.artifact_records import list_artifact_records
+    from research_cockpit.artifact_records import (
+        AVAILABILITY_STATUSES,
+        INTEGRITY_LEVELS,
+        STORAGE_MODES,
+        list_artifact_records,
+    )
     from research_cockpit.retention import validate_retention
 
     errors: list[str] = []
@@ -1144,6 +1149,163 @@ def validate_artifact_records(
         links = record.get("links")
         if links is not None and not isinstance(links, dict):
             errors.append(f"artifact record {record_id!r}: links must be a mapping")
+        storage = record.get("storage")
+        if storage is not None:
+            if not isinstance(storage, dict):
+                errors.append(f"artifact record {record_id!r}: storage must be a mapping")
+            else:
+                mode = str(storage.get("mode") or "").strip()
+                ownership = str(storage.get("ownership") or "").strip()
+                uri = str(storage.get("uri") or "").strip()
+                managed_key = storage.get("managed_key")
+                if mode not in STORAGE_MODES:
+                    errors.append(
+                        f"artifact record {record_id!r}: storage.mode is invalid"
+                    )
+                expected_ownership = {
+                    "reference": "external",
+                    "managed": "cockpit_managed",
+                    "legacy": "cockpit_managed",
+                }.get(mode)
+                if expected_ownership is not None and ownership != expected_ownership:
+                    errors.append(
+                        f"artifact record {record_id!r}: storage.ownership must be "
+                        f"{expected_ownership!r} for mode {mode!r}"
+                    )
+                raw_availability = record.get("availability")
+                availability_status = (
+                    raw_availability.get("status")
+                    if isinstance(raw_availability, dict)
+                    else None
+                )
+                if not uri and (mode == "managed" or availability_status == "available"):
+                    errors.append(
+                        f"artifact record {record_id!r}: storage.uri is required"
+                    )
+                if mode == "managed":
+                    key_text = str(managed_key or "").strip().replace("\\", "/")
+                    key_path = PurePosixPath(key_text)
+                    if (
+                        not key_text
+                        or key_path.is_absolute()
+                        or ".." in key_path.parts
+                    ):
+                        errors.append(
+                            f"artifact record {record_id!r}: "
+                            "storage.managed_key must be a safe relative path"
+                        )
+                elif managed_key not in (None, ""):
+                    errors.append(
+                        f"artifact record {record_id!r}: storage.managed_key "
+                        "is only valid for managed storage"
+                    )
+
+        integrity = record.get("integrity")
+        if integrity is not None:
+            if not isinstance(integrity, dict):
+                errors.append(
+                    f"artifact record {record_id!r}: integrity must be a mapping"
+                )
+            else:
+                level = str(integrity.get("level") or "").strip()
+                algorithm = integrity.get("algorithm")
+                digest = integrity.get("digest")
+                if level not in INTEGRITY_LEVELS:
+                    errors.append(
+                        f"artifact record {record_id!r}: integrity.level is invalid"
+                    )
+                if level == "unverified":
+                    if algorithm not in (None, ""):
+                        errors.append(
+                            f"artifact record {record_id!r}: "
+                            "integrity.algorithm must be null when unverified"
+                        )
+                    if digest not in (None, ""):
+                        errors.append(
+                            f"artifact record {record_id!r}: "
+                            "integrity.digest must be null when unverified"
+                        )
+                elif level in INTEGRITY_LEVELS:
+                    if algorithm != "sha256":
+                        errors.append(
+                            f"artifact record {record_id!r}: "
+                            "integrity.algorithm must be 'sha256'"
+                        )
+                    digest_text = str(digest or "").strip().lower()
+                    prefix, separator, hex_digest = digest_text.partition(":")
+                    allowed_prefixes = {
+                        "content": {"sha256"},
+                        "manifest": {"sha256", "manifest-sha256"},
+                        "inventory": {"inventory-sha256"},
+                    }.get(level, set())
+                    if (
+                        not separator
+                        or prefix not in allowed_prefixes
+                        or len(hex_digest) != 64
+                        or any(character not in "0123456789abcdef" for character in hex_digest)
+                    ):
+                        errors.append(
+                            f"artifact record {record_id!r}: "
+                            "integrity.digest does not match integrity.level"
+                        )
+
+        inventory = record.get("inventory")
+        if inventory is not None:
+            if not isinstance(inventory, dict):
+                errors.append(
+                    f"artifact record {record_id!r}: inventory must be a mapping"
+                )
+            else:
+                for field_name in ("size_bytes", "file_count", "entries_scanned"):
+                    value = inventory.get(field_name)
+                    if value is not None and (
+                        isinstance(value, bool)
+                        or not isinstance(value, int)
+                        or value < 0
+                    ):
+                        errors.append(
+                            f"artifact record {record_id!r}: "
+                            f"inventory.{field_name} must be a non-negative integer or null"
+                        )
+                if not isinstance(inventory.get("complete"), bool):
+                    errors.append(
+                        f"artifact record {record_id!r}: inventory.complete must be a boolean"
+                    )
+
+        availability = record.get("availability")
+        if availability is not None:
+            if not isinstance(availability, dict):
+                errors.append(
+                    f"artifact record {record_id!r}: availability must be a mapping"
+                )
+            elif availability.get("status") not in AVAILABILITY_STATUSES:
+                errors.append(
+                    f"artifact record {record_id!r}: availability.status is invalid"
+                )
+
+        lifecycle = record.get("lifecycle")
+        if lifecycle is not None:
+            if not isinstance(lifecycle, dict):
+                errors.append(
+                    f"artifact record {record_id!r}: lifecycle must be a mapping"
+                )
+            else:
+                supersedes = lifecycle.get("supersedes")
+                if not isinstance(supersedes, list) or not all(
+                    isinstance(value, str) and value for value in supersedes
+                ):
+                    errors.append(
+                        f"artifact record {record_id!r}: "
+                        "lifecycle.supersedes must be a list of record ids"
+                    )
+                superseded_by = lifecycle.get("superseded_by")
+                if superseded_by is not None and (
+                    not isinstance(superseded_by, str) or not superseded_by
+                ):
+                    errors.append(
+                        f"artifact record {record_id!r}: "
+                        "lifecycle.superseded_by must be a record id or null"
+                    )
         retention = record.get("retention")
         if retention is not None:
             try:
