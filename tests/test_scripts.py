@@ -28,6 +28,10 @@ existing_pythonpath = os.environ.get("PYTHONPATH", "")
 os.environ["PYTHONPATH"] = str(SRC_DIR) if not existing_pythonpath else str(SRC_DIR) + os.pathsep + existing_pythonpath
 
 from research_cockpit.interaction_log import append_interaction_log, load_interaction_log
+from research_cockpit.artifact_inventory import (
+    ensure_artifact_inventory,
+    load_artifact_inventory,
+)
 from research_cockpit.model import (
     ValidationError,
     build_search_index,
@@ -2759,6 +2763,34 @@ class ScriptBehaviorTests(unittest.TestCase):
         payload = validation_payload(self.root, changed_nodes=["exp_t5"])
         self.assertTrue(payload["fallback"]["used_full_validation"])
         self.assertEqual(payload["fallback"]["reason"], "validation_index_missing_or_incompatible")
+
+    def test_finish_mutation_incrementally_patches_artifact_inventory(self) -> None:
+        path = self.root / "graph" / "nodes" / "artifact_inventory_patch.yaml"
+        before = {
+            "id": "artifact_inventory_patch",
+            "type": "artifact",
+            "title": "Initial artifact title",
+            "status": "done",
+            "path": "artifacts/inventory_patch",
+        }
+        save_yaml(path, before)
+        ensure_artifact_inventory(self.root)
+        after = dict(before)
+        after["title"] = "Patched artifact title"
+
+        finish_mutation(
+            self.root,
+            [(path, before, after)],
+            interaction={"kind": "test_artifact_inventory_patch"},
+            rebuild_dashboard=False,
+        )
+
+        inventory = load_artifact_inventory(self.root)
+        self.assertEqual(
+            inventory["graph_artifacts"]["artifact_inventory_patch"]["title"],
+            "Patched artifact title",
+        )
+
     def test_parallel_complete_experiment_writes_different_nodes_serially(self) -> None:
         option_path = self.root / "graph" / "nodes" / "option_t5.yaml"
         option = load_yaml(option_path)
@@ -8007,6 +8039,38 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("external_path", by_id["artifact_external_cache"]["warnings"])
         self.assertFalse(by_id["artifact_external_cache"]["cleanup_candidate"])
 
+    def test_artifact_retention_audit_reuses_incremental_inventory_target_scans(self) -> None:
+        repo = self.tmp_root
+        payload_file = repo / "artifacts" / "inventory_cached" / "payload.bin"
+        payload_file.parent.mkdir(parents=True, exist_ok=True)
+        payload_file.write_bytes(b"x" * 8)
+        write_node(
+            self.root,
+            {
+                "id": "artifact_inventory_cached",
+                "type": "artifact",
+                "title": "Cached inventory artifact",
+                "status": "done",
+                "path": "artifacts/inventory_cached",
+                "retention": {"class": "reproducible_output"},
+            },
+        )
+
+        first = artifact_retention_audit_payload(self.root, repo=repo, min_size_bytes=1)
+        with patch(
+            "research_cockpit.maintenance._scan_path",
+            side_effect=AssertionError("second audit must use inventory metadata"),
+        ):
+            second = artifact_retention_audit_payload(
+                self.root,
+                repo=repo,
+                min_size_bytes=1,
+            )
+
+        self.assertIn("artifact_inventory_cached", first["large_artifact_candidates"])
+        self.assertIn("artifact_inventory_cached", second["large_artifact_candidates"])
+        self.assertEqual(first["artifacts"], second["artifacts"])
+
     def test_artifact_retention_audit_blocks_active_subtree_and_baseline_artifacts(self) -> None:
         self.start_t5_assignment()
         repo = self.tmp_root
@@ -8282,6 +8346,9 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertIn("artifact_compaction_counts", payload)
         self.assertIn("record_only_candidates", payload)
         self.assertIn("artifact_compaction_plan", payload)
+        self.assertIn("artifact_inventory", payload)
+        self.assertIn("aggregates", payload["artifact_inventory"])
+        self.assertIn("graph_artifacts", payload["artifact_inventory"]["aggregates"])
         self.assertIn("active_assignment", payload["unsafe_cleanup_blockers"])
         self.assertIn("active_run", payload["unsafe_cleanup_blockers"])
         self.assertTrue(payload["recommended_next_actions"])

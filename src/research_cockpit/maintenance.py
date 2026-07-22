@@ -694,6 +694,15 @@ def build_artifact_retention_audit(
     min_size_bytes: int,
     max_files: int = 1000,
 ) -> dict[str, Any]:
+    from research_cockpit.artifact_inventory import (
+        cached_retention_target_scan,
+        ensure_artifact_inventory,
+        patch_retention_target_scans,
+    )
+
+    inventory_result = ensure_artifact_inventory(root)
+    inventory = inventory_result["inventory"]
+    scan_updates: list[dict[str, Any]] = []
     nodes, assignments, runs = _load_validated(root)
     artifact_references = _artifact_reference_index(nodes)
     artifacts: list[dict[str, Any]] = []
@@ -733,7 +742,24 @@ def build_artifact_retention_audit(
                     "truncated": False,
                 })
                 continue
-            scan = _scan_path(resolved, max_files=max_files)
+            scan = cached_retention_target_scan(
+                inventory,
+                repo=repo,
+                max_files=max_files,
+                artifact_id=node.id,
+                label=label,
+                target=target,
+                resolved_path=resolved,
+            )
+            if scan is None:
+                scan = _scan_path(resolved, max_files=max_files)
+                scan_updates.append({
+                    "artifact_id": node.id,
+                    "label": label,
+                    "target": target,
+                    "resolved_path": resolved,
+                    "scan": scan,
+                })
             if not scan["exists"]:
                 warnings.append("missing_path")
             target_rows.append({
@@ -789,6 +815,14 @@ def build_artifact_retention_audit(
             "cleanup_candidate": cleanup_candidate,
         })
 
+    if scan_updates:
+        patch_retention_target_scans(
+            root,
+            repo=repo,
+            max_files=max_files,
+            scans=scan_updates,
+        )
+
     return {
         "ok": True,
         "schema_version": "artifact_retention_audit_v1",
@@ -801,6 +835,11 @@ def build_artifact_retention_audit(
         "large_artifact_candidates": [item["artifact_id"] for item in artifacts if item["large"]],
         "cleanup_candidates": [item["artifact_id"] for item in artifacts if item["cleanup_candidate"]],
         "warnings": sorted({warning for item in artifacts for warning in item["warnings"]}),
+        "artifact_inventory": {
+            "status": inventory_result["status"],
+            "aggregates": inventory.get("aggregates", {}),
+            "scan": inventory.get("scan", {}),
+        },
     }
 
 
@@ -961,6 +1000,7 @@ def build_maintenance_audit(
         "blocked_branches": blocked_branches,
         "large_artifact_candidates": artifact_audit["large_artifact_candidates"],
         "large_output_candidates": _large_output_candidates(artifact_audit),
+        "artifact_inventory": artifact_audit.get("artifact_inventory", {}),
         "artifact_compaction_counts": artifact_compaction["counts"],
         "record_only_candidates": [
             row["artifact_id"]

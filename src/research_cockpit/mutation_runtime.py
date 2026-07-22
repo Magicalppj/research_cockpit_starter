@@ -59,6 +59,19 @@ def mark_validation_index_stale(root: Path, *, reason: str, detail: str = "") ->
     mark_stale(root, reason=reason, detail=detail)
 
 
+def patch_artifact_inventory(root: Path, changed_paths: list[Path]) -> dict[str, Any]:
+    from research_cockpit.artifact_inventory import patch_artifact_inventory as patch
+
+    with progress_phase("artifact_inventory_update"):
+        return patch(root, changed_paths)
+
+
+def mark_artifact_inventory_stale(root: Path, *, reason: str, detail: str = "") -> None:
+    from research_cockpit.artifact_inventory import mark_artifact_inventory_stale as mark_stale
+
+    mark_stale(root, reason=reason, detail=detail)
+
+
 def _interaction_log_error_payload(root: Path, message: str) -> dict[str, Any]:
     return {
         "ok": False,
@@ -790,9 +803,9 @@ def execute_mutation_transaction(
         except Exception as exc:
             operation_index_warning = str(exc)
 
+    changed_paths = [path for path, _, _ in [*planned_yaml, *planned_text]]
+    changed_paths.extend(target for _, target, _ in planned_moves)
     if not rebuild_dashboard:
-        changed_paths = [path for path, _, _ in [*planned_yaml, *planned_text]]
-        changed_paths.extend(target for _, target, _ in planned_moves)
         try:
             patch_validation_index(root, changed_paths)
         except Exception as exc:
@@ -818,6 +831,34 @@ def execute_mutation_transaction(
                     "recovery_commands": [f"research-cockpit build --root {root} --affected --id <node_id> --json"],
                 },
             ) from exc
+
+    try:
+        patch_artifact_inventory(root, changed_paths)
+    except Exception as exc:
+        stale_error = ""
+        try:
+            mark_artifact_inventory_stale(
+                root,
+                reason="incremental_patch_failed",
+                detail=str(exc),
+            )
+        except Exception as stale_exc:
+            stale_error = f"; stale marker failed: {stale_exc}"
+        error = f"Mutation succeeded but artifact inventory update failed: {exc}{stale_error}"
+        raise MutationError(
+            error,
+            {
+                "ok": False,
+                "status": "partial_success",
+                "partial_success": True,
+                "rolled_back": False,
+                "written_files": written_files,
+                "error": error,
+                "recovery_commands": [
+                    f"research-cockpit maintenance audit --root {root} --json",
+                ],
+            },
+        ) from exc
 
     result = {
         "ok": True,
