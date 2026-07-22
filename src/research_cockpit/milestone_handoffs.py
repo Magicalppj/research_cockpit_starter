@@ -15,6 +15,12 @@ from research_cockpit.coordination import build_coordination_state
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.mutation_runtime import execute_mutation_transaction
 from research_cockpit.operation_receipts import normalized_request_hash, validate_operation_id
+from research_cockpit.research_ledger import (
+    build_research_ledger,
+    git_toplevel,
+    ledger_relative_path,
+    write_research_ledger,
+)
 from research_cockpit.storage import load_yaml
 from research_cockpit.validation_index import mark_validation_index_stale
 
@@ -169,14 +175,33 @@ def _handoff_path(root: Path, operation_id: str) -> Path:
     return root / "handoffs" / f"{file_id}.yaml"
 
 
-def _existing_receipt(path: Path, request_hash: str) -> dict[str, Any] | None:
+def _existing_report(path: Path, request_hash: str) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     report = load_yaml(path)
+    if not isinstance(report, dict):
+        return {}
     receipt = report.get("receipt")
     if report.get("request_hash") == request_hash and isinstance(receipt, dict):
-        return deepcopy(receipt)
+        return deepcopy(report)
     return {}
+
+
+def _resolve_ledger_repo(repo: Path | None) -> Path | None:
+    if repo is None:
+        return None
+    resolved = git_toplevel(repo)
+    if resolved is None:
+        raise ValueError(f"ledger repository must be a Git worktree: {repo}")
+    return resolved
+
+
+def _rebuild_ledger(repo: Path | None, report: dict[str, Any]) -> None:
+    if repo is None:
+        return
+    projection = report.get("ledger_projection")
+    if isinstance(projection, dict):
+        write_research_ledger(repo, projection)
 
 
 def _gate_summary(
@@ -299,14 +324,21 @@ def _mark_stale(root: Path, *, target_revision: str, current_revision: str) -> N
         return
 
 
-def execute_milestone_handoff(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
+def execute_milestone_handoff(
+    root: Path,
+    plan: dict[str, Any],
+    *,
+    repo: Path | None = None,
+) -> dict[str, Any]:
     parsed = _parse_plan(plan)
+    ledger_repo = _resolve_ledger_repo(repo)
     request_hash = normalized_request_hash(parsed)
     report_path = _handoff_path(root, parsed["operation_id"])
-    existing = _existing_receipt(report_path, request_hash)
+    existing = _existing_report(report_path, request_hash)
     if existing is not None:
         if existing:
-            return existing
+            _rebuild_ledger(ledger_repo, existing)
+            return deepcopy(existing["receipt"])
         return _error_receipt(
             parsed,
             status="idempotency_conflict",
@@ -391,6 +423,20 @@ def execute_milestone_handoff(root: Path, plan: dict[str, Any]) -> dict[str, Any
     blockers = _collect_blockers(coordination, parsed["allow"])
     blocked = bool(blockers["blocking_categories"])
     relative_report = report_path.relative_to(root).as_posix()
+    created_at = _utc_timestamp()
+    ledger_projection = build_research_ledger(
+        root,
+        validation_state,
+        operation_id=parsed["operation_id"],
+        kind=parsed["kind"],
+        target_revision=target_revision,
+        timestamp=created_at,
+    )
+    ledger_file = (
+        ledger_relative_path(parsed["operation_id"])
+        if ledger_repo is not None
+        else None
+    )
     receipt = {
         "schema_version": HANDOFF_SCHEMA_VERSION,
         "ok": not blocked,
@@ -401,6 +447,7 @@ def execute_milestone_handoff(root: Path, plan: dict[str, Any]) -> dict[str, Any
         "changed": True,
         "target_revision": target_revision,
         "report_file": relative_report,
+        "ledger_file": ledger_file,
         "gates": _gate_summary(validation=validation, build=build, smoke=smoke),
         "blockers": blockers,
         "error": (
@@ -418,7 +465,8 @@ def execute_milestone_handoff(root: Path, plan: dict[str, Any]) -> dict[str, Any
         "request_hash": request_hash,
         "request": parsed,
         "target_revision": target_revision,
-        "created_at": _utc_timestamp(),
+        "created_at": created_at,
+        "ledger_projection": ledger_projection,
         "receipt": receipt,
     }
 
@@ -462,9 +510,10 @@ def execute_milestone_handoff(root: Path, plan: dict[str, Any]) -> dict[str, Any
             blockers=blockers,
         )
     except MutationError:
-        concurrent = _existing_receipt(report_path, request_hash)
+        concurrent = _existing_report(report_path, request_hash)
         if concurrent:
-            return concurrent
+            _rebuild_ledger(ledger_repo, concurrent)
+            return deepcopy(concurrent["receipt"])
         latest = root_truth_revision(root)
         if latest != target_revision:
             _mark_stale(root, target_revision=target_revision, current_revision=latest)
@@ -486,4 +535,5 @@ def execute_milestone_handoff(root: Path, plan: dict[str, Any]) -> dict[str, Any
             gates=receipt["gates"],
             blockers=blockers,
         )
+    _rebuild_ledger(ledger_repo, report)
     return receipt

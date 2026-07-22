@@ -294,12 +294,13 @@ CAPABILITY_BY_COMMAND = {
 COMMANDS: list[dict[str, object]] = [
     {
         "name": "init",
-        "purpose": "Initialize a project-local research_cockpit state directory from a template.",
+        "purpose": "Initialize external state for a Git project, or an explicit legacy research_cockpit state directory.",
         "mutating": True,
         "supports_json": True,
         "supports_dry_run": False,
         "supports_no_build": False,
         "supports_build": True,
+        "extra_supported_flags": ["--repo", "--project-id", "--state-home", "--template", "--force", "--build"],
         "recommended_when": "Start a new research repo before recording project-specific state.",
     },
     {
@@ -1548,7 +1549,7 @@ ROLE_FACADE_COMMANDS: list[dict[str, object]] = [
         "supports_dry_run": False,
         "supports_no_build": False,
         "required_flags": ["--file", "<path>"],
-        "extra_supported_flags": ["--file", "--print-schema", "--progress"],
+        "extra_supported_flags": ["--file", "--print-schema", "--progress", "--repo"],
         "schema_command": "research-cockpit coord handoff --print-schema",
         "group": "maintenance",
         "verification_mode": "internal_non_dry_run",

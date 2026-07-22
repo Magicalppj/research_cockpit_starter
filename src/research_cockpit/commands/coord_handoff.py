@@ -7,7 +7,11 @@ import yaml
 
 from research_cockpit.commands._runtime import emit_json, safe_print
 from research_cockpit.milestone_handoffs import execute_milestone_handoff
-from research_cockpit.paths import default_data_root
+from research_cockpit.paths import (
+    default_data_root,
+    find_project_locator,
+    local_state_root,
+)
 from research_cockpit.storage import load_yaml
 
 
@@ -32,6 +36,8 @@ def _print_human(payload: dict) -> None:
     safe_print(f"Target revision: {payload.get('target_revision') or 'not captured'}")
     if payload.get("report_file"):
         safe_print(f"Report: {payload['report_file']}")
+    if payload.get("ledger_file"):
+        safe_print(f"Ledger: {payload['ledger_file']}")
     error = payload.get("error")
     if isinstance(error, dict) and error.get("message"):
         safe_print(str(error["message"]))
@@ -40,6 +46,11 @@ def _print_human(payload: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="research-cockpit coord handoff", allow_abbrev=False)
     parser.add_argument("--root", type=Path, default=default_data_root())
+    parser.add_argument(
+        "--repo",
+        type=Path,
+        help="Git worktree that receives the deterministic research ledger.",
+    )
     parser.add_argument("--file", type=Path)
     parser.add_argument("--print-schema", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -55,7 +66,8 @@ def main() -> None:
     if not args.file.is_file():
         parser.error(f"handoff input does not exist: {args.file}")
     try:
-        payload = execute_milestone_handoff(args.root, load_yaml(args.file))
+        repo = args.repo or _locator_repo_for_root(args.root)
+        payload = execute_milestone_handoff(args.root, load_yaml(args.file), repo=repo)
     except ValueError as exc:
         if args.json:
             emit_json(
@@ -78,6 +90,16 @@ def main() -> None:
     if payload.get("ok"):
         return
     raise SystemExit(1)
+
+
+def _locator_repo_for_root(root: Path) -> Path | None:
+    locator = find_project_locator(Path.cwd())
+    if locator is None:
+        return None
+    locator_path, payload = locator
+    if local_state_root(payload["project_id"]) != root.expanduser().resolve():
+        return None
+    return locator_path.parent
 
 
 if __name__ == "__main__":

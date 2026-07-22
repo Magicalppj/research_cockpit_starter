@@ -7,6 +7,7 @@ import sys
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 import yaml
 
@@ -19,7 +20,8 @@ from research_cockpit.commands.build_dashboard import build_dashboard_from_valid
 from research_cockpit.commands.skill_smoke_test import compact_root_smoke_from_validation
 from research_cockpit.commands.validate_cockpit import full_validation_snapshot
 from research_cockpit.milestone_handoffs import execute_milestone_handoff, root_truth_revision
-from research_cockpit.model import validate_cockpit
+from research_cockpit.model import ResearchNode, validate_cockpit
+from research_cockpit.research_ledger import build_research_ledger
 from research_cockpit.storage import load_yaml, save_yaml
 
 
@@ -72,6 +74,18 @@ class MilestoneHandoffTests(unittest.TestCase):
 
     def _write_node(self, payload: dict) -> None:
         save_yaml(self.root / "graph" / "nodes" / f"{payload['id']}.yaml", payload)
+
+    def _ledger_repo(self) -> Path:
+        repo = self.root / "ledger_repo"
+        repo.mkdir()
+        completed = subprocess.run(
+            ["git", "init", str(repo)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        return repo
 
     @staticmethod
     def _plan(operation_id: str = "handoff_test", **overrides: object) -> dict:
@@ -328,6 +342,144 @@ class MilestoneHandoffTests(unittest.TestCase):
             replay = execute_milestone_handoff(self.root, self._plan("handoff_replay"))
 
         self.assertEqual(replay, first)
+
+    def test_exact_retry_rebuilds_missing_portable_ledger_without_rerunning_gates(self) -> None:
+        repo = self._ledger_repo()
+        plan = self._plan("handoff_ledger")
+        with (
+            patch(
+                "research_cockpit.milestone_handoffs.build_dashboard_from_validated_state",
+                return_value=self._build_result(),
+            ),
+            patch(
+                "research_cockpit.milestone_handoffs.compact_root_smoke_from_validation",
+                return_value=self._smoke_result(),
+            ),
+            patch(
+                "research_cockpit.milestone_handoffs.build_coordination_state",
+                return_value=self._coordination_state(),
+            ),
+        ):
+            first = execute_milestone_handoff(self.root, plan, repo=repo)
+
+        ledger_path = repo / "research-ledger" / "handoff_ledger.yaml"
+        self.assertEqual(first["ledger_file"], "research-ledger/handoff_ledger.yaml")
+        self.assertTrue(ledger_path.is_file())
+        first_bytes = ledger_path.read_bytes()
+        ledger = load_yaml(ledger_path)
+        self.assertEqual(ledger["schema_version"], "research_ledger_v1")
+        self.assertEqual(ledger["milestone"]["state_revision"], first["target_revision"])
+        self.assertNotIn(str(self.root), ledger_path.read_text(encoding="utf-8"))
+        self.assertNotIn(str(repo), ledger_path.read_text(encoding="utf-8"))
+
+        ledger_path.unlink()
+        with (
+            patch(
+                "research_cockpit.milestone_handoffs.full_validation_snapshot",
+                side_effect=AssertionError("validation reran"),
+            ),
+            patch(
+                "research_cockpit.milestone_handoffs.build_dashboard_from_validated_state",
+                side_effect=AssertionError("build reran"),
+            ),
+            patch(
+                "research_cockpit.milestone_handoffs.compact_root_smoke_from_validation",
+                side_effect=AssertionError("smoke reran"),
+            ),
+        ):
+            replay = execute_milestone_handoff(self.root, plan, repo=repo)
+
+        self.assertEqual(replay, first)
+        self.assertEqual(ledger_path.read_bytes(), first_bytes)
+
+    def test_ledger_keeps_portable_artifact_uris_and_omits_local_paths(self) -> None:
+        save_yaml(
+            self.root / "artifact_records" / "experiment_final.yaml",
+            {
+                "schema_version": "artifact_records_v1",
+                "experiment_id": "experiment_final",
+                "records": {
+                    "record_local": {
+                        "record_id": "record_local",
+                        "experiment_id": "experiment_final",
+                        "artifact_id": "artifact_local",
+                        "storage": {
+                            "mode": "reference",
+                            "ownership": "external",
+                            "uri": f"file://{self.root}/payload.bin",
+                            "managed_key": None,
+                        },
+                    },
+                    "record_remote": {
+                        "record_id": "record_remote",
+                        "experiment_id": "experiment_final",
+                        "artifact_id": "artifact_remote",
+                        "storage": {
+                            "mode": "reference",
+                            "ownership": "external",
+                            "uri": "https://example.invalid/evidence/final.json",
+                            "managed_key": None,
+                        },
+                    },
+                },
+            },
+        )
+        option = ResearchNode.from_dict(
+            {"id": "option_final", "type": "option", "title": "Option", "status": "accepted"}
+        )
+        decision = ResearchNode.from_dict(
+            {
+                "id": "decision_final",
+                "type": "decision",
+                "title": "Decision",
+                "status": "accepted",
+                "parent": "option_final",
+                "linked_artifact_records": ["record_local", "record_remote"],
+            }
+        )
+        experiment = ResearchNode.from_dict(
+            {
+                "id": "experiment_final",
+                "type": "experiment",
+                "title": "Experiment",
+                "status": "done",
+                "parent": "option_final",
+                "findings": [
+                    {
+                        "statement": "Remote evidence supports the selected option.",
+                        "confidence": "strong",
+                        "outcome": "success",
+                        "metrics": {"score": 0.91},
+                        "linked_artifact_records": ["record_remote"],
+                    }
+                ],
+            }
+        )
+        state = SimpleNamespace(
+            nodes={node.id: node for node in (option, decision, experiment)},
+            current={"current_option": "option_final"},
+            runs={},
+            assignments={},
+        )
+
+        ledger = build_research_ledger(
+            self.root,
+            state,
+            operation_id="handoff_portable",
+            kind="release",
+            target_revision="root-v1:test",
+            timestamp="2026-07-22T00:00:00Z",
+        )
+        text = yaml.safe_dump(ledger, sort_keys=False)
+
+        self.assertEqual(ledger["accepted_decisions"][0]["id"], "decision_final")
+        self.assertEqual(ledger["final_findings"][0]["metrics"], {"score": 0.91})
+        remote = next(item for item in ledger["reviewed_artifacts"] if item["record_id"] == "record_remote")
+        local = next(item for item in ledger["reviewed_artifacts"] if item["record_id"] == "record_local")
+        self.assertEqual(remote["uri"], "https://example.invalid/evidence/final.json")
+        self.assertNotIn("uri", local)
+        self.assertNotIn("file://", text)
+        self.assertNotIn(str(self.root), text)
 
     def test_reused_operation_id_with_changed_request_is_rejected_before_gates(self) -> None:
         with (
