@@ -65,12 +65,17 @@ def _new_research_repo(
     return research_repo, plugin_path, root
 
 
-def _unexpected_writes(changed: list[str]) -> list[str]:
+def _unexpected_writes(
+    changed: list[str],
+    *,
+    allowed_files: tuple[str, ...] = (),
+) -> list[str]:
     return [
         path
         for path in changed
         if not (
-            path == "research_cockpit"
+            path in allowed_files
+            or path == "research_cockpit"
             or path.startswith("research_cockpit/")
             or path == "fresh_research_cockpit"
             or path.startswith("fresh_research_cockpit/")
@@ -88,6 +93,7 @@ def _case(
     observations: dict[str, Any] | None = None,
     findings: list[str] | None = None,
     workflow: str | None = None,
+    allowed_files: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     visible_checks = agent_checks if agent_checks is not None else checks
     for check in visible_checks:
@@ -95,7 +101,7 @@ def _case(
     changed = files_changed or []
     metrics = workflow_metrics(visible_checks, files_changed=changed)
     contract = evaluate_workflow_contract(metrics, workflow) if workflow else None
-    unexpected = _unexpected_writes(changed)
+    unexpected = _unexpected_writes(changed, allowed_files=allowed_files)
     final_passed = passed and not unexpected and (contract is None or contract["ok"])
     return {
         "case": name,
@@ -165,12 +171,28 @@ def agent_a_cold_start_install(
     python: str,
     parent: Path,
 ) -> dict[str, Any]:
-    research_repo, plugin_path, _root = _new_research_repo(skill_path, parent, "a")
+    research_repo, plugin_path, legacy_root = _new_research_repo(
+        skill_path,
+        parent,
+        "a",
+    )
     env = _package_env(plugin_path)
+    state_home = parent / "external_state_a"
+    project_id = "agent-usability-a"
+    git_init = _run_command(["git", "init"], cwd=research_repo, env=env)
     before = _file_manifest(research_repo)
     checks = [
+        git_init,
         _run_command(
-            _cli(python, "init", "--root", "fresh_research_cockpit"),
+            _cli(
+                python,
+                "init",
+                "--project-id",
+                project_id,
+                "--state-home",
+                str(state_home),
+                "--json",
+            ),
             cwd=research_repo,
             env=env,
         ),
@@ -180,7 +202,7 @@ def agent_a_cold_start_install(
                 "coord",
                 "overview",
                 "--root",
-                "fresh_research_cockpit",
+                str(state_home / project_id),
                 "--json",
                 "--compact",
                 "--limit",
@@ -193,6 +215,29 @@ def agent_a_cold_start_install(
     changed = _changed_files(before, _file_manifest(research_repo))
     findings = _readability_findings(plugin_path)
     overview = checks[-1].get("json") if isinstance(checks[-1].get("json"), dict) else {}
+    init_payload = checks[1].get("json") if isinstance(checks[1].get("json"), dict) else {}
+    locator_path = research_repo / ".research-cockpit.yaml"
+    locator = _read_yaml(locator_path)
+    locator_text = locator_path.read_text(encoding="utf-8") if locator_path.is_file() else ""
+    state_root = state_home / project_id
+    state_is_external = not state_root.is_relative_to(research_repo.resolve())
+    legacy_root_unchanged = not any(
+        path == "research_cockpit" or path.startswith("research_cockpit/")
+        for path in changed
+    )
+    external_state_default = (
+        init_payload.get("external") is True
+        and init_payload.get("root") == str(state_root)
+        and (state_root / "current_state.yaml").is_file()
+        and state_is_external
+        and state_root != legacy_root
+        and legacy_root_unchanged
+    )
+    portable_locator = (
+        locator.get("schema_version") == "research_cockpit_locator_v1"
+        and locator.get("project_id") == project_id
+        and str(state_home.resolve()) not in locator_text
+    )
     return _case(
         "agent_a_cold_start_install",
         all(check["passed"] for check in checks)
@@ -205,8 +250,12 @@ def agent_a_cold_start_install(
             "plugin_unchanged": not any(
                 path.startswith(".agent/skills/research-cockpit/") for path in changed
             ),
+            "git_repo": git_init["passed"],
+            "external_state_default": external_state_default,
+            "portable_locator": portable_locator,
         },
         findings=findings,
+        allowed_files=(".research-cockpit.yaml",),
     )
 
 

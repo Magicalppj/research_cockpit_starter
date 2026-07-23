@@ -273,6 +273,11 @@ class SkillReleaseCheckTests(unittest.TestCase):
             self.assertIn("metrics", case)
             self.assertIn("command_count", case["metrics"])
 
+        cold_start = by_case["agent_a_cold_start_install"]
+        self.assertTrue(cold_start["agent_observations"]["git_repo"])
+        self.assertTrue(cold_start["agent_observations"]["external_state_default"])
+        self.assertTrue(cold_start["agent_observations"]["portable_locator"])
+
         worker = by_case["agent_c_assigned_worker_round_trip"]
         self.assertTrue(worker["agent_observations"]["packet_ready"])
         self.assertTrue(worker["agent_observations"]["close_internally_verified"])
