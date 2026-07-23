@@ -14,11 +14,17 @@ from research_cockpit.commands.migrate_terminal_next_actions import (
     migrate_terminal_next_actions,
 )
 from research_cockpit.commands.repair_interaction_log import repair_interaction_log
+from research_cockpit.artifact_migration import migrate_legacy_artifact
 
 
 _ACTIONS_BY_COMMAND = {
     "repair": {"interaction_log", "suggestion_lifecycle"},
-    "migrate": {"interaction_log", "worktree_findings", "terminal_next_actions"},
+    "migrate": {
+        "artifact_storage",
+        "interaction_log",
+        "worktree_findings",
+        "terminal_next_actions",
+    },
     "compact": {"artifact"},
 }
 
@@ -30,6 +36,7 @@ _PARAMETER_FIELDS = {
         "show_diff",
     },
     ("migrate", "interaction_log"): set(),
+    ("migrate", "artifact_storage"): {"record_id", "operation_id"},
     ("migrate", "worktree_findings"): {
         "from_root",
         "agent_id",
@@ -49,6 +56,7 @@ _PARAMETER_FIELDS = {
 }
 
 _REQUIRED_PARAMETERS = {
+    ("migrate", "artifact_storage"): {"record_id", "operation_id"},
     ("migrate", "worktree_findings"): {"from_root", "agent_id", "option_id"},
     ("migrate", "terminal_next_actions"): {"node_id"},
 }
@@ -144,6 +152,13 @@ def _repair(root: Path, action: str, execute: bool, parameters: dict[str, Any]) 
 
 
 def _migrate(root: Path, action: str, execute: bool, parameters: dict[str, Any]) -> dict[str, Any]:
+    if action == "artifact_storage":
+        return migrate_legacy_artifact(
+            root,
+            record_id=parameters["record_id"],
+            operation_id=parameters["operation_id"],
+            execute=execute,
+        )
     if action == "interaction_log":
         return migrate_interaction_log(root, dry_run=not execute)
     if action == "worktree_findings":

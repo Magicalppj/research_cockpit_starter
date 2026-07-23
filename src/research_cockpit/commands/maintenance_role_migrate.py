@@ -5,9 +5,12 @@ from research_cockpit.commands._maintenance_role_cli import run_maintenance_role
 
 MAINTENANCE_MIGRATE_SCHEMA = {
     "schema_version": "maintenance_action_v1",
-    "action": "interaction_log",
+    "action": "artifact_storage",
     "execute": False,
-    "parameters": {},
+    "parameters": {
+        "record_id": "record_legacy",
+        "operation_id": "migrate-record-legacy-001",
+    },
 }
 
 

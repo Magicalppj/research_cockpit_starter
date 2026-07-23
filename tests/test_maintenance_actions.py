@@ -5,6 +5,7 @@ import shutil
 import sys
 import unittest
 import uuid
+from unittest import mock
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -63,6 +64,35 @@ class MaintenanceActionTests(unittest.TestCase):
         self.assertGreaterEqual(payload["result"]["event_count"], 1)
         self.assertFalse(
             (self.root / "graph" / "interaction_events" / "manifest.json").exists()
+        )
+
+    def test_migrate_artifact_storage_routes_one_record_and_operation_id(self) -> None:
+        expected = {"schema_version": "artifact_storage_migration_plan_v1"}
+        with mock.patch(
+            "research_cockpit.maintenance_actions.migrate_legacy_artifact",
+            return_value=expected,
+        ) as migrated:
+            payload = apply_maintenance_action(
+                self.root,
+                command="migrate",
+                plan={
+                    "schema_version": "maintenance_action_v1",
+                    "action": "artifact_storage",
+                    "execute": False,
+                    "parameters": {
+                        "record_id": "record_legacy",
+                        "operation_id": "migrate-legacy-001",
+                    },
+                },
+            )
+
+        self.assertFalse(payload["executed"])
+        self.assertEqual(payload["result"], expected)
+        migrated.assert_called_once_with(
+            self.root,
+            record_id="record_legacy",
+            operation_id="migrate-legacy-001",
+            execute=False,
         )
 
     def test_compact_dry_run_requires_no_artifact_selection(self) -> None:
