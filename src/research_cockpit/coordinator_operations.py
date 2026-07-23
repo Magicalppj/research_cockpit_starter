@@ -27,6 +27,12 @@ from research_cockpit.work_packets import assignment_result_revision
 
 
 _ASSIGN_FIELDS = {"schema_version", "operation_id", "action", "graph_plan", "session"}
+TRACKING_REASONS = (
+    "parallel_ownership",
+    "durable_handoff",
+    "independent_review",
+    "stage_deliverable",
+)
 _SESSION_FIELDS = {
     "kind",
     "option_id",
@@ -41,6 +47,7 @@ _SESSION_FIELDS = {
     "base",
     "create_worktree",
     "force",
+    "tracking_reason",
 }
 
 
@@ -105,6 +112,15 @@ def parse_coord_assign_input(payload: dict[str, Any]) -> dict[str, Any]:
         value = normalized.get(field)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ValueError(f"coord assign session {field} must be a non-empty string or null")
+    tracking_reason = normalized.get("tracking_reason")
+    if tracking_reason is not None:
+        if not isinstance(tracking_reason, str) or not tracking_reason.strip():
+            raise ValueError(
+                "coord assign session tracking_reason must be a non-empty string or null"
+            )
+        if len(tracking_reason.strip()) > 100:
+            raise ValueError("coord assign session tracking_reason exceeds 100 characters")
+        normalized["tracking_reason"] = tracking_reason.strip()
     for field in ("create_worktree", "force"):
         value = normalized.get(field, False)
         if not isinstance(value, bool):
@@ -129,6 +145,38 @@ def parse_coord_assign_input(payload: dict[str, Any]) -> dict[str, Any]:
         "action": action,
         "session": normalized,
     }
+
+
+def assignment_granularity_warning(session: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the non-blocking tracking-contract warning for a parsed session."""
+    tracking_reason = session.get("tracking_reason")
+    if tracking_reason is None:
+        return {
+            "code": "missing_tracking_reason",
+            "allowed_tracking_reasons": list(TRACKING_REASONS),
+        }
+    if tracking_reason not in TRACKING_REASONS:
+        return {
+            "code": "unknown_tracking_reason",
+            "provided_tracking_reason": tracking_reason,
+            "allowed_tracking_reasons": list(TRACKING_REASONS),
+        }
+    kind = session.get("kind", "experiment")
+    if kind == "review" and tracking_reason != "independent_review":
+        return {
+            "code": "review_tracking_reason_mismatch",
+            "provided_tracking_reason": tracking_reason,
+            "expected_tracking_reason": "independent_review",
+        }
+    if kind == "experiment" and tracking_reason == "independent_review":
+        return {
+            "code": "experiment_tracking_reason_mismatch",
+            "provided_tracking_reason": tracking_reason,
+            "expected_tracking_reasons": [
+                reason for reason in TRACKING_REASONS if reason != "independent_review"
+            ],
+        }
+    return None
 
 
 def _lease_epoch_counter(payload: dict[str, Any]) -> int:
@@ -258,6 +306,13 @@ def apply_coord_assignment(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
         transaction = result.get("_operation_transaction", {})
     else:
         session = parsed["session"]
+        tracking_reason = session.get("tracking_reason")
+        structured_tracking_reason = (
+            tracking_reason if tracking_reason in TRACKING_REASONS else None
+        )
+        granularity_warning = assignment_granularity_warning(session)
+        receipt["tracking_reason"] = structured_tracking_reason
+        receipt["granularity_warning"] = granularity_warning
         timestamp = datetime.now(timezone.utc)
         timestamp_text = timestamp.isoformat(timespec="seconds").replace("+00:00", "Z")
         assignment_path = root / "assignments" / f"{session['assignment_id']}.yaml"
@@ -342,6 +397,8 @@ def apply_coord_assignment(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
             },
             "updated_at": timestamp_text,
         }
+        if structured_tracking_reason is not None:
+            assignment_overrides["tracking_reason"] = structured_tracking_reason
         if experiment_id:
             assignment_overrides.update({
                 "kind": "experiment",
@@ -376,6 +433,8 @@ def apply_coord_assignment(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
             "kind": session_kind,
             "producer_assignment_id": session.get("producer_assignment_id"),
         }
+        if structured_tracking_reason is not None:
+            receipt["entities"]["tracking_reason"] = structured_tracking_reason
         interaction = {
             "kind": "coord_review_assignment_created" if session_kind == "review" else "coord_assignment_created",
             "actor": "coordinator",

@@ -84,6 +84,7 @@ PUBLIC_CONTRACT_EXAMPLES: dict[str, dict[str, Any]] = {
             "status": "pending",
             "result_revision": None,
         },
+        "result": None,
         "allowed_operations": _bounded(["start", "record", "close"]),
         "cursor": {
             "current_node": "experiment_x",
@@ -101,6 +102,20 @@ PUBLIC_CONTRACT_EXAMPLES: dict[str, dict[str, Any]] = {
         "runs": _bounded(["run_x"]),
         "findings": _bounded(["finding_x"]),
         "artifact_records": _bounded(["artifact_record_x"]),
+        "attempts": _bounded(
+            [
+                {
+                    "attempt_id": "seed_17",
+                    "status": "completed",
+                    "outcome": "positive",
+                    "summary": "Selected final seed met the acceptance criteria.",
+                    "evidence_refs": _bounded(
+                        ["s3://research-output/attempts/seed_17/metrics.json"],
+                        limit=5,
+                    ),
+                }
+            ]
+        ),
         "delivery": {
             "git_commit": "abcdef1",
             "changed_files": _bounded(["src/retrieval.py"]),
@@ -307,6 +322,11 @@ PUBLIC_CONTRACT_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
     ),
 }
 
+PUBLIC_CONTRACT_OPTIONAL_FIELDS: dict[str, frozenset[str]] = {
+    "work_packet_v1": frozenset({"result"}),
+    "evidence_bundle_v1": frozenset({"attempts"}),
+}
+
 
 def _contract_error(path: str, message: str) -> None:
     raise ValueError(f"{path}: {message}")
@@ -458,6 +478,86 @@ def _validate_verification(
             path,
             f"{status} requires additional_verification_required=true and commands",
         )
+
+
+def _validate_attempt_collection(
+    value: object,
+    path: str,
+    *,
+    strict: bool,
+    include_evidence_refs: bool,
+) -> dict[str, Any]:
+    attempts = _validate_bounded_collection(
+        value,
+        path,
+        item_kind="mapping",
+        strict=strict,
+    )
+    fields = {"attempt_id", "status", "outcome", "summary"}
+    if include_evidence_refs:
+        fields.add("evidence_refs")
+    attempt_ids: set[str] = set()
+    for index, item in enumerate(attempts["items"]):
+        item_path = f"{path}.items[{index}]"
+        _require_fields(item, item_path, fields)
+        _reject_unknown_fields(item, item_path, fields, strict=strict)
+        attempt_id = _require_string(item["attempt_id"], f"{item_path}.attempt_id")
+        assert attempt_id is not None
+        attempt_key = attempt_id.casefold()
+        if attempt_key in attempt_ids:
+            _contract_error(path, "attempt_id values must be unique")
+        attempt_ids.add(attempt_key)
+        _require_enum(
+            item["status"],
+            f"{item_path}.status",
+            frozenset({"completed", "failed", "cancelled"}),
+        )
+        _require_enum(
+            item["outcome"],
+            f"{item_path}.outcome",
+            frozenset({"positive", "negative", "inconclusive", "mixed"}),
+        )
+        _require_string(item["summary"], f"{item_path}.summary")
+        if include_evidence_refs:
+            evidence_refs = _validate_bounded_collection(
+                item["evidence_refs"],
+                f"{item_path}.evidence_refs",
+                item_kind="string",
+                strict=strict,
+            )
+            if evidence_refs["limit"] != 5:
+                _contract_error(
+                    f"{item_path}.evidence_refs.limit",
+                    "must be 5",
+                )
+    return attempts
+
+
+def _validate_result_projection(
+    value: object,
+    path: str,
+    *,
+    strict: bool,
+) -> None:
+    if value is None:
+        return
+    result = _require_mapping(value, path)
+    fields = {"revision", "outcome", "summary", "attempts"}
+    _require_fields(result, path, fields)
+    _reject_unknown_fields(result, path, fields, strict=strict)
+    _require_string(result["revision"], f"{path}.revision")
+    _require_enum(
+        result["outcome"],
+        f"{path}.outcome",
+        frozenset({"positive", "negative", "inconclusive", "mixed"}),
+    )
+    _require_string(result["summary"], f"{path}.summary")
+    _validate_attempt_collection(
+        result["attempts"],
+        f"{path}.attempts",
+        strict=strict,
+        include_evidence_refs=False,
+    )
 
 
 def _validate_required_action(
@@ -739,6 +839,9 @@ def _validate_work_packet(
             "pending review requires a null result revision",
         )
 
+    if "result" in payload:
+        _validate_result_projection(payload["result"], f"{path}.result", strict=strict)
+
     cursor = _require_mapping(payload["cursor"], f"{path}.cursor")
     cursor_fields = {"current_node", "next_actions"}
     _require_fields(cursor, f"{path}.cursor", cursor_fields)
@@ -819,6 +922,13 @@ def _validate_evidence_bundle(
             f"{path}.{field}",
             item_kind="string",
             strict=strict,
+        )
+    if "attempts" in payload:
+        _validate_attempt_collection(
+            payload["attempts"],
+            f"{path}.attempts",
+            strict=strict,
+            include_evidence_refs=True,
         )
 
     delivery = _require_mapping(payload["delivery"], f"{path}.delivery")
@@ -1447,10 +1557,11 @@ def parse_public_contract(
             f"{schema_version} is missing required fields: {', '.join(missing)}"
         )
     strict = mode == "mutation"
+    optional_fields = PUBLIC_CONTRACT_OPTIONAL_FIELDS.get(schema_version, frozenset())
     _reject_unknown_fields(
         payload,
         schema_version,
-        {*required_fields, "schema_version"},
+        {*required_fields, *optional_fields, "schema_version"},
         strict=strict,
     )
     _PUBLIC_CONTRACT_VALIDATORS[schema_version](

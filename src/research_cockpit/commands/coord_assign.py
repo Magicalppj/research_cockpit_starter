@@ -76,6 +76,7 @@ COORD_ASSIGN_SCHEMAS = {
             "assignment_id": "assignment_x",
             "create_worktree": True,
             "force": False,
+            "tracking_reason": "stage_deliverable",
         },
     },
     "review_session": {
@@ -93,6 +94,7 @@ COORD_ASSIGN_SCHEMAS = {
             "assignment_id": "assignment_review_x",
             "create_worktree": True,
             "force": False,
+            "tracking_reason": "independent_review",
         },
     },
 }

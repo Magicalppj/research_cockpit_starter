@@ -16,6 +16,7 @@ from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.coordinator_operations import (
     _lease_epoch_counter,
     apply_coord_assignment,
+    assignment_granularity_warning,
     parse_coord_assign_input,
 )
 from research_cockpit.interaction_log import iter_interaction_events
@@ -137,6 +138,7 @@ class CoordinatorAssignmentTests(unittest.TestCase):
                 "assignment_id": "assign_canonical",
                 "create_worktree": False,
                 "force": True,
+                "tracking_reason": "stage_deliverable",
             },
         }
 
@@ -158,10 +160,13 @@ class CoordinatorAssignmentTests(unittest.TestCase):
 
         self.assertEqual(replay, first)
         self.assertTrue(index_path.is_file())
+        self.assertEqual(first["tracking_reason"], "stage_deliverable")
+        self.assertIsNone(first["granularity_warning"])
         assignment = load_yaml(self.root / "assignments" / "assign_canonical.yaml")
         self.assertEqual(assignment["agent_id"], "agent_canonical")
         self.assertEqual(assignment["current_node"], "experiment_demo_prompt_refinement")
         self.assertEqual(assignment["objective"], "Test the canonical assignment facade.")
+        self.assertEqual(assignment["tracking_reason"], "stage_deliverable")
         self.assertEqual(
             assignment["lease"]["owner_agent_id"],
             "agent_canonical",
@@ -172,6 +177,73 @@ class CoordinatorAssignmentTests(unittest.TestCase):
         self.assertEqual(packet["lease"]["state"], "active")
         self.assertEqual(packet["readiness"], "ready")
         self.assertIn("start", packet["allowed_operations"]["items"])
+
+    def test_missing_tracking_reason_warns_without_writing_a_default(self) -> None:
+        plan = {
+            "schema_version": "coord_assign_v1",
+            "operation_id": "op_coord_missing_tracking_reason",
+            "action": "session",
+            "session": {
+                "kind": "experiment",
+                "option_id": "option_demo_prompt_refinement",
+                "experiment_id": "experiment_demo_prompt_refinement",
+                "objective": "Keep the existing broad workstream.",
+                "branch": "codex/missing-tracking-reason",
+                "worktree": str(self.worktree),
+                "agent_id": "agent_missing_tracking_reason",
+                "assignment_id": "assign_missing_tracking_reason",
+                "create_worktree": False,
+                "force": True,
+            },
+        }
+
+        first = apply_coord_assignment(self.root, plan)
+        replay = apply_coord_assignment(self.root, plan)
+
+        self.assertEqual(replay, first)
+        self.assertIsNone(first["tracking_reason"])
+        self.assertEqual(
+            first["granularity_warning"],
+            {
+                "code": "missing_tracking_reason",
+                "allowed_tracking_reasons": [
+                    "parallel_ownership",
+                    "durable_handoff",
+                    "independent_review",
+                    "stage_deliverable",
+                ],
+            },
+        )
+        assignment = load_yaml(
+            self.root / "assignments" / "assign_missing_tracking_reason.yaml"
+        )
+        self.assertNotIn("tracking_reason", assignment)
+
+    def test_tracking_reason_warnings_use_exact_structured_values(self) -> None:
+        natural_language = "independent review of a stage deliverable"
+
+        self.assertEqual(
+            assignment_granularity_warning(
+                {"kind": "experiment", "tracking_reason": natural_language}
+            )["code"],
+            "unknown_tracking_reason",
+        )
+        self.assertEqual(
+            assignment_granularity_warning(
+                {"kind": "review", "tracking_reason": "parallel_ownership"}
+            ),
+            {
+                "code": "review_tracking_reason_mismatch",
+                "provided_tracking_reason": "parallel_ownership",
+                "expected_tracking_reason": "independent_review",
+            },
+        )
+        self.assertEqual(
+            assignment_granularity_warning(
+                {"kind": "experiment", "tracking_reason": "independent_review"}
+            )["code"],
+            "experiment_tracking_reason_mismatch",
+        )
 
     def test_experiment_session_requires_explicit_experiment_target(self) -> None:
         with self.assertRaisesRegex(ValueError, "experiment_id"):

@@ -26,6 +26,10 @@ from research_cockpit.work_packets import build_work_packet_for_assignment
 COLLECTION_LIMIT = 20
 EVIDENCE_BUNDLE_MAX_BYTES = 16 * 1024
 TEXT_ITEM_LIMIT = 500
+ATTEMPT_INPUT_LIMIT = 100
+ATTEMPT_EVIDENCE_REF_LIMIT = 5
+_ATTEMPT_STATUSES = {"completed", "failed", "cancelled"}
+_ATTEMPT_OUTCOMES = {"positive", "negative", "inconclusive", "mixed"}
 
 
 def bounded_collection(values: list[Any], *, limit: int = COLLECTION_LIMIT) -> dict[str, Any]:
@@ -95,6 +99,83 @@ def _string_list(value: Any, field_name: str) -> list[str]:
     return rows
 
 
+def _attempt_reference(value: Any, *, index: int, reference_index: int) -> str:
+    reference = str(value or "").strip()
+    if not reference:
+        raise ValueError(
+            "assignment_result.attempts["
+            f"{index}].evidence_refs[{reference_index}] must be a non-empty string"
+        )
+    if len(reference) > 1000:
+        raise ValueError(
+            "assignment_result.attempts["
+            f"{index}].evidence_refs[{reference_index}] exceeds 1000 characters"
+        )
+    return reference
+
+
+def _attempt(value: Any, *, index: int) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"assignment_result.attempts[{index}] must be a mapping")
+    required = {"attempt_id", "status", "outcome", "summary", "evidence_refs"}
+    missing = sorted(required - set(value))
+    unknown = sorted(set(value) - required)
+    if missing:
+        raise ValueError(
+            f"assignment_result.attempts[{index}] is missing: " + ", ".join(missing)
+        )
+    if unknown:
+        raise ValueError(
+            f"assignment_result.attempts[{index}] does not support: " + ", ".join(unknown)
+        )
+    attempt_id = str(value["attempt_id"] or "").strip()
+    if not attempt_id:
+        raise ValueError(f"assignment_result.attempts[{index}].attempt_id must be non-empty")
+    if len(attempt_id) > 200:
+        raise ValueError(
+            f"assignment_result.attempts[{index}].attempt_id exceeds 200 characters"
+        )
+    status = str(value["status"] or "").strip()
+    if status not in _ATTEMPT_STATUSES:
+        allowed = ", ".join(sorted(_ATTEMPT_STATUSES))
+        raise ValueError(
+            f"assignment_result.attempts[{index}].status must be one of: {allowed}"
+        )
+    outcome = str(value["outcome"] or "").strip()
+    if outcome not in _ATTEMPT_OUTCOMES:
+        allowed = ", ".join(sorted(_ATTEMPT_OUTCOMES))
+        raise ValueError(
+            f"assignment_result.attempts[{index}].outcome must be one of: {allowed}"
+        )
+    summary = str(value["summary"] or "").strip()
+    if not summary:
+        raise ValueError(f"assignment_result.attempts[{index}].summary must be non-empty")
+    references = value["evidence_refs"]
+    if not isinstance(references, list):
+        raise ValueError(f"assignment_result.attempts[{index}].evidence_refs must be a list")
+    if len(references) > ATTEMPT_EVIDENCE_REF_LIMIT:
+        raise ValueError(
+            f"assignment_result.attempts[{index}].evidence_refs supports at most "
+            f"{ATTEMPT_EVIDENCE_REF_LIMIT} entries"
+        )
+    normalized_references = [
+        _attempt_reference(item, index=index, reference_index=reference_index)
+        for reference_index, item in enumerate(references)
+    ]
+    if len(set(normalized_references)) != len(normalized_references):
+        raise ValueError(f"assignment_result.attempts[{index}].evidence_refs must be unique")
+    return {
+        "attempt_id": attempt_id,
+        "status": status,
+        "outcome": outcome,
+        "summary": _bounded_text(summary),
+        "evidence_refs": bounded_collection(
+            normalized_references,
+            limit=ATTEMPT_EVIDENCE_REF_LIMIT,
+        ),
+    }
+
+
 def _proposal(value: Any, *, index: int) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"assignment_result.proposals[{index}] must be a mapping")
@@ -154,7 +235,7 @@ def build_evidence_bundle(
     review: dict[str, Any] | None = None,
     extra_proposals: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], str]:
-    allowed = {"outcome", "summary", "delivery", "proposals"}
+    allowed = {"outcome", "summary", "delivery", "proposals", "attempts"}
     unknown = sorted(set(result_spec) - allowed)
     if unknown:
         raise ValueError("assignment_result does not support: " + ", ".join(unknown))
@@ -165,6 +246,18 @@ def build_evidence_bundle(
         _proposal(item, index=index)
         for index, item in enumerate([*proposals, *(extra_proposals or [])])
     ]
+    attempts = result_spec.get("attempts", [])
+    if not isinstance(attempts, list):
+        raise ValueError("assignment_result.attempts must be a list")
+    if len(attempts) > ATTEMPT_INPUT_LIMIT:
+        raise ValueError(
+            "assignment_result.attempts supports at most "
+            f"{ATTEMPT_INPUT_LIMIT} selected attempts"
+        )
+    normalized_attempts = [_attempt(item, index=index) for index, item in enumerate(attempts)]
+    attempt_ids = [item["attempt_id"].casefold() for item in normalized_attempts]
+    if len(set(attempt_ids)) != len(attempt_ids):
+        raise ValueError("assignment_result.attempts attempt_id values must be unique")
     bundle = {
         "schema_version": "evidence_bundle_v1",
         "bundle_kind": bundle_kind,
@@ -180,6 +273,7 @@ def build_evidence_bundle(
         "artifact_records": bounded_collection(
             [_bounded_text(item, limit=200) for item in artifact_record_ids]
         ),
+        "attempts": bounded_collection(normalized_attempts),
         "delivery": _delivery(result_spec.get("delivery")),
         "proposals": bounded_collection(normalized_proposals),
         "verification": {

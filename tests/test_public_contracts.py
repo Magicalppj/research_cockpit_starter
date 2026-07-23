@@ -90,6 +90,7 @@ class PublicContractTests(unittest.TestCase):
                 evidence["runs"],
                 evidence["findings"],
                 evidence["artifact_records"],
+                evidence["attempts"],
                 evidence["delivery"]["changed_files"],
                 evidence["proposals"],
             ]
@@ -263,6 +264,11 @@ class PublicContractTests(unittest.TestCase):
         nested["delivery"]["future_mutation_field"] = "reject"
         with self.assertRaisesRegex(ValueError, "delivery.*unknown fields"):
             parse_public_contract(nested, mode="mutation")
+
+        invalid_attempt = public_contract_example("evidence_bundle_v1")
+        invalid_attempt["attempts"]["items"][0]["status"] = "running"
+        with self.assertRaisesRegex(ValueError, "attempts.*status"):
+            parse_public_contract(invalid_attempt, mode="mutation")
 
         with self.assertRaisesRegex(ValueError, "not a mutation input"):
             parse_public_contract(

@@ -30,6 +30,7 @@ from research_cockpit.model import load_runs
 from research_cockpit.mutation_lock import MutationError
 from research_cockpit.public_contracts import WORKFLOW_BUDGETS
 from research_cockpit.storage import load_yaml, save_yaml
+from research_cockpit.work_packets import build_work_packet
 
 
 NOW = datetime(2026, 7, 20, 10, 0, tzinfo=timezone.utc)
@@ -213,6 +214,99 @@ class WorkCloseTests(unittest.TestCase):
         self.assertEqual(assignment.review["status"], "pending")
         self.assertNotIn("assign_x", agent.active_assignment_ids)
         self.assertEqual(len(list((self.root / "assignments").glob("*.yaml"))), 1)
+
+    def test_closeout_aggregates_external_attempts_without_graph_growth(self) -> None:
+        plan = self._plan(operation_id="op_close_aggregated_attempts")
+        plan["assignment_result"]["attempts"] = [
+            {
+                "attempt_id": "preflight_seed_1",
+                "status": "failed",
+                "outcome": "negative",
+                "summary": "Seed 1 exhausted the memory budget before evaluation.",
+                "evidence_refs": ["s3://research-output/seed_1/stderr.log"],
+            },
+            {
+                "attempt_id": "retry_seed_2",
+                "status": "completed",
+                "outcome": "negative",
+                "summary": "Seed 2 completed but missed the quality threshold.",
+                "evidence_refs": ["s3://research-output/seed_2/metrics.json"],
+            },
+            {
+                "attempt_id": "selected_seed_3",
+                "status": "completed",
+                "outcome": "negative",
+                "summary": "Seed 3 confirmed the same negative conclusion.",
+                "evidence_refs": ["s3://research-output/seed_3/metrics.json"],
+            },
+        ]
+
+        receipt = close_assignment_work(
+            self.root,
+            assignment_id="assign_x",
+            plan=plan,
+            now=NOW + timedelta(minutes=2),
+        )
+
+        assignment = load_assignment(self.root, "assign_x")
+        bundle = assignment.result
+        packet = build_work_packet(
+            self.root,
+            "assign_x",
+            now=NOW + timedelta(minutes=3),
+        )
+
+        self.assertEqual(
+            [item["attempt_id"] for item in bundle["attempts"]["items"]],
+            ["preflight_seed_1", "retry_seed_2", "selected_seed_3"],
+        )
+        self.assertEqual(bundle["attempts"]["total"], 3)
+        self.assertEqual(bundle["attempts"]["omitted"], 0)
+        self.assertEqual(bundle["attempts"]["items"][0]["status"], "failed")
+        self.assertEqual(bundle["attempts"]["items"][0]["outcome"], "negative")
+        self.assertEqual(
+            bundle["attempts"]["items"][0]["evidence_refs"]["items"],
+            ["s3://research-output/seed_1/stderr.log"],
+        )
+        self.assertEqual(packet["result"]["revision"], receipt["result_revision"])
+        self.assertEqual(packet["result"]["attempts"]["total"], 3)
+        self.assertEqual(
+            [item["attempt_id"] for item in packet["result"]["attempts"]["items"]],
+            ["preflight_seed_1", "retry_seed_2", "selected_seed_3"],
+        )
+        self.assertEqual(len(list((self.root / "assignments").glob("*.yaml"))), 1)
+        self.assertEqual(len(list((self.root / "graph" / "nodes").glob("*.yaml"))), 2)
+        self.assertEqual(len(load_runs(self.root)), 1)
+        self.assertLessEqual(
+            len(json.dumps(bundle, separators=(",", ":")).encode("utf-8")),
+            16 * 1024,
+        )
+
+    def test_closeout_bounds_selected_attempts(self) -> None:
+        plan = self._plan(operation_id="op_close_bounded_attempts")
+        plan["assignment_result"]["attempts"] = [
+            {
+                "attempt_id": f"seed_{index}",
+                "status": "completed",
+                "outcome": "negative",
+                "summary": f"Seed {index} missed the accepted threshold.",
+                "evidence_refs": [f"s3://research-output/seed_{index}/metrics.json"],
+            }
+            for index in range(21)
+        ]
+
+        close_assignment_work(
+            self.root,
+            assignment_id="assign_x",
+            plan=plan,
+            now=NOW + timedelta(minutes=2),
+        )
+
+        attempts = load_assignment(self.root, "assign_x").result["attempts"]
+        self.assertEqual(attempts["limit"], 20)
+        self.assertEqual(attempts["total"], 21)
+        self.assertEqual(attempts["omitted"], 1)
+        self.assertEqual(len(attempts["items"]), 20)
 
     def test_invalid_finding_confidence_lists_allowed_values(self) -> None:
         plan = self._plan(operation_id="op_close_invalid_confidence")

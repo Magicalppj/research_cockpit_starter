@@ -41,6 +41,15 @@ WORK_CLOSE_SCHEMA = {
             "changed_files": [],
             "tests": {"status": "passed", "summary": "Targeted checks passed."},
         },
+        "attempts": [
+            {
+                "attempt_id": "seed_17",
+                "status": "completed",
+                "outcome": "positive",
+                "summary": "Selected final seed met the acceptance criteria.",
+                "evidence_refs": ["s3://research-output/attempts/seed_17/metrics.json"],
+            }
+        ],
         "proposals": [],
     },
     "review_required": False,

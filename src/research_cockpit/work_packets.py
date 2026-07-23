@@ -34,6 +34,9 @@ WORK_PACKET_MAX_BYTES = 8 * 1024
 _TEXT_LIMIT = 200
 _DEPENDENCY_GRAPH_LIMIT = 200
 _ASSIGNMENT_STATUSES = {"queued", "active", "blocked", "completed", "cancelled", "retired"}
+_RESULT_ATTEMPT_LIMIT = 5
+_RESULT_OUTCOMES = {"positive", "negative", "inconclusive", "mixed"}
+_RESULT_ATTEMPT_STATUSES = {"completed", "failed", "cancelled"}
 
 
 def _text(value: Any, *, limit: int = _TEXT_LIMIT) -> str:
@@ -66,6 +69,64 @@ def assignment_result_revision(assignment: AssignmentRecord) -> str | None:
     if isinstance(explicit, str) and explicit.strip():
         return explicit.strip()
     return stable_payload_revision(result, prefix="result-v1")
+
+
+def _result_projection(assignment: AssignmentRecord) -> dict[str, Any] | None:
+    result = assignment.result
+    if result.get("schema_version") != "evidence_bundle_v1":
+        return None
+    revision = assignment_result_revision(assignment)
+    outcome = str(result.get("outcome") or "").strip()
+    summary = str(result.get("summary") or "").strip()
+    if not revision or outcome not in _RESULT_OUTCOMES or not summary:
+        return None
+    raw_attempts = result.get("attempts")
+    if raw_attempts is None:
+        raw_items: list[Any] = []
+        total = 0
+    elif not isinstance(raw_attempts, dict) or not isinstance(raw_attempts.get("items"), list):
+        return None
+    else:
+        raw_items = raw_attempts["items"]
+        raw_total = raw_attempts.get("total")
+        total = raw_total if isinstance(raw_total, int) and raw_total >= 0 else len(raw_items)
+        total = max(total, len(raw_items))
+    attempts: list[dict[str, str]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            return None
+        attempt_id = str(item.get("attempt_id") or "").strip()
+        status = str(item.get("status") or "").strip()
+        attempt_outcome = str(item.get("outcome") or "").strip()
+        attempt_summary = str(item.get("summary") or "").strip()
+        if (
+            not attempt_id
+            or status not in _RESULT_ATTEMPT_STATUSES
+            or attempt_outcome not in _RESULT_OUTCOMES
+            or not attempt_summary
+        ):
+            return None
+        attempts.append(
+            {
+                "attempt_id": _text(attempt_id, limit=200),
+                "status": status,
+                "outcome": attempt_outcome,
+                "summary": _text(attempt_summary, limit=200),
+            }
+        )
+    items = attempts[:_RESULT_ATTEMPT_LIMIT]
+    total = max(total, len(attempts))
+    return {
+        "revision": revision,
+        "outcome": outcome,
+        "summary": _text(summary, limit=400),
+        "attempts": {
+            "items": items,
+            "limit": _RESULT_ATTEMPT_LIMIT,
+            "total": total,
+            "omitted": max(0, total - len(items)),
+        },
+    }
 
 
 def _review_projection(assignment: AssignmentRecord) -> dict[str, Any]:
@@ -438,6 +499,8 @@ def _fit_budget(packet: dict[str, Any]) -> None:
         packet["dependencies"],
         packet["stale_inputs"],
     ]
+    if packet["result"] is not None:
+        collection_paths.append(packet["result"]["attempts"])
     while _encoded_size(packet) >= WORK_PACKET_MAX_BYTES:
         changed = False
         for collection in collection_paths:
@@ -590,6 +653,7 @@ def build_work_packet_for_assignment(
         ),
         "lease": lease,
         "review": _review_projection(assignment),
+        "result": _result_projection(assignment),
         "allowed_operations": _bounded(allowed_operations, item_limit=10),
         "cursor": {
             "current_node": assignment.current_node or None,
