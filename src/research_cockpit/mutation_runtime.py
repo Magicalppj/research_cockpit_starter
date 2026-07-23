@@ -719,6 +719,7 @@ def execute_mutation_transaction(
         event_checkpoint = interaction_append_checkpoint(root)
         if operation_request is not None:
             operation_signature_before = operation_source_signature(root)
+        committed_staged_targets: set[Path] = set()
         try:
             with progress_phase("commit"):
                 for path, _, after in planned_yaml:
@@ -729,6 +730,7 @@ def execute_mutation_transaction(
                     written_files.append(str(path))
                 for source, target, existed in planned_moves:
                     _commit_staged_move(root, source, target, existed, allowed_roots=planned_move_roots)
+                    committed_staged_targets.add(target)
                     written_files.append(str(target))
                 for interaction in planned_interactions:
                     appended = _append_interaction_log_unlocked(
@@ -738,12 +740,22 @@ def execute_mutation_transaction(
         except BaseException as exc:
             rollback_errors = restore_interaction_append_checkpoint(root, event_checkpoint)
             rollback_errors.extend(_restore_files(backups))
+            preserved_staged_paths: list[str] = []
             for source, target, _ in planned_moves:
-                for staged_path in (target, source):
-                    try:
-                        _remove_staged_path(staged_path)
-                    except OSError as cleanup_exc:
-                        rollback_errors.append(f"{staged_path}: {cleanup_exc}")
+                try:
+                    _remove_staged_path(source)
+                except OSError as cleanup_exc:
+                    rollback_errors.append(f"{source}: {cleanup_exc}")
+                if target in committed_staged_targets and rollback_errors:
+                    if _lexists(target):
+                        preserved_staged_paths.append(str(target))
+                    continue
+                try:
+                    _remove_staged_path(target)
+                except OSError as cleanup_exc:
+                    rollback_errors.append(f"{target}: {cleanup_exc}")
+                    if target in committed_staged_targets and _lexists(target):
+                        preserved_staged_paths.append(str(target))
             rolled_back = not rollback_errors
             status = "rolled_back" if rolled_back else "partial_success"
             payload = {
@@ -760,6 +772,8 @@ def execute_mutation_transaction(
             }
             if rollback_errors:
                 payload["rollback_errors"] = rollback_errors
+            if preserved_staged_paths:
+                payload["preserved_staged_paths"] = preserved_staged_paths
             if not isinstance(exc, Exception) and not rollback_errors:
                 raise
             raise MutationError(f"Mutation transaction failed; status={status}: {exc}", payload) from exc

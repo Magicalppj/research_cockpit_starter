@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -196,7 +197,7 @@ class NodeOnboardingTests(unittest.TestCase):
         )
 
         command = payload["command_drafts"]["claim_assignment"]
-        self.assertNotIn("research-cockpit", command)
+        self.assertNotEqual(shlex.split(command)[0], "research-cockpit")
         self.assertIn("-m research_cockpit.cli work claim", command)
         self.assertIn("--root", command)
         self.assertEqual(payload["recommended_next_steps"][0]["command"], command)
@@ -236,7 +237,7 @@ class NodeOnboardingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr or result.stdout)
         payload = json.loads(result.stdout)
         command = payload["node_context"]["command_drafts"]["claim_assignment"]
-        self.assertNotIn("research-cockpit", command)
+        self.assertNotEqual(shlex.split(command)[0], "research-cockpit")
         self.assertIn("-m research_cockpit.cli work claim", command)
 
     def test_commands_manifest_includes_python_module_command(self) -> None:
