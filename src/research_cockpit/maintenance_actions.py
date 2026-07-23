@@ -14,6 +14,7 @@ from research_cockpit.commands.migrate_terminal_next_actions import (
     migrate_terminal_next_actions,
 )
 from research_cockpit.commands.repair_interaction_log import repair_interaction_log
+from research_cockpit.artifact_gc import execute_managed_artifact_gc
 from research_cockpit.artifact_migration import migrate_legacy_artifact
 
 
@@ -25,7 +26,7 @@ _ACTIONS_BY_COMMAND = {
         "worktree_findings",
         "terminal_next_actions",
     },
-    "compact": {"artifact"},
+    "compact": {"artifact", "artifact_gc"},
 }
 
 _PARAMETER_FIELDS = {
@@ -53,12 +54,20 @@ _PARAMETER_FIELDS = {
         "show_diff",
     },
     ("compact", "artifact"): {"artifact_id", "show_diff"},
+    ("compact", "artifact_gc"): {
+        "record_id",
+        "operation_id",
+        "phase",
+        "expected_revision",
+        "purge_after_seconds",
+    },
 }
 
 _REQUIRED_PARAMETERS = {
     ("migrate", "artifact_storage"): {"record_id", "operation_id"},
     ("migrate", "worktree_findings"): {"from_root", "agent_id", "option_id"},
     ("migrate", "terminal_next_actions"): {"node_id"},
+    ("compact", "artifact_gc"): {"record_id", "operation_id", "phase"},
 }
 
 
@@ -120,6 +129,18 @@ def parse_maintenance_action(
         if isinstance(age, bool) or not isinstance(age, int) or age < 0:
             raise ValueError(
                 f"maintenance {command} {action} older_than_days must be an integer >= 0"
+            )
+    if "expected_revision" in normalized and not isinstance(
+        normalized["expected_revision"], str
+    ):
+        raise ValueError(
+            f"maintenance {command} {action} expected_revision must be a string"
+        )
+    if "purge_after_seconds" in normalized:
+        delay = normalized["purge_after_seconds"]
+        if isinstance(delay, bool) or not isinstance(delay, int):
+            raise ValueError(
+                f"maintenance {command} {action} purge_after_seconds must be an integer"
             )
     if "from_root" in normalized:
         from_root = Path(normalized["from_root"])
@@ -187,7 +208,16 @@ def _migrate(root: Path, action: str, execute: bool, parameters: dict[str, Any])
 
 
 def _compact(root: Path, action: str, execute: bool, parameters: dict[str, Any]) -> dict[str, Any]:
-    del action
+    if action == "artifact_gc":
+        return execute_managed_artifact_gc(
+            root,
+            record_id=parameters["record_id"],
+            operation_id=parameters["operation_id"],
+            phase=parameters["phase"],
+            expected_revision=parameters.get("expected_revision"),
+            purge_after_seconds=parameters.get("purge_after_seconds"),
+            execute=execute,
+        )
     return compact_artifacts_payload(
         root,
         artifact_id=parameters.get("artifact_id"),

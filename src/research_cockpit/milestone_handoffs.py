@@ -69,6 +69,7 @@ def _truth_paths(root: Path) -> list[Path]:
         "runs",
         "artifact_records",
         "artifact_migrations",
+        "artifact_gc_manifests",
     )
     for name in yaml_roots:
         directory = root / name

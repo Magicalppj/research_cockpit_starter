@@ -448,8 +448,30 @@ def agent_c_assigned_worker_round_trip(
         close_check.get("json") if isinstance(close_check.get("json"), dict) else {}
     )
     assignment = _read_yaml(root / "assignments" / f"{assignment_id}.yaml")
-    artifact_paths = list((root / "artifacts" / DEMO_EXPERIMENT_ID).rglob("metrics.json"))
-    payload_preserved = any(path.read_bytes() == evidence_bytes for path in artifact_paths)
+    artifact_record_id = str(
+        close_payload.get("entities", {}).get("artifact_record_id") or ""
+    )
+    artifact_records = _read_yaml(
+        root / "artifact_records" / f"{DEMO_EXPERIMENT_ID}.yaml"
+    ).get("records", {})
+    artifact_record = (
+        artifact_records.get(artifact_record_id, {})
+        if isinstance(artifact_records, dict)
+        else {}
+    )
+    storage = artifact_record.get("storage", {})
+    links = artifact_record.get("links", {})
+    legacy_copy_paths = list(
+        (root / "artifacts" / DEMO_EXPERIMENT_ID).rglob("metrics.json")
+    )
+    evidence_preserved = (
+        (evidence_source / "metrics.json").read_bytes() == evidence_bytes
+        and storage.get("mode") == "reference"
+        and storage.get("ownership") == "external"
+        and storage.get("uri") == evidence_source.as_uri()
+        and links.get("metrics") == (evidence_source / "metrics.json").as_uri()
+        and not legacy_copy_paths
+    )
     observations = {
         "packet_ready": packet.get("readiness") == "ready",
         "start_generated_run": bool(run_id),
@@ -461,7 +483,7 @@ def agent_c_assigned_worker_round_trip(
             is False
         ),
         "assignment_completed": assignment.get("status") == "completed",
-        "final_evidence_preserved": payload_preserved,
+        "final_evidence_preserved": evidence_preserved,
         "agent_command_count": len(worker_checks),
     }
     return _case(

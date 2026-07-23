@@ -110,6 +110,40 @@ class MaintenanceActionTests(unittest.TestCase):
         self.assertFalse(payload["executed"])
         self.assertEqual(payload["result"]["schema_version"], "artifact_compaction_plan_v1")
 
+    def test_compact_artifact_gc_routes_one_revision_bound_record(self) -> None:
+        expected = {"schema_version": "artifact_gc_plan_v1"}
+        with mock.patch(
+            "research_cockpit.maintenance_actions.execute_managed_artifact_gc",
+            return_value=expected,
+        ) as collected:
+            payload = apply_maintenance_action(
+                self.root,
+                command="compact",
+                plan={
+                    "schema_version": "maintenance_action_v1",
+                    "action": "artifact_gc",
+                    "execute": False,
+                    "parameters": {
+                        "record_id": "record_legacy",
+                        "operation_id": "gc-record-001",
+                        "phase": "quarantine",
+                        "purge_after_seconds": 60,
+                    },
+                },
+            )
+
+        self.assertFalse(payload["executed"])
+        self.assertEqual(payload["result"], expected)
+        collected.assert_called_once_with(
+            self.root,
+            record_id="record_legacy",
+            operation_id="gc-record-001",
+            phase="quarantine",
+            expected_revision=None,
+            purge_after_seconds=60,
+            execute=False,
+        )
+
     def test_command_rejects_an_action_owned_by_another_maintenance_route(self) -> None:
         with self.assertRaisesRegex(ValueError, "not supported by maintenance repair"):
             apply_maintenance_action(

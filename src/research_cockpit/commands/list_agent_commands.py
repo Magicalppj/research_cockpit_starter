@@ -1711,7 +1711,7 @@ CUTOVER_FACADE_COMMANDS: list[dict[str, object]] = [
     },
     {
         "name": "maintenance compact",
-        "purpose": "Plan or demote one eligible graph artifact without deleting payload files.",
+        "purpose": "Plan one graph-artifact demotion or one revision-bound managed-payload GC transition.",
         "mutating": True,
         "supports_json": True,
         "supports_compact": True,
@@ -1723,7 +1723,7 @@ CUTOVER_FACADE_COMMANDS: list[dict[str, object]] = [
         "group": "maintenance",
         "verification_mode": "structured_file_non_dry_run",
         "rebuild_default": False,
-        "recommended_when": "Dry-run first, then demote one can_demote artifact per invocation.",
+        "recommended_when": "Dry-run first; graph demotion never deletes payloads, while artifact_gc quarantines or purges only one verified managed record.",
     },
 ]
 
