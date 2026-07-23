@@ -13,6 +13,15 @@ from research_cockpit.storage import load_yaml
 from research_cockpit.types import ValidationError
 
 
+def _plan_operation_id(raw_plan: object) -> object | None:
+    if not isinstance(raw_plan, dict):
+        return None
+    parameters = raw_plan.get("parameters")
+    if not isinstance(parameters, dict):
+        return None
+    return parameters.get("operation_id")
+
+
 def run_maintenance_role(
     *,
     command: str,
@@ -63,6 +72,7 @@ def run_maintenance_role(
             parser,
             exc,
             operation=f"maintenance {command}",
+            operation_id=_plan_operation_id(raw_plan),
             retry_command=f"research-cockpit maintenance {command} --print-schema",
         )
 

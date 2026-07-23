@@ -182,6 +182,7 @@ class BlindAcceptanceRegressionTests(unittest.TestCase):
                 "schema_version": "maintenance_action_v1",
                 "action": "interaction_log",
                 "execute": False,
+                "parameters": {"operation_id": "maintenance-invalid-001"},
                 "unexpected": True,
             },
         )
@@ -203,6 +204,7 @@ class BlindAcceptanceRegressionTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], "work_operation_v1")
         self.assertEqual(payload["operation"], "maintenance repair")
         self.assertEqual(payload["error"]["code"], "invalid_request")
+        self.assertEqual(payload["operation_id"], "maintenance-invalid-001")
 
 
     def test_handoff_success_progress_ends_completed(self) -> None:
