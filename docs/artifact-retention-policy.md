@@ -6,7 +6,7 @@ Research Cockpit preserves conclusions, provenance, and bounded evidence bundles
 
 - Keep findings, decisions, and baselines reviewable after a worktree is removed.
 - Preserve reusable evidence while allowing reproducible or disposable payloads to be cleaned.
-- Keep old nodes, artifact records, manifests, and payloads readable and writable.
+- Keep legacy nodes, artifact records, manifests, and payloads readable while keeping new managed payloads outside the state root.
 - Avoid creating a graph node for every run output.
 
 ## What Must Be Preserved
@@ -20,7 +20,7 @@ Preserve enough information to understand and reproduce a conclusion:
 - key plots, reports, tables, or portable review bundle
 - linked finding, decision, option, baseline, experiment, and run ids
 
-The full raw payload does not always need to remain in `research_cockpit/artifacts/**`.
+The full raw payload does not need to remain in the state root. `research_cockpit/artifacts/**` is a legacy location, not a destination for new evidence writes.
 
 ## Retention Classes
 
@@ -55,7 +55,9 @@ evidence_inputs:
 research-cockpit work close --root <data-root> --assignment <assignment_id> --file <closeout.yaml> --json --compact
 ```
 
-The runtime stages and hashes the directory outside the commit lock, then atomically writes the artifact record, provenance, result, and assignment state. It rejects symlinks, junctions, unsupported file types, links outside the source directory, and reuse of managed staging or artifact paths.
+The default `reference` mode writes source URI, selected links, bounded inventory, and declared integrity into the artifact record without copying payload bytes. The source remains owned by the launcher or external system.
+
+Set `mode: managed` only when Cockpit must own a copy. Managed mode requires an external artifact root configured through `storage.yaml` or `RESEARCH_COCKPIT_ARTIFACT_ROOT`; it copies and hashes in one stream before atomically publishing the artifact record. It never falls back to `research_cockpit/artifacts/**`. Both modes reject symlinks, junctions, unsupported file types, and links outside the source directory.
 
 Use `work record` only when evidence must be durable before close because of crash recovery, shared consumption, or a long streaming run:
 
@@ -86,6 +88,18 @@ research-cockpit maintenance compact --root <data-root> --file <compaction.yaml>
 
 Only a single artifact classified as `can_demote` may be executed. Change `execute` to `true` only after reviewing the dry-run. Demotion writes an artifact record and migration report, updates safe references, and removes the graph node; it does not delete payload bytes.
 
+## Managed Storage Migration And GC
+
+Legacy payloads remain readable. To move one record into configured external managed storage, use `maintenance migrate` with `action: artifact_storage`; the default is dry-run and the same stable `operation_id` resumes an interrupted migration. See [0.3.1 storage migration](migrations/0.3.1-storage-boundaries-and-workstream-tracking.md) for the exact file contract.
+
+Physical cleanup is separate from graph compaction. `maintenance compact` with `action: artifact_gc` plans and executes one revision-bound transition for one verified Cockpit-managed record:
+
+```text
+dry-run plan -> verify -> quarantine -> delayed purge
+```
+
+It rejects active, must-keep, external, legacy, weak-integrity, incomplete-inventory, or unsafe payloads. Quarantine is an atomic rename inside the managed artifact filesystem; every prepared and final transition has an immutable manifest. Purge must use a fresh plan revision after the delay. Do not manually delete managed or quarantine directories.
+
 ## Cleanup Rules
 
 Preserve evidence linked from accepted decisions, effective baselines, strong findings, or active follow-up work. Preserve final checkpoints and planned resume state.
@@ -98,6 +112,6 @@ Clean only after review:
 - optimizer or scheduler state after resume is no longer planned
 - payloads superseded by stronger evidence
 
-Do not clean paths referenced by active assignments, queued or running runs, active resources, or unresolved retention warnings. Use `maintenance audit` for bounded candidates, but keep destructive filesystem and Git actions under explicit human control.
+Do not clean paths referenced by active assignments, queued or running runs, active resources, or unresolved retention warnings. Use `maintenance audit` for bounded candidates. Only `artifact_gc` may physically clean eligible Cockpit-managed payloads; external and legacy sources remain outside this mechanism.
 
-For very large payloads, use a stable external or ignored artifact root and keep only summaries, manifests, provenance, and portable review bundles in Research Cockpit.
+For very large payloads, use reference evidence by default or an explicit stable external managed root. Keep only metadata, provenance, and portable review bundles in the state root.

@@ -6,23 +6,38 @@ Large research repositories slow down when generated outputs, checkpoints, datas
 
 ```text
 research-repo/
+  .research-cockpit.yaml # portable project locator only
   src/
   configs/
   scripts/
   tests/
+  .worktrees/           # temporary agent worktrees
+
+external-state/<project-id>/
+  storage.yaml
+  graph/
+  assignments/
+  runs/
+  gate_results/
+  artifact_records/
+  handoffs/
+
+external-managed-artifacts/<project-id>/
+  .quarantine/
+
+legacy-state-root/      # only for existing in-repository projects
   research_cockpit/
     graph/
     assignments/
     runs/
     gate_results/
     artifact_records/
-    artifacts/          # durable summaries and review bundles
-  outputs/              # ignored generated outputs
-  data/                 # ignored or externally managed data
-  .worktrees/           # temporary agent worktrees
+    artifacts/          # readable legacy payloads only
 ```
 
-For large payloads, use an external stable artifact root and store bounded summaries, manifests, and portable review bundles under `research_cockpit/artifacts/`.
+In a Git worktree, `research-cockpit init` without `--root` creates external state and writes only `.research-cockpit.yaml` into the repository. `--root research_cockpit` remains the explicit legacy/in-place mode. Configure managed payload storage separately in `<state-root>/storage.yaml` or through `RESEARCH_COCKPIT_ARTIFACT_ROOT`; it must not overlap the state root or source worktree.
+
+New evidence is reference-only by default. Store metadata, provenance, and selected links in the state root; use an explicit external managed root only when Cockpit must own a copy. Do not place new managed payloads under `research_cockpit/artifacts/`.
 
 ## Minimal Worktrees
 
@@ -83,4 +98,6 @@ Use a bounded maintenance audit before cleanup:
 research-cockpit maintenance audit --root <data-root> --repo <repo-root> --json --compact
 ```
 
-Review active assignments and runs, resource declarations, outer and nested repository state, retention metadata, and stable evidence links. The audit reports candidates; destructive filesystem, worktree, and branch operations remain explicit human actions.
+Review active assignments and runs, resource declarations, outer and nested repository state, retention metadata, and stable evidence links. The audit reports candidates. For a verified Cockpit-managed payload, use the revision-bound `maintenance compact` `artifact_gc` transition instead of manually deleting files: it quarantines first and purges only after the recorded delay. External and legacy evidence remain outside GC.
+
+See [0.3.1 storage boundaries](migrations/0.3.1-storage-boundaries-and-workstream-tracking.md) for migration and recovery details.

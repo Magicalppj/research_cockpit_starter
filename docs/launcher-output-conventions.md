@@ -1,6 +1,6 @@
 # Launcher Output Conventions
 
-These conventions apply to shell scripts, Python launchers, notebooks, scheduler jobs, and manual runs. Launcher files are local execution state until `work record` or `work close` stages selected evidence into the canonical data root.
+These conventions apply to shell scripts, Python launchers, notebooks, scheduler jobs, and manual runs. Launcher files remain local execution state until `work record` or `work close` admits selected evidence metadata into the canonical state root; default reference evidence leaves payload bytes at the source.
 
 Starter templates live in `templates/launcher/`. Keep paths inside launcher files relative to one run output directory so the bundle remains portable across platforms and worktrees.
 
@@ -104,11 +104,12 @@ Failed gates set `passed: false` and record blockers in `fatal_failures`. Gate f
 }
 ```
 
-Link values must be relative to the source directory. Final output is staged once through closeout:
+Link values must be relative to the source directory. Final output is admitted once through closeout. The default `reference` mode preserves the source in place and records URI, bounded inventory, integrity declaration, and selected links without copying payload bytes. Use explicit `mode: managed` only when Cockpit must own a copy and an external managed artifact root is configured:
 
 ```yaml
 evidence_inputs:
   source: <launcher_output_dir>
+  mode: reference
   title: Run x output bundle
   summary: Smoke run output and logs.
   links:
@@ -137,4 +138,4 @@ research-cockpit work record --root <data-root> --assignment <assignment_id> --f
 4. Close once with terminal run, experiment, finding, assignment result, gates, and final evidence.
 5. Stop after an internally verified receipt; do not repeat validate, context, build, or smoke.
 
-Do not store machine-local absolute paths in canonical records. Relative input paths are resolved from the structured input file, and staged links remain data-root relative.
+Do not put machine-local absolute paths in launcher templates or Git-facing documents. Relative input paths resolve from the structured input file; persisted record locations follow the selected reference or managed storage mode. `artifacts/` is legacy-only, so launchers must not expect closeout to create an in-root payload copy.

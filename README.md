@@ -1,15 +1,15 @@
 # Research Cockpit
 
-Research Cockpit 是面向多 agent 并行研究的本地状态与证据管理插件。它把研究组合、assignment、run、review、decision 和 artifact provenance 保存在调用仓库的 `research_cockpit/` 数据根中，并通过一个按角色划分的 CLI 提供有界上下文和事务写入。
+Research Cockpit 是面向多 agent 并行研究的本地状态与证据管理插件。它把研究组合、assignment、run、review、decision 和 artifact provenance 保存在调用项目解析到的 state root（Git 项目默认 external state，`research_cockpit/` 仍可作为 legacy root）中，并通过一个按角色划分的 CLI 提供有界上下文和事务写入。
 
 ## 安装
 
 ```sh
 python -m pip install -e .
-research-cockpit init --root research_cockpit --json
+research-cockpit init --project-id <project-id> --json
 ```
 
-所有平台都应显式传入 `--root`，或设置 `RESEARCH_COCKPIT_ROOT`。结构化输入使用 UTF-8 YAML/JSON 文件，避免依赖 shell-specific quoting。
+在 Git worktree 中省略 `--root` 会创建 external state，并只在仓库写入 portable `.research-cockpit.yaml` locator。`research-cockpit init --root research_cockpit` 是显式 legacy/in-place mode。运行时应显式传入 `--root`，或设置 `RESEARCH_COCKPIT_ROOT`。结构化输入使用 UTF-8 YAML/JSON 文件，避免依赖 shell-specific quoting。
 
 ## 最短工作流
 
@@ -22,6 +22,8 @@ research-cockpit work close --root research_cockpit --assignment <assignment_id>
 ```
 
 `work_start_v1` 必须复制 packet 的 agent、lease、`input_revision`，并显式将 `cursor.current_node` 写为 `experiment_id`。该节点不是 experiment 时不要猜测目标，应由 coordinator 修正 assignment。
+
+一个 assignment 对应一个 independently owned stage workstream，而不是每次 edit、retry、seed、parameter adjustment 或 local attempt。相同 research contract 的这些操作复用当前 assignment；只有独立 owner、durable handoff、independent review 或可能改变 research judgment 的阶段性交付才创建新的 assignment 或 graph node。
 
 只有缺少输入契约时才运行 `work start --print-schema --json --compact` 或 `work close --print-schema --json --compact`；schema discovery 不是正常流程中的额外调用。`work_close_v1.finding.confidence` 只接受 `weak`、`medium` 或 `strong`。
 
@@ -84,7 +86,7 @@ research-cockpit maintenance migrate --print-schema
 research-cockpit maintenance compact --print-schema
 ```
 
-`maintenance_action_v1` 默认 `execute: false`。显式执行时设为 `true`；compaction 每次只处理一个 `can_demote` artifact，并且不删除 payload 文件。
+`maintenance_action_v1` 默认 `execute: false`。`action: artifact` 的 graph demotion 每次只处理一个 `can_demote` artifact，且不删除 payload 文件。`action: artifact_gc` 只回收一个 verified Cockpit-managed record：先 dry-run 取得 revision，再 quarantine，最后 delayed purge；legacy 和 external evidence 不在其范围内。
 
 ## 有界读取
 
@@ -123,9 +125,9 @@ UI 优先读取 fresh dashboard projection；缺失或 stale 时会现场构建�
 
 ## 数据边界
 
-- `agents/*.yaml`、`assignments/*.yaml`、`coordinator_state.yaml`、`current_state.yaml`、`graph/nodes/*.yaml`、`graph/interaction_events/**`、`runs/*.yaml`、`gate_results/*`、`artifact_records/*.yaml` 和 `handoffs/*.yaml` 是结构化 truth/audit state。
+- `storage.yaml`、`agents/*.yaml`、`assignments/*.yaml`、`coordinator_state.yaml`、`current_state.yaml`、`graph/nodes/*.yaml`、`graph/interaction_events/**`、`runs/*.yaml`、`gate_results/*`、`artifact_records/*.yaml` 和 `handoffs/*.yaml` 是结构化 truth/audit state。
 - `coordinator_state.yaml` 保存 coordinator/UI selection；`current_state.yaml` 仅用于 legacy/coordinator compatibility。
-- `artifacts/` 保存长期 evidence payload；`artifact_records/` 保存轻量 metadata 和 provenance。
+- Evidence 默认 reference-only；`artifact_records/` 保存 location、ownership、integrity、inventory、retention、lifecycle 与 availability。配置的 external artifact root 承载新的 Cockpit-managed payload，`artifacts/` 只作为 legacy payload location 继续可读。
 - `dashboards/` 是可重建 projection，不是 truth source。
 - Markdown notes 是长文本 supporting records，不用于推断 current state。
 - Worktree 隔离代码与实验过程；canonical data root 仍是共享研究状态边界。
@@ -134,7 +136,7 @@ UI 优先读取 fresh dashboard projection；缺失或 stale 时会现场构建�
 
 0.3.0 只公开当前 role-based CLI，不提供旧命令 alias。0.2.x 及更早保存的 nodes、assignments、runs、gates、artifact records/manifests、payload bytes 和 interaction history仍可直接读取并继续写入；未知字段会 round-trip 保留。
 
-升级与替换表见 [0.3.0 CLI migration](docs/migrations/0.3.0-cli-cutover.md)。内部模块保留仅用于复用 domain behavior，不构成 public CLI。
+升级与替换表见 [0.3.0 CLI migration](docs/migrations/0.3.0-cli-cutover.md)；state、evidence、legacy migration 与 managed GC 见 [0.3.1 storage boundaries](docs/migrations/0.3.1-storage-boundaries-and-workstream-tracking.md)。内部模块保留仅用于复用 domain behavior，不构成 public CLI。
 
 ## 开发验证
 

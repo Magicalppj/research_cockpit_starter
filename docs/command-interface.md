@@ -42,7 +42,18 @@ Coordinator action boundary 必须显式区分：
 
 Worker、reviewer 与 coordinator mutation 必须携带稳定 `operation_id`。Canonical request 经 normalization 后计算 hash；同 id、同 hash 返回原 receipt，同 id、不同 hash 返回 `idempotency_conflict`，且不写 truth。
 
-Operation receipt 与 mutation interaction event 在同一 transaction 写入。Derived operation index 只加速 lookup，不是 truth，也不创建 per-operation files。Maintenance action 为显式人工流程，不承诺 operation-id idempotency，默认 dry-run。
+Operation receipt 与 mutation interaction event 在同一 transaction 写入。Derived operation index 只加速 lookup，不是 truth，也不创建 per-operation files。Maintenance action 是显式人工流程，默认 dry-run；只有 action contract 明确声明 stable `operation_id` 时才支持 exact retry。
+
+## Storage Lifecycle
+
+`work close` 与 `work record` 的 `evidence_inputs` 默认使用 reference admission：写入 URI、inventory、integrity 与 provenance，不复制 payload。`mode: managed` 必须显式指定，且要求通过 `storage.yaml` 或 `RESEARCH_COCKPIT_ARTIFACT_ROOT` 配置与 state root 分离的 external artifact root；新 write 不会落到 legacy `artifacts/`。
+
+`maintenance migrate` 的 `action: artifact_storage` 迁移一个 legacy record，默认 dry-run；同一 stable `operation_id` 是中断后的 exact retry identity。`maintenance compact` 有两个互不替代的 action：
+
+- `artifact`：demote 一个 graph artifact，永不删除 payload bytes。
+- `artifact_gc`：对一个 verified Cockpit-managed record 执行 quarantine 或 delayed purge。dry-run 返回 `state_revision`；`execute: true` 必须提交该 revision 的 `expected_revision`，并使用稳定 `record_id`、`operation_id` 与 `phase`。
+
+GC 与 migration 是 maintainer-only exceptional operations，不属于普通 worker 的三命令路径。完整 file examples、blocker 与恢复规则见 [0.3.1 storage boundaries](migrations/0.3.1-storage-boundaries-and-workstream-tracking.md)。
 
 ## Success Envelope
 

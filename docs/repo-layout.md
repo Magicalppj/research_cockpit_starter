@@ -12,7 +12,7 @@ research-repo/
   research_cockpit/
 ```
 
-The plugin stores reusable code and tools. The research repo stores project-specific state in its own `research_cockpit/` directory.
+The plugin stores reusable code and tools. In a Git project, new initialization normally stores project-specific state outside the worktree and commits only a portable `.research-cockpit.yaml` locator. An in-repository `research_cockpit/` directory remains supported as a legacy or explicit `--root` state root.
 
 ## Plugin Contents
 
@@ -50,9 +50,9 @@ The plugin stores reusable code and tools. The research repo stores project-spec
 - `cli_progress.py`: stderr progress events that keep stdout machine-readable.
 - `maintenance.py`: repository, worktree, branch, resource, and retention audit domain logic.
 - `types.py`: core dataclasses, validation error type, node/status constants, and search constants.
-- `storage.py`: YAML IO and path normalization helpers.
-- `artifact_records.py` and `artifact_compaction.py`: lightweight evidence metadata, explicit graph promotion, and non-destructive artifact demotion planning.
-- `paths.py`: plugin and data-root discovery.
+- `storage.py` and `storage_layout.py`: YAML IO, path normalization, and external managed artifact-root resolution.
+- `artifact_records.py`, `artifact_inventory.py`, `artifact_migration.py`, `artifact_gc.py`, and `artifact_compaction.py`: lightweight evidence metadata, bounded inventory, legacy migration, quarantine-first managed GC, explicit graph promotion, and non-destructive graph artifact demotion.
+- `paths.py`: plugin, portable project locator, and data-root discovery.
 - `graph_core.py`: node loading, explicit edge loading, graph traversal, focus path derivation, and graph JSON.
 - `resources.py`: node links, linked artifacts, and local resource row extraction.
 - `interaction_log.py` and `graph_views.py`: sidecar state helpers.
@@ -72,7 +72,8 @@ Commands resolve data root in this order:
 
 1. Explicit `--root`.
 2. `RESEARCH_COCKPIT_ROOT`.
-3. Upward search from current working directory for `research_cockpit/`.
-4. Plugin repo fallback `examples/demo_research_cockpit/`.
+3. Upward search for a valid `.research-cockpit.yaml` locator, then the host-local state root for its stable project id.
+4. Upward search from current working directory for legacy `research_cockpit/`.
+5. Plugin repo fallback `examples/demo_research_cockpit/`.
 
-Run workflow commands with `research-cockpit` and pass `--root` when the data root is not obvious.
+Run workflow commands with `research-cockpit` and pass `--root` when the data root is not obvious. Configure a managed artifact root separately with `storage.yaml` or `RESEARCH_COCKPIT_ARTIFACT_ROOT`; new payload writes never implicitly target legacy `artifacts/`.

@@ -36,6 +36,10 @@ Workflow/domain layer
   assignment_results.py
   assignment_reviews.py
   maintenance_actions.py
+  artifact_records.py
+  artifact_inventory.py
+  artifact_migration.py
+  artifact_gc.py
   evidence_bundles.py
   evidence_staging.py
   run_closeout.py
@@ -64,6 +68,7 @@ Graph and sidecar state
 
 Storage and shared types
   storage.py
+  storage_layout.py
   paths.py
   types.py
 ```
@@ -94,21 +99,24 @@ The root `SKILL.md` is only a role router. Default agent instructions live in `w
 - `assignment_scope.py`: assignment mutation boundaries, out-of-scope write checks, and coordinator override handling.
 - `assignment_leases.py`: claim, renew, release, owner/epoch checks, lease renewal planning, heartbeat hooks, and expired-lease reassignment guards.
 - `assignment_runs.py`: composes lease renewal with the existing run-creation domain transaction for `work start`.
-- `assignment_records.py`: stages and hashes incremental evidence, renews leases, and writes idempotent record receipts.
+- `assignment_records.py`: admits incremental reference or explicit managed evidence, renews leases, and writes idempotent record receipts.
 - `coordinator_operations.py`: validates and executes `coord_assign_v1` graph/session operations.
 - `coordinator_decisions.py`: dispatches strict `coord_decide_v1` decision/baseline actions.
-- `maintenance_actions.py`: validates and dispatches bounded maintenance plans.
+- `maintenance_actions.py`: validates and dispatches bounded maintenance plans, including explicit legacy storage migration and revision-bound managed-payload GC.
 - `work_packets.py`: bounded assignment projections, dependency/input readiness, lease state, stable revisions, and unchanged polling.
 - `assignment_results.py`: validates `work_close_v1`, performs operation replay checks, stages optional final evidence, and delegates one atomic assignment closeout.
 - `coordination.py`: builds the indexed, revisioned, paginated Coordination Snapshot and its shared internal state projection without loading the full graph on a fresh index.
 - `synthesis.py`: projects revision-bound selected dependency Evidence Bundles into a bounded Synthesis Packet; it does not scan unrelated accepted history.
 - `assignment_reviews.py`: builds bounded review packets, records reviewer-only Evidence Bundles, and applies revision-bound coordinator verdicts without rewriting producer results.
 - `evidence_bundles.py`: constructs and validates bounded work/review result contracts and their stable revisions.
-- `evidence_staging.py`: copies and hashes final payloads outside the truth commit lock, then prepares artifact-record changes for atomic closeout.
+- `evidence_staging.py`: admits final evidence outside the truth commit lock. Reference mode writes bounded metadata without copying bytes; explicit managed mode streams copy/hash into configured external storage before preparing atomic artifact-record changes.
+- `artifact_records.py` and `artifact_inventory.py`: normalize provenance records and maintain bounded metadata inventory without treating payload bytes as state truth.
+- `artifact_migration.py`: performs resumable, verified legacy-to-managed transitions and preserves source evidence on cross-filesystem copy.
+- `artifact_gc.py`: enforces revision-bound verified managed-payload quarantine and delayed purge, with immutable transition manifests and exact-retry recovery.
 - `run_closeout.py`: owns the combined run, gate, finding, artifact record, Evidence Bundle, experiment, cursor, and lease transaction.
 - `operation_receipts.py`: normalized operation hashes, durable receipt lookup from interaction events, and the derived incremental operation index.
 - `mutation_runtime.py`: optimistic multi-file commits, rollback, operation-event append, and post-commit derived-index patching.
-- `milestone_handoffs.py`: captures a root truth revision, reuses one full validation state across build and compact smoke, evaluates coordination blockers, and commits an immutable operation-id-scoped handoff report.
+- `milestone_handoffs.py`: captures a root truth revision from structured state and transition manifests, never payload roots; it reuses one full validation state across build and compact smoke, evaluates coordination blockers, and commits an immutable operation-id-scoped handoff report.
 - `root_snapshot.py`: targeted graph snapshots. `load_indexed_root_snapshot(...)` is the no-full-fallback entry point for latency-bounded reads.
 - `validation_index.py`: generated graph/sidecar signatures and targeted lookup maps used by incremental validation and read models.
 - `node_onboarding.py`: builds legacy-compatible node handoff data used by bounded context projections.
@@ -138,7 +146,8 @@ Sidecar files such as `graph_views.yaml` and `interaction_log.yaml` support UI a
 
 - `types.py`: `ResearchNode`, `ValidationError`, valid node/status/workstream constants, and shared search constants.
 - `storage.py`: `load_yaml`, `save_yaml`, node-file path helpers, and relative path normalization.
-- `paths.py`: plugin-root and data-root discovery.
+- `storage_layout.py`: resolves external managed artifact storage and rejects overlap with the state root.
+- `paths.py`: plugin-root, portable project locator, and data-root discovery.
 
 These modules should remain free of command, UI, and dashboard dependencies.
 
@@ -170,6 +179,7 @@ Do not add new large domain logic to `model.py`. If a new behavior is hard to pl
 
 Truth-source data lives in:
 
+- `<data-root>/storage.yaml` for the machine-local external managed artifact policy
 - `<data-root>/agents/*.yaml` for generated agent identities, display names, and active assignment ids
 - `<data-root>/assignments/*.yaml` for worker-local assignment roots, cursors, next actions, and assignment status
 - `<data-root>/coordinator_state.yaml` for coordinator/UI selected node, selected assignment, global next actions, and dashboard filters
@@ -181,9 +191,10 @@ Truth-source data lives in:
 - `<data-root>/runs/*.yaml` for concrete experiment executions
 - `<data-root>/gate_results/*.yaml` for gate metadata records
 - `<data-root>/gate_results/*.json` for structured gate payloads
-- `<data-root>/artifact_records/*.yaml` for lightweight evidence metadata created by record-only artifact ingest
-- `<data-root>/artifact_migrations/*.yaml` for artifact demotion audit reports
-- `<data-root>/artifacts/**` for long-lived evidence payloads and ingest manifests
+- `<data-root>/artifact_records/*.yaml` for lightweight evidence metadata, provenance, storage mode, integrity, inventory, retention, lifecycle, and availability
+- `<data-root>/artifact_migrations/*.yaml` for resumable legacy-to-managed migration journals
+- `<data-root>/artifact_gc_manifests/*.yaml` for immutable managed-payload GC transition manifests
+- `<data-root>/artifacts/**` for readable legacy payloads only; configured external managed storage owns new Cockpit-managed payload bytes
 - `<data-root>/handoffs/*.yaml` for immutable operation-id-scoped milestone reports and revision-bound gate summaries
 
 Runtime access rules:
@@ -194,7 +205,7 @@ Runtime access rules:
 - `validation_index.py` is a derived acceleration index; missing, incompatible, or stale indexes must fall back to full validation and return explicit refresh commands.
 - `coordination.py` consumes the assignment projection in the validation index when fresh and performs an explicit assignment-file fallback when stale; UI and CLI use this same builder.
 - `interaction_log.py` owns both legacy YAML compatibility and the JSONL event backend. Commands must append through this module and must not rewrite interaction history.
-- `run_closeout.py` owns both legacy `run_closeout_v1` and facade `work_close_v1` terminal transactions; final payload copy/hash occurs before lock acquisition, while artifact move and truth writes commit together.
+- `run_closeout.py` owns both legacy `run_closeout_v1` and facade `work_close_v1` terminal transactions; reference evidence records metadata without copying bytes, while explicit managed copy/hash occurs before lock acquisition and publishes record truth atomically.
 - `milestone_handoffs.py` never holds the canonical mutation lock during validate/build/smoke. It checks the target revision before and inside the short report transaction; `handoffs/` is excluded from the target revision to avoid a self-referential receipt.
 - `commands/build_dashboard.py` uses the derived `.dashboard-build.lock` for generated files. A handoff may therefore build outside the canonical truth lock while same-root dashboard writers remain serialized.
 
