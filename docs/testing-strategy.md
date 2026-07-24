@@ -14,8 +14,8 @@ python dev/scripts/run_test_profile.py <fast|precommit|full> --json --compact --
 
 | Profile | Intended use | Coverage | Target |
 | --- | --- | --- | ---: |
-| `fast` | 每个实现切片后的反馈 | 核心 model、assignment、packet、coordination 与 profile contract | 30s |
-| `precommit` | 提交前 | fast + role facade integration + 精确 CLI sentinel + read-only release check | 60s |
+| `fast` | 每个实现切片后的反馈 | profile、receipt/runtime id、packet 与 dependency sentinel；受影响范围由 `--extra-test` 补入 | 15s |
+| `precommit` | 提交前 | fast + bounded role facade/transaction sentinel + 精确 CLI sentinel + read-only release check | 60s |
 | `full` | merge、release 或大范围重构前 | 全部 unittest discovery + 完整 release check | 360s |
 
 Target 只写入结果的 `within_target`，不决定退出码。支持的平台、较慢磁盘或受控沙箱不会仅因 wall-clock 超标而失败。
@@ -29,6 +29,8 @@ python dev/scripts/run_test_profile.py fast --extra-test tests.test_work_close -
 ```
 
 `--extra-test` 接受 unittest module、class 或 method id。它只适用于 fast/precommit；full 已发现全部测试。
+
+日常开发不要求在每次文件保存后运行 profile。先用最窄的 RED/GREEN test 驱动当前行为；一个可独立验证的实现切片完成后只运行一次 `fast`。`precommit` 只在准备提交时运行，`full` 只用于 merge/release 或大范围重构。
 
 默认 precommit 不运行整个 `tests.test_scripts` 或 `tests.test_ui`。修改这些区域时必须通过 `--extra-test` 加入对应 module 或 method，不能把默认 profile 当成 changed-scope 自动推断。
 
@@ -52,7 +54,9 @@ Full profile 的 unittest stage 设置 `RESEARCH_COCKPIT_EXTERNAL_RELEASE_CHECK=
 
 ## Maintenance Rules
 
-- 新增纯 model/state/packet contract 时加入 fast。
+- `fast` 只保留少量稳定且实测快速的 sentinel；大型整模块不得因“核心”标签直接加入。
+- 新增 model/state/packet contract 默认进入 precommit，并由当前改动通过 `--extra-test` 精确加入 fast；只有小型模块实测仍满足预算时才可整体加入 fast。
+- `precommit` 同样保持 bounded；大型 work-close、handoff、model 和 legacy 模块只选择关键 public-contract method，完整模块由 changed scope 或 full 承担。
 - 新增 facade transaction、schema/help parity 或 bounded startup contract 时加入 precommit。
 - UI、stress、legacy breadth、大 fixture 和完整 usability 流程保留在 full，除非实测证明适合关键路径。
 - Profile 中优先列 module；只从大型混合模块选择少量稳定的 public-contract method。
@@ -67,5 +71,12 @@ Full profile 的 unittest stage 设置 `RESEARCH_COCKPIT_EXTERNAL_RELEASE_CHECK=
 - Fast 初始基线：169 tests，约 15s。
 - Precommit 初始基线：270 tests、3 skips，加 read-only release check 共约 55s。
 - Full profile 初始基线：846 tests、6 skips，加完整 release check 共约 264s。
+
+2026-07-24 在 WSL 挂载盘工作树上，收缩前 fast 已增长到 204 tests、约 156s；这是本次将日常层改为固定 sentinel 集的直接原因。
+
+同一环境收缩后实测：
+
+- Fast：16 tests，约 1.2s。
+- Precommit：32 tests 约 27.2s，加 read-only release check 共约 48.3s。
 
 这些数字用于观察趋势，不是跨平台性能承诺。

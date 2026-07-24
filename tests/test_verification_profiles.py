@@ -23,9 +23,36 @@ class VerificationProfileTests(unittest.TestCase):
         self.assertEqual(len(fast), len(set(fast)))
         self.assertEqual(len(precommit), len(set(precommit)))
         self.assertLess(set(fast), set(precommit))
-        self.assertIn("tests.test_model", fast)
-        self.assertIn("tests.test_verification_profiles", fast)
-        self.assertIn("tests.test_blind_acceptance_regressions", precommit)
+        self.assertEqual(fast, (
+            "tests.test_verification_profiles",
+            "tests.test_operation_receipts",
+            "tests.test_work_packets",
+            "tests.test_assignment_dependencies",
+        ))
+        self.assertNotIn("tests.test_model", fast)
+        self.assertNotIn("tests.test_assignment_leases", fast)
+        self.assertNotIn("tests.test_coordination", fast)
+        self.assertLessEqual(len(precommit), 15)
+        self.assertNotIn("tests.test_model", precommit)
+        self.assertNotIn("tests.test_assignment_leases", precommit)
+        self.assertNotIn("tests.test_coordination", precommit)
+        self.assertNotIn("tests.test_work_close", precommit)
+        self.assertNotIn("tests.test_coordinator_operations", precommit)
+        self.assertIn(
+            "tests.test_coordinator_operations.CoordinatorAssignmentTests."
+            "test_session_action_creates_explicit_assignment_once",
+            precommit,
+        )
+        self.assertIn(
+            "tests.test_work_close.WorkCloseTests."
+            "test_close_writes_bounded_result_and_completes_assignment_atomically",
+            precommit,
+        )
+        self.assertIn(
+            "tests.test_blind_acceptance_regressions.BlindAcceptanceRegressionTests."
+            "test_session_targets_experiment_and_start_binds_packet_revision",
+            precommit,
+        )
         self.assertIn(
             "tests.test_scripts.ScriptBehaviorTests."
             "test_context_execution_view_is_bounded_and_keeps_execution_invariants",

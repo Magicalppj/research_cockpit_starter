@@ -16,38 +16,42 @@ RELEASE_CHECK = Path("dev") / "scripts" / "run_skill_release_check.py"
 SCHEMA_VERSION = "test_profile_v1"
 PROFILE_ORDER = ("fast", "precommit", "full")
 PROFILE_TARGET_SECONDS = {
-    "fast": 30,
+    "fast": 15,
     "precommit": 60,
     "full": 360,
 }
 
 FAST_TESTS = (
     "tests.test_verification_profiles",
-    "tests.test_storage_layout",
-    "tests.test_model",
-    "tests.test_public_contracts",
-    "tests.test_assignment_leases",
-    "tests.test_assignment_dependencies",
     "tests.test_operation_receipts",
     "tests.test_work_packets",
-    "tests.test_work_packet_edges",
-    "tests.test_work_packet_projection",
-    "tests.test_coordination",
+    "tests.test_assignment_dependencies",
 )
 
-INTEGRATION_TESTS = (
-    "tests.test_assignment_reviews",
-    "tests.test_coordinator_operations",
-    "tests.test_work_start",
-    "tests.test_work_close",
-    "tests.test_work_record",
-    "tests.test_blind_acceptance_regressions",
+PRECOMMIT_TESTS = (
+    *FAST_TESTS,
+    (
+        "tests.test_coordinator_operations.CoordinatorAssignmentTests."
+        "test_session_action_creates_explicit_assignment_once"
+    ),
+    (
+        "tests.test_work_start.WorkStartTests."
+        "test_start_generates_run_and_piggybacks_lease_renewal"
+    ),
+    (
+        "tests.test_work_close.WorkCloseTests."
+        "test_close_writes_bounded_result_and_completes_assignment_atomically"
+    ),
+    (
+        "tests.test_work_record.WorkRecordTests."
+        "test_record_is_idempotent_and_defaults_to_reference"
+    ),
+    (
+        "tests.test_blind_acceptance_regressions.BlindAcceptanceRegressionTests."
+        "test_session_targets_experiment_and_start_binds_packet_revision"
+    ),
     "tests.test_cli_cutover",
-    "tests.test_role_discovery",
-    "tests.test_role_playbooks",
     "tests.test_role_release_surface",
-    "tests.test_milestone_handoff",
-    "tests.test_workflow_efficiency",
     (
         "tests.test_scripts.ScriptBehaviorTests."
         "test_context_execution_view_is_bounded_and_keeps_execution_invariants"
@@ -79,7 +83,7 @@ def profile_test_targets(profile: str) -> tuple[str, ...]:
     if profile == "fast":
         return FAST_TESTS
     if profile == "precommit":
-        return _dedupe((*FAST_TESTS, *INTEGRATION_TESTS))
+        return PRECOMMIT_TESTS
     if profile == "full":
         return ()
     raise ValueError(f"Unknown test profile: {profile}")
@@ -251,7 +255,7 @@ def run_profile(
 
 def profiles_payload() -> dict[str, Any]:
     purpose = {
-        "fast": "Default edit feedback for core state and packet contracts.",
+        "fast": "Small edit-loop sentinels; add changed scope explicitly.",
         "precommit": "Facade integration plus read-only release checks.",
         "full": "All tests plus the complete release harness before merge or release.",
     }

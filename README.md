@@ -143,7 +143,7 @@ UI 优先读取 fresh dashboard projection；缺失或 stale 时会现场构建�
 选择与当前阶段对应的一层，不要依次运行三层：
 
 ```sh
-# 日常编辑反馈，目标 30 秒内
+# 日常编辑反馈，目标 15 秒内
 python dev/scripts/run_test_profile.py fast --json --compact --progress
 
 # 提交前 integration + read-only release gate，目标 60 秒内
