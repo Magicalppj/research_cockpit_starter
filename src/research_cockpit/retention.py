@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,25 @@ def validate_retention(value: Any, field_name: str = "retention") -> dict[str, A
     if retention_class not in (None, "") and str(retention_class) not in RETENTION_CLASSES:
         allowed = ", ".join(sorted(RETENTION_CLASSES))
         raise ValueError(f"Invalid {field_name}.class {retention_class!r}; allowed: {allowed}")
+    expires_at = data.get("expires_at")
+    if expires_at not in (None, ""):
+        if not isinstance(expires_at, str):
+            raise ValueError(f"{field_name}.expires_at must be an ISO-8601 timestamp or null")
+        try:
+            parsed_expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(
+                f"{field_name}.expires_at must be an ISO-8601 timestamp or null"
+            ) from exc
+        if parsed_expiry.tzinfo is None:
+            raise ValueError(f"{field_name}.expires_at must include a timezone")
+    keep_until_decision = data.get("keep_until_decision")
+    if keep_until_decision is not None and (
+        not isinstance(keep_until_decision, str) or not keep_until_decision.strip()
+    ):
+        raise ValueError(
+            f"{field_name}.keep_until_decision must be a decision id or null"
+        )
     return data
 
 

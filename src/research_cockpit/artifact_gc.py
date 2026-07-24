@@ -11,6 +11,9 @@ import re
 import shutil
 from typing import Any
 
+from research_cockpit.artifact_lifecycle import (
+    artifact_lifecycle_reservation_blockers,
+)
 from research_cockpit.artifact_migration import active_record_blockers
 from research_cockpit.artifact_records import (
     find_artifact_record,
@@ -375,7 +378,39 @@ def _availability(record: dict[str, Any]) -> str:
     return str(availability.get("status") or "")
 
 
-def _plan_blockers(context: _GcContext, *, purge_after_seconds: int) -> tuple[list[str], dict[str, Any] | None]:
+def _retention_blockers(context: _GcContext) -> list[str]:
+    retention = (
+        context.record.get("retention")
+        if isinstance(context.record.get("retention"), dict)
+        else {}
+    )
+    blockers: list[str] = []
+    expires_at = retention.get("expires_at")
+    if expires_at not in (None, ""):
+        try:
+            if _utc_now() < _parse_timestamp(
+                expires_at,
+                field_name="retention.expires_at",
+            ):
+                blockers.append("retention_not_expired")
+        except ValueError:
+            blockers.append("retention_expiry_invalid")
+    keep_until_decision = retention.get("keep_until_decision")
+    if keep_until_decision is not None:
+        decision_id = (
+            keep_until_decision.strip()
+            if isinstance(keep_until_decision, str)
+            else ""
+        )
+        decision = load_nodes(context.root).get(decision_id) if decision_id else None
+        if decision is None or decision.type != "decision":
+            blockers.append("retention_decision_invalid")
+        elif decision.status not in {"accepted", "rejected"}:
+            blockers.append("retention_decision_pending")
+    return blockers
+
+
+def _state_blockers(context: _GcContext, *, purge_after_seconds: int) -> list[str]:
     storage = context.record.get("storage") if isinstance(context.record.get("storage"), dict) else {}
     integrity = context.record.get("integrity") if isinstance(context.record.get("integrity"), dict) else {}
     inventory = context.record.get("inventory") if isinstance(context.record.get("inventory"), dict) else {}
@@ -391,15 +426,23 @@ def _plan_blockers(context: _GcContext, *, purge_after_seconds: int) -> tuple[li
         blockers.append("must_keep_retention")
     elif retention not in _GC_RETENTION_CLASSES:
         blockers.append("retention_not_gc_eligible")
+    blockers.extend(_retention_blockers(context))
     blockers.extend(
         active_record_blockers(
             context.root,
             experiment_id=context.experiment_id,
             run_id=context.run_id,
+            protected_paths=[context.target_dir, context.quarantine_dir],
+        )
+    )
+    blockers.extend(
+        artifact_lifecycle_reservation_blockers(
+            context.root,
+            experiment_ids=[context.experiment_id],
+            ignore_gc_ids=[context.gc_id],
         )
     )
     availability = _availability(context.record)
-    payload = context.target_dir if context.phase == "quarantine" else context.quarantine_dir
     if context.phase == "quarantine":
         if availability != "available":
             blockers.append(f"availability_{availability or 'unknown'}")
@@ -415,6 +458,15 @@ def _plan_blockers(context: _GcContext, *, purge_after_seconds: int) -> tuple[li
                 blockers.append("purge_delay_not_elapsed")
         except ValueError:
             blockers.append("missing_quarantine_delay")
+    return sorted(set(blockers))
+
+
+def _plan_blockers(context: _GcContext, *, purge_after_seconds: int) -> tuple[list[str], dict[str, Any] | None]:
+    blockers = _state_blockers(
+        context,
+        purge_after_seconds=purge_after_seconds,
+    )
+    payload = context.target_dir if context.phase == "quarantine" else context.quarantine_dir
     if not blockers:
         try:
             verification = _verify_managed_payload(context, payload)
@@ -485,6 +537,30 @@ def _check_transition(context: _GcContext, manifest: dict[str, Any], *, transiti
         )
 
 
+def _assert_gc_state_safe(
+    context: _GcContext,
+    *,
+    purge_after_seconds: int,
+) -> _GcContext:
+    if _read_bytes(context.record_path) != context.record_before_bytes:
+        raise ValueError("artifact record changed after GC planning; rerun the plan")
+    current = _build_context(
+        context.root,
+        record_id=context.record_id,
+        operation_id=context.operation_id,
+        phase=context.phase,
+    )
+    blockers = _state_blockers(
+        current,
+        purge_after_seconds=purge_after_seconds,
+    )
+    if blockers:
+        raise ValueError(
+            f"artifact GC {context.phase} is blocked: " + ", ".join(blockers)
+        )
+    return current
+
+
 def _prepare_transition(
     context: _GcContext,
     *,
@@ -492,18 +568,18 @@ def _prepare_transition(
     verification: dict[str, Any],
     purge_after_seconds: int,
 ) -> dict[str, Any]:
-    existing = _load_transition(context.prepared_path)
-    if existing is not None:
-        _check_transition(context, existing, transition="prepared")
-        return existing
-    if not isinstance(expected_revision, str) or not expected_revision.strip():
-        raise ValueError("expected_revision is required for an artifact GC execution")
     with mutation_lock(context.root):
         ensure_interaction_log_valid(context.root)
+        _assert_gc_state_safe(
+            context,
+            purge_after_seconds=purge_after_seconds,
+        )
         existing = _load_transition(context.prepared_path)
         if existing is not None:
             _check_transition(context, existing, transition="prepared")
             return existing
+        if not isinstance(expected_revision, str) or not expected_revision.strip():
+            raise ValueError("expected_revision is required for an artifact GC execution")
         current_revision = root_truth_revision(context.root)
         if current_revision != expected_revision:
             raise ValueError(
@@ -587,6 +663,7 @@ def _publish_record_transition(
     updated_record: dict[str, Any],
     final_manifest: dict[str, Any],
     event_kind: str,
+    purge_after_seconds: int,
 ) -> None:
     _validate_record_update(context, updated_record)
     record_after = deepcopy(context.record_before)
@@ -608,6 +685,11 @@ def _publish_record_transition(
                 transition="quarantined" if context.phase == "quarantine" else "purged",
             )
             return
+        if context.phase == "quarantine":
+            _assert_gc_state_safe(
+                context,
+                purge_after_seconds=purge_after_seconds,
+            )
         checkpoint = interaction_append_checkpoint(context.root)
         try:
             save_yaml(context.record_path, record_after)
@@ -768,22 +850,45 @@ def _execute_quarantine(
         )
         if not plan["eligible"]:
             raise ValueError("artifact GC quarantine is blocked: " + ", ".join(plan["blockers"]))
-        prepared = _prepare_transition(
-            context,
-            expected_revision=expected_revision,
-            verification=plan["verification"] or {},
-            purge_after_seconds=delay,
-        )
+        verification_seed = plan["verification"] or {}
     else:
         _check_transition(context, prepared, transition="prepared")
+        verification_seed = {
+            "integrity": deepcopy(prepared.get("integrity") or {}),
+            "inventory": deepcopy(prepared.get("inventory") or {}),
+        }
+    prepared = _prepare_transition(
+        context,
+        expected_revision=expected_revision,
+        verification=verification_seed,
+        purge_after_seconds=delay,
+    )
     artifact_root = context.layout.require_managed_artifact_root()
     moved = False
     if context.quarantine_dir.exists() or os.path.lexists(context.quarantine_dir):
         verification = _verify_managed_payload(context, context.quarantine_dir)
     else:
         verification = _verify_managed_payload(context, context.target_dir)
-        _safe_rename(context.target_dir, context.quarantine_dir, artifact_root=artifact_root)
-        moved = True
+        with mutation_lock(context.root):
+            ensure_interaction_log_valid(context.root)
+            _assert_gc_state_safe(
+                context,
+                purge_after_seconds=delay,
+            )
+            current_prepared = _load_transition(context.prepared_path)
+            if current_prepared is None:
+                raise ValueError("artifact GC prepared manifest disappeared before quarantine")
+            _check_transition(context, current_prepared, transition="prepared")
+            if not (
+                context.quarantine_dir.exists()
+                or os.path.lexists(context.quarantine_dir)
+            ):
+                _safe_rename(
+                    context.target_dir,
+                    context.quarantine_dir,
+                    artifact_root=artifact_root,
+                )
+                moved = True
     final_manifest = _transition_manifest(
         context,
         transition="quarantined",
@@ -797,10 +902,12 @@ def _execute_quarantine(
             updated_record=_record_after_quarantine(context, prepared),
             final_manifest=final_manifest,
             event_kind="artifact_gc_quarantined",
+            purge_after_seconds=delay,
         )
     except BaseException:
         if moved and context.quarantine_dir.exists() and not context.target_dir.exists():
-            context.quarantine_dir.replace(context.target_dir)
+            with mutation_lock(context.root):
+                context.quarantine_dir.replace(context.target_dir)
         raise
     inventory = _patch_inventory(
         context,
@@ -846,25 +953,43 @@ def _execute_purge(
         )
         if not plan["eligible"]:
             raise ValueError("artifact GC purge is blocked: " + ", ".join(plan["blockers"]))
-        prepared = _prepare_transition(
-            context,
-            expected_revision=expected_revision,
-            verification=plan["verification"] or {},
-            purge_after_seconds=delay,
-        )
+        verification_seed = plan["verification"] or {}
     else:
         _check_transition(context, prepared, transition="prepared")
+        verification_seed = {
+            "integrity": deepcopy(prepared.get("integrity") or {}),
+            "inventory": deepcopy(prepared.get("inventory") or {}),
+        }
+    prepared = _prepare_transition(
+        context,
+        expected_revision=expected_revision,
+        verification=verification_seed,
+        purge_after_seconds=delay,
+    )
 
     if context.quarantine_dir.exists() or os.path.lexists(context.quarantine_dir):
         verification = _verify_managed_payload(context, context.quarantine_dir)
-        if _read_bytes(context.record_path) != context.record_before_bytes:
-            raise ValueError("artifact record changed after purge preparation; rerun the plan")
-        _purge_tree(context.quarantine_dir)
+        payload_exists = True
     else:
         verification = {
             "integrity": deepcopy(prepared.get("integrity") or {}),
             "inventory": deepcopy(prepared.get("inventory") or {}),
         }
+        payload_exists = False
+    with mutation_lock(context.root):
+        ensure_interaction_log_valid(context.root)
+        _assert_gc_state_safe(
+            context,
+            purge_after_seconds=delay,
+        )
+        current_prepared = _load_transition(context.prepared_path)
+        if current_prepared is None:
+            raise ValueError("artifact GC prepared manifest disappeared before purge")
+        _check_transition(context, current_prepared, transition="prepared")
+        if payload_exists and not context.quarantine_dir.exists():
+            raise ValueError("quarantined payload changed after purge verification")
+    if payload_exists:
+        _purge_tree(context.quarantine_dir)
     final_manifest = _transition_manifest(
         context,
         transition="purged",
@@ -877,6 +1002,7 @@ def _execute_purge(
         updated_record=_record_after_purge(context),
         final_manifest=final_manifest,
         event_kind="artifact_gc_purged",
+        purge_after_seconds=delay,
     )
     inventory = _patch_inventory(
         context,

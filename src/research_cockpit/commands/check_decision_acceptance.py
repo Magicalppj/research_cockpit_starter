@@ -16,6 +16,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.decisions import build_decision_acceptance_checklist
+from research_cockpit.artifact_records import list_artifact_records
 
 
 def decision_acceptance_payload(root: Path, decision_id: str) -> dict:
@@ -23,7 +24,11 @@ def decision_acceptance_payload(root: Path, decision_id: str) -> dict:
     current = load_yaml(root / "current_state.yaml")
     explicit_edges = load_explicit_edges(root)
     validate_cockpit(root, nodes, current, explicit_edges, raise_on_error=True)
-    return build_decision_acceptance_checklist(nodes, decision_id)
+    return build_decision_acceptance_checklist(
+        nodes,
+        decision_id,
+        artifact_records=list_artifact_records(root),
+    )
 
 
 def _print_human(payload: dict) -> None:

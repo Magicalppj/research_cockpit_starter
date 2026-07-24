@@ -15829,6 +15829,110 @@ class ScriptBehaviorTests(unittest.TestCase):
         self.assertEqual(event["problem_id"], "problem_text")
         self.assertFalse(event["forced"])
 
+    def test_force_accept_rejects_unverified_decision_critical_artifact(self) -> None:
+        write_node(
+            self.root,
+            {
+                "id": "option_alt",
+                "type": "option",
+                "title": "Alternative",
+                "status": "rejected",
+                "parent": "problem_text",
+            },
+        )
+        experiment = load_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml")
+        experiment.update(
+            {
+                "status": "done",
+                "result_summary": "Improves edit following.",
+                "outcome": "positive",
+                "linked_artifact_records": ["record_decision_integrity"],
+            }
+        )
+        save_yaml(self.root / "graph" / "nodes" / "exp_t5.yaml", experiment)
+        write_node(
+            self.root,
+            {
+                "id": "decision_t5",
+                "type": "decision",
+                "title": "Use T5",
+                "status": "proposed",
+                "parent": "option_t5",
+                "summary": "T5 is promising.",
+                "supporting_experiments": ["exp_t5"],
+                "evidence_strength": "medium",
+                "evidence_summary": "1 experiment; outcome positive",
+                "alternatives_considered": ["option_alt"],
+                "consequences": ["Update focus."],
+                "next_required_actions": ["Run CLAP ablation."],
+            },
+        )
+        artifact_path = self.root / "artifact_records" / "exp_t5.yaml"
+        save_yaml(
+            artifact_path,
+            {
+                "schema_version": "artifact_records_v1",
+                "experiment_id": "exp_t5",
+                "records": {
+                    "record_decision_integrity": {
+                        "record_id": "record_decision_integrity",
+                        "experiment_id": "exp_t5",
+                        "run_id": "run_decision_integrity",
+                        "storage": {
+                            "mode": "reference",
+                            "ownership": "external",
+                            "uri": "s3://example/decision-integrity",
+                            "managed_key": None,
+                        },
+                        "integrity": {
+                            "level": "inventory",
+                            "algorithm": "sha256",
+                            "digest": "inventory-sha256:" + "0" * 64,
+                        },
+                        "inventory": {
+                            "size_bytes": 1,
+                            "file_count": 1,
+                            "complete": True,
+                        },
+                        "retention": {"class": "reproducible_output"},
+                        "availability": {
+                            "status": "available",
+                            "last_verified_at": None,
+                        },
+                        "lifecycle": {"supersedes": [], "superseded_by": None},
+                    }
+                },
+            },
+        )
+
+        with self.assertRaisesRegex(ValueError, "content or manifest"):
+            accept_decision(
+                self.root,
+                decision_id="decision_t5",
+                force_accept=True,
+                rebuild_dashboard=False,
+            )
+
+        artifact_file = load_yaml(artifact_path)
+        artifact_file["records"]["record_decision_integrity"]["integrity"] = {
+            "level": "manifest",
+            "algorithm": "sha256",
+            "digest": "sha256:" + "0" * 64,
+        }
+        save_yaml(artifact_path, artifact_file)
+
+        accept_decision(
+            self.root,
+            decision_id="decision_t5",
+            force_accept=True,
+            rebuild_dashboard=False,
+        )
+
+        self.assertEqual(
+            load_yaml(self.root / "graph" / "nodes" / "decision_t5.yaml")["status"],
+            "accepted",
+        )
+
     def test_accept_decision_cli_dry_run_json_previews_without_writing(self) -> None:
         command = "accept-decision"
         write_node(

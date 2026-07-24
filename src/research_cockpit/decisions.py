@@ -73,6 +73,7 @@ def _acceptance_check(
     reason: str,
     *,
     blocking: bool = True,
+    unoverrideable: bool = False,
     related_node_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
@@ -81,6 +82,7 @@ def _acceptance_check(
         "state": "pass" if passed else "fail",
         "reason": reason,
         "blocking": blocking,
+        "unoverrideable": unoverrideable,
         "related_node_ids": related_node_ids or [],
     }
 
@@ -102,7 +104,32 @@ def _acceptance_warning(
     }
 
 
-def build_decision_acceptance_checklist(nodes: dict[str, ResearchNode], decision_id: str) -> dict[str, Any]:
+def _linked_artifact_record_ids(experiment: ResearchNode) -> list[str]:
+    record_ids = unique_strings(experiment.raw.get("linked_artifact_records", []) or [])
+    findings = experiment.raw.get("findings")
+    if isinstance(findings, list):
+        for finding in findings:
+            if isinstance(finding, dict):
+                record_ids = unique_strings(
+                    record_ids
+                    + list(finding.get("linked_artifact_records", []) or [])
+                )
+    return record_ids
+
+
+def _artifact_integrity_level(record: dict[str, Any]) -> str:
+    integrity = record.get("integrity")
+    if not isinstance(integrity, dict):
+        return "unverified"
+    return str(integrity.get("level") or "unverified")
+
+
+def build_decision_acceptance_checklist(
+    nodes: dict[str, ResearchNode],
+    decision_id: str,
+    *,
+    artifact_records: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     if decision_id not in nodes:
         raise ValueError(f"Decision node does not exist: {decision_id}")
     decision = nodes[decision_id]
@@ -168,6 +195,57 @@ def build_decision_acceptance_checklist(nodes: dict[str, ResearchNode], decision
         related_node_ids=valid_experiment_ids,
     ))
 
+    critical_record_ids: list[str] = []
+    for experiment_id in valid_experiment_ids:
+        critical_record_ids = unique_strings(
+            critical_record_ids
+            + _linked_artifact_record_ids(nodes[experiment_id])
+        )
+    record_by_id = {
+        str(record.get("record_id") or "").strip(): record
+        for record in artifact_records or []
+        if isinstance(record, dict) and str(record.get("record_id") or "").strip()
+    }
+    missing_records = [
+        record_id for record_id in critical_record_ids if record_id not in record_by_id
+    ]
+    weak_records = [
+        (record_id, _artifact_integrity_level(record_by_id[record_id]))
+        for record_id in critical_record_ids
+        if record_id in record_by_id
+        and _artifact_integrity_level(record_by_id[record_id])
+        not in {"content", "manifest"}
+    ]
+    integrity_ok = not missing_records and not weak_records
+    if missing_records:
+        integrity_reason = (
+            "Decision-critical artifact record metadata is missing: "
+            + ", ".join(missing_records)
+        )
+    elif weak_records:
+        integrity_reason = (
+            "Decision-critical artifact records must use content or manifest integrity: "
+            + ", ".join(
+                f"{record_id} ({level})" for record_id, level in weak_records
+            )
+        )
+    elif critical_record_ids:
+        integrity_reason = (
+            "All decision-critical artifact records use content or manifest integrity."
+        )
+    else:
+        integrity_reason = "No decision-critical artifact record is referenced."
+    checks.append(
+        _acceptance_check(
+            "decision_critical_integrity",
+            "Decision-critical artifacts have verified integrity",
+            integrity_ok,
+            integrity_reason,
+            unoverrideable=True,
+            related_node_ids=critical_record_ids,
+        )
+    )
+
     strength = str(decision.raw.get("evidence_strength") or "none")
     strength_ok = strength in {"weak", "medium", "strong"} and strength != "none"
     checks.append(_acceptance_check(
@@ -226,6 +304,9 @@ def build_decision_acceptance_checklist(nodes: dict[str, ResearchNode], decision
         for check in checks
         if check["blocking"] and check["state"] == "fail"
     ]
+    hard_blocking_failures = [
+        check for check in blocking_failures if check.get("unoverrideable") is True
+    ]
     return {
         "decision_id": decision.id,
         "decision_title": decision.title,
@@ -233,13 +314,22 @@ def build_decision_acceptance_checklist(nodes: dict[str, ResearchNode], decision
         "ready": not blocking_failures,
         "checks": checks,
         "blocking_failures": blocking_failures,
+        "hard_blocking_failures": hard_blocking_failures,
         "warnings": warnings,
     }
 
 
-def build_decision_acceptance_checklists(nodes: dict[str, ResearchNode]) -> list[dict[str, Any]]:
+def build_decision_acceptance_checklists(
+    nodes: dict[str, ResearchNode],
+    *,
+    artifact_records: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
     return [
-        build_decision_acceptance_checklist(nodes, node.id)
+        build_decision_acceptance_checklist(
+            nodes,
+            node.id,
+            artifact_records=artifact_records,
+        )
         for node in sorted(nodes.values(), key=lambda item: item.id)
         if node.type == "decision"
     ]

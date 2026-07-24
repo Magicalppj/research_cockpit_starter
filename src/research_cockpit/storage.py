@@ -19,7 +19,7 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 def save_yaml(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=".tmp-", suffix=".yaml", dir=path.parent)
+    fd, temp_name = tempfile.mkstemp(prefix=".tmp-", suffix=".tmp", dir=path.parent)
     temp_path = Path(temp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:

@@ -5,6 +5,9 @@ import copy
 from pathlib import Path
 from typing import Any
 
+from research_cockpit.artifact_lifecycle import (
+    assert_no_artifact_lifecycle_reservation,
+)
 from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
@@ -33,6 +36,7 @@ from research_cockpit.model import (
     script_command,
     validate_cockpit,
 )
+from research_cockpit.run_summaries import ACTIVE_RUN_STATUSES
 
 
 def update_run(
@@ -106,6 +110,16 @@ def update_run(
     candidate = dict(runs)
     candidate[normalized_id] = RunRecord.from_dict(after_data)
     validate_mutation_candidate(root, state, runs=candidate)
+    creates_active_reference = (
+        after_data.get("status") in ACTIVE_RUN_STATUSES
+        and not after_data.get("finished_at")
+    )
+    lifecycle_experiment_id = str(after_data.get("experiment_id") or "")
+    if creates_active_reference:
+        assert_no_artifact_lifecycle_reservation(
+            root,
+            experiment_ids=[lifecycle_experiment_id],
+        )
 
     changed = before_data != after_data
     changes = [(path, before_data, after_data)] if changed else []
@@ -140,6 +154,16 @@ def update_run(
             "after": after_data,
         },
         rebuild_dashboard=rebuild_dashboard,
+        commit_validators=(
+            [
+                lambda: assert_no_artifact_lifecycle_reservation(
+                    root,
+                    experiment_ids=[lifecycle_experiment_id],
+                )
+            ]
+            if creates_active_reference
+            else None
+        ),
     )
     return result
 

@@ -12,6 +12,9 @@ import shutil
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from research_cockpit.artifact_lifecycle import (
+    artifact_lifecycle_reservation_blockers,
+)
 from research_cockpit.artifact_records import (
     find_artifact_record,
     list_artifact_records,
@@ -173,7 +176,53 @@ def _subtree_ids(nodes: dict[str, Any], root_id: str) -> set[str]:
     return selected
 
 
-def active_record_blockers(root: Path, *, experiment_id: str, run_id: str) -> list[str]:
+def _resource_strings(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        values: list[str] = []
+        for item in value.values():
+            values.extend(_resource_strings(item))
+        return values
+    if isinstance(value, list):
+        values = []
+        for item in value:
+            values.extend(_resource_strings(item))
+        return values
+    return []
+
+
+def _resolve_resource_path(root: Path, value: Any) -> Path | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    parsed = urlparse(text)
+    if parsed.scheme == "file":
+        return Path(unquote(parsed.path))
+    if parsed.scheme and len(parsed.scheme) != 1:
+        return None
+    path = Path(text)
+    if path.is_absolute():
+        return path
+    candidates = (root / path, root.parent / path)
+    return next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+
+
+def _paths_overlap(left: Path, right: Path) -> bool:
+    left = left.resolve(strict=False)
+    right = right.resolve(strict=False)
+    return left == right or left in right.parents or right in left.parents
+
+
+def active_record_blockers(
+    root: Path,
+    *,
+    experiment_id: str,
+    run_id: str,
+    protected_paths: list[Path] | None = None,
+) -> list[str]:
     nodes = load_nodes(root)
     blockers: list[str] = []
     for assignment in load_assignments(root).values():
@@ -182,7 +231,8 @@ def active_record_blockers(root: Path, *, experiment_id: str, run_id: str) -> li
         scope = _subtree_ids(nodes, assignment.root_node)
         if experiment_id in scope or assignment.current_node == experiment_id:
             blockers.append(f"active_assignment:{assignment.assignment_id}")
-    for run in load_runs(root).values():
+    runs = load_runs(root)
+    for run in runs.values():
         if (
             run.experiment_id == experiment_id
             and run.status in ACTIVE_RUN_STATUSES
@@ -190,11 +240,33 @@ def active_record_blockers(root: Path, *, experiment_id: str, run_id: str) -> li
         ):
             blockers.append(f"active_run:{run.run_id}")
     if run_id:
-        for run in load_runs(root).values():
+        for run in runs.values():
             if run.run_id == run_id and run.status in ACTIVE_RUN_STATUSES:
                 marker = f"active_run:{run.run_id}"
                 if marker not in blockers:
                     blockers.append(marker)
+    protected = [path.resolve(strict=False) for path in protected_paths or []]
+    if protected:
+        for run in sorted(runs.values(), key=lambda item: item.run_id):
+            if run.status not in ACTIVE_RUN_STATUSES or run.finished_at:
+                continue
+            resources: list[tuple[str, Any]] = [
+                ("output_root", run.output_root),
+                ("log_root", run.log_root),
+                ("progress_file", run.progress_file),
+                ("config_file", run.config_file),
+            ]
+            resources.extend(
+                ("resources", value)
+                for value in _resource_strings(run.raw.get("resources"))
+            )
+            for source, value in resources:
+                resource_path = _resolve_resource_path(root, value)
+                if resource_path is not None and any(
+                    _paths_overlap(resource_path, candidate) for candidate in protected
+                ):
+                    blockers.append(f"active_resource:{run.run_id}:{source}")
+                    break
     return sorted(set(blockers))
 
 
@@ -261,6 +333,7 @@ def _build_context(root: Path, *, record_id: str, operation_id: str) -> _Migrati
     run_id = _safe_segment("run_id", record.get("run_id"))
     source, source_relative_path = _legacy_source(root, record)
     migration_id = _migration_id(record_id, operation_id)
+    journal_path = _journal_path(root, migration_id)
     managed_key, staging_dir, target_dir = _managed_paths(
         layout,
         experiment_id=experiment_id,
@@ -268,11 +341,17 @@ def _build_context(root: Path, *, record_id: str, operation_id: str) -> _Migrati
         record_id=record_id,
         migration_id=migration_id,
     )
-    transfer_method = (
-        "same_filesystem_rename"
-        if source.exists() and _same_filesystem(source, artifact_root)
-        else "copy_and_verify"
-    )
+    existing_journal = _load_journal(journal_path)
+    if existing_journal is not None:
+        transfer_method = str(existing_journal.get("transfer_method") or "")
+        if transfer_method not in {"same_filesystem_rename", "copy_and_verify"}:
+            raise ValueError(f"{journal_path}: invalid artifact migration transfer method")
+    else:
+        transfer_method = (
+            "same_filesystem_rename"
+            if source.exists() and _same_filesystem(source, artifact_root)
+            else "copy_and_verify"
+        )
     return _MigrationContext(
         root=root,
         layout=layout,
@@ -291,8 +370,51 @@ def _build_context(root: Path, *, record_id: str, operation_id: str) -> _Migrati
         managed_key=managed_key,
         staging_dir=staging_dir,
         target_dir=target_dir,
-        journal_path=_journal_path(root, migration_id),
+        journal_path=journal_path,
         transfer_method=transfer_method,
+    )
+
+
+def _migration_state_blockers(
+    context: _MigrationContext,
+    *,
+    require_source: bool,
+) -> list[str]:
+    blockers = active_record_blockers(
+        context.root,
+        experiment_id=context.experiment_id,
+        run_id=context.run_id,
+        protected_paths=[context.source, context.staging_dir, context.target_dir],
+    )
+    blockers.extend(
+        artifact_lifecycle_reservation_blockers(
+            context.root,
+            experiment_ids=[context.experiment_id],
+            ignore_migration_ids=[context.migration_id],
+        )
+    )
+    if require_source:
+        if not context.source.exists():
+            blockers.append("legacy_source_missing")
+        elif _is_link_like(context.source) or not context.source.is_dir():
+            blockers.append("legacy_source_not_directory")
+    return sorted(set(blockers))
+
+
+def _migration_requires_source(
+    context: _MigrationContext,
+    journal: dict[str, Any] | None,
+) -> bool:
+    return not (
+        journal is not None
+        and context.transfer_method == "same_filesystem_rename"
+        and not context.source.exists()
+        and (
+            context.staging_dir.exists()
+            or os.path.lexists(context.staging_dir)
+            or context.target_dir.exists()
+            or os.path.lexists(context.target_dir)
+        )
     )
 
 
@@ -336,9 +458,22 @@ def _check_journal(context: _MigrationContext, journal: dict[str, Any]) -> None:
 def _write_initial_journal(context: _MigrationContext) -> dict[str, Any]:
     with mutation_lock(context.root):
         ensure_interaction_log_valid(context.root)
+        if _read_bytes(context.record_path) != context.record_before_bytes:
+            raise ValueError(
+                "artifact record changed after migration planning; rerun the migration plan"
+            )
         existing = _load_journal(context.journal_path)
         if existing is not None:
             _check_journal(context, existing)
+        blockers = _migration_state_blockers(
+            context,
+            require_source=_migration_requires_source(context, existing),
+        )
+        if blockers:
+            raise ValueError(
+                "artifact storage migration is blocked: " + ", ".join(blockers)
+            )
+        if existing is not None:
             return existing
         journal = _migration_journal(context)
         save_yaml(context.journal_path, journal)
@@ -733,6 +868,14 @@ def _publish_migration(
         if current_journal is None:
             raise ValueError("artifact migration journal disappeared before publish")
         _check_journal(context, current_journal)
+        blockers = _migration_state_blockers(
+            context,
+            require_source=context.transfer_method == "copy_and_verify",
+        )
+        if blockers:
+            raise ValueError(
+                "artifact storage migration is blocked: " + ", ".join(blockers)
+            )
         if context.target_dir.exists() or os.path.lexists(context.target_dir):
             verification = verify_managed_payload(context, context.target_dir)
             record_after["records"][context.record_id] = _updated_raw_record(
@@ -881,15 +1024,13 @@ def plan_legacy_artifact_migration(
     operation_id: str,
 ) -> dict[str, Any]:
     context = _build_context(root, record_id=record_id, operation_id=operation_id)
-    blockers = active_record_blockers(
-        context.root,
-        experiment_id=context.experiment_id,
-        run_id=context.run_id,
+    journal = _load_journal(context.journal_path)
+    if journal is not None:
+        _check_journal(context, journal)
+    blockers = _migration_state_blockers(
+        context,
+        require_source=_migration_requires_source(context, journal),
     )
-    if not context.source.exists():
-        blockers.append("legacy_source_missing")
-    elif _is_link_like(context.source) or not context.source.is_dir():
-        blockers.append("legacy_source_not_directory")
     target_state = "absent"
     try:
         if context.target_dir.exists() or os.path.lexists(context.target_dir):
@@ -900,9 +1041,6 @@ def plan_legacy_artifact_migration(
     except ValueError:
         blockers.append("managed_target_conflict")
         target_state = "conflict"
-    journal = _load_journal(context.journal_path)
-    if journal is not None:
-        _check_journal(context, journal)
     return {
         "ok": True,
         "schema_version": "artifact_storage_migration_plan_v1",

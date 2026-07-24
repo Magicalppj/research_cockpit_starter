@@ -6,6 +6,9 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from research_cockpit.artifact_lifecycle import (
+    assert_no_artifact_lifecycle_reservation,
+)
 from research_cockpit.paths import default_data_root
 
 ROOT = default_data_root()
@@ -34,6 +37,7 @@ from research_cockpit.model import (
     load_yaml,
     script_command,
 )
+from research_cockpit.run_summaries import ACTIVE_RUN_STATUSES
 
 
 def create_run(
@@ -114,6 +118,14 @@ def create_run(
                 + ", ".join(collisions)
             )
         data.update(copy.deepcopy(run_extra_fields))
+    creates_active_run = (
+        data["status"] in ACTIVE_RUN_STATUSES and not data.get("finished_at")
+    )
+    if creates_active_run:
+        assert_no_artifact_lifecycle_reservation(
+            root,
+            experiment_ids=[experiment_id],
+        )
     candidate_runs = dict(runs)
     candidate_runs[normalized_id] = RunRecord.from_dict(data)
     candidate_nodes = dict(state.nodes)
@@ -187,6 +199,16 @@ def create_run(
         interactions=[interaction],
         rebuild_dashboard=rebuild_dashboard,
         operation_request=operation_request,
+        commit_validators=(
+            [
+                lambda: assert_no_artifact_lifecycle_reservation(
+                    root,
+                    experiment_ids=[experiment_id],
+                )
+            ]
+            if creates_active_run
+            else None
+        ),
     )
     if operation_request is not None:
         result["_operation_transaction"] = transaction

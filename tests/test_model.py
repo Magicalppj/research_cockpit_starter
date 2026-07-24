@@ -174,6 +174,23 @@ class ModelValidationTests(unittest.TestCase):
 
             self.assertEqual(load_yaml(fallback), {"name": "T5", "items": ["alpha", "beta"]})
 
+    def test_save_yaml_temp_file_is_not_truth_discoverable(self) -> None:
+        target = self.root / "agents" / "agent_temp.yaml"
+        save_yaml(target, {"agent_id": "agent_temp", "status": "idle"})
+        visible_during_publish: list[str] = []
+        original_replace = Path.replace
+
+        def inspect_then_replace(source: Path, destination: Path) -> Path:
+            visible_during_publish.extend(
+                path.name for path in source.parent.glob("*.yaml")
+            )
+            return original_replace(source, destination)
+
+        with patch.object(Path, "replace", new=inspect_then_replace):
+            save_yaml(target, {"agent_id": "agent_temp", "status": "active"})
+
+        self.assertEqual(visible_during_publish, [target.name])
+
     def test_valid_sample_cockpit_passes_validation(self) -> None:
         nodes = load_nodes(self.root)
 

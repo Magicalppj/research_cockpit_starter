@@ -11,6 +11,7 @@ from typing import Any
 
 ROOT = default_data_root()
 
+from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.model import (
     ResearchNode,
     ValidationError,
@@ -134,8 +135,14 @@ def promote_decision(
     problem_before_data = None
     problem_id = option.parent
     if status == "accepted":
-        checklist = build_decision_acceptance_checklist(candidate, decision_id)
-        if not force_accept and not checklist["ready"]:
+        checklist = build_decision_acceptance_checklist(
+            candidate,
+            decision_id,
+            artifact_records=list_artifact_records(root),
+        )
+        if checklist["hard_blocking_failures"] or (
+            not force_accept and not checklist["ready"]
+        ):
             raise ValueError(decision_acceptance_failure_message(checklist))
 
         option_path = find_node_file(root, option_id)

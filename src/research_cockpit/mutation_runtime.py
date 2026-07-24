@@ -350,7 +350,7 @@ def preflight_mutation(root: Path) -> dict[str, bool]:
 
 def _atomic_save_yaml(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=".tmp-", suffix=".yaml", dir=path.parent)
+    fd, temp_name = tempfile.mkstemp(prefix=".tmp-", suffix=".tmp", dir=path.parent)
     temp_path = Path(temp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -898,6 +898,7 @@ def finish_mutation(
     rebuild_dashboard: bool,
     text_changes: list[tuple] | None = None,
     operation_request: dict[str, Any] | None = None,
+    commit_validators: list[CommitValidator] | None = None,
 ) -> dict[str, Any]:
     event = deepcopy(interaction)
     if operation_request is not None and operation_request.get("command"):
@@ -909,4 +910,5 @@ def finish_mutation(
         rebuild_dashboard=rebuild_dashboard,
         text_changes=text_changes,
         operation_request=operation_request,
+        commit_validators=commit_validators,
     )

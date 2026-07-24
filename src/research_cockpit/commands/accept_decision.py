@@ -11,6 +11,7 @@ from typing import Any
 
 ROOT = default_data_root()
 
+from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.model import (
     ResearchNode,
     ValidationError,
@@ -47,8 +48,14 @@ def accept_decision(
     if decision.type != "decision":
         raise ValueError(f"Node {decision_id} must be decision, got {decision.type}")
 
-    checklist = build_decision_acceptance_checklist(nodes, decision_id)
-    if not force_accept and not checklist["ready"]:
+    checklist = build_decision_acceptance_checklist(
+        nodes,
+        decision_id,
+        artifact_records=list_artifact_records(root),
+    )
+    if checklist["hard_blocking_failures"] or (
+        not force_accept and not checklist["ready"]
+    ):
         raise DecisionNotReadyError(decision_acceptance_failure_message(checklist), checklist)
 
     option_id = decision.parent

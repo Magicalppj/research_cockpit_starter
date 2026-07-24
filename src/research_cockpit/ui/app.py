@@ -18,6 +18,7 @@ RESEARCH_ROOT = default_data_root()
 COMMAND_LANGUAGE = "bash"
 
 from research_cockpit.context_packs import build_agent_context, build_dashboard_read_models
+from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.coordination import build_coordination_snapshot
 from research_cockpit.baselines import (
     build_accepted_decision_rows,
@@ -113,6 +114,14 @@ _DASHBOARD_JSON_FILES = {
     "search_index": "search_index.json",
     "option_workstreams": "option_workstreams.json",
 }
+
+
+def _decision_acceptance(nodes: dict, decision_id: str) -> dict[str, Any]:
+    return build_decision_acceptance_checklist(
+        nodes,
+        decision_id,
+        artifact_records=list_artifact_records(RESEARCH_ROOT),
+    )
 
 
 def _baseline_ref_label(ref: object) -> str:
@@ -462,7 +471,7 @@ def render_node_detail(
             st.write(text["findings"])
             st.dataframe(pd.DataFrame(format_finding_rows(findings)), use_container_width=True, hide_index=True)
         if node.type == "decision":
-            checklist = build_decision_acceptance_checklist(nodes, node_id)
+            checklist = _decision_acceptance(nodes, node_id)
             st.write(text["decision_acceptance_checklist"])
             if checklist["ready"]:
                 st.success(text["decision_ready"])
@@ -1312,7 +1321,7 @@ def render_decision_trace(nodes: dict, text: dict[str, str]) -> None:
         use_container_width=True,
         hide_index=True,
     )
-    checklist = build_decision_acceptance_checklist(nodes, decision_id)
+    checklist = _decision_acceptance(nodes, decision_id)
     st.subheader(text["decision_acceptance_checklist"])
     if checklist["ready"]:
         st.success(text["decision_ready"])

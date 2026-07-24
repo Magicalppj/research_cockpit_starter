@@ -16,6 +16,7 @@ from research_cockpit.graph_core import (
 from research_cockpit.gate_result_records import build_experiment_gate_context
 from research_cockpit.hierarchy_policy import hierarchy_policy
 from research_cockpit.decisions import build_decision_acceptance_checklist, build_decision_trace
+from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.baselines import resolve_effective_baseline
 from research_cockpit.context_packs import build_next_action_scopes
 from research_cockpit.interaction_log import recent_interactions_with_warnings
@@ -290,7 +291,11 @@ def _decision_context(
     run_records: list[dict[str, Any]] | None = None,
     gate_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    checklist = build_decision_acceptance_checklist(nodes, decision.id)
+    checklist = build_decision_acceptance_checklist(
+        nodes,
+        decision.id,
+        artifact_records=list_artifact_records(root),
+    )
     trace = build_decision_trace(nodes, decision.id)
     return {
         "kind": "decision",

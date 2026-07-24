@@ -13,6 +13,7 @@ from unittest import mock
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
+from research_cockpit import artifact_migration
 from research_cockpit.artifact_migration import (
     migrate_legacy_artifact,
     plan_legacy_artifact_migration,
@@ -130,6 +131,60 @@ class LegacyArtifactMigrationTests(unittest.TestCase):
         self.assertTrue(self.payload.exists())
         self.assertEqual(self._record().get("storage"), None)
 
+    def test_active_assignment_created_after_staging_blocks_publish_and_restores_source(self) -> None:
+        original_stage = artifact_migration._stage_payload
+
+        def stage_then_add_active_assignment(context: object) -> tuple[Path, dict]:
+            staging, verification = original_stage(context)
+            save_yaml(
+                self.root / "assignments" / "assignment_migration_race.yaml",
+                {
+                    "assignment_id": "assignment_migration_race",
+                    "agent_id": None,
+                    "status": "queued",
+                    "root_node": "option_demo_prompt_refinement",
+                    "current_node": self.experiment_id,
+                    "allowed_subtree": {
+                        "root": "option_demo_prompt_refinement",
+                        "policy": "descendants_only",
+                    },
+                },
+            )
+            return staging, verification
+
+        with mock.patch(
+            "research_cockpit.artifact_migration._same_filesystem",
+            return_value=True,
+        ), mock.patch(
+            "research_cockpit.artifact_migration._stage_payload",
+            side_effect=stage_then_add_active_assignment,
+        ):
+            with self.assertRaisesRegex(ValueError, "active_assignment:assignment_migration_race"):
+                self._execute()
+
+        self.assertTrue(self.payload.exists())
+        self.assertEqual(self._record().get("storage"), None)
+
+    def test_active_resource_path_blocks_migration(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_migration_resource.yaml",
+            {
+                "run_id": "run_migration_resource",
+                "experiment_id": self.experiment_id,
+                "status": "running",
+                "started_at": "2026-07-23T00:00:00Z",
+                "output_root": str(self.payload),
+            },
+        )
+
+        payload = self._plan(operation_id="migrate-resource-001")
+
+        self.assertFalse(payload["eligible"])
+        self.assertIn(
+            "active_resource:run_migration_resource:output_root",
+            payload["blockers"],
+        )
+
     def test_cross_filesystem_copy_preserves_source_and_relinks_record(self) -> None:
         with mock.patch(
             "research_cockpit.artifact_migration._same_filesystem",
@@ -230,6 +285,26 @@ class LegacyArtifactMigrationTests(unittest.TestCase):
             return_value=False,
         ):
             payload = self._execute()
+        self.assertFalse(payload["replayed"])
+        self.assertEqual(self._record()["storage"]["mode"], "managed")
+
+    def test_exact_retry_recovers_same_filesystem_stage_after_process_crash(self) -> None:
+        with mock.patch(
+            "research_cockpit.artifact_migration._same_filesystem",
+            return_value=True,
+        ), mock.patch(
+            "research_cockpit.artifact_migration._publish_migration",
+            side_effect=OSError("process terminated before publish"),
+        ), mock.patch(
+            "research_cockpit.artifact_migration._restore_renamed_source",
+        ):
+            with self.assertRaisesRegex(OSError, "process terminated before publish"):
+                self._execute()
+
+        self.assertFalse(self.payload.exists())
+        payload = self._execute()
+
+        self.assertEqual(payload["transfer_method"], "same_filesystem_rename")
         self.assertFalse(payload["replayed"])
         self.assertEqual(self._record()["storage"]["mode"], "managed")
 

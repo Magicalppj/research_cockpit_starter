@@ -10,6 +10,9 @@ import secrets
 import subprocess
 from typing import Any
 
+from research_cockpit.artifact_lifecycle import (
+    assert_no_artifact_lifecycle_reservation,
+)
 from research_cockpit.agent_sessions import (
     ensure_worktree_boundary,
     nearest_problem_id,
@@ -44,6 +47,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.mutation_lock import MutationError
+from research_cockpit.option_workstreams import experiment_ids_for_option
 from research_cockpit.paths import default_data_root
 from research_cockpit.storage import find_node_file, save_text
 
@@ -544,6 +548,11 @@ def start_agent_session(
     option = nodes[option_id]
     if option.type != "option":
         raise ValueError(f"Node {option_id} must be option, got {option.type}")
+    lifecycle_experiment_ids = experiment_ids_for_option(nodes, option_id)
+    assert_no_artifact_lifecycle_reservation(
+        root,
+        experiment_ids=lifecycle_experiment_ids,
+    )
 
     repo_root = root.resolve().parent
     resolved_worktree = _resolve_worktree(repo_root, worktree)
@@ -801,6 +810,12 @@ def start_agent_session(
             },
             rebuild_dashboard=rebuild_dashboard,
             operation_request=operation_request,
+            commit_validators=[
+                lambda: assert_no_artifact_lifecycle_reservation(
+                    root,
+                    experiment_ids=lifecycle_experiment_ids,
+                )
+            ],
         )
     except MutationError as exc:
         if create_worktree:

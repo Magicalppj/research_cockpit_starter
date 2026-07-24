@@ -16,7 +16,9 @@ from research_cockpit.artifact_gc import (
     execute_managed_artifact_gc,
     plan_managed_artifact_gc,
 )
+from research_cockpit import artifact_gc
 from research_cockpit.artifact_migration import migrate_legacy_artifact
+from research_cockpit.commands.create_run import create_run
 from research_cockpit.milestone_handoffs import root_truth_revision
 from research_cockpit.storage import load_yaml, save_yaml
 
@@ -180,6 +182,116 @@ class ManagedArtifactGcTests(unittest.TestCase):
         )
         self.assertTrue(replay["replayed"])
         self.assertEqual(len(list(manifest_dir.glob("*.yaml"))), 2)
+
+    def test_quarantine_rolls_back_when_an_active_assignment_appears_before_publish(self) -> None:
+        plan = self._plan()
+        original_rename = artifact_gc._safe_rename
+
+        def add_active_assignment_then_rename(
+            source: Path,
+            target: Path,
+            *,
+            artifact_root: Path,
+        ) -> None:
+            save_yaml(
+                self.root / "assignments" / "assignment_gc_race.yaml",
+                {
+                    "assignment_id": "assignment_gc_race",
+                    "agent_id": None,
+                    "status": "queued",
+                    "root_node": "option_demo_prompt_refinement",
+                    "current_node": self.experiment_id,
+                    "allowed_subtree": {
+                        "root": "option_demo_prompt_refinement",
+                        "policy": "descendants_only",
+                    },
+                },
+            )
+            original_rename(source, target, artifact_root=artifact_root)
+
+        with mock.patch(
+            "research_cockpit.artifact_gc._safe_rename",
+            side_effect=add_active_assignment_then_rename,
+        ):
+            with self.assertRaisesRegex(ValueError, "active_assignment:assignment_gc_race"):
+                self._execute(
+                    phase="quarantine",
+                    operation_id="gc-quarantine-001",
+                    expected_revision=plan["state_revision"],
+                )
+
+        self.assertTrue(
+            (self.store / self.experiment_id / self.run_id / self.record_id).exists()
+        )
+        self.assertFalse(Path(plan["quarantine_path"]).exists())
+        self.assertEqual(self._record()["availability"]["status"], "available")
+
+    def test_gc_honors_expiry_and_pending_decision_retention_guards(self) -> None:
+        record_file = load_yaml(self._record_path())
+        retention = record_file["records"][self.record_id]["retention"]
+        retention["expires_at"] = "2099-01-01T00:00:00Z"
+        save_yaml(self._record_path(), record_file)
+
+        not_expired = self._plan(operation_id="gc-retention-expiry-001")
+
+        self.assertFalse(not_expired["eligible"])
+        self.assertIn("retention_not_expired", not_expired["blockers"])
+
+        record_file = load_yaml(self._record_path())
+        retention = record_file["records"][self.record_id]["retention"]
+        retention["expires_at"] = "2000-01-01T00:00:00Z"
+        retention["keep_until_decision"] = "decision_demo_prompt_refinement"
+        save_yaml(self._record_path(), record_file)
+
+        pending_decision = self._plan(operation_id="gc-retention-decision-001")
+
+        self.assertFalse(pending_decision["eligible"])
+        self.assertIn("retention_decision_pending", pending_decision["blockers"])
+
+    def test_active_resource_path_blocks_quarantine(self) -> None:
+        save_yaml(
+            self.root / "runs" / "run_gc_resource.yaml",
+            {
+                "run_id": "run_gc_resource",
+                "experiment_id": self.experiment_id,
+                "status": "running",
+                "started_at": "2026-07-23T00:00:00Z",
+                "output_root": str(
+                    self.store / self.experiment_id / self.run_id / self.record_id
+                ),
+            },
+        )
+
+        plan = self._plan(operation_id="gc-active-resource-001")
+
+        self.assertFalse(plan["eligible"])
+        self.assertIn("active_resource:run_gc_resource:output_root", plan["blockers"])
+
+    def test_prepared_gc_reservation_blocks_new_active_run(self) -> None:
+        plan = self._plan(operation_id="gc-reservation-001")
+        with mock.patch(
+            "research_cockpit.artifact_gc._safe_rename",
+            side_effect=OSError("pause after prepare"),
+        ):
+            with self.assertRaisesRegex(OSError, "pause after prepare"):
+                self._execute(
+                    phase="quarantine",
+                    operation_id="gc-reservation-001",
+                    expected_revision=plan["state_revision"],
+                )
+
+        with self.assertRaisesRegex(ValueError, "artifact lifecycle reservation"):
+            create_run(
+                self.root,
+                run_id="run_after_gc_reservation",
+                experiment_id=self.experiment_id,
+                status="running",
+                started_at="2026-07-23T00:00:00Z",
+                coordinator=True,
+                rebuild_dashboard=False,
+            )
+
+        self.assertFalse((self.root / "runs" / "run_after_gc_reservation.yaml").exists())
 
     def test_active_and_weak_integrity_records_cannot_quarantine(self) -> None:
         save_yaml(

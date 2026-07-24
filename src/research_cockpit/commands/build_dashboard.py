@@ -27,6 +27,7 @@ from research_cockpit.context_packs import (
     write_dashboard_markdown,
 )
 from research_cockpit.assignment_view import build_assignment_view
+from research_cockpit.artifact_records import list_artifact_records
 from research_cockpit.graph_core import GraphTopology
 from research_cockpit.model import (
     build_experiment_matrix,
@@ -412,7 +413,10 @@ def _build_dashboard_payload(
     decision_checklists = _profiled(
         profiler,
         "build_decision_checklists",
-        lambda: build_decision_acceptance_checklists(nodes),
+        lambda: build_decision_acceptance_checklists(
+            nodes,
+            artifact_records=list_artifact_records(root),
+        ),
     )
     validation_index = _profiled(
         profiler,

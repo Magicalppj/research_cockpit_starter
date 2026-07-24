@@ -504,7 +504,11 @@ def context_payload(
         },
     }
     if nodes[node_id].type == "decision":
-        payload["decision_acceptance"] = build_decision_acceptance_checklist(nodes, node_id)
+        payload["decision_acceptance"] = build_decision_acceptance_checklist(
+            nodes,
+            node_id,
+            artifact_records=list_artifact_records(root),
+        )
     if compact:
         payload["schema_version"] = "context_compact_v3"
         payload["compact"] = True
