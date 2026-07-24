@@ -75,8 +75,31 @@ _UNITTEST_SKIPPED = re.compile(r"skipped=(\d+)")
 _FAILURE_TAIL_BYTES = 8 * 1024
 
 
-def _dedupe(values: Iterable[str]) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(values))
+def _dedupe_test_targets(values: Iterable[str]) -> tuple[str, ...]:
+    selected: list[str] = []
+    for value in values:
+        if any(
+            value == target or value.startswith(f"{target}.")
+            for target in selected
+        ):
+            continue
+
+        descendants = [
+            index
+            for index, target in enumerate(selected)
+            if target.startswith(f"{value}.")
+        ]
+        if descendants:
+            insert_at = descendants[0]
+            selected = [
+                target
+                for target in selected
+                if not target.startswith(f"{value}.")
+            ]
+            selected.insert(insert_at, value)
+        else:
+            selected.append(value)
+    return tuple(selected)
 
 
 def profile_test_targets(profile: str) -> tuple[str, ...]:
@@ -96,13 +119,13 @@ def build_profile_plan(
     extra_tests: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     targets = profile_test_targets(profile)
-    extras = _dedupe(str(value).strip() for value in extra_tests if str(value).strip())
+    extras = tuple(str(value).strip() for value in extra_tests if str(value).strip())
     if profile == "full" and extras:
         raise ValueError("--extra-test is supported only by fast and precommit profiles")
 
     test_command = [python, "-m", "unittest"]
     if profile != "full":
-        test_command.extend(_dedupe((*targets, *extras)))
+        test_command.extend(_dedupe_test_targets((*targets, *extras)))
     test_env = {}
     if profile == "full":
         test_env["RESEARCH_COCKPIT_EXTERNAL_RELEASE_CHECK"] = "1"

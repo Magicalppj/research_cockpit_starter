@@ -83,15 +83,32 @@ class VerificationProfileTests(unittest.TestCase):
             "1",
         )
 
-    def test_extra_tests_are_deduplicated_and_rejected_by_full(self) -> None:
+    def test_extra_tests_are_scope_deduplicated_and_rejected_by_full(self) -> None:
         extra_test = "tests.test_ui.UiAppTests.test_health"
+        covered_child = (
+            "tests.test_verification_profiles.VerificationProfileTests."
+            "test_list_command_is_machine_readable_and_does_not_run_tests"
+        )
         fast = run_test_profile.build_profile_plan(
             "fast",
             python="python-x",
-            extra_tests=(extra_test, extra_test),
+            extra_tests=(extra_test, extra_test, covered_child),
+        )
+        precommit = run_test_profile.build_profile_plan(
+            "precommit",
+            python="python-x",
+            extra_tests=("tests.test_scripts",),
         )
 
         self.assertEqual(fast[0]["command"].count(extra_test), 1)
+        self.assertNotIn(covered_child, fast[0]["command"])
+        self.assertEqual(precommit[0]["command"].count("tests.test_scripts"), 1)
+        self.assertFalse(
+            any(
+                target.startswith("tests.test_scripts.")
+                for target in precommit[0]["command"]
+            )
+        )
         with self.assertRaisesRegex(ValueError, "fast and precommit"):
             run_test_profile.build_profile_plan(
                 "full",
