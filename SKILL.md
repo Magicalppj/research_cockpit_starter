@@ -5,7 +5,7 @@ description: Manage bounded multi-agent research assignments, evidence, review, 
 
 # Research Cockpit
 
-Research Cockpit 的默认单位是一个 assignment-scoped Work Packet，而不是完整研究图。先选择一个角色，只读取对应 playbook，然后执行一条 startup path。
+Research Cockpit 的默认 ownership 单位是一个 independently owned stage workstream；assignment-scoped Work Packet 只承载需要独立 owner 或 durable handoff 的阶段工作，而不是每次操作。先选择一个角色，只读取对应 playbook，然后执行一条 startup path。
 
 ## Role Router
 
