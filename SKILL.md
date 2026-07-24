@@ -42,10 +42,11 @@ research-cockpit coord overview --root <data-root> --json --compact --limit 20
 2. 每个 mutating facade 请求使用稳定 `operation_id`；只对完全相同的请求复用它。
 3. `work start` 原子创建 run 并启动 experiment；`work close` 原子提交 run、finding、result、cursor、lease 和 optional evidence。
 4. `work record` 只用于 close 前必须 durable 的增量 evidence。
-5. Coordinator 创建 experiment/review assignment；reviewer 不修改 producer truth，coordinator 负责应用 review、decision 和 baseline。
-6. 成功 receipt 已 internal-verified 时立即停止，不追加 validate/context/build/smoke。
-7. Dashboard 是 projection；artifact payload 与 provenance 不能被 projection 替代。
-8. 不直接编辑 interaction backend，也不通过通用 YAML patch 绕过 domain validation。
+5. 同一 research contract 下的 edit、retry、seed、parameter、preflight 和 local attempt 复用一个 assignment；mechanical documentation-only micro edit 等 operational work 不创建 assignment/node，独立阶段交付仍按 ownership gate 判断。
+6. Coordinator 只为 independent stage workstream 或显式 review gate 创建 assignment；reviewer 不修改 producer truth，coordinator 负责应用 review、decision 和 baseline。
+7. 成功 receipt 已 internal-verified 时立即停止，不追加 validate/context/build/smoke。
+8. Dashboard 是 projection；evidence 默认 reference-only，managed payload 新写入需要显式 external artifact root，legacy payload 保持可读。
+9. 不直接编辑 interaction backend，也不通过通用 YAML patch 绕过 domain validation。
 
 ## Progressive Disclosure
 

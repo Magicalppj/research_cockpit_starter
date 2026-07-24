@@ -2,9 +2,9 @@
 
 ## Source Of Truth
 
-- `research_cockpit/agents/*.yaml`、`assignments/*.yaml`、`coordinator_state.yaml`、`current_state.yaml`、`graph/nodes/*.yaml`、`graph/interaction_events/**`、`runs/*.yaml`、`gate_results/*`、`artifact_records/*.yaml` 和 `handoffs/*.yaml` 是结构化 truth/audit state。
+- `research_cockpit/storage.yaml`、`agents/*.yaml`、`assignments/*.yaml`、`coordinator_state.yaml`、`current_state.yaml`、`graph/nodes/*.yaml`、`graph/interaction_events/**`、`runs/*.yaml`、`gate_results/*`、`artifact_records/*.yaml` 和 `handoffs/*.yaml` 是结构化 truth/audit state。
 - `assignments/*.yaml` 是 worker-local cursor 与 next-action source；`coordinator_state.yaml` 是 coordinator/UI selection state；`current_state.yaml` 仅用于 legacy/coordinator compatibility。
-- `artifacts/*` 是长期 evidence payload；`artifact_records/*.yaml` 是轻量 metadata/provenance。
+- Evidence 默认保持 reference-only；配置的 external artifact root 承载新 managed payload。`artifacts/*` 仅是 legacy payload location，继续可读但不接受隐式新分配；`artifact_records/*.yaml` 是轻量 metadata/provenance。
 - `graph/interaction_log.yaml` 在 segmented manifest 存在后是 immutable legacy prefix；只能通过 `maintenance migrate` 或 `maintenance repair` 处理 interaction backend。
 - `dashboards/*` 是 generated projection。普通 worker verification 不需要 build。
 - Markdown notes 只是 supporting records，不能作为 current state truth。
@@ -33,6 +33,8 @@
 ## Write Rules
 
 - 优先使用 canonical role facade；不要调用内部 command modules。
+- 一个 assignment 对应一个 independently owned stage workstream；同一 research contract 下的 edit、retry、seed、parameter、preflight 与 local attempt 复用它。
+- Mechanical documentation-only micro edit、progress read、smoke、mechanical retry、format fix 不创建 assignment 或 graph node；独立 owner、阶段性交付或 parallel ownership 仍按 assignment gate 处理，只有可能改变 research judgment 的 question/option/hypothesis/protocol/success criteria 才建 node。
 - Coordinator 创建 experiment session 时必须显式绑定该 option 下的 `experiment_id`；创建 review session 时必须绑定已完成且待审的 `producer_assignment_id`。
 - Unclaimed packet 使用一次 `work claim --return-packet`，直接复用返回 packet。
 - `work_start_v1` 从 packet 复制 agent、lease、`input_revision`，并将 `cursor.current_node` 作为显式 `experiment_id`；若该节点不是 experiment，停止并让 coordinator 修正 assignment。
@@ -71,5 +73,6 @@ research-cockpit coord handoff --root <data-root> --file <handoff.yaml> --json -
 ## Environment
 
 - 可设置 `RESEARCH_COCKPIT_ROOT` 作为默认 data root。
+- 可设置 `RESEARCH_COCKPIT_ARTIFACT_ROOT` 作为 external managed artifact root；未配置时只允许 reference evidence 与 legacy 读取。
 - 若入口缺少依赖，从 plugin root 运行 `python -m pip install -e .`。
 - Markdown 使用 UTF-8；不要提交本机用户名、absolute worktree path、virtualenv path 或 machine-specific interpreter path。
