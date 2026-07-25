@@ -187,6 +187,68 @@ class MultiAgentBaselineTests(unittest.TestCase):
         self.assertIn("broad_discovery_count", contract["violations"])
         self.assertIn("read_after_write_count", contract["violations"])
 
+    def test_workflow_metrics_reset_mutation_state_at_role_boundaries(self) -> None:
+        checks = [
+            {
+                "command": ["research-cockpit", "coord", "assign"],
+                "passed": True,
+                "json": {
+                    "verification": {
+                        "status": "internally_verified",
+                        "additional_verification_required": False,
+                    }
+                },
+            },
+            {
+                "command": ["research-cockpit", "work", "open"],
+                "passed": True,
+            },
+            {
+                "command": ["research-cockpit", "work", "start"],
+                "passed": True,
+                "json": {
+                    "verification": {
+                        "status": "internally_verified",
+                        "additional_verification_required": False,
+                    }
+                },
+            },
+            {
+                "command": ["research-cockpit", "review", "open"],
+                "passed": True,
+            },
+        ]
+
+        metrics = workflow_metrics(checks)
+
+        self.assertEqual(metrics["read_after_write_count"], 0)
+        self.assertEqual(metrics["extra_verification_after_mutation_count"], 0)
+
+    def test_workflow_metrics_reset_mutation_state_at_explicit_span_boundaries(self) -> None:
+        checks = [
+            {
+                "command": ["research-cockpit", "work", "close"],
+                "workflow_span": "worker-a",
+                "passed": True,
+                "json": {
+                    "verification": {
+                        "status": "internally_verified",
+                        "additional_verification_required": False,
+                    }
+                },
+            },
+            {
+                "command": ["research-cockpit", "work", "open"],
+                "workflow_span": "worker-b",
+                "passed": True,
+            },
+        ]
+
+        metrics = workflow_metrics(checks)
+
+        self.assertEqual(metrics["read_after_write_count"], 0)
+        self.assertEqual(metrics["extra_verification_after_mutation_count"], 0)
+
     def test_progress_parser_and_concurrency_summary_keep_stage_boundaries(self) -> None:
         stderr = "\n".join(
             [

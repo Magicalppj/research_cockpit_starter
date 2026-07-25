@@ -104,6 +104,18 @@ def command_name(command: list[str]) -> str | None:
     return group
 
 
+def _workflow_boundary(
+    name: str,
+    check: dict[str, Any],
+) -> tuple[str, str] | None:
+    explicit_span = check.get("workflow_span")
+    if isinstance(explicit_span, str) and explicit_span.strip():
+        return ("span", explicit_span.strip())
+    group = name.partition(" ")[0]
+    if group in ROLE_COMMAND_GROUPS:
+        return ("role", group)
+    return None
+
 
 def _optional_numeric_sum(
     command_rows: list[tuple[str, dict[str, Any]]],
@@ -240,7 +252,13 @@ def workflow_metrics(
     broad_discovery_after_packet_count = 0
     mutation_seen = False
     packet_seen = False
-    for name, _check in command_rows:
+    active_boundary: tuple[str, str] | None = None
+    for name, check in command_rows:
+        boundary = _workflow_boundary(name, check)
+        if boundary is not None and boundary != active_boundary:
+            mutation_seen = False
+            packet_seen = False
+            active_boundary = boundary
         if mutation_seen and name in CONTEXT_READ_COMMANDS:
             read_after_write_count += 1
         if packet_seen and name in BROAD_DISCOVERY_COMMANDS:
@@ -261,7 +279,12 @@ def workflow_metrics(
     extra_verification_after_mutation_count = 0
     internally_verified_mutation_seen = False
     verification_commands = CONTEXT_READ_COMMANDS | {"validate", "build"}
+    active_boundary = None
     for name, check in command_rows:
+        boundary = _workflow_boundary(name, check)
+        if boundary is not None and boundary != active_boundary:
+            internally_verified_mutation_seen = False
+            active_boundary = boundary
         if internally_verified_mutation_seen and name in verification_commands:
             extra_verification_after_mutation_count += 1
         if name in TRUTH_SOURCE_MUTATION_COMMANDS:
