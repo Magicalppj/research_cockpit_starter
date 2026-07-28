@@ -57,11 +57,13 @@ from research_cockpit.model import (
     load_yaml,
     load_nodes,
     node_context,
+    RunRecord,
     save_yaml,
     search_knowledge,
     unique_strings,
     upsert_graph_view,
     validate_cockpit,
+    validate_runs,
 )
 from research_cockpit.graph_core import GraphTopology
 from research_cockpit.lifecycle_guards import active_descendant_blockers
@@ -263,6 +265,51 @@ class ModelValidationTests(unittest.TestCase):
                 errors = validate_cockpit(self.root, load_nodes(self.root))
 
                 self.assertEqual(errors, [])
+
+    def test_validate_runs_rejects_duplicate_active_assignment_and_experiment(self) -> None:
+        nodes = {
+            "exp_a": ResearchNode.from_dict(
+                {"id": "exp_a", "type": "experiment", "title": "A", "status": "running"}
+            ),
+            "exp_b": ResearchNode.from_dict(
+                {"id": "exp_b", "type": "experiment", "title": "B", "status": "running"}
+            ),
+        }
+        runs = {
+            "run_a": RunRecord.from_dict(
+                {
+                    "run_id": "run_a",
+                    "assignment_id": "assign_x",
+                    "experiment_id": "exp_a",
+                    "status": "running",
+                }
+            ),
+            "run_b": RunRecord.from_dict(
+                {
+                    "run_id": "run_b",
+                    "assignment_id": "assign_x",
+                    "experiment_id": "exp_b",
+                    "status": "queued",
+                }
+            ),
+            "run_c": RunRecord.from_dict(
+                {
+                    "run_id": "run_c",
+                    "assignment_id": "assign_y",
+                    "experiment_id": "exp_a",
+                    "status": "running",
+                }
+            ),
+        }
+
+        errors = validate_runs(runs, nodes)
+
+        self.assertTrue(
+            any("assignment 'assign_x' has multiple active runs" in error for error in errors)
+        )
+        self.assertTrue(
+            any("experiment 'exp_a' has multiple active runs" in error for error in errors)
+        )
 
     def test_agent_assignment_and_coordinator_records_are_loaded_and_validated(self) -> None:
         save_yaml(

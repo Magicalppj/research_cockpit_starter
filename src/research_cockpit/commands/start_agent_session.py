@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import copy
 import json
 import hashlib
@@ -13,6 +14,7 @@ from typing import Any
 from research_cockpit.artifact_lifecycle import (
     assert_no_artifact_lifecycle_reservation,
 )
+from research_cockpit.assignment_leases import AssignmentLeaseError
 from research_cockpit.agent_sessions import (
     ensure_worktree_boundary,
     nearest_problem_id,
@@ -47,6 +49,7 @@ from research_cockpit.model import (
     validate_cockpit,
 )
 from research_cockpit.mutation_lock import MutationError
+from research_cockpit.operation_receipts import bounded
 from research_cockpit.option_workstreams import experiment_ids_for_option
 from research_cockpit.paths import default_data_root
 from research_cockpit.storage import find_node_file, save_text
@@ -190,6 +193,25 @@ def _remove_recovery_marker(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+def _worktree_partial_success_receipt(
+    exc: AssignmentLeaseError,
+    *,
+    worktree: Path,
+    reused: bool,
+) -> dict[str, Any]:
+    receipt = copy.deepcopy(exc.receipt)
+    action = "reused" if reused else "created"
+    warning = (
+        f"Git worktree was {action} at {worktree}; truth mutation was not committed. "
+        "Resolve the blocker and retry the same operation_id to reuse it."
+    )
+    existing = receipt.get("warnings", {}).get("items", [])
+    receipt["warnings"] = bounded([*[str(item) for item in existing], warning])
+    receipt["partial_success"] = True
+    receipt["rolled_back"] = False
+    return receipt
 
 
 def _command_plan_entry(command: list[str], *, stdin: str | None = None) -> dict[str, Any]:
@@ -537,6 +559,7 @@ def start_agent_session(
     assignment_overrides: dict[str, Any] | None = None,
     preloaded_state: CommandState | None = None,
     claim_option_workstream: bool = True,
+    additional_commit_validators: list[Callable[[], None]] | None = None,
 ) -> dict[str, Any]:
     requested_agent_id = agent_id
     requested_assignment_id = assignment_id
@@ -814,12 +837,25 @@ def start_agent_session(
                 lambda: assert_no_artifact_lifecycle_reservation(
                     root,
                     experiment_ids=lifecycle_experiment_ids,
-                )
+                ),
+                *(additional_commit_validators or []),
             ],
         )
+    except AssignmentLeaseError as exc:
+        if create_worktree:
+            raise AssignmentLeaseError(
+                _worktree_partial_success_receipt(
+                    exc,
+                    worktree=resolved_worktree,
+                    reused=resume_existing_worktree,
+                )
+            ) from exc
+        raise
     except MutationError as exc:
         if create_worktree:
             payload = dict(exc.payload)
+            payload["partial_success"] = True
+            payload["rolled_back"] = False
             payload["created_worktree"] = result["created_worktree"]
             payload["reused_worktree"] = resume_existing_worktree
             payload["worktree"] = str(resolved_worktree)

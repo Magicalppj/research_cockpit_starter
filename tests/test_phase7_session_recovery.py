@@ -170,11 +170,42 @@ class Phase7SessionRecoveryTests(unittest.TestCase):
             apply_coord_assignment(self.root, self._plan(create_worktree=True))
 
         receipt = captured.exception.receipt
+        self.assertTrue(receipt["partial_success"])
+        self.assertTrue(
+            any("worktree" in warning.lower() for warning in receipt["warnings"]["items"])
+        )
         self.assertEqual(receipt["required_action"]["kind"], "manual_recovery")
         self.assertTrue(
             receipt["required_action"]["command"].startswith(
                 "research-cockpit coord assign"
             )
+        )
+
+    def test_active_run_race_reports_created_worktree_as_partial_success(self) -> None:
+        def create_worktree(_command: list[str]) -> None:
+            self.worktree.mkdir(parents=True)
+
+        with (
+            patch(
+                "research_cockpit.commands.start_agent_session._run_git_worktree_add",
+                side_effect=create_worktree,
+            ),
+            patch(
+                "research_cockpit.coordinator_operations.active_run_ids_added_since_snapshot",
+                return_value=["run_raced"],
+            ),
+            self.assertRaises(AssignmentLeaseError) as captured,
+        ):
+            apply_coord_assignment(self.root, self._plan(create_worktree=True))
+
+        receipt = captured.exception.receipt
+        self.assertTrue(receipt["partial_success"])
+        self.assertTrue(self.worktree.is_dir())
+        self.assertTrue(
+            any("worktree" in warning.lower() for warning in receipt["warnings"]["items"])
+        )
+        self.assertFalse(
+            (self.root / "assignments" / "assign_phase7_recovery.yaml").exists()
         )
 
 

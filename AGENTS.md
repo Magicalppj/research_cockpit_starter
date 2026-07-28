@@ -38,7 +38,8 @@
 - Coordinator 创建 experiment session 时必须显式绑定该 option 下的 `experiment_id`；创建 review session 时必须绑定已完成且待审的 `producer_assignment_id`。
 - Unclaimed packet 使用一次 `work claim --return-packet`，直接复用返回 packet。
 - `work_start_v1` 从 packet 复制 agent、lease、`input_revision`，并将 `cursor.current_node` 作为显式 `experiment_id`；若该节点不是 experiment，停止并让 coordinator 修正 assignment。
-- Claimed assignment 以 `work start` 开始；正常 mutation 与 launcher heartbeat 自动续租，`work renew` 仅用于 recovery。
+- Claimed assignment 以 `work start` 开始。先读取 packet 的 `active_runs.assignment` 与 `active_runs.experiment`：本 assignment 的 active run 复用其 `run_id` 执行 `record`/`close`，其他 assignment 占用目标 experiment 时停止并交由 coordinator 处理。
+- 成功的 assignment mutation 会自动续租。Bundled launcher 与 `progress.json` 不会自动调用 lease heartbeat；长时间无 mutation 的任务必须在 `work_start_v1.lease_seconds` 中预留足够期限，或由外部 runtime 明确安排 `work renew`。不要假设写 progress 会续租。
 - Closeout 使用一次 `work close --file <closeout.yaml>`；不要拆成多个 run/experiment/cursor 操作。
 - 仅在缺少 closeout contract 时运行 `work close --print-schema --json --compact`；`finding.confidence` 只接受 `weak`、`medium` 或 `strong`。
 - Final payload 放入 `work_close_v1.evidence_inputs`。仅在 close 前必须 durable 时使用 `work record`。

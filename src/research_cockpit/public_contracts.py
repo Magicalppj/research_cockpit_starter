@@ -85,6 +85,10 @@ PUBLIC_CONTRACT_EXAMPLES: dict[str, dict[str, Any]] = {
             "result_revision": None,
         },
         "result": None,
+        "active_runs": {
+            "assignment": _bounded([], limit=5),
+            "experiment": _bounded([], limit=5),
+        },
         "allowed_operations": _bounded(["start", "record", "close"]),
         "cursor": {
             "current_node": "experiment_x",
@@ -255,6 +259,7 @@ PUBLIC_CONTRACT_REQUIRED_FIELDS: dict[str, frozenset[str]] = {
             "deliverables",
             "lease",
             "review",
+            "active_runs",
             "allowed_operations",
             "cursor",
         }
@@ -841,6 +846,46 @@ def _validate_work_packet(
 
     if "result" in payload:
         _validate_result_projection(payload["result"], f"{path}.result", strict=strict)
+
+    active_runs = _require_mapping(payload["active_runs"], f"{path}.active_runs")
+    active_run_fields = {"assignment", "experiment"}
+    _require_fields(active_runs, f"{path}.active_runs", active_run_fields)
+    _reject_unknown_fields(
+        active_runs,
+        f"{path}.active_runs",
+        active_run_fields,
+        strict=strict,
+    )
+    for scope_name in sorted(active_run_fields):
+        collection_path = f"{path}.active_runs.{scope_name}"
+        collection = _validate_bounded_collection(
+            active_runs[scope_name],
+            collection_path,
+            item_kind="mapping",
+            strict=strict,
+        )
+        reference_fields = {"run_id", "assignment_id", "experiment_id", "status"}
+        for index, reference in enumerate(collection["items"]):
+            reference_path = f"{collection_path}.items[{index}]"
+            _require_fields(reference, reference_path, reference_fields)
+            _reject_unknown_fields(
+                reference,
+                reference_path,
+                reference_fields,
+                strict=strict,
+            )
+            for field in ("run_id", "experiment_id", "status"):
+                _require_string(reference[field], f"{reference_path}.{field}")
+            _require_string(
+                reference["assignment_id"],
+                f"{reference_path}.assignment_id",
+                nullable=True,
+            )
+            _require_enum(
+                reference["status"],
+                f"{reference_path}.status",
+                frozenset({"queued", "running"}),
+            )
 
     cursor = _require_mapping(payload["cursor"], f"{path}.cursor")
     cursor_fields = {"current_node", "next_actions"}

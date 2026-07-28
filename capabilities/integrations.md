@@ -15,7 +15,7 @@ Coordinator 使用 `coord assign` 的 `session` action，显式提供 option、o
 
 Git worktree 只隔离代码与实验过程。Research mutation 仍通过 canonical root 的 assignment lease、scope 和 transaction。
 
-Launcher heartbeat 在模型上下文外运行；正常 mutation 也会 piggyback lease renewal。Agent 不需要周期性调用 renewal。
+正常 mutation 会 piggyback lease renewal。Bundled launcher 与 `progress.json` 只维护执行进度，不会自动调用 lease heartbeat；长时间无 mutation 的任务需在 start contract 中设置足够的 `lease_seconds`，或由外部 runtime 明确安排 `work renew`，无需让 agent 在模型回合中周期性续租。
 
 ## UI
 

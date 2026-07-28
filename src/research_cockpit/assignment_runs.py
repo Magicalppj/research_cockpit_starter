@@ -22,6 +22,12 @@ from research_cockpit.operation_receipts import (
     validate_operation_id,
 )
 from research_cockpit.runtime_ids import generate_runtime_id
+from research_cockpit.run_lifecycle import (
+    active_run_ids_added_since_snapshot,
+    active_run_ids_for_target,
+    capture_active_run_snapshot,
+)
+from research_cockpit.types import ValidationError
 from research_cockpit.work_packets import build_work_packet_for_assignment
 
 
@@ -53,6 +59,10 @@ def _lease_error(
     input_revision: str | None = None,
     latest_packet_revision: str | None = None,
     conflict_files: list[str] | None = None,
+    dependency_blockers: list[str] | None = None,
+    retry_kind: str = "reopen_packet",
+    retry_command: str | None = None,
+    retry_reason: str | None = None,
 ) -> AssignmentLeaseError:
     return AssignmentLeaseError(
         error_receipt(
@@ -65,11 +75,54 @@ def _lease_error(
             input_revision=input_revision,
             latest_packet_revision=latest_packet_revision,
             conflict_files=conflict_files,
-            retry_command=(
+            dependency_blockers=dependency_blockers,
+            retry_kind=retry_kind,
+            retry_command=retry_command
+            or (
                 f"research-cockpit work open --root <data-root> "
                 f"--assignment {assignment_id} --compact --json"
             ),
+            retry_reason=retry_reason,
         )
+    )
+
+
+def _assert_no_active_run_for_start(
+    root: Path,
+    *,
+    assignment_id: str,
+    experiment_id: str,
+    operation_id: str,
+    lease_id: str,
+    active_run_ids: list[str] | None = None,
+) -> None:
+    if active_run_ids is None:
+        active_run_ids = active_run_ids_for_target(
+            root,
+            assignment_id=assignment_id,
+            experiment_id=experiment_id,
+        )
+    if not active_run_ids:
+        return
+    raise _lease_error(
+        assignment_id=assignment_id,
+        operation_id=operation_id,
+        code="active_run_blocks_start",
+        message=(
+            "work start cannot create a second active run for the assignment "
+            "or experiment."
+        ),
+        lease_id=lease_id,
+        dependency_blockers=[f"active_run:{run_id}" for run_id in active_run_ids],
+        retry_kind="manual_recovery",
+        retry_command=(
+            "research-cockpit context --root <data-root> "
+            f"--id {experiment_id} --view execution --json --compact"
+        ),
+        retry_reason=(
+            "Resolve the existing active run with its owning assignment before "
+            "starting another."
+        ),
     )
 
 
@@ -176,6 +229,20 @@ def start_assignment_run(
             lease_seconds=lease_seconds,
         )
     )
+    target_experiment = str(experiment_id or candidate_assignment.current_node)
+    active_run_snapshot = capture_active_run_snapshot(
+        root,
+        assignment_id=assignment_id,
+        experiment_id=target_experiment,
+    )
+    _assert_no_active_run_for_start(
+        root,
+        assignment_id=assignment_id,
+        experiment_id=target_experiment,
+        operation_id=operation_id,
+        lease_id=lease_id,
+        active_run_ids=list(active_run_snapshot.occupancy.run_ids),
+    )
     packet = build_work_packet_for_assignment(root, candidate_assignment, now=current)
     allowed = {
         str(item) for item in packet.get("allowed_operations", {}).get("items", [])
@@ -213,7 +280,6 @@ def start_assignment_run(
             latest_packet_revision=str(packet["revision"]),
         )
 
-    target_experiment = str(experiment_id or candidate_assignment.current_node)
     run_id = generate_runtime_id("run", scope_hint=assignment_id, slug_hint=slug_hint)
     expanded_run_fields = _expand_run_placeholders(
         normalized_run_fields,
@@ -264,6 +330,19 @@ def start_assignment_run(
             additional_yaml_changes=lease_changes,
             interaction_override=interaction,
             operation_request=operation_request,
+            additional_commit_validators=[
+                lambda: _assert_no_active_run_for_start(
+                    root,
+                    assignment_id=assignment_id,
+                    experiment_id=target_experiment,
+                    operation_id=operation_id,
+                    lease_id=lease_id,
+                    active_run_ids=active_run_ids_added_since_snapshot(
+                        root,
+                        active_run_snapshot,
+                    ),
+                )
+            ],
             run_extra_fields={
                 "assignment_id": assignment_id,
                 "operation_id": operation_id,
@@ -271,6 +350,15 @@ def start_assignment_run(
             },
             **expanded_run_fields,
         )
+    except ValidationError:
+        _assert_no_active_run_for_start(
+            root,
+            assignment_id=assignment_id,
+            experiment_id=target_experiment,
+            operation_id=operation_id,
+            lease_id=lease_id,
+        )
+        raise
     except MutationError as exc:
         stored = exc.payload.get("operation_receipt")
         if isinstance(stored, dict):

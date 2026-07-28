@@ -8,6 +8,7 @@ import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -19,7 +20,14 @@ from research_cockpit.assignment_runs import start_assignment_run
 from research_cockpit.commands.work_start import parse_start_input
 from research_cockpit.interaction_log import iter_interaction_events
 from research_cockpit.model import load_runs
+from research_cockpit.run_lifecycle import (
+    ActiveRunOccupancy,
+    ActiveRunSnapshot,
+    active_run_ids_for_target,
+)
 from research_cockpit.storage import load_yaml, save_yaml
+from research_cockpit.validation_index import ensure_validation_index
+from research_cockpit.work_packets import build_work_packet
 
 
 NOW = datetime(2026, 7, 20, 9, 0, tzinfo=timezone.utc)
@@ -118,6 +126,187 @@ class WorkStartTests(unittest.TestCase):
         kinds = [event["kind"] for event in iter_interaction_events(self.root, strict=True)]
         self.assertEqual(kinds.count("assignment_lease_renewed"), 0)
         self.assertIn("assignment_run_started", kinds)
+
+    def test_start_blocks_second_active_run_for_assignment_target(self) -> None:
+        first = self._start(operation_id="op_first_active_run")
+
+        with self.assertRaises(AssignmentLeaseError) as caught:
+            self._start(operation_id="op_second_active_run")
+
+        active_run_id = first["entities"]["run_id"]
+        active_packet = build_work_packet(
+            self.root,
+            "assign_x",
+            now=NOW + timedelta(seconds=31),
+        )
+        self.assertEqual(
+            active_packet["allowed_operations"]["items"],
+            ["record", "close"],
+        )
+        self.assertEqual(
+            active_packet["active_runs"]["assignment"]["items"],
+            [
+                {
+                    "run_id": active_run_id,
+                    "assignment_id": "assign_x",
+                    "experiment_id": "experiment_x",
+                    "status": "running",
+                }
+            ],
+        )
+        self.assertEqual(
+            caught.exception.receipt["error"]["code"],
+            "active_run_blocks_start",
+        )
+        self.assertEqual(
+            caught.exception.receipt["error"]["dependency_blockers"]["items"],
+            [f"active_run:{active_run_id}"],
+        )
+
+        empty_snapshot = ActiveRunSnapshot(
+            assignment_id="assign_x",
+            experiment_id="experiment_x",
+            occupancy=ActiveRunOccupancy((), ()),
+            file_signatures=(),
+        )
+        with patch(
+            "research_cockpit.assignment_runs.capture_active_run_snapshot",
+            return_value=empty_snapshot,
+        ), patch(
+            "research_cockpit.assignment_runs.active_run_ids_added_since_snapshot",
+            return_value=[active_run_id],
+        ), patch(
+            "research_cockpit.work_packets.active_run_occupancy_for_target",
+            return_value=ActiveRunOccupancy((), ()),
+        ):
+            with self.assertRaises(AssignmentLeaseError) as raced:
+                self._start(operation_id="op_raced_active_run")
+
+        self.assertEqual(
+            raced.exception.receipt["error"]["code"],
+            "active_run_blocks_start",
+        )
+        self.assertEqual(len(load_runs(self.root)), 1)
+
+    def test_start_rechecks_active_runs_without_second_truth_scan(self) -> None:
+        ensure_validation_index(self.root)
+        with patch(
+            "research_cockpit.run_lifecycle.load_runs",
+            wraps=load_runs,
+        ) as run_loader:
+            self._start(operation_id="op_single_truth_scan")
+
+        self.assertEqual(run_loader.call_count, 1)
+
+    def test_active_run_query_uses_complete_validation_index_projection(self) -> None:
+        indexed_runs = {
+            "run_assignment": {
+                "run_id": "run_assignment",
+                "status": "running",
+                "experiment_id": "experiment_other",
+                "assignment_id": "assign_x",
+                "finished_at": None,
+            },
+            "run_target": {
+                "run_id": "run_target",
+                "status": "queued",
+                "experiment_id": "experiment_x",
+                "assignment_id": "assign_other",
+                "finished_at": None,
+            },
+            "run_finished": {
+                "run_id": "run_finished",
+                "status": "completed",
+                "experiment_id": "experiment_x",
+                "assignment_id": "assign_x",
+                "finished_at": "2026-07-20T08:00:00Z",
+            },
+        }
+
+        with patch(
+            "research_cockpit.run_lifecycle.load_runs",
+            side_effect=AssertionError("indexed projection should avoid truth scan"),
+        ):
+            active_run_ids = active_run_ids_for_target(
+                self.root,
+                assignment_id="assign_x",
+                experiment_id="experiment_x",
+                indexed_runs=indexed_runs,
+            )
+
+        self.assertEqual(active_run_ids, ["run_assignment", "run_target"])
+
+    def test_packet_does_not_offer_close_for_foreign_target_run(self) -> None:
+        ensure_validation_index(self.root)
+        save_yaml(
+            self.root / "runs" / "run_foreign.yaml",
+            {
+                "run_id": "run_foreign",
+                "assignment_id": "assign_other",
+                "experiment_id": "experiment_x",
+                "status": "running",
+                "started_at": NOW.isoformat().replace("+00:00", "Z"),
+            },
+        )
+
+        packet = build_work_packet(
+            self.root,
+            "assign_x",
+            now=NOW + timedelta(seconds=30),
+        )
+
+        self.assertEqual(packet["allowed_operations"]["items"], [])
+        self.assertEqual(
+            packet["active_runs"]["experiment"]["items"],
+            [
+                {
+                    "run_id": "run_foreign",
+                    "assignment_id": "assign_other",
+                    "experiment_id": "experiment_x",
+                    "status": "running",
+                }
+            ],
+        )
+        with self.assertRaises(AssignmentLeaseError) as caught:
+            self._start(operation_id="op_foreign_target_run")
+        self.assertEqual(
+            caught.exception.receipt["error"]["code"],
+            "active_run_blocks_start",
+        )
+
+    def test_packet_revision_tracks_active_run_ownership(self) -> None:
+        run_path = self.root / "runs" / "run_ownership.yaml"
+        run = {
+            "run_id": "run_ownership",
+            "assignment_id": "assign_x",
+            "experiment_id": "experiment_other",
+            "status": "running",
+            "started_at": NOW.isoformat().replace("+00:00", "Z"),
+        }
+        save_yaml(run_path, run)
+        ensure_validation_index(self.root)
+        first = build_work_packet(
+            self.root,
+            "assign_x",
+            now=NOW + timedelta(seconds=30),
+        )
+        self.assertEqual(
+            first["allowed_operations"]["items"],
+            ["record", "close"],
+        )
+
+        run["assignment_id"] = "assign_other"
+        run["experiment_id"] = "experiment_x"
+        save_yaml(run_path, run)
+        changed = build_work_packet(
+            self.root,
+            "assign_x",
+            since_revision=first["revision"],
+            now=NOW + timedelta(seconds=30),
+        )
+
+        self.assertTrue(changed["changed"])
+        self.assertEqual(changed["allowed_operations"]["items"], [])
 
     def test_start_rejects_assignment_not_allowed_by_work_packet(self) -> None:
         assignment_path = self.root / "assignments" / "assign_x.yaml"

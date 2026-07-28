@@ -36,6 +36,15 @@ class PublicContractTests(unittest.TestCase):
                 self.assertEqual(payload["schema_version"], schema_version)
                 json.dumps(payload)
 
+        packet = public_contract_example("work_packet_v1")
+        self.assertEqual(
+            packet["active_runs"],
+            {
+                "assignment": {"items": [], "limit": 5, "total": 0, "omitted": 0},
+                "experiment": {"items": [], "limit": 5, "total": 0, "omitted": 0},
+            },
+        )
+
     def test_contract_examples_are_returned_as_independent_copies(self) -> None:
         first = public_contract_example("work_packet_v1")
         first["assignment_id"] = "changed"

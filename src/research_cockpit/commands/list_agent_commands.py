@@ -1585,7 +1585,7 @@ ROLE_FACADE_COMMANDS: list[dict[str, object]] = [
         "group": "context",
         "verification_mode": "internal_non_dry_run",
         "rebuild_default": False,
-        "recommended_when": "Recover a long-idle lease only when launcher heartbeat or normal mutation renewal was unavailable.",
+        "recommended_when": "Recover a long-idle lease only when explicit external renewal or normal mutation renewal was unavailable.",
     },
     {
         "name": "work release",

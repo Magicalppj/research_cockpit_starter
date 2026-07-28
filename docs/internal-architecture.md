@@ -27,6 +27,7 @@ Workflow/domain layer
   assignment_scope.py
   assignment_leases.py
   assignment_runs.py
+  run_lifecycle.py
   assignment_records.py
   work_packets.py
   coordination.py
@@ -99,6 +100,7 @@ The root `SKILL.md` is only a role router. Default agent instructions live in `w
 - `assignment_scope.py`: assignment mutation boundaries, out-of-scope write checks, and coordinator override handling.
 - `assignment_leases.py`: claim, renew, release, owner/epoch checks, lease renewal planning, heartbeat hooks, and expired-lease reassignment guards.
 - `assignment_runs.py`: composes lease renewal with the existing run-creation domain transaction for `work start`.
+- `run_lifecycle.py`: owns bounded active-run references, assignment/experiment occupancy lookup, stable preflight snapshots, and changed-file commit guards.
 - `assignment_records.py`: admits incremental reference or explicit managed evidence, renews leases, and writes idempotent record receipts.
 - `coordinator_operations.py`: validates and executes `coord_assign_v1` graph/session operations.
 - `coordinator_decisions.py`: dispatches strict `coord_decide_v1` decision/baseline actions.
@@ -159,7 +161,7 @@ These modules should remain free of command, UI, and dashboard dependencies.
 - Use `agent_state.py` for agent, assignment, and coordinator state records/loaders.
 - Use `assignment_scope.py` for assignment-scoped mutation boundaries.
 - Use `work_packets.py` for assignment-facing read projections and revision polling.
-- Use `assignment_leases.py` and `assignment_runs.py` for lease-aware worker mutations.
+- Use `assignment_leases.py` and `assignment_runs.py` for lease-aware worker mutations; use `run_lifecycle.py` for active-run occupancy and concurrent-start guards.
 - Use `coordination.py` for coordinator/UI portfolio projections and `synthesis.py` for selected-evidence synthesis assignments.
 - Use `milestone_handoffs.py` only for coordinator merge, release, or research-stage closeout gates.
 - Use `operation_receipts.py` for ordinary mutation idempotency; do not create per-operation receipt files. `handoffs/*.yaml` is the deliberate exception because a milestone report is durable research/release truth, not only a retry receipt.
@@ -203,6 +205,7 @@ Runtime access rules:
 - `operation_receipts.py` derives `<data-root>/dashboards/operation_index.json` from immutable interaction events; a missing or stale index rebuilds from events and never becomes truth.
 - `mutation_runtime.py` owns targeted preflight, optimistic file checks, atomic multi-file transactions, rollback, and validation-index patching.
 - `validation_index.py` is a derived acceleration index; missing, incompatible, or stale indexes must fall back to full validation and return explicit refresh commands.
+- Active-run reads may use a signature-current validation-index projection. Start/session mutations capture full run truth outside the root lock and, inside the lock, parse only run files added or changed after that snapshot; full validation still enforces the one-active-run-per-assignment-and-experiment invariant.
 - `coordination.py` consumes the assignment projection in the validation index when fresh and performs an explicit assignment-file fallback when stale; UI and CLI use this same builder.
 - `interaction_log.py` owns both legacy YAML compatibility and the JSONL event backend. Commands must append through this module and must not rewrite interaction history.
 - `run_closeout.py` owns both legacy `run_closeout_v1` and facade `work_close_v1` terminal transactions; reference evidence records metadata without copying bytes, while explicit managed copy/hash occurs before lock acquisition and publishes record truth atomically.

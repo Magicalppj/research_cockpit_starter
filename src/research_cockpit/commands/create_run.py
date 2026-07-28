@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import copy
 from datetime import date
 from pathlib import Path
@@ -70,6 +71,7 @@ def create_run(
     interaction_override: dict[str, Any] | None = None,
     operation_request: dict[str, Any] | None = None,
     run_extra_fields: dict[str, Any] | None = None,
+    additional_commit_validators: list[Callable[[], None]] | None = None,
 ) -> dict[str, Any]:
     state = load_targeted_state(root, node_ids=[experiment_id])
     ensure_assignment_scope(
@@ -193,22 +195,22 @@ def create_run(
             "experiment_status_changed": experiment_status_changed,
         },
     }
+    commit_validators = list(additional_commit_validators or [])
+    if creates_active_run:
+        commit_validators.insert(
+            0,
+            lambda: assert_no_artifact_lifecycle_reservation(
+                root,
+                experiment_ids=[experiment_id],
+            ),
+        )
     transaction = execute_mutation_transaction(
         root,
         changes,
         interactions=[interaction],
         rebuild_dashboard=rebuild_dashboard,
         operation_request=operation_request,
-        commit_validators=(
-            [
-                lambda: assert_no_artifact_lifecycle_reservation(
-                    root,
-                    experiment_ids=[experiment_id],
-                )
-            ]
-            if creates_active_run
-            else None
-        ),
+        commit_validators=commit_validators or None,
     )
     if operation_request is not None:
         result["_operation_transaction"] = transaction

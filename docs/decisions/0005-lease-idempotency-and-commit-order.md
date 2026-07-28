@@ -76,3 +76,7 @@ CLI processes do not share memory and retries may happen after process exit. Rej
 - Facade receipts must remain bounded so storing them in events does not inflate segments excessively.
 - Concurrency tests must cover one-winner claim, exact replay, payload mismatch, stale owner, disjoint closeout, same-target conflict, and index recovery.
 - Background heartbeat cost is measured separately and never appears in model-visible workflow output.
+
+## Implementation Status (2026-07-28)
+
+Successful assignment mutations renew leases, and the lease domain exposes a heartbeat operation. The bundled launcher templates do not currently invoke that hook, and writing `progress.json` does not renew a lease. Until an integration wires the hook, long mutation-free runs must choose a sufficient `work_start_v1.lease_seconds` or have an external runtime explicitly arrange `work renew`; this status note narrows the accepted design claim to shipped behavior.

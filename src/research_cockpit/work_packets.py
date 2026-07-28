@@ -20,6 +20,11 @@ from research_cockpit.root_snapshot import (
     indexed_root_snapshot_source,
     load_indexed_root_snapshot,
 )
+from research_cockpit.run_lifecycle import (
+    ActiveRunOccupancy,
+    active_run_occupancy_for_target,
+    indexed_run_projection_is_current,
+)
 from research_cockpit.synthesis import build_synthesis_packet_for_assignment
 from research_cockpit.types import ValidationError
 from research_cockpit.validation_index import (
@@ -410,6 +415,8 @@ def _allowed_operations(
     readiness: str,
     lease_state: str,
     legacy_usable: bool,
+    has_assignment_active_run: bool,
+    has_experiment_active_run: bool,
 ) -> list[str]:
     if assignment.status in {"completed", "cancelled", "retired"}:
         return []
@@ -420,6 +427,10 @@ def _allowed_operations(
     if assignment.kind == "review":
         if readiness == "ready" and lease_state in {"active", "legacy_unknown"}:
             return ["review"]
+        return []
+    if has_assignment_active_run:
+        return ["record", "close"]
+    if has_experiment_active_run:
         return []
     if legacy_usable:
         return ["start", "record", "close"]
@@ -458,6 +469,7 @@ def _source_revision(
     index: dict[str, Any] | None,
     *,
     lease_state: str,
+    active_run_occupancy: ActiveRunOccupancy,
 ) -> str:
     snapshot_source: dict[str, Any]
     if is_index_schema_compatible(index):
@@ -472,6 +484,7 @@ def _source_revision(
     return stable_payload_revision(
         {
             "assignments": _dependency_source_rows(root, assignment),
+            "active_runs": active_run_occupancy.source_payload(),
             "lease_state": lease_state,
             "snapshot": snapshot_source,
         },
@@ -498,6 +511,8 @@ def _fit_budget(packet: dict[str, Any]) -> None:
         packet["compatibility_warnings"],
         packet["dependencies"],
         packet["stale_inputs"],
+        packet["active_runs"]["assignment"],
+        packet["active_runs"]["experiment"],
     ]
     if packet["result"] is not None:
         collection_paths.append(packet["result"]["attempts"])
@@ -539,11 +554,27 @@ def build_work_packet_for_assignment(
         raise ValueError("now must be timezone-aware")
     now = now.astimezone(timezone.utc)
     lease, lease_state = _lease_projection(assignment, now=now)
+    indexed_runs = None
+    if is_index_schema_compatible(index):
+        assert index is not None
+        candidate_indexed_runs = index.get("runs", {})
+        if isinstance(candidate_indexed_runs, dict) and indexed_run_projection_is_current(
+            root,
+            candidate_indexed_runs,
+        ):
+            indexed_runs = candidate_indexed_runs
+    active_run_occupancy = active_run_occupancy_for_target(
+        root,
+        assignment_id=assignment.assignment_id,
+        experiment_id=assignment.current_node,
+        indexed_runs=indexed_runs,
+    )
     source_revision = _source_revision(
         root,
         assignment,
         index,
         lease_state=lease_state,
+        active_run_occupancy=active_run_occupancy,
     )
     if since_revision and since_revision == source_revision:
         return {
@@ -619,7 +650,19 @@ def build_work_packet_for_assignment(
         readiness=readiness,
         lease_state=lease_state,
         legacy_usable=legacy_usable,
+        has_assignment_active_run=bool(active_run_occupancy.assignment_run_ids),
+        has_experiment_active_run=bool(active_run_occupancy.experiment_run_ids),
     )
+    active_runs = {
+        "assignment": _bounded(
+            [run.to_dict() for run in active_run_occupancy.assignment_runs],
+            item_limit=5,
+        ),
+        "experiment": _bounded(
+            [run.to_dict() for run in active_run_occupancy.experiment_runs],
+            item_limit=5,
+        ),
+    }
 
     packet: dict[str, Any] = {
         "schema_version": WORK_PACKET_SCHEMA_VERSION,
@@ -654,6 +697,7 @@ def build_work_packet_for_assignment(
         "lease": lease,
         "review": _review_projection(assignment),
         "result": _result_projection(assignment),
+        "active_runs": active_runs,
         "allowed_operations": _bounded(allowed_operations, item_limit=10),
         "cursor": {
             "current_node": assignment.current_node or None,
@@ -673,7 +717,28 @@ def build_work_packet_for_assignment(
         packet["synthesis_packet"] = build_synthesis_packet_for_assignment(root, assignment)
     _fit_budget(packet)
     parse_public_contract(packet)
-    if _source_revision(root, assignment, index, lease_state=lease_state) != source_revision:
+    latest_indexed_runs = indexed_runs
+    if latest_indexed_runs is not None and not indexed_run_projection_is_current(
+        root,
+        latest_indexed_runs,
+    ):
+        latest_indexed_runs = None
+    latest_active_run_occupancy = active_run_occupancy_for_target(
+        root,
+        assignment_id=assignment.assignment_id,
+        experiment_id=assignment.current_node,
+        indexed_runs=latest_indexed_runs,
+    )
+    if (
+        _source_revision(
+            root,
+            assignment,
+            index,
+            lease_state=lease_state,
+            active_run_occupancy=latest_active_run_occupancy,
+        )
+        != source_revision
+    ):
         raise ValidationError([
             f"{assignment.assignment_id}: Work Packet sources changed during projection; retry work open"
         ])

@@ -12,6 +12,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR / "src"))
 
 from research_cockpit.assignment_leases import AssignmentLeaseError
+from research_cockpit.assignment_runs import start_assignment_run
 from research_cockpit.commands.build_dashboard import build_dashboard
 from research_cockpit.coordinator_operations import (
     _lease_epoch_counter,
@@ -20,6 +21,8 @@ from research_cockpit.coordinator_operations import (
     parse_coord_assign_input,
 )
 from research_cockpit.interaction_log import iter_interaction_events
+from research_cockpit.model import load_runs
+from research_cockpit.run_lifecycle import ActiveRunOccupancy, ActiveRunSnapshot
 from research_cockpit.storage import load_yaml
 from research_cockpit.work_packets import build_work_packet
 
@@ -177,6 +180,94 @@ class CoordinatorAssignmentTests(unittest.TestCase):
         self.assertEqual(packet["lease"]["state"], "active")
         self.assertEqual(packet["readiness"], "ready")
         self.assertIn("start", packet["allowed_operations"]["items"])
+
+    def test_session_action_does_not_replace_lease_during_active_run(self) -> None:
+        plan = {
+            "schema_version": "coord_assign_v1",
+            "operation_id": "op_coord_active_session",
+            "action": "session",
+            "session": {
+                "kind": "experiment",
+                "option_id": "option_demo_prompt_refinement",
+                "experiment_id": "experiment_demo_prompt_refinement",
+                "objective": "Keep the active run attached to its current lease.",
+                "branch": "codex/active-session",
+                "worktree": str(self.worktree),
+                "agent_id": "agent_active_session",
+                "assignment_id": "assign_active_session",
+                "create_worktree": False,
+                "force": True,
+                "tracking_reason": "stage_deliverable",
+            },
+        }
+        apply_coord_assignment(self.root, plan)
+        assignment = load_yaml(
+            self.root / "assignments" / "assign_active_session.yaml"
+        )
+        packet = build_work_packet(self.root, "assign_active_session")
+        started = start_assignment_run(
+            self.root,
+            assignment_id="assign_active_session",
+            agent_id="agent_active_session",
+            lease_id=assignment["lease"]["lease_id"],
+            lease_epoch=assignment["lease"]["lease_epoch"],
+            operation_id="op_start_active_session",
+            input_revision=packet["input_revision"],
+            experiment_id="experiment_demo_prompt_refinement",
+        )
+        active_assignment = load_yaml(
+            self.root / "assignments" / "assign_active_session.yaml"
+        )
+        with patch(
+            "research_cockpit.run_lifecycle.load_runs",
+            side_effect=AssertionError("incremental index should avoid truth scan"),
+        ):
+            active_packet = build_work_packet(self.root, "assign_active_session")
+        self.assertEqual(
+            active_packet["allowed_operations"]["items"],
+            ["record", "close"],
+        )
+
+        retry_plan = {**plan, "operation_id": "op_replace_active_session"}
+        with self.assertRaises(AssignmentLeaseError) as caught:
+            apply_coord_assignment(self.root, retry_plan)
+
+        active_run_id = started["entities"]["run_id"]
+        self.assertEqual(
+            caught.exception.receipt["error"]["code"],
+            "active_run_blocks_session",
+        )
+        self.assertEqual(
+            caught.exception.receipt["error"]["dependency_blockers"]["items"],
+            [f"active_run:{active_run_id}"],
+        )
+
+        raced_plan = {**plan, "operation_id": "op_raced_active_session"}
+        empty_snapshot = ActiveRunSnapshot(
+            assignment_id="assign_active_session",
+            experiment_id="experiment_demo_prompt_refinement",
+            occupancy=ActiveRunOccupancy((), ()),
+            file_signatures=(),
+        )
+        with patch(
+            "research_cockpit.coordinator_operations.capture_active_run_snapshot",
+            return_value=empty_snapshot,
+        ), patch(
+            "research_cockpit.coordinator_operations.active_run_ids_added_since_snapshot",
+            return_value=[active_run_id],
+        ):
+            with self.assertRaises(AssignmentLeaseError) as raced:
+                apply_coord_assignment(self.root, raced_plan)
+
+        self.assertEqual(
+            raced.exception.receipt["error"]["code"],
+            "active_run_blocks_session",
+        )
+        unchanged = load_yaml(
+            self.root / "assignments" / "assign_active_session.yaml"
+        )
+        self.assertEqual(unchanged["lease"], active_assignment["lease"])
+        self.assertEqual(len(load_runs(self.root)), 1)
 
     def test_missing_tracking_reason_warns_without_writing_a_default(self) -> None:
         plan = {

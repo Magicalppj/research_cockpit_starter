@@ -42,6 +42,8 @@ Coordinator action boundary 必须显式区分：
 
 Worker、reviewer 与 coordinator mutation 必须携带稳定 `operation_id`。Canonical request 经 normalization 后计算 hash；同 id、同 hash 返回原 receipt，同 id、不同 hash 返回 `idempotency_conflict`，且不写 truth。
 
+Canonical role workflow 对同一 assignment 或 experiment 同时最多允许一个 `queued`/`running` 且未结束的 run。Work Packet 的 `active_runs.assignment` 与 `active_runs.experiment` 是 limit 5 的 bounded references，每项包含 `run_id`、nullable `assignment_id`、`experiment_id` 与 `status`。存在本 assignment 的 active run 时只保留 `record` 与 `close`；仅目标 experiment 被其他 assignment 占用时不提供 mutation。直接重复 `work start` 返回 `active_run_blocks_start`，试图用 `coord assign` 替换 experiment session 返回 `active_run_blocks_session`。两者都在 `dependency_blockers.items` 返回 `active_run:<run_id>`，恢复动作指向该 experiment 的 execution context。
+
 Operation receipt 与 mutation interaction event 在同一 transaction 写入。Derived operation index 只加速 lookup，不是 truth，也不创建 per-operation files。Maintenance action 是显式人工流程，默认 dry-run；只有 action contract 明确声明 stable `operation_id` 时才支持 exact retry。
 
 ## Storage Lifecycle
@@ -78,6 +80,8 @@ Role mutation 返回 bounded receipt，至少包含：
 - dependency/review not ready
 - scope overlap/out-of-scope write
 - optimistic target conflict
+
+`coord assign` 在 `create_worktree: true` 后遇到提交期 conflict（包括 active-run race）时返回 `partial_success: true`：worktree 已创建或复用，但 truth 未提交。Caller 解决 blocker 后必须以完全相同的 request 与 `operation_id` 重试；不要创建第二个 worktree 或换 id。
 
 Exact transport retry 复用 operation id；truth、lease、input 或 request 发生变化时使用新 id。
 

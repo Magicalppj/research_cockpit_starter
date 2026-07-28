@@ -731,6 +731,8 @@ def validate_runs(runs: dict[str, RunRecord], nodes: dict[str, ResearchNode]) ->
     from research_cockpit.retention import validate_retention
 
     errors: list[str] = []
+    active_by_assignment: dict[str, list[str]] = {}
+    active_by_experiment: dict[str, list[str]] = {}
     for run in runs.values():
         if not run.run_id:
             errors.append("run has empty run_id")
@@ -753,6 +755,24 @@ def validate_runs(runs: dict[str, RunRecord], nodes: dict[str, ResearchNode]) ->
                 validate_retention(run.raw.get("output_retention"), "output_retention")
             except ValueError as exc:
                 errors.append(f"{run.run_id}: {exc}")
+        if run.status in {"queued", "running"} and not run.finished_at:
+            assignment_id = str(run.raw.get("assignment_id") or "")
+            if assignment_id:
+                active_by_assignment.setdefault(assignment_id, []).append(run.run_id)
+            if run.experiment_id:
+                active_by_experiment.setdefault(run.experiment_id, []).append(run.run_id)
+    for assignment_id, run_ids in sorted(active_by_assignment.items()):
+        if len(run_ids) > 1:
+            errors.append(
+                f"assignment {assignment_id!r} has multiple active runs: "
+                + ", ".join(sorted(run_ids))
+            )
+    for experiment_id, run_ids in sorted(active_by_experiment.items()):
+        if len(run_ids) > 1:
+            errors.append(
+                f"experiment {experiment_id!r} has multiple active runs: "
+                + ", ".join(sorted(run_ids))
+            )
     return errors
 
 

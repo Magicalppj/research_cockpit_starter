@@ -316,6 +316,8 @@ def build_validation_index(
             "run_id": run_id,
             "status": run.status,
             "experiment_id": run.experiment_id,
+            "assignment_id": str(run.raw.get("assignment_id") or ""),
+            "finished_at": run.finished_at,
             "file": rel_path,
             "file_signature": file_signature(path) if path.exists() else None,
         }
@@ -613,6 +615,8 @@ def _patch_run(index: dict[str, Any], root: Path, rel_path: str) -> None:
         "run_id": run.run_id,
         "status": run.status,
         "experiment_id": run.experiment_id,
+        "assignment_id": str(run.raw.get("assignment_id") or ""),
+        "finished_at": run.finished_at,
         "file": rel_path,
         "file_signature": file_signature(path),
     }

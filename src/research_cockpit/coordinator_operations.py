@@ -14,6 +14,7 @@ from research_cockpit.mutation_lock import MutationError
 from research_cockpit.model import derive_focus_path, load_assignments
 from research_cockpit.operation_receipts import (
     OperationIdConflict,
+    bounded,
     error_receipt,
     normalized_request_hash,
     replay_or_conflict,
@@ -21,6 +22,12 @@ from research_cockpit.operation_receipts import (
     validate_operation_id,
 )
 from research_cockpit.runtime_ids import generate_runtime_id
+from research_cockpit.run_lifecycle import (
+    ActiveRunSnapshot,
+    active_run_ids_added_since_snapshot,
+    active_run_ids_for_target,
+    capture_active_run_snapshot,
+)
 from research_cockpit.storage import load_yaml
 from research_cockpit.validation_index import ensure_validation_index
 from research_cockpit.work_packets import assignment_result_revision
@@ -205,18 +212,57 @@ def _operation_error(
     message: str,
     retry_command: str = "research-cockpit coord overview --root <data-root> --json --compact",
     retry_reason: str | None = None,
+    dependency_blockers: list[str] | None = None,
+    partial_success: bool = False,
+    warnings: list[str] | None = None,
 ) -> AssignmentLeaseError:
-    return AssignmentLeaseError(
-        error_receipt(
-            operation="coord assign",
+    receipt = error_receipt(
+        operation="coord assign",
+        assignment_id=assignment_id,
+        operation_id=operation_id,
+        code=code,
+        message=message,
+        retry_kind="manual_recovery",
+        retry_command=retry_command,
+        retry_reason=retry_reason,
+        dependency_blockers=dependency_blockers,
+        partial_success=partial_success,
+    )
+    if warnings:
+        receipt["warnings"] = bounded(warnings)
+    return AssignmentLeaseError(receipt)
+
+
+def _assert_no_active_run_for_session(
+    root: Path,
+    *,
+    assignment_id: str,
+    experiment_id: str,
+    operation_id: str,
+    active_run_ids: list[str] | None = None,
+) -> None:
+    if active_run_ids is None:
+        active_run_ids = active_run_ids_for_target(
+            root,
             assignment_id=assignment_id,
-            operation_id=operation_id,
-            code=code,
-            message=message,
-            retry_kind="manual_recovery",
-            retry_command=retry_command,
-            retry_reason=retry_reason,
+            experiment_id=experiment_id,
         )
+    if not active_run_ids:
+        return
+    raise _operation_error(
+        operation_id=operation_id,
+        assignment_id=assignment_id,
+        code="active_run_blocks_session",
+        message=(
+            "coord assign cannot replace an experiment session while its assignment "
+            "or target has active runs."
+        ),
+        retry_command=(
+            "research-cockpit context --root <data-root> "
+            f"--id {experiment_id} --view execution --json --compact"
+        ),
+        retry_reason="Continue or close the existing active run before assigning a new session.",
+        dependency_blockers=[f"active_run:{run_id}" for run_id in active_run_ids],
     )
 
 
@@ -313,15 +359,29 @@ def apply_coord_assignment(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
         granularity_warning = assignment_granularity_warning(session)
         receipt["tracking_reason"] = structured_tracking_reason
         receipt["granularity_warning"] = granularity_warning
-        timestamp = datetime.now(timezone.utc)
-        timestamp_text = timestamp.isoformat(timespec="seconds").replace("+00:00", "Z")
         assignment_path = root / "assignments" / f"{session['assignment_id']}.yaml"
         existing_assignment = load_yaml(assignment_path) if assignment_path.is_file() else {}
+        session_kind = session.get("kind", "experiment")
+        experiment_id = session.get("experiment_id")
+        active_run_snapshot: ActiveRunSnapshot | None = None
+        if session_kind == "experiment" and experiment_id:
+            active_run_snapshot = capture_active_run_snapshot(
+                root,
+                assignment_id=session["assignment_id"],
+                experiment_id=experiment_id,
+            )
+            _assert_no_active_run_for_session(
+                root,
+                assignment_id=session["assignment_id"],
+                experiment_id=experiment_id,
+                operation_id=operation_id,
+                active_run_ids=list(active_run_snapshot.occupancy.run_ids),
+            )
+        timestamp = datetime.now(timezone.utc)
+        timestamp_text = timestamp.isoformat(timespec="seconds").replace("+00:00", "Z")
         lease_epoch = _lease_epoch_counter(existing_assignment) + 1
         lease_id = generate_runtime_id("lease", scope_hint=session["assignment_id"])
         state = load_validated_state(root)
-        session_kind = session.get("kind", "experiment")
-        experiment_id = session.get("experiment_id")
         producer = None
         producer_revision = None
         if session_kind == "review":
@@ -461,6 +521,22 @@ def apply_coord_assignment(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
                 assignment_overrides=assignment_overrides,
                 preloaded_state=state,
                 claim_option_workstream=session_kind != "review",
+                additional_commit_validators=(
+                    [
+                        lambda: _assert_no_active_run_for_session(
+                            root,
+                            assignment_id=session["assignment_id"],
+                            experiment_id=experiment_id,
+                            operation_id=operation_id,
+                            active_run_ids=active_run_ids_added_since_snapshot(
+                                root,
+                                active_run_snapshot,
+                            ),
+                        )
+                    ]
+                    if active_run_snapshot is not None
+                    else None
+                ),
             )
         except MutationError as exc:
             recovery_commands = [
@@ -471,6 +547,16 @@ def apply_coord_assignment(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
             stored = exc.payload.get("operation_receipt")
             if isinstance(stored, dict):
                 raise AssignmentLeaseError(stored) from exc
+            has_worktree_side_effect = bool(
+                exc.payload.get("created_worktree")
+                or exc.payload.get("reused_worktree")
+            )
+            worktree_warnings = []
+            if has_worktree_side_effect:
+                worktree_warnings.append(
+                    "Git worktree exists but coord assign truth was not committed; "
+                    "resolve the blocker and retry the same operation_id."
+                )
             raise _operation_error(
                 operation_id=operation_id,
                 assignment_id=assignment_id,
@@ -482,6 +568,10 @@ def apply_coord_assignment(root: Path, plan: dict[str, Any]) -> dict[str, Any]:
                     else "research-cockpit coord overview --root <data-root> --json --compact"
                 ),
                 retry_reason="Retry the exact same coord assign operation after the conflict is resolved.",
+                partial_success=bool(
+                    exc.payload.get("partial_success") or has_worktree_side_effect
+                ),
+                warnings=worktree_warnings,
             ) from exc
         transaction = result.get("_operation_transaction", {})
 

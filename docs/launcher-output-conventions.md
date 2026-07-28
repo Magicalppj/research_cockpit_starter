@@ -47,7 +47,7 @@ Start through the assignment facade and retain the runtime-generated run id from
 research-cockpit work start --root <data-root> --assignment <assignment_id> --file <work_start.yaml> --json --compact
 ```
 
-Do not add a control-plane command for each progress update. The launcher owns `progress.json`; normal mutations and launcher heartbeat renew the lease outside model turns.
+Do not add a control-plane command for each progress update. The launcher owns `progress.json`, but the bundled templates do not translate progress writes into lease heartbeat. Normal mutations renew the lease; long tasks must set a sufficient `lease_seconds` in `work_start_v1`, or use an external runtime that explicitly arranges `work renew` outside model turns.
 
 ## Progress And Gates
 

@@ -6,7 +6,7 @@
 research-cockpit work open --root <data-root> --assignment <assignment_id> --json --compact
 ```
 
-Work Packet 是本 assignment 的完整控制面上下文。使用其中的 `objective`、`scope`、`success_criteria`、`deliverables`、`lease`、`input_revision` 和 `allowed_operations`；不要再读取 coordinator context 或完整 graph。
+Work Packet 是本 assignment 的完整控制面上下文。使用其中的 `objective`、`scope`、`success_criteria`、`deliverables`、`lease`、`input_revision`、`active_runs` 和 `allowed_operations`；不要再读取 coordinator context 或完整 graph。
 
 Unchanged polling：
 
@@ -35,6 +35,8 @@ research-cockpit work close --root <data-root> --assignment <assignment_id> --fi
 
 `work_start_v1` 使用 packet 中的 agent、lease、epoch 与 `input_revision`，并显式设置 `experiment_id: <packet.cursor.current_node>`；run id 由 runtime 生成。若 `cursor.current_node` 不是 experiment，不要搜索或猜测目标，停止并让 coordinator 修正 assignment。只有缺少 contract 时才运行 `work start --print-schema --json --compact`。
 
+若 packet 未列出 `start` 而列出 `record`/`close`，从 `active_runs.assignment.items` 取得本 assignment 的 `run_id` 并复用，不再启动第二个 run。若 mutation 列表为空，检查 `active_runs.experiment.items`；目标 experiment 由其他 assignment 占用时不要关闭他人的 run。`active_run_blocks_start` 的 `dependency_blockers.items` 仍给出占用者；按 receipt 查看 execution context，并继续本 assignment 的 run，或让 coordinator 协调其 owner。
+
 `work_close_v1` 一次提交 run status、experiment result、finding、assignment result、cursor、review requirement、proposal 与 optional `evidence_inputs`。只有缺少 closeout contract 时才运行 `work close --print-schema --json --compact`；返回示例包含 `review_required`，其默认 `false` 继承 assignment policy，设为 `true` 只用于追加 review，不能用 `false` 取消 coordinator 已要求的 review。`finding.confidence` 只接受 `weak`、`medium` 或 `strong`。
 
 同一 research contract 下的 code edit、retry、seed、parameter adjustment、preflight 与 repeated local attempt 都复用当前 assignment，不创建新的 assignment 或 graph node。只有 hypothesis、protocol 或 success criteria 的变化足以影响 research judgment 时，才在 closeout 中提出新 branch/node proposal，由 coordinator 决定是否建图和分派。
@@ -55,7 +57,7 @@ research-cockpit work record --root <data-root> --assignment <assignment_id> --f
 - scope conflict：不要扩大 scope 或手改 YAML。
 - `new_branch` proposal：只记录 proposal，不能自行创建 assignment。
 
-`work renew` 与 `work release` 仅用于恢复或显式交还；正常 mutation 和 launcher heartbeat 自动续租。
+`work release` 用于显式交还；正常 mutation 自动续租。Bundled launcher 与 `progress.json` 不会自动续租；长任务需在 start contract 中设置足够的 `lease_seconds`，或由外部 runtime 明确安排 `work renew`，不要让模型按 progress update 周期性轮询。
 
 ## Detail On Demand
 
